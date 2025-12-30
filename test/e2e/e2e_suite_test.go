@@ -20,73 +20,111 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/firebolt-analytics/core-operator/test/utils"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+)
+
+const (
+	// Test namespace
+	testNamespace = "firebolt-e2e"
+
+	// Test image - locally available in kind
+	testImage = "us-east4-docker.pkg.dev/shared-991415466295/firebolt-analytics/firebolt-core"
+	testTag   = "release-4.31.0-pre.0.20251219132726.3032bf8968ff-amd64"
+
+	// Timeouts
+	clusterReadyTimeout      = 60 * time.Second
+	clusterTransitionTimeout = 90 * time.Second
+	resourceCleanupTimeout   = 60 * time.Second
+	pollInterval             = 1 * time.Second
 )
 
 var (
-	// Optional Environment Variables:
-	// - CERT_MANAGER_INSTALL_SKIP=true: Skips CertManager installation during test setup.
-	// These variables are useful if CertManager is already installed, avoiding
-	// re-installation and conflicts.
-	skipCertManagerInstall = os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true"
-	// isCertManagerAlreadyInstalled will be set true when CertManager CRDs be found on the cluster
-	isCertManagerAlreadyInstalled = false
-
-	// projectImage is the name of the image which will be build and loaded
-	// with the code source changes to be tested.
-	projectImage = "example.com/operator:v0.0.1"
+	k8sClient  *kubernetes.Clientset
+	ctx        context.Context
+	cancelFunc context.CancelFunc
 )
 
-// TestE2E runs the end-to-end (e2e) test suite for the project. These tests execute in an isolated,
-// temporary environment to validate project changes with the purpose of being used in CI jobs.
-// The default setup requires Kind, builds/loads the Manager Docker image locally, and installs
-// CertManager.
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting operator integration test suite\n")
-	RunSpecs(t, "e2e suite")
+	fmt.Fprintf(GinkgoWriter, "Starting Core Operator E2E test suite\n")
+	RunSpecs(t, "Core Operator E2E Suite")
 }
 
 var _ = BeforeSuite(func() {
-	By("building the manager(Operator) image")
-	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-	_, err := utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
+	// Setup controller-runtime logger
+	log.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-	// TODO(user): If you want to change the e2e test vendor from Kind, ensure the image is
-	// built and available before running the tests. Also, remove the following block.
-	By("loading the manager(Operator) image on Kind")
-	err = utils.LoadImageToKindClusterWithName(projectImage)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager(Operator) image into Kind")
+	ctx, cancelFunc = context.WithCancel(context.Background())
 
-	// The tests-e2e are intended to run on a temporary cluster that is created and destroyed for testing.
-	// To prevent errors when tests run in environments with CertManager already installed,
-	// we check for its presence before execution.
-	// Setup CertManager before the suite if not skipped and if not already installed
-	if !skipCertManagerInstall {
-		By("checking if cert manager is installed already")
-		isCertManagerAlreadyInstalled = utils.IsCertManagerCRDsInstalled()
-		if !isCertManagerAlreadyInstalled {
-			_, _ = fmt.Fprintf(GinkgoWriter, "Installing CertManager...\n")
-			Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
-		} else {
-			_, _ = fmt.Fprintf(GinkgoWriter, "WARNING: CertManager is already installed. Skipping installation...\n")
+	By("Setting up Kubernetes client")
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
+	Expect(err).NotTo(HaveOccurred())
+
+	// Use the config from controller-runtime if available
+	if config == nil {
+		config = ctrl.GetConfigOrDie()
+	}
+
+	k8sClient, err = kubernetes.NewForConfig(config)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Ensuring test namespace is ready")
+	// Wait for namespace to be fully deleted if it's in Terminating state
+	for {
+		ns, err := k8sClient.CoreV1().Namespaces().Get(ctx, testNamespace, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			break // Namespace doesn't exist, we can create it
 		}
+		Expect(err).NotTo(HaveOccurred())
+		if ns.Status.Phase == corev1.NamespaceTerminating {
+			fmt.Fprintf(GinkgoWriter, "Waiting for namespace %s to finish terminating...\n", testNamespace)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		// Namespace exists and is not terminating, we can use it
+		break
+	}
+
+	By("Creating test namespace")
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testNamespace,
+		},
+	}
+	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
 	}
 })
 
 var _ = AfterSuite(func() {
-	// Teardown CertManager after the suite if not skipped and if it was not already installed
-	if !skipCertManagerInstall && !isCertManagerAlreadyInstalled {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Uninstalling CertManager...\n")
-		utils.UninstallCertManager()
+	By("Cleaning up test namespace")
+	if k8sClient != nil {
+		err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
+		}
+	}
+
+	if cancelFunc != nil {
+		cancelFunc()
 	}
 })
