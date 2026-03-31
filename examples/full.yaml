@@ -1,0 +1,28 @@
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: core-engine-production
+  namespace: firebolt
+spec:
+  replicas: 5
+  image:
+    repository: "ghcr.io/firebolt-db/firebolt-core"
+    tag: "v1.2.0"
+    pullPolicy: IfNotPresent
+  resources:
+    cpu: "4"
+    memory: "16Gi"
+  drainCheckInterval: "10s"
+  rollout: graceful
+  metadataService:
+    image:
+      repository: "ghcr.io/firebolt-db/dedicated-pensieve"
+      tag: "v1.2.0"
+  nodeSelector:
+    dedicated: firebolt-nodes
+    zone: us-east-1a
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: firebolt-nodes
+      effect: NoSchedule

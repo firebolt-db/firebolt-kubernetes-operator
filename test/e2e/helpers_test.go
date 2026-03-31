@@ -26,8 +26,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,8 +38,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -49,6 +51,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
 	"github.com/firebolt-analytics/core-operator/internal/controller"
 )
 
@@ -76,7 +79,7 @@ type TestQueryConfig struct {
 	Query     string
 	Validator QueryValidator
 	Mode      QueryMode
-	Suffix    string // Added to cluster names to avoid conflicts between light/heavy runs
+	Suffix    string // Added to engine names to avoid conflicts between light/heavy runs
 }
 
 // QueryValidator validates the result of a query
@@ -99,14 +102,15 @@ type OperatorInstance struct {
 	mgr        manager.Manager
 	cancelFunc context.CancelFunc
 	wg         sync.WaitGroup
-	prefix     string
+	crdClient  client.Client
 }
 
 // operatorInstanceCounter is used to generate unique controller names
 var operatorInstanceCounter atomic.Int64
 
-// StartOperator starts an operator instance with the given prefix
-func StartOperator(prefix string) (*OperatorInstance, error) {
+// StartOperator starts an operator instance. The labelValue is used to scope the cache
+// so multiple operator instances in the same namespace don't interfere.
+func StartOperator(labelValue string) (*OperatorInstance, error) {
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
 		&clientcmd.ConfigOverrides{},
@@ -122,6 +126,9 @@ func StartOperator(prefix string) (*OperatorInstance, error) {
 	if err := appsv1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add appsv1 to scheme: %w", err)
 	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
+	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
@@ -130,11 +137,10 @@ func StartOperator(prefix string) (*OperatorInstance, error) {
 				testNamespace: {},
 			},
 		},
-		// Use port 0 to let the system pick a free port (for parallel tests)
 		Metrics: metricsserver.Options{
-			BindAddress: "0", // Disable metrics server
+			BindAddress: "0",
 		},
-		HealthProbeBindAddress: "0", // Disable health probes
+		HealthProbeBindAddress: "0",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create manager: %w", err)
@@ -145,35 +151,37 @@ func StartOperator(prefix string) (*OperatorInstance, error) {
 		return nil, fmt.Errorf("failed to create clientset: %w", err)
 	}
 
-	reconciler := &controller.ConfigMapReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		ConfigPrefix: prefix,
-		Namespace:    testNamespace,
-		RestConfig:   config,
-		Clientset:    clientset,
+	reconciler := &controller.FireboltEngineReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestConfig: config,
+		Clientset:  clientset,
 	}
 
-	// Use a unique controller name to avoid collisions when restarting operators
-	controllerName := fmt.Sprintf("%s-%d", prefix, operatorInstanceCounter.Add(1))
+	controllerName := fmt.Sprintf("fireboltengine-%d", operatorInstanceCounter.Add(1))
 	if err := reconciler.SetupWithManagerNamed(mgr, controllerName); err != nil {
 		return nil, fmt.Errorf("failed to setup reconciler: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	crdClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create crd client: %w", err)
+	}
+
+	ctxOp, cancel := context.WithCancel(context.Background())
 
 	instance := &OperatorInstance{
 		mgr:        mgr,
 		cancelFunc: cancel,
-		prefix:     prefix,
+		crdClient:  crdClient,
 	}
 
 	instance.wg.Add(1)
 	go func() {
 		defer instance.wg.Done()
 		defer GinkgoRecover()
-		if err := mgr.Start(ctx); err != nil {
-			fmt.Fprintf(GinkgoWriter, "Manager for prefix %s exited with error: %v\n", prefix, err)
+		if err := mgr.Start(ctxOp); err != nil {
+			fmt.Fprintf(GinkgoWriter, "Manager exited with error: %v\n", err)
 		}
 	}()
 
@@ -191,70 +199,119 @@ func (o *OperatorInstance) Stop() {
 	o.wg.Wait()
 }
 
-// CreateClusterConfig creates a ConfigMap for a Core cluster
-func CreateClusterConfig(ctx context.Context, name string, replicas int) error {
-	return CreateClusterConfigWithRollout(ctx, name, replicas, "graceful")
+// CreateEngine creates a FireboltEngine CR
+func CreateEngine(ctx context.Context, name string, replicas int) error {
+	return CreateEngineWithRollout(ctx, name, replicas, "graceful")
 }
 
-// CreateClusterConfigWithRollout creates a ConfigMap for a Core cluster with a specific rollout strategy
-func CreateClusterConfigWithRollout(ctx context.Context, name string, replicas int, rollout string) error {
-	cm := &corev1.ConfigMap{
+// CreateEngineWithRollout creates a FireboltEngine CR with a specific rollout strategy
+func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rollout string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: testNamespace,
 		},
-		Data: map[string]string{
-			"replicas":           strconv.Itoa(replicas),
-			"image":              testImage,
-			"tag":                testTag,
-			"imagePullPolicy":    "IfNotPresent",
-			"cpu":                "100m",
-			"memory":             "3Gi", // Note: 2Gi is insufficient for these tests (drain check query OOMs)
-			"drainCheckInterval": "2s",
-			"rollout":            rollout,
+		Spec: computev1alpha1.FireboltEngineSpec{
+			Replicas: int32(replicas),
+			Image: computev1alpha1.ImageSpec{
+				Repository: testImage,
+				Tag:        testTag,
+				PullPolicy: corev1.PullIfNotPresent,
+			},
+			Resources: computev1alpha1.ResourceRequirements{
+				CPU:    resource.MustParse("100m"),
+				Memory: resource.MustParse("3Gi"),
+			},
+			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
+			Rollout:            computev1alpha1.RolloutStrategy(rollout),
+			MetadataService: &computev1alpha1.MetadataServiceSpec{
+				Image: &computev1alpha1.ImageSpec{
+					Repository: pensieveImage,
+					Tag:        pensieveTag,
+					PullPolicy: corev1.PullIfNotPresent,
+				},
+			},
 		},
 	}
 
-	_, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Create(ctx, cm, metav1.CreateOptions{})
-	return err
+	return cl.Create(ctx, engine)
 }
 
-// UpdateClusterReplicas updates the replicas count in the cluster config
-func UpdateClusterReplicas(ctx context.Context, name string, replicas int) error {
-	cm, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Get(ctx, name, metav1.GetOptions{})
+// UpdateEngineReplicas updates the replicas count in the engine CR (with retry on conflict)
+func UpdateEngineReplicas(ctx context.Context, name string, replicas int) error {
+	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
+		engine.Spec.Replicas = int32(replicas)
+	})
+}
+
+// UpdateEngineImageTag updates the image tag in the engine CR (with retry on conflict)
+func UpdateEngineImageTag(ctx context.Context, name string, tag string) error {
+	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
+		engine.Spec.Image.Tag = tag
+	})
+}
+
+// retryOnConflict retries an update on conflict errors
+func retryOnConflict(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltEngine)) error {
+	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
 
-	cm.Data["replicas"] = strconv.Itoa(replicas)
-	_, err = k8sClient.CoreV1().ConfigMaps(testNamespace).Update(ctx, cm, metav1.UpdateOptions{})
-	return err
+	for i := 0; i < 10; i++ {
+		engine := &computev1alpha1.FireboltEngine{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, engine); err != nil {
+			return err
+		}
+		mutate(engine)
+		err := cl.Update(ctx, engine)
+		if err == nil {
+			return nil
+		}
+		if !errors.IsConflict(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("too many conflict retries updating engine %s", name)
 }
 
-// UpdateClusterImageTag updates the image tag in the cluster config
-func UpdateClusterImageTag(ctx context.Context, name string, tag string) error {
-	cm, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Get(ctx, name, metav1.GetOptions{})
+// DeleteEngine deletes the engine CR
+func DeleteEngine(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
 
-	cm.Data["tag"] = tag
-	_, err = k8sClient.CoreV1().ConfigMaps(testNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+	}
+	err = cl.Delete(ctx, engine)
+	if errors.IsNotFound(err) {
+		return nil
+	}
 	return err
 }
 
-// DeleteClusterConfig deletes the cluster ConfigMap
-func DeleteClusterConfig(ctx context.Context, name string) error {
-	return k8sClient.CoreV1().ConfigMaps(testNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-}
+// WaitForEngineReady waits for the metadata service and all pods in an engine to be ready.
+func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas int, timeout time.Duration) error {
+	if err := WaitForMetadataServiceReady(ctx, engineName, timeout); err != nil {
+		return fmt.Errorf("metadata service not ready: %w", err)
+	}
 
-// WaitForClusterReady waits for all pods in a cluster to be ready
-func WaitForClusterReady(ctx context.Context, clusterName string, expectedReplicas int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
 		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("core-operator/cluster=%s", clusterName),
+			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s,firebolt.io/generation", engineName),
 		})
 		if err != nil {
 			time.Sleep(pollInterval)
@@ -280,102 +337,118 @@ func WaitForClusterReady(ctx context.Context, clusterName string, expectedReplic
 		time.Sleep(pollInterval)
 	}
 
-	return fmt.Errorf("timeout waiting for cluster %s to have %d ready pods", clusterName, expectedReplicas)
+	return fmt.Errorf("timeout waiting for engine %s to have %d ready pods", engineName, expectedReplicas)
 }
 
-// WaitForClusterStable waits for the cluster status to be stable
-func WaitForClusterStable(ctx context.Context, clusterName string, timeout time.Duration) error {
-	statusName := clusterName + "-status"
+// WaitForEngineStable waits for the engine status phase to be "stable"
+func WaitForEngineStable(ctx context.Context, engineName string, timeout time.Duration) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		cm, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Get(ctx, statusName, metav1.GetOptions{})
-		if err != nil {
+		engine := &computev1alpha1.FireboltEngine{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: engineName, Namespace: testNamespace}, engine); err != nil {
 			time.Sleep(pollInterval)
 			continue
 		}
 
-		stateStr, ok := cm.Data["state"]
-		if !ok {
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		var status struct {
-			Phase string `json:"phase"`
-		}
-		if err := json.Unmarshal([]byte(stateStr), &status); err != nil {
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		if status.Phase == "stable" {
+		if engine.Status.Phase == computev1alpha1.PhaseStable {
 			return nil
 		}
 
 		time.Sleep(pollInterval)
 	}
 
-	return fmt.Errorf("timeout waiting for cluster %s to be stable", clusterName)
+	return fmt.Errorf("timeout waiting for engine %s to be stable", engineName)
 }
 
-// WaitForResourcesDeleted waits for all cluster resources to be deleted
-func WaitForResourcesDeleted(ctx context.Context, clusterName string, timeout time.Duration) error {
+// WaitForMetadataServiceReady waits for the metadata service (dedicated pensieve)
+// Deployment to have at least 1 ready replica.
+func WaitForMetadataServiceReady(ctx context.Context, engineName string, timeout time.Duration) error {
+	metadataDeployName := engineName + "-metadata"
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		// Check for pods
+		deploy, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, metadataDeployName, metav1.GetOptions{})
+		if err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		if deploy.Status.ReadyReplicas >= 1 {
+			return nil
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for metadata service %s to become ready", metadataDeployName)
+}
+
+// WaitForResourcesDeleted waits for all engine resources to be deleted
+func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	engineSelector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
+
+	for time.Now().Before(deadline) {
 		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("core-operator/cluster=%s", clusterName),
+			LabelSelector: engineSelector,
 		})
 		if err == nil && len(pods.Items) > 0 {
 			time.Sleep(pollInterval)
 			continue
 		}
 
-		// Check for services
 		svcs, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("core-operator/cluster=%s", clusterName),
+			LabelSelector: engineSelector,
 		})
 		if err == nil && len(svcs.Items) > 0 {
 			time.Sleep(pollInterval)
 			continue
 		}
 
-		// Check for statefulsets
 		stsList, err := k8sClient.AppsV1().StatefulSets(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("core-operator/cluster=%s", clusterName),
+			LabelSelector: engineSelector,
 		})
 		if err == nil && len(stsList.Items) > 0 {
 			time.Sleep(pollInterval)
 			continue
 		}
 
-		// Check for status configmap
-		_, err = k8sClient.CoreV1().ConfigMaps(testNamespace).Get(ctx, clusterName+"-status", metav1.GetOptions{})
-		if err == nil || !errors.IsNotFound(err) {
+		deployList, err := k8sClient.AppsV1().Deployments(testNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: engineSelector,
+		})
+		if err == nil && len(deployList.Items) > 0 {
 			time.Sleep(pollInterval)
 			continue
 		}
 
-		// All resources deleted
+		pvcList, err := k8sClient.CoreV1().PersistentVolumeClaims(testNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: engineSelector,
+		})
+		if err == nil && len(pvcList.Items) > 0 {
+			time.Sleep(pollInterval)
+			continue
+		}
+
 		return nil
 	}
 
-	return fmt.Errorf("timeout waiting for resources of cluster %s to be deleted", clusterName)
+	return fmt.Errorf("timeout waiting for resources of engine %s to be deleted", engineName)
 }
 
-// RunQuery executes a SQL query through the cluster service using port-forwarding.
-// This ensures queries go through the stable service endpoint, which always
-// points to the active generation during zero-downtime transitions.
-func RunQuery(ctx context.Context, clusterName, query string) (string, error) {
-	serviceName := clusterName + "-service"
+// RunQuery executes a SQL query through the engine service using port-forwarding.
+func RunQuery(ctx context.Context, engineName, query string) (string, error) {
+	serviceName := engineName + "-service"
 	return executeQueryViaService(ctx, serviceName, query)
 }
 
-// executeQueryViaService port-forwards to the cluster service and executes an HTTP query
+// executeQueryViaService port-forwards to the engine service and executes an HTTP query
 func executeQueryViaService(ctx context.Context, serviceName, query string) (string, error) {
-	// Find a free local port
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", fmt.Errorf("failed to find free port: %w", err)
@@ -383,23 +456,23 @@ func executeQueryViaService(ctx context.Context, serviceName, query string) (str
 	localPort := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	// Use kubectl port-forward to the service (client-go doesn't directly support service port-forwarding)
-	cmd := exec.Command("kubectl", "--context", "kind-dev-cluster", "port-forward",
-		"-n", testNamespace, "svc/"+serviceName, fmt.Sprintf("%d:3473", localPort))
+	args := []string{"port-forward", "-n", testNamespace, "svc/" + serviceName, fmt.Sprintf("%d:3473", localPort)}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		args = append([]string{"--context", "kind-" + kindCluster}, args...)
+	}
+	cmd := exec.Command("kubectl", args...)
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start port-forward: %w", err)
 	}
 
-	// Ensure we clean up the port-forward process
 	defer func() {
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
 	}()
 
-	// Wait for port-forward to be ready (poll until we can connect)
 	var connected bool
-	for i := 0; i < 50; i++ { // Try for ~5 seconds
+	for i := 0; i < 50; i++ {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
@@ -412,7 +485,6 @@ func executeQueryViaService(ctx context.Context, serviceName, query string) (str
 		return "", fmt.Errorf("timeout waiting for port-forward to be ready")
 	}
 
-	// Execute HTTP query
 	queryURL := fmt.Sprintf("http://127.0.0.1:%d/?query_label=e2e-test-query&output_format=JSON_Compact", localPort)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, queryURL, strings.NewReader(query))
@@ -465,7 +537,7 @@ func ParseQueryResult(output string) (interface{}, error) {
 
 // BackgroundQueryRunner runs queries in the background and tracks failures
 type BackgroundQueryRunner struct {
-	clusterName    string
+	engineName     string
 	query          string
 	validator      QueryValidator
 	stopCh         chan struct{}
@@ -473,22 +545,22 @@ type BackgroundQueryRunner struct {
 	failureCount   atomic.Int32
 	successCount   atomic.Int32
 	mu             sync.Mutex
-	failureReasons map[string]int // Tracks failure reasons and their counts
+	failureReasons map[string]int
 }
 
 // NewBackgroundQueryRunner creates a new background query runner with automatic validator selection
-func NewBackgroundQueryRunner(clusterName, query string) *BackgroundQueryRunner {
-	validator := LightQueryValidator // Default for SELECT <number>
+func NewBackgroundQueryRunner(engineName, query string) *BackgroundQueryRunner {
+	validator := LightQueryValidator
 	if strings.Contains(query, "array_agg") {
 		validator = HeavyQueryValidator
 	}
-	return NewBackgroundQueryRunnerWithValidator(clusterName, query, validator)
+	return NewBackgroundQueryRunnerWithValidator(engineName, query, validator)
 }
 
 // NewBackgroundQueryRunnerWithValidator creates a background query runner with custom validator
-func NewBackgroundQueryRunnerWithValidator(clusterName, query string, validator QueryValidator) *BackgroundQueryRunner {
+func NewBackgroundQueryRunnerWithValidator(engineName, query string, validator QueryValidator) *BackgroundQueryRunner {
 	return &BackgroundQueryRunner{
-		clusterName:    clusterName,
+		engineName:     engineName,
 		query:          query,
 		validator:      validator,
 		stopCh:         make(chan struct{}),
@@ -521,7 +593,7 @@ func (r *BackgroundQueryRunner) Start(ctx context.Context) {
 
 // runQuery executes a single query and records the result
 func (r *BackgroundQueryRunner) runQuery(ctx context.Context) {
-	output, err := RunQuery(ctx, r.clusterName, r.query)
+	output, err := RunQuery(ctx, r.engineName, r.query)
 	if err != nil {
 		r.recordFailure("query_error", err.Error())
 		return
@@ -545,7 +617,6 @@ func (r *BackgroundQueryRunner) runQuery(ctx context.Context) {
 func (r *BackgroundQueryRunner) recordFailure(category, detail string) {
 	r.failureCount.Add(1)
 
-	// Categorize the error for summary
 	reason := category + ": " + r.categorizeError(detail)
 
 	r.mu.Lock()
@@ -557,7 +628,6 @@ func (r *BackgroundQueryRunner) recordFailure(category, detail string) {
 
 // categorizeError extracts a short category from the error detail
 func (r *BackgroundQueryRunner) categorizeError(detail string) string {
-	// Extract key error patterns for grouping
 	switch {
 	case strings.Contains(detail, "connection refused"):
 		return "connection refused"
@@ -576,7 +646,6 @@ func (r *BackgroundQueryRunner) categorizeError(detail string) string {
 	case strings.Contains(detail, "port-forward"):
 		return "port-forward error"
 	default:
-		// Truncate long messages
 		if len(detail) > 50 {
 			return detail[:50] + "..."
 		}
@@ -600,7 +669,6 @@ func (r *BackgroundQueryRunner) GetFailureReasons() map[string]int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Return a copy
 	result := make(map[string]int)
 	for k, v := range r.failureReasons {
 		result[k] = v
@@ -622,16 +690,8 @@ func (r *BackgroundQueryRunner) PrintFailureSummary() {
 	fmt.Fprintf(GinkgoWriter, "=========================================\n")
 }
 
-// Helper function to get rest.Config
-func getRestConfig() (*rest.Config, error) {
-	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
-	).ClientConfig()
-}
-
-// Helper to get controller-runtime client
-func getClient() (client.Client, error) {
+// getCRDClient returns a controller-runtime client that knows about the CRD types
+func getCRDClient() (client.Client, error) {
 	config, err := getRestConfig()
 	if err != nil {
 		return nil, err
@@ -644,6 +704,17 @@ func getClient() (client.Client, error) {
 	if err := appsv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
 
 	return client.New(config, client.Options{Scheme: scheme})
+}
+
+// getRestConfig returns the kubernetes REST config
+func getRestConfig() (*rest.Config, error) {
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
 }

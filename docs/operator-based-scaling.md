@@ -1,14 +1,14 @@
 # Operator-Based Zero-Downtime Scaling Design
 
-This document describes an architecture for zero-downtime scaling of Firebolt Core clusters using a lightweight Kubernetes operator.
+This document describes an architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator.
 
 ## Goals
 
-- Zero-downtime scaling via blue-green cluster transitions
+- Zero-downtime scaling via blue-green engine transitions
 - Single configuration change triggers full orchestration
 - No Helm or manual multi-step processes
-- No custom CRDs required
-- Ephemeral clusters (no persistent storage)
+- Custom Resource Definition (CRD) with status subresource for clean state management
+- Ephemeral engines (no persistent storage)
 
 ## Architecture Overview
 
@@ -16,23 +16,28 @@ This document describes an architecture for zero-downtime scaling of Firebolt Co
 ┌────────────────────────────────────────────────────────────┐
 │                        Operator                            │
 │                                                            │
-│  - Watches ConfigMaps with prefix (default: core-cluster)  │
+│  - Watches FireboltEngine CRs                              │
 │  - Manages StatefulSets + Services per generation          │
-│  - Pre-generates cluster config (predictable pod names)    │
-│  - Switches traffic via cluster Service selector           │
-│  - Runs drain check before deleting old cluster            │
+│  - Pre-generates engine config (predictable pod names)     │
+│  - Switches traffic via engine Service selector            │
+│  - Runs drain check before deleting old generation         │
 └────────────────────────────────────────────────────────────┘
         │
         │ watches / updates
         ▼
-┌─────────────────────────────┐     ┌─────────────────────────────────┐
-│         ConfigMap           │     │           ConfigMap             │
-│  core-cluster-production    │     │  core-cluster-production-status │
-│                             │     │                                 │
-│  replicas: 5                │     │  generation: 1                  │
-│  image: .../firebolt-core   │     │  phase: stable                  │
-│  tag: v1.2                  │     │                                 │
-└─────────────────────────────┘     └─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    FireboltEngine CR                         │
+│  core-engine-production                                     │
+│                                                             │
+│  spec:                          status:                     │
+│    replicas: 5                    currentGeneration: 1      │
+│    image:                         activeGeneration: 1       │
+│      repository: .../core         phase: stable             │
+│      tag: v1.2                    lastReconciled: ...       │
+│    resources:                                               │
+│      cpu: "2"                                               │
+│      memory: "8Gi"                                          │
+└─────────────────────────────────────────────────────────────┘
 
         │ creates / manages
         ▼
@@ -42,24 +47,24 @@ This document describes an architecture for zero-downtime scaling of Firebolt Co
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Generation 1 (active)                               │   │
 │  │                                                     │   │
-│  │  StatefulSet: core-cluster-production-g1         │   │
-│  │  Headless Service: core-cluster-production-g1-hl │   │
-│  │  ConfigMap: core-cluster-production-g1-config     │   │
+│  │  StatefulSet: core-engine-production-g1             │   │
+│  │  Headless Service: core-engine-production-g1-hl     │   │
+│  │  ConfigMap: core-engine-production-g1-config        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                            │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Generation 0 (draining)                             │   │
 │  │                                                     │   │
-│  │  StatefulSet: core-cluster-production-g0         │   │
-│  │  Headless Service: core-cluster-production-g0-hl │   │
-│  │  ConfigMap: core-cluster-production-g0-config     │   │
+│  │  StatefulSet: core-engine-production-g0             │   │
+│  │  Headless Service: core-engine-production-g0-hl     │   │
+│  │  ConfigMap: core-engine-production-g0-config        │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
-│                     Cluster Service                        │
-│             core-cluster-production-service                │
-│        selector: core-operator/generation=1                │
+│                     Engine Service                         │
+│             core-engine-production-service                 │
+│        selector: firebolt.io/generation=1                  │
 │                                                            │
 │         (Stable endpoint, operator updates selector)       │
 └────────────────────────────────────────────────────────────┘
@@ -67,47 +72,45 @@ This document describes an architecture for zero-downtime scaling of Firebolt Co
 
 ## Components
 
-### 1. Config ConfigMap
+### 1. FireboltEngine Custom Resource
 
-User-facing configuration. Operator watches ConfigMaps with a configurable prefix (default `core-cluster`). The ConfigMap name must start with this prefix.
+User-facing configuration. The operator watches `FireboltEngine` CRs in the configured namespace (or all namespaces).
 
 For the complete list of supported fields, see the [README](../README.md#configuration-reference).
 
-### 2. Status ConfigMap
+### 2. Status Subresource
 
-Operator-managed state. Named with `-status` suffix matching the config ConfigMap.
+The engine's status is stored in the `.status` subresource of the CR, managed exclusively by the operator.
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
 metadata:
-  name: core-cluster-production-status  # Config name + "-status"
+  name: core-engine-production
   namespace: firebolt
-  ownerReferences:
-    - apiVersion: v1
-      kind: ConfigMap
-      name: core-cluster-production
-      uid: <config-configmap-uid>
-data:
-  state: |
-    {
-      "currentGeneration": 2,
-      "activeGeneration": 2,
-      "drainingGeneration": null,
-      "phase": "stable",
-      "lastReconciled": "2024-01-15T10:00:00Z",
-      "pendingMutation": null
-    }
+spec:
+  replicas: 5
+  image:
+    repository: ghcr.io/firebolt-db/firebolt-core
+    tag: v1.2.0
+  resources:
+    cpu: "2"
+    memory: "8Gi"
+status:
+  currentGeneration: 2
+  activeGeneration: 2
+  phase: stable
+  lastReconciled: "2024-01-15T10:00:00Z"
 ```
 
 Initial generation starts at 0.
 
 **Phases:**
-- `stable` - Single active cluster, no transition in progress
-- `creating` - New cluster being created
-- `switching` - Traffic being switched to new cluster
-- `draining` - Running drain checks on old cluster
-- `cleaning` - Deleting old cluster resources
+- `stable` - Single active generation, no transition in progress
+- `creating` - New generation being created
+- `switching` - Traffic being switched to new generation
+- `draining` - Running drain checks on old generation
+- `cleaning` - Deleting old generation resources
 
 ### State Machine
 
@@ -117,7 +120,7 @@ Initial generation starts at 0.
                  │  (only active generation exists)                │
                  └─────────────────────────────────────────────────┘
                               │
-                              │ config change detected
+                              │ spec change detected
                               ▼
                  ┌─────────────────────────────────────────────────┐
                  │                  creating                       │
@@ -129,7 +132,7 @@ Initial generation starts at 0.
                               ▼
                  ┌─────────────────────────────────────────────────┐
                  │                 switching                       │
-                 │  (cluster Service selector updated)             │
+                 │  (engine Service selector updated)              │
                  │  (new traffic → new generation)                 │
                  └─────────────────────────────────────────────────┘
                               │
@@ -160,42 +163,42 @@ Initial generation starts at 0.
 ```
 
 **Key Invariants:**
-- Traffic is switched only after new cluster is fully Ready
-- Old cluster is deleted only after all pods are drained
+- Traffic is switched only after new generation is fully Ready
+- Old generation is deleted only after all pods are drained
 - At most two generations exist simultaneously (active + draining)
 
 ### 3. Per-Generation Resources
 
-For each cluster generation, the operator creates resources with naming pattern `{configmap-name}-g{N}`. All resources have `ownerReferences` pointing to the config ConfigMap for cascading deletion.
+For each engine generation, the operator creates resources with naming pattern `{engine-name}-g{N}`. All resources have `ownerReferences` pointing to the `FireboltEngine` CR for cascading deletion.
 
 **StatefulSet:**
 
 Key design choices:
 - `podManagementPolicy: Parallel` - All pods start simultaneously for faster cluster formation
-- Labels `core-operator/cluster` and `core-operator/generation` for selector-based routing
-- `ownerReferences` pointing to config ConfigMap for cascading deletion
+- Labels `firebolt.io/engine` and `firebolt.io/generation` for selector-based routing
+- `ownerReferences` pointing to the `FireboltEngine` CR for cascading deletion
 - Config mounted from pre-generated ConfigMap with pod FQDNs
 
 ```yaml
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: core-cluster-production-g2
+  name: core-engine-production-g2
   labels:
-    core-operator/cluster: core-cluster-production
-    core-operator/generation: "2"
+    firebolt.io/engine: core-engine-production
+    firebolt.io/generation: "2"
   ownerReferences:
-    - apiVersion: v1
-      kind: ConfigMap
-      name: core-cluster-production
+    - apiVersion: compute.firebolt.io/v1alpha1
+      kind: FireboltEngine
+      name: core-engine-production
 spec:
-  serviceName: core-cluster-production-g2-hl
+  serviceName: core-engine-production-g2-hl
   replicas: 5
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      core-operator/cluster: core-cluster-production
-      core-operator/generation: "2"
+      firebolt.io/engine: core-engine-production
+      firebolt.io/generation: "2"
   # ... pod template with Core container and config volume
 ```
 
@@ -203,7 +206,7 @@ spec:
 
 The headless service (`-hl` suffix) is a critical Kubernetes component required for StatefulSet pod networking:
 
-1. **Stable DNS names**: Each pod in a StatefulSet gets a predictable DNS name based on the headless service: `{pod-name}.{headless-service}.{namespace}.svc`. For example, `core-cluster-production-g2-0.core-cluster-production-g2-hl.firebolt.svc`.
+1. **Stable DNS names**: Each pod gets a predictable DNS name: `{pod-name}.{headless-service}.{namespace}.svc`. For example, `core-engine-production-g2-0.core-engine-production-g2-hl.firebolt.svc`.
 
 2. **Pod-to-pod communication**: Core nodes need to discover and communicate with each other during cluster formation. The headless service provides the DNS resolution that allows pods to find their peers by name.
 
@@ -215,50 +218,50 @@ The headless service (`-hl` suffix) is a critical Kubernetes component required 
 apiVersion: v1
 kind: Service
 metadata:
-  name: core-cluster-production-g2-hl
+  name: core-engine-production-g2-hl
   ownerReferences:
-    - apiVersion: v1
-      kind: ConfigMap
-      name: core-cluster-production
+    - apiVersion: compute.firebolt.io/v1alpha1
+      kind: FireboltEngine
+      name: core-engine-production
 spec:
   clusterIP: None
-  publishNotReadyAddresses: true  # Required for cluster formation
+  publishNotReadyAddresses: true
   selector:
-    core-operator/cluster: core-cluster-production
-    core-operator/generation: "2"
+    firebolt.io/engine: core-engine-production
+    firebolt.io/generation: "2"
   ports:
     - port: 3473
       name: query
 ```
 
-Note: The headless service is NOT used for external traffic. External traffic goes through the cluster service (`-service` suffix) which load balances across all ready pods in the active generation.
+Note: The headless service is NOT used for external traffic. External traffic goes through the engine service (`-service` suffix) which load balances across all ready pods in the active generation.
 
 **Core Config ConfigMap (pre-generated by operator):**
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: core-cluster-production-g2-config
+  name: core-engine-production-g2-config
   ownerReferences:
-    - apiVersion: v1
-      kind: ConfigMap
-      name: core-cluster-production
+    - apiVersion: compute.firebolt.io/v1alpha1
+      kind: FireboltEngine
+      name: core-engine-production
 data:
   config.json: |
     {
       "nodes": [
-        {"host": "core-cluster-production-g2-0.core-cluster-production-g2-hl.firebolt.svc"},
-        {"host": "core-cluster-production-g2-1.core-cluster-production-g2-hl.firebolt.svc"},
-        {"host": "core-cluster-production-g2-2.core-cluster-production-g2-hl.firebolt.svc"},
-        {"host": "core-cluster-production-g2-3.core-cluster-production-g2-hl.firebolt.svc"},
-        {"host": "core-cluster-production-g2-4.core-cluster-production-g2-hl.firebolt.svc"}
+        {"host": "core-engine-production-g2-0.core-engine-production-g2-hl.firebolt.svc"},
+        {"host": "core-engine-production-g2-1.core-engine-production-g2-hl.firebolt.svc"},
+        {"host": "core-engine-production-g2-2.core-engine-production-g2-hl.firebolt.svc"},
+        {"host": "core-engine-production-g2-3.core-engine-production-g2-hl.firebolt.svc"},
+        {"host": "core-engine-production-g2-4.core-engine-production-g2-hl.firebolt.svc"}
       ]
     }
 ```
 
-### 4. Cluster Service
+### 4. Engine Service
 
-Stable endpoint for clients. Named with `-service` suffix matching the config ConfigMap. Operator updates selector to switch traffic between generations.
+Stable endpoint for clients. Named with `-service` suffix matching the engine name. Operator updates selector to switch traffic between generations.
 
 The service uses `ClusterIP` type, which provides connection queuing at the kernel level. If all backing pods are temporarily unavailable (e.g., during the brief moment of selector switch), new connections are queued rather than immediately rejected. This improves resilience during transitions.
 
@@ -266,16 +269,16 @@ The service uses `ClusterIP` type, which provides connection queuing at the kern
 apiVersion: v1
 kind: Service
 metadata:
-  name: core-cluster-production-service  # Config name + "-service"
+  name: core-engine-production-service
   ownerReferences:
-    - apiVersion: v1
-      kind: ConfigMap
-      name: core-cluster-production
+    - apiVersion: compute.firebolt.io/v1alpha1
+      kind: FireboltEngine
+      name: core-engine-production
 spec:
   type: ClusterIP
   selector:
-    core-operator/cluster: core-cluster-production
-    core-operator/generation: "2"  # Operator updates this
+    firebolt.io/engine: core-engine-production
+    firebolt.io/generation: "2"
   ports:
     - port: 3473
       name: query
@@ -286,13 +289,13 @@ spec:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Operator Watch Loop                      │
-│              (per config ConfigMap found)                   │
+│            (per FireboltEngine CR found)                    │
 └─────────────────────────────────────────────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
-              │ Read {cluster} config │
-              │ Read {cluster}-status │
+              │ Read FireboltEngine   │
+              │ spec + status         │
               └───────────────────────┘
                           │
                           ▼
@@ -329,10 +332,10 @@ Phase: stable (g0 active, 3 nodes)
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 1. Create g1 resources:                                  │
-│    - ConfigMap {cluster}-g1-config (5 nodes config)      │
-│    - Headless Service {cluster}-g1-hl                    │
-│    - StatefulSet {cluster}-g1 (5 replicas)               │
+│ 1. Create g1 resources:                                     │
+│    - ConfigMap {engine}-g1-config (5 nodes config)          │
+│    - Headless Service {engine}-g1-hl                        │
+│    - StatefulSet {engine}-g1 (5 replicas)                   │
 │                                                             │
 │    Phase: creating                                          │
 └─────────────────────────────────────────────────────────────┘
@@ -341,7 +344,7 @@ Phase: stable (g0 active, 3 nodes)
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. Wait for all 5 pods Ready                                │
 │                                                             │
-│    Poll pods with label core-operator/generation=1          │
+│    Poll pods with label firebolt.io/generation=1            │
 │    Wait until: 5/5 Running + Ready                          │
 └─────────────────────────────────────────────────────────────┘
         │
@@ -349,18 +352,18 @@ Phase: stable (g0 active, 3 nodes)
 ┌─────────────────────────────────────────────────────────────┐
 │ 3. Switch traffic                                           │
 │                                                             │
-│    Update cluster Service selector: generation=1            │
-│    New queries → g1                                      │
-│    Existing connections → continue on g0                 │
+│    Update engine Service selector: generation=1             │
+│    New queries → g1                                         │
+│    Existing connections → continue on g0                    │
 │                                                             │
 │    Phase: switching                                         │
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. Drain old cluster                                        │
+│ 4. Drain old generation                                     │
 │                                                             │
-│    For each pod in g0:                                   │
+│    For each pod in g0:                                      │
 │      Loop:                                                  │
 │        Exec fb drain check on 'core' container              │
 │        Parse JSON: if data[0][0] == "0": pod is drained     │
@@ -373,11 +376,11 @@ Phase: stable (g0 active, 3 nodes)
         │
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. Delete old cluster                                       │
+│ 5. Delete old generation                                    │
 │                                                             │
-│    Delete StatefulSet {cluster}-g0                       │
-│    Delete Service {cluster}-g0-hl                        │
-│    Delete ConfigMap {cluster}-g0-config                  │
+│    Delete StatefulSet {engine}-g0                            │
+│    Delete Service {engine}-g0-hl                            │
+│    Delete ConfigMap {engine}-g0-config                      │
 │                                                             │
 │    Phase: cleaning                                          │
 └─────────────────────────────────────────────────────────────┘
@@ -401,7 +404,7 @@ The drain check is executed via `kubectl exec` on the `core` container of each p
 
 ## Config Snapshotting and Pending Mutations
 
-When the operator starts a transition, it **snapshots** the target configuration into the status ConfigMap (`lastAppliedConfig`). This snapshot is used for the entire transition, regardless of subsequent changes to the config ConfigMap.
+When the operator starts a transition, it **snapshots** the target configuration into `status.lastAppliedConfig`. This snapshot is used for the entire transition, regardless of subsequent changes to the engine spec.
 
 ### Behavior During Transitions
 
@@ -414,7 +417,7 @@ Current state:
 User changes: replicas 3 → 5
 
 Operator logic:
-  1. Detect change (live config differs from lastAppliedConfig)
+  1. Detect change (live spec differs from lastAppliedConfig)
   2. Snapshot new config: lastAppliedConfig = {replicas: 5, ...}
   3. Start transition: phase = creating, create g1 resources with 5 replicas
   4. Continue transition using snapshotted config
@@ -422,7 +425,7 @@ Operator logic:
 
 ### Handling Changes During Transition
 
-If the config changes while a transition is in progress, the new config is saved as `pendingMutation`. Only **one** pending mutation is kept (the most recent).
+If the spec changes while a transition is in progress, the new spec is saved as `status.pendingMutation`. Only **one** pending mutation is kept (the most recent).
 
 ```
 Current state:
@@ -434,7 +437,7 @@ Current state:
 User changes: replicas 5 → 7
 
 Operator logic:
-  1. Detect change (live config differs from lastAppliedConfig)
+  1. Detect change (live spec differs from lastAppliedConfig)
   2. Save as pending: pendingMutation = {replicas: 7, ...}
   3. Continue current transition with snapshotted config (5 replicas)
   4. After g1 transition completes → phase = stable
@@ -457,7 +460,7 @@ This ensures:
 - Current transition completes cleanly with its snapshotted config
 - Rapid successive changes result in at most one additional transition
 - Only the final desired state matters
-- Operator can resume correctly after restart (state is persisted in status ConfigMap)
+- Operator can resume correctly after restart (state is persisted in status subresource)
 
 ## Traffic Flow
 
@@ -466,18 +469,18 @@ Client
    │
    ▼
 ┌──────────────────────────────────────────────┐
-│            Cluster Service                   │
-│    core-cluster-production-service           │
-│    selector: core-operator/generation=1      │
+│            Engine Service                    │
+│    core-engine-production-service            │
+│    selector: firebolt.io/generation=1        │
 └──────────────────────┬───────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────┐
-│    StatefulSet core-cluster-production-g1 │
+│    StatefulSet core-engine-production-g1     │
 │                                              │
-│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐     │
-│  │pod-0│ │pod-1│ │pod-2│ │pod-3│ │pod-4│     │
-│  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘     │
+│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐   │
+│  │pod-0│ │pod-1│ │pod-2│ │pod-3│ │pod-4│   │
+│  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘   │
 └──────────────────────────────────────────────┘
 
 During transition, g0 continues serving existing connections
@@ -486,31 +489,38 @@ until drain check confirms 0 active queries on all pods.
 
 ## Operator RBAC
 
-The operator runs in a single namespace and requires only namespace-scoped permissions:
+The operator requires the following permissions (generated from kubebuilder markers):
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: core-operator
-  namespace: firebolt
+  name: manager-role
 rules:
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltengines"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltengines/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltengines/finalizers"]
+    verbs: ["update"]
   - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
-    verbs: ["get", "list", "watch", "create", "update", "delete"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]  # For drain check
+    verbs: ["create"]
 ```
+
+The operator supports both namespace-scoped and cluster-scoped operation. Use `--namespace` to restrict to a single namespace.
 
 ## Operator Deployment
 
@@ -518,35 +528,33 @@ rules:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--config-prefix` | `core-cluster` | Prefix for ConfigMaps the operator watches |
-| `--namespace` | (required) | Namespace to operate in |
+| `--namespace` | (optional) | Namespace to watch. Watches all namespaces if empty. |
 
 ### Startup Behavior
 
 On startup, the operator:
-1. Lists all ConfigMaps matching the prefix in the namespace
-2. For each config ConfigMap, checks for existing resources with matching `ownerReferences`
-3. If resources exist with correct ownership: adopt and resume management
-4. If resources exist without ownership or with different ownership: refuse to manage, log error
-5. If no resources exist: initialize from scratch (generation 0)
+1. Lists all `FireboltEngine` CRs in the watched namespace(s)
+2. For each engine, checks the status subresource for current phase
+3. If status exists with an in-progress transition: resumes from current phase
+4. If no status exists: initializes from scratch (generation 0)
 
-### Multi-Cluster Support
+### Multi-Engine Support
 
-The operator can manage multiple independent Core clusters in the same namespace. Each cluster is defined by a separate ConfigMap matching the prefix:
+The operator can manage multiple independent engines in the same namespace. Each engine is defined by a separate `FireboltEngine` resource:
 
 ```
-core-cluster-production   → manages core-cluster-production-* resources
-core-cluster-staging      → manages core-cluster-staging-* resources
-core-cluster-dev          → manages core-cluster-dev-* resources
+core-engine-production   → manages core-engine-production-* resources
+core-engine-staging      → manages core-engine-staging-* resources
+core-engine-dev          → manages core-engine-dev-* resources
 ```
 
-Reconciliation for each cluster is independent.
+Reconciliation for each engine is independent.
 
 ## Configuration Reference
 
-For the complete list of configurable fields in the cluster definition ConfigMap, see the [README](../README.md#configuration-reference).
+For the complete list of configurable fields in the engine spec, see the [README](../README.md#configuration-reference).
 
-### Status ConfigMap (operator-managed)
+### Status Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -556,6 +564,7 @@ For the complete list of configurable fields in the cluster definition ConfigMap
 | `phase` | string | Current phase (stable/creating/switching/draining/cleaning) |
 | `lastReconciled` | string | Timestamp of last reconciliation |
 | `pendingMutation` | object/null | Queued mutation waiting to be processed |
+| `lastAppliedConfig` | object/null | Spec used to create the current/active generation |
 
 ## Concurrency and Race Conditions
 
@@ -565,29 +574,37 @@ The operator uses Kubernetes optimistic concurrency control (ResourceVersion) to
 |----------|----------|
 | Two reconciles read same status | Second update fails with conflict error, controller-runtime requeues |
 | Resource created between Get and Create | Create returns AlreadyExists, requeue handles it |
-| Rapid config changes during transition | Only the latest change is kept as PendingMutation |
-| Operator crash mid-transition | Restarts and resumes from persisted phase in status ConfigMap |
+| Rapid spec changes during transition | Only the latest change is kept as PendingMutation |
+| Operator crash mid-transition | Restarts and resumes from persisted phase in status subresource |
 
-**Key principle:** All state is persisted in the status ConfigMap before taking action. If an update fails due to conflict, the reconcile is retried with fresh state.
+**Key principle:** All state is persisted in the status subresource before taking action. If an update fails due to conflict, the reconcile is retried with fresh state.
 
 ## Failure Handling
 
 | Scenario | Behavior |
 |----------|----------|
-| New cluster fails to become Ready | Transition stalls in `creating` phase. Old cluster continues serving. Manual intervention required. |
-| Drain check never succeeds | Transition stalls in `draining` phase. New cluster is active. Old cluster remains. Manual intervention required. |
-| Operator restarts mid-transition | Operator reads status ConfigMap, resumes from current phase. |
-| ConfigMap deleted | Operator logs error, takes no action. Existing clusters remain. |
+| New generation fails to become Ready | Transition stalls in `creating` phase. Old generation continues serving. Manual intervention required. |
+| Drain check never succeeds | Transition stalls in `draining` phase. New generation is active. Old generation remains. Manual intervention required. |
+| Operator restarts mid-transition | Operator reads status subresource, resumes from current phase. |
+| Engine deleted | Kubernetes garbage collection removes all owned resources. |
 
 ## Limitations
 
-1. **No automatic rollback** - If new cluster fails, operator does not revert. Traffic stays on old cluster.
-2. **Single namespace** - Operator manages resources in one namespace.
-3. **No PVC support** - Designed for ephemeral clusters only.
+1. **No automatic rollback** - If new generation fails, operator does not revert. Traffic stays on old generation.
+2. **No PVC support** - Designed for ephemeral engines only.
 
 ## Design Decisions
+
+### Why a CRD instead of ConfigMaps
+
+A Custom Resource Definition provides:
+- **Status subresource**: Clean separation of user intent (spec) and operator state (status)
+- **Short names**: `kubectl get fire` instead of verbose commands
+- **Print columns**: Rich `kubectl get` output showing replicas, phase, generation
+- **Validation**: Kubebuilder markers for field validation (min values, enums)
+- **Owner references**: Proper GVK for owner references instead of referencing ConfigMaps
+- **Structured spec**: Nested objects (image, resources) instead of flat string key-value pairs
 
 ### Why StatefulSets instead of Deployments or raw Pods
 
 StatefulSets are used despite the operator pre-generating pod FQDNs because StatefulSets automatically recreate failed pods. Deployments would work for FQDN generation but use ReplicaSets which don't provide stable pod identities needed for config generation. Raw pods managed directly by the operator would require reimplementing pod health monitoring and recreation logic that StatefulSets provide out of the box.
-

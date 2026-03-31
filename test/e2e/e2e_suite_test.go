@@ -22,6 +22,11 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,13 +48,19 @@ const (
 	testNamespace = "firebolt-e2e"
 
 	// Test image - locally available in kind
-	testImage = "us-east4-docker.pkg.dev/shared-991415466295/firebolt-analytics/firebolt-core"
-	testTag   = "release-4.31.0-pre.0.20251219132726.3032bf8968ff-amd64"
+	testImage    = "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
+	testTag      = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64"
+	newImageTag  = "latest"
+
+	// Metadata service images
+	pensieveImage = "000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve"
+	pensieveTag   = "4.32.0-pre.0.20260331033249.e67bde0be1cd"
+	postgresImage = "postgres:16-alpine"
 
 	// Timeouts
-	clusterReadyTimeout      = 60 * time.Second
-	clusterTransitionTimeout = 90 * time.Second
-	resourceCleanupTimeout   = 60 * time.Second
+	clusterReadyTimeout      = 120 * time.Second
+	clusterTransitionTimeout = 150 * time.Second
+	resourceCleanupTimeout   = 90 * time.Second
 	pollInterval             = 1 * time.Second
 )
 
@@ -61,8 +72,8 @@ var (
 
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	fmt.Fprintf(GinkgoWriter, "Starting Core Operator E2E test suite\n")
-	RunSpecs(t, "Core Operator E2E Suite")
+	fmt.Fprintf(GinkgoWriter, "Starting Firebolt Engine E2E test suite\n")
+	RunSpecs(t, "Firebolt Engine E2E Suite")
 }
 
 var _ = BeforeSuite(func() {
@@ -86,32 +97,62 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = kubernetes.NewForConfig(config)
 	Expect(err).NotTo(HaveOccurred())
 
-	By("Ensuring test namespace is ready")
-	// Wait for namespace to be fully deleted if it's in Terminating state
-	for {
-		ns, err := k8sClient.CoreV1().Namespaces().Get(ctx, testNamespace, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			break // Namespace doesn't exist, we can create it
-		}
+	By("Installing FireboltEngine CRD")
+	_, thisFile, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	crdPath := filepath.Join(projectRoot, "config", "crd", "bases", "compute.firebolt.io_fireboltengines.yaml")
+	output, err := exec.Command("kubectl", "apply", "-f", crdPath).CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(GinkgoWriter, "CRD install output: %s\n", string(output))
+	}
+	Expect(err).NotTo(HaveOccurred(), "Failed to install CRD")
+
+	By("Deleting test namespace if it exists")
+	err = k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
 		Expect(err).NotTo(HaveOccurred())
-		if ns.Status.Phase == corev1.NamespaceTerminating {
-			fmt.Fprintf(GinkgoWriter, "Waiting for namespace %s to finish terminating...\n", testNamespace)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		// Namespace exists and is not terminating, we can use it
-		break
 	}
 
-	By("Creating test namespace")
+	By("Waiting for namespace to be fully deleted")
+	for {
+		_, err := k8sClient.CoreV1().Namespaces().Get(ctx, testNamespace, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			break
+		}
+		Expect(err).NotTo(HaveOccurred())
+		fmt.Fprintf(GinkgoWriter, "Waiting for namespace %s to be deleted...\n", testNamespace)
+		time.Sleep(1 * time.Second)
+	}
+
+	By("Creating fresh test namespace")
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: testNamespace,
 		},
 	}
 	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
-		Expect(err).NotTo(HaveOccurred())
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Verifying required container images are loaded in Kind cluster")
+	kindCluster := os.Getenv("KIND_CLUSTER")
+	if kindCluster == "" {
+		kindCluster = "kind"
+	}
+	kindNode := kindCluster + "-control-plane"
+	requiredImages := []string{
+		testImage + ":" + testTag,
+		testImage + ":" + newImageTag,
+		pensieveImage + ":" + pensieveTag,
+		postgresImage,
+	}
+	for _, img := range requiredImages {
+		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(GinkgoWriter, "crictl inspecti output for %s: %s\n", img, strings.TrimSpace(string(out)))
+			Fail(fmt.Sprintf("Required image %q is not loaded in Kind cluster %q. "+
+				"Load it with: kind load docker-image %s --name %s", img, kindCluster, img, kindCluster))
+		}
+		fmt.Fprintf(GinkgoWriter, "Verified image %s is available\n", img)
 	}
 })
 

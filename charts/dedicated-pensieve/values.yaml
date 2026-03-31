@@ -1,0 +1,49 @@
+image:
+  repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve
+  # provided automatically during deployment process
+  # your commit pre-release version
+  tag: 4.32.0-pre.0.20260331033249.e67bde0be1cd
+  sha: e67bde0b
+service:
+  type: ClusterIP
+  port: 7000
+  targetPort: 7000
+deployment:
+  terminationGracePeriodSeconds: 30
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+server:
+  host: 0.0.0.0
+  port: 7000
+  threads: 0
+  log_level: information
+postgresql:
+  # Non-sensitive connection settings
+  host: ""
+  port: 5432
+  database: ""
+  schema: public
+  keepalive:
+    enabled: 1
+    idle_sec: 120
+    interval_sec: 30
+    count: 5
+  connect_timeout_sec: 5
+  # Credentials management (sensitive data)
+  # Credentials are ALWAYS provided via Secret mounted as files
+  # ConfigMap will NEVER contain credential information
+  credentials:
+    # Path where secret will be mounted in the container
+    mountPath: /secrets/postgres
+    # Option 1: Use existing secret (recommended for production/ESO)
+    # If set, chart will NOT create a secret
+    existingSecret: ""
+    # Option 2: Create secret from values (for dev/testing)
+    # These are only used if existingSecret is empty
+    # In production, pass these via --set or separate values file (never commit to git!)
+    username: ""
+    password: ""

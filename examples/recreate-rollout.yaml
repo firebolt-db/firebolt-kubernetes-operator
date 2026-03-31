@@ -1,0 +1,15 @@
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: core-engine-dev
+  namespace: firebolt
+spec:
+  replicas: 2
+  image:
+    repository: "ghcr.io/firebolt-db/firebolt-core"
+    tag: "latest"
+    pullPolicy: Always
+  resources:
+    cpu: "500m"
+    memory: "2Gi"
+  rollout: recreate

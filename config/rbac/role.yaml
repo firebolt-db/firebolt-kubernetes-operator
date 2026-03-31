@@ -1,23 +1,82 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: operator
-    app.kubernetes.io/managed-by: kustomize
   name: manager-role
 rules:
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apps"]
-  resources: ["statefulsets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["pods/exec"]
-  verbs: ["create"]
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - compute.firebolt.io
+  resources:
+  - fireboltengines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - compute.firebolt.io
+  resources:
+  - fireboltengines/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - compute.firebolt.io
+  resources:
+  - fireboltengines/status
+  verbs:
+  - get
+  - patch
+  - update

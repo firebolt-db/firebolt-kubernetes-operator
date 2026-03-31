@@ -1,16 +1,16 @@
 # Firebolt Core Operator
 
-A Kubernetes controller that manages Firebolt Core clusters with zero-downtime scaling via blue-green deployments.
+A Kubernetes controller that manages Firebolt engines with zero-downtime scaling via blue-green deployments.
 
 ## Overview
 
-The operator watches ConfigMaps with a configurable prefix and automatically manages the lifecycle of Core clusters. When you change the configuration (e.g., scale from 3 to 5 nodes), the operator:
+The operator watches `FireboltEngine` custom resources and automatically manages the lifecycle of Firebolt engines. When you change the configuration (e.g., scale from 3 to 5 nodes), the operator:
 
-1. Creates a new cluster with the desired configuration
+1. Creates a new engine generation with the desired configuration
 2. Waits for all pods to become ready
-3. Switches traffic to the new cluster
-4. Drains the old cluster (waits for running queries to complete)
-5. Deletes the old cluster
+3. Switches traffic to the new generation
+4. Drains the old generation (waits for running queries to complete)
+5. Deletes the old generation
 
 All of this happens automatically with zero downtime for clients.
 
@@ -22,156 +22,187 @@ All of this happens automatically with zero downtime for clients.
 # Build and push the operator image
 make docker-build docker-push IMG=<your-registry>/core-operator:latest
 
-# Deploy to your cluster
+# Deploy to your cluster (includes CRD installation)
 make deploy IMG=<your-registry>/core-operator:latest
 ```
 
-### 2. Create a Cluster
+### 2. Create a Firebolt Engine
 
-Create a ConfigMap that defines your cluster. The name must start with the configured prefix (default: `core-cluster`):
+Create a `FireboltEngine` resource:
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
 metadata:
-  name: core-cluster-production
+  name: core-engine-production
   namespace: firebolt
-data:
-  replicas: "3"
-  image: "ghcr.io/firebolt-db/firebolt-core"
-  tag: "v1.2.0"
-  cpu: "2"
-  memory: "8Gi"
+spec:
+  replicas: 3
+  image:
+    repository: "ghcr.io/firebolt-db/firebolt-core"
+    tag: "v1.2.0"
+  resources:
+    cpu: "2"
+    memory: "8Gi"
 ```
 
 ```bash
-kubectl apply -f my-cluster.yaml
+kubectl apply -f my-engine.yaml
 ```
 
-The operator will create a 3-node cluster. Connect to it via the cluster service:
+The operator will create a 3-node engine. Connect to it via the engine service:
 ```
-core-cluster-production-service.firebolt.svc:3473
+core-engine-production-service.firebolt.svc:3473
 ```
 
 ### 3. Scale or Update
 
-Simply update the ConfigMap:
+Simply update the `FireboltEngine` resource:
 
 ```bash
-kubectl patch configmap core-cluster-production -n firebolt \
-  --type merge -p '{"data":{"replicas":"5"}}'
+kubectl patch fireboltengine core-engine-production -n firebolt \
+  --type merge -p '{"spec":{"replicas":5}}'
+```
+
+Or use the short name:
+
+```bash
+kubectl patch fire core-engine-production -n firebolt \
+  --type merge -p '{"spec":{"replicas":5}}'
 ```
 
 The operator handles the zero-downtime transition automatically.
 
-### 4. Delete a Cluster
+### 4. Delete an Engine
 
-Delete the ConfigMap:
+Delete the `FireboltEngine` resource:
 
 ```bash
-kubectl delete configmap core-cluster-production -n firebolt
+kubectl delete fireboltengine core-engine-production -n firebolt
 ```
 
 All associated resources (StatefulSets, Services, etc.) are automatically deleted via Kubernetes owner references.
 
-## ConfigMap Prefix
-
-The operator only watches ConfigMaps whose names start with a specific prefix. This is configured via the `--config-prefix` flag (default: `core-cluster`).
-
-**How it works:**
-- ConfigMap `core-cluster-production` → **managed** (starts with `core-cluster`)
-- ConfigMap `core-cluster-staging` → **managed** (starts with `core-cluster`)
-- ConfigMap `my-app-config` → **ignored** (does not start with `core-cluster`)
-
-**Multiple clusters:** You can run multiple independent clusters by creating multiple ConfigMaps with different names:
-
-```
-core-cluster-production   → creates core-cluster-production-service
-core-cluster-staging      → creates core-cluster-staging-service  
-core-cluster-dev          → creates core-cluster-dev-service
-```
-
-Each cluster is managed independently with its own transition lifecycle.
-
 ## Configuration Reference
 
-### Cluster Definition ConfigMap
+### FireboltEngine Spec
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `replicas` | **Yes** | - | Number of nodes (must be ≥ 1) |
-| `image` | **Yes** | - | Container image repository (must not be empty) |
-| `tag` | **Yes** | - | Container image tag (must not be empty) |
-| `cpu` | **Yes** | - | CPU request and limit (Kubernetes format, e.g., `"2"`, `"500m"`) |
-| `memory` | **Yes** | - | Memory request and limit (Kubernetes format, e.g., `"8Gi"`, `"4096Mi"`) |
-| `imagePullPolicy` | No | `IfNotPresent` | Image pull policy: `Always`, `Never`, or `IfNotPresent` |
-| `drainCheckInterval` | No | `5s` | How often to check if old pods have finished serving queries |
-| `rollout` | No | `graceful` | Rollout strategy: `graceful` waits for drain, `recreate` deletes immediately |
-| `nodeSelector` | No | - | YAML-encoded node selector (see example below) |
-| `tolerations` | No | - | YAML-encoded tolerations array (see example below) |
+| `spec.replicas` | **Yes** | - | Number of nodes (must be ≥ 1) |
+| `spec.image.repository` | **Yes** | - | Container image repository |
+| `spec.image.tag` | **Yes** | - | Container image tag |
+| `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy: `Always`, `Never`, or `IfNotPresent` |
+| `spec.resources.cpu` | **Yes** | - | CPU request and limit (Kubernetes quantity, e.g., `"2"`, `"500m"`) |
+| `spec.resources.memory` | **Yes** | - | Memory request and limit (Kubernetes quantity, e.g., `"8Gi"`, `"4096Mi"`) |
+| `spec.drainCheckInterval` | No | `5s` | How often to check if old pods have finished serving queries |
+| `spec.rollout` | No | `graceful` | Rollout strategy: `graceful` waits for drain, `recreate` deletes immediately |
+| `spec.nodeSelector` | No | - | Node selector map |
+| `spec.tolerations` | No | - | Tolerations array |
+| `spec.metadataService.image.repository` | No | *(derived from engine image)* | Metadata service image repository |
+| `spec.metadataService.image.tag` | No | *(derived from engine image)* | Metadata service image tag |
+| `spec.metadataService.image.pullPolicy` | No | `IfNotPresent` | Metadata service image pull policy |
 
 ### Full Example
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
 metadata:
-  name: core-cluster-production
+  name: core-engine-production
   namespace: firebolt
-data:
-  replicas: "5"
-  image: "ghcr.io/firebolt-db/firebolt-core"
-  tag: "v1.2.0"
-  cpu: "4"
-  memory: "16Gi"
-  imagePullPolicy: "IfNotPresent"
+spec:
+  replicas: 5
+  image:
+    repository: "ghcr.io/firebolt-db/firebolt-core"
+    tag: "v1.2.0"
+    pullPolicy: IfNotPresent
+  resources:
+    cpu: "4"
+    memory: "16Gi"
   drainCheckInterval: "10s"
-  rollout: "graceful"
-  nodeSelector: |
+  rollout: graceful
+  metadataService:
+    image:
+      repository: "ghcr.io/firebolt-db/dedicated-pensieve"
+      tag: "v1.2.0"
+  nodeSelector:
     dedicated: firebolt-nodes
     zone: us-east-1a
-  tolerations: |
+  tolerations:
     - key: dedicated
       operator: Equal
       value: firebolt-nodes
       effect: NoSchedule
 ```
 
+## Metadata Service
+
+Each engine automatically gets a **metadata service** that provides cluster coordination. The operator deploys and manages it without any manual intervention.
+
+The metadata service consists of:
+- A lightweight PostgreSQL instance (1 Gi persistent storage) for metadata storage
+- A metadata server that provides the coordination endpoint to engine nodes
+
+The engine nodes are automatically configured to connect to the metadata service via `config.multi_cluster_endpoint`.
+
+### Image Configuration
+
+By default, the metadata service image is derived from the engine image (same registry prefix, `dedicated-pensieve` repository, same tag). You can override it:
+
+```yaml
+spec:
+  metadataService:
+    image:
+      repository: "my-registry/dedicated-pensieve"
+      tag: "v1.2.0"
+```
+
 ## Operator-Managed Resources
 
 **Do not modify these resources manually.** The operator creates and manages them automatically.
 
-For a cluster defined by ConfigMap `core-cluster-production`, the operator creates:
+For an engine named `core-engine-production`, the operator creates:
+
+### Per-Engine Resources (shared across generations)
 
 | Resource | Name Pattern | Purpose |
 |----------|--------------|---------|
-| **Status ConfigMap** | `core-cluster-production-status` | Operator's internal state |
-| **Cluster Service** | `core-cluster-production-service` | Stable endpoint for clients |
-| **StatefulSet** | `core-cluster-production-g{N}` | Pods for generation N |
-| **Headless Service** | `core-cluster-production-g{N}-hl` | Pod DNS for generation N |
-| **Config ConfigMap** | `core-cluster-production-g{N}-config` | Core config for generation N |
+| **Metadata Service** | `core-engine-production-metadata` | Metadata coordination endpoint |
+| **Metadata ConfigMap** | `core-engine-production-metadata` | Metadata service configuration |
+| **PostgreSQL Deployment** | `core-engine-production-metadata-pg` | Metadata database |
+| **PostgreSQL Service** | `core-engine-production-metadata-pg` | Database endpoint |
+| **PostgreSQL PVC** | `core-engine-production-metadata-pg` | Persistent database storage |
+| **PostgreSQL Credentials** | `core-engine-production-metadata-pg-creds` | Database credentials |
+
+### Per-Generation Resources (created during blue-green transitions)
+
+| Resource | Name Pattern | Purpose |
+|----------|--------------|---------|
+| **Engine Service** | `core-engine-production-service` | Stable endpoint for clients |
+| **StatefulSet** | `core-engine-production-g{N}` | Pods for generation N |
+| **Headless Service** | `core-engine-production-g{N}-hl` | Pod DNS for generation N |
+| **Config ConfigMap** | `core-engine-production-g{N}-config` | Core config for generation N |
 
 ### Important Rules
 
-1. **Never edit the status ConfigMap** - It contains the operator's state. Modifying it can cause undefined behavior.
+1. **Never edit operator-created resources** - The operator assumes full control. Manual changes will be overwritten or cause conflicts.
 
-2. **Never edit operator-created StatefulSets or Services** - The operator assumes full control. Manual changes will be overwritten or cause conflicts.
+2. **To delete an engine, delete the `FireboltEngine` resource** - All other resources (including metadata service and PostgreSQL) will be garbage collected automatically.
 
-3. **To delete a cluster, delete the definition ConfigMap** - All other resources will be garbage collected automatically.
-
-4. **To modify a cluster, edit only the definition ConfigMap** - The operator handles everything else.
+3. **To modify an engine, edit only the `FireboltEngine` resource** - The operator handles everything else.
 
 ## Supported Operations
 
 | Operation | How to Do It | What Happens |
 |-----------|--------------|--------------|
-| **Create cluster** | Create ConfigMap with prefix | Operator creates generation 0 |
-| **Scale up/down** | Update `replicas` in ConfigMap | Zero-downtime blue-green transition |
-| **Change image** | Update `image` or `tag` | Zero-downtime blue-green transition |
-| **Change resources** | Update `cpu` or `memory` | Zero-downtime blue-green transition |
-| **Delete cluster** | Delete ConfigMap | All resources garbage collected |
+| **Create engine** | Create `FireboltEngine` resource | Operator creates generation 0 |
+| **Scale up/down** | Update `spec.replicas` | Zero-downtime blue-green transition |
+| **Change image** | Update `spec.image` | Zero-downtime blue-green transition |
+| **Change resources** | Update `spec.resources` | Zero-downtime blue-green transition |
+| **Delete engine** | Delete `FireboltEngine` resource | All resources garbage collected |
 
-Any change to the ConfigMap triggers a new generation. The operator:
+Any change to the spec triggers a new generation. The operator:
 1. Creates new resources with the updated config
 2. Waits for them to be ready
 3. Switches traffic
@@ -182,27 +213,27 @@ Any change to the ConfigMap triggers a new generation. The operator:
 ### Graceful (default)
 
 ```yaml
-data:
+spec:
   rollout: "graceful"
 ```
 
-- New cluster is created and must become fully ready
-- Traffic is switched to the new cluster
-- Old cluster is drained (operator waits for running queries to complete)
-- Old cluster is deleted only after drain completes
+- New generation is created and must become fully ready
+- Traffic is switched to the new generation
+- Old generation is drained (operator waits for running queries to complete)
+- Old generation is deleted only after drain completes
 
 Use this for production workloads where you want zero query interruption.
 
 ### Recreate
 
 ```yaml
-data:
+spec:
   rollout: "recreate"
 ```
 
-- New cluster is created and must become fully ready
-- Traffic is switched to the new cluster
-- Old cluster is **immediately deleted** (no drain check)
+- New generation is created and must become fully ready
+- Traffic is switched to the new generation
+- Old generation is **immediately deleted** (no drain check)
 
 Use this for development/testing or when you need faster transitions and can tolerate interrupted queries.
 
@@ -210,38 +241,38 @@ Use this for development/testing or when you need faster transitions and can tol
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config-prefix` | `core-cluster` | Prefix for ConfigMaps to watch |
-| `--namespace` | (required) | Namespace to operate in |
-| `--metrics-bind-address` | `:8080` | Address for metrics endpoint |
+| `--namespace` | (optional) | Namespace to watch. Watches all namespaces if empty. |
+| `--metrics-bind-address` | `0` | Address for metrics endpoint |
 | `--health-probe-bind-address` | `:8081` | Address for health probes |
 | `--leader-elect` | `false` | Enable leader election for HA |
 
 ## Monitoring
 
-### Cluster Status
+### Engine Status
 
-Check the status ConfigMap to see the current state:
+Check the engine status to see the current state:
 
 ```bash
-kubectl get configmap core-cluster-production-status -n firebolt -o jsonpath='{.data.state}' | jq
+kubectl get fireboltengine core-engine-production -n firebolt -o yaml
+```
+
+Or use short names:
+
+```bash
+kubectl get fire -n firebolt
 ```
 
 Output:
-```json
-{
-  "currentGeneration": 2,
-  "activeGeneration": 2,
-  "drainingGeneration": null,
-  "phase": "stable",
-  "lastReconciled": "2024-01-15T10:00:00Z"
-}
+```
+NAME                      REPLICAS   PHASE    GENERATION   AGE
+core-engine-production    5          stable   2            24h
 ```
 
 ### Phases
 
 | Phase | Meaning |
 |-------|---------|
-| `stable` | Cluster is running normally, no transition in progress |
+| `stable` | Engine is running normally, no transition in progress |
 | `creating` | New generation is being created, waiting for pods to be ready |
 | `switching` | Traffic is being switched to the new generation |
 | `draining` | Waiting for old generation pods to finish serving queries |
@@ -249,27 +280,26 @@ Output:
 
 ## Troubleshooting
 
-### Cluster stuck in "creating" phase
+### Engine stuck in "creating" phase
 
 Pods in the new generation are not becoming ready. Check:
 ```bash
-kubectl get pods -l core-operator/cluster=core-cluster-production -n firebolt
+kubectl get pods -l firebolt.io/engine=core-engine-production -n firebolt
 kubectl describe pod <pod-name> -n firebolt
 kubectl logs <pod-name> -n firebolt
 ```
 
-### Cluster stuck in "draining" phase
+### Engine stuck in "draining" phase
 
 Old pods still have running queries. This is normal for long-running queries. If you need to force the transition:
 
-1. Change to `rollout: recreate` in the ConfigMap, or
+1. Change to `rollout: recreate` in the engine spec, or
 2. Manually delete the old StatefulSet (not recommended)
 
-### ConfigMap changes not being picked up
+### Engine changes not being picked up
 
-Ensure the ConfigMap name starts with the configured prefix:
+Check operator logs:
 ```bash
-# Check operator logs
 kubectl logs -l app=core-operator -n firebolt
 ```
 

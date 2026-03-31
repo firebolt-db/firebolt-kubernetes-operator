@@ -144,4 +144,3 @@ func MaybeCrash(clusterName string, point CrashPoint) {
 		// Safety timeout - shouldn't happen in tests
 	}
 }
-

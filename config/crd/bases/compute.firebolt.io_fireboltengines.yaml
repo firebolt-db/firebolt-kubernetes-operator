@@ -1,0 +1,545 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: fireboltengines.compute.firebolt.io
+spec:
+  group: compute.firebolt.io
+  names:
+    kind: FireboltEngine
+    listKind: FireboltEngineList
+    plural: fireboltengines
+    shortNames:
+    - fire
+    - fireng
+    singular: fireboltengine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.activeGeneration
+      name: Generation
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: FireboltEngine is the Schema for the fireboltengines API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: FireboltEngineSpec defines the desired state of a Firebolt
+              engine.
+            properties:
+              drainCheckInterval:
+                description: DrainCheckInterval controls how often to check if old
+                  pods have finished serving queries.
+                type: string
+              image:
+                description: Image defines the container image to use.
+                properties:
+                  pullPolicy:
+                    default: IfNotPresent
+                    description: PullPolicy defines when to pull the image.
+                    enum:
+                    - Always
+                    - Never
+                    - IfNotPresent
+                    type: string
+                  repository:
+                    description: Repository is the container image repository.
+                    minLength: 1
+                    type: string
+                  tag:
+                    description: Tag is the container image tag.
+                    minLength: 1
+                    type: string
+                required:
+                - repository
+                - tag
+                type: object
+              metadataService:
+                description: MetadataService configures the per-engine metadata service
+                  (PostgreSQL + metadata server).
+                properties:
+                  image:
+                    description: |-
+                      Image overrides the metadata service container image.
+                      If not specified, derived from the engine image
+                      (same registry prefix, "dedicated-pensieve" repo, same tag).
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy defines when to pull the image.
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      repository:
+                        description: Repository is the container image repository.
+                        minLength: 1
+                        type: string
+                      tag:
+                        description: Tag is the container image tag.
+                        minLength: 1
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
+                type: object
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: NodeSelector constrains which nodes the engine pods can
+                  be scheduled on.
+                type: object
+              replicas:
+                description: Replicas is the number of engine nodes.
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
+              resources:
+                description: Resources defines the CPU and memory for engine pods.
+                properties:
+                  cpu:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: CPU request and limit (Kubernetes quantity, e.g.
+                      "2", "500m").
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Memory request and limit (Kubernetes quantity, e.g.
+                      "8Gi", "4096Mi").
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                required:
+                - cpu
+                - memory
+                type: object
+              rollout:
+                default: graceful
+                description: 'Rollout strategy for transitions: "graceful" waits for
+                  drain, "recreate" deletes immediately.'
+                enum:
+                - graceful
+                - recreate
+                type: string
+              tolerations:
+                description: Tolerations allow engine pods to be scheduled on tainted
+                  nodes.
+                items:
+                  description: |-
+                    The pod this Toleration is attached to tolerates any taint that matches
+                    the triple <key,value,effect> using the matching operator <operator>.
+                  properties:
+                    effect:
+                      description: |-
+                        Effect indicates the taint effect to match. Empty means match all taint effects.
+                        When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                      type: string
+                    key:
+                      description: |-
+                        Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                        If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                      type: string
+                    operator:
+                      description: |-
+                        Operator represents a key's relationship to the value.
+                        Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                        Exists is equivalent to wildcard for value, so that a pod can
+                        tolerate all taints of a particular category.
+                        Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                      type: string
+                    tolerationSeconds:
+                      description: |-
+                        TolerationSeconds represents the period of time the toleration (which must be
+                        of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                        it is not set, which means tolerate the taint forever (do not evict). Zero and
+                        negative values will be treated as 0 (evict immediately) by the system.
+                      format: int64
+                      type: integer
+                    value:
+                      description: |-
+                        Value is the taint value the toleration matches to.
+                        If the operator is Exists, the value should be empty, otherwise just a regular string.
+                      type: string
+                  type: object
+                type: array
+            required:
+            - image
+            - replicas
+            - resources
+            type: object
+          status:
+            description: FireboltEngineStatus defines the observed state of a Firebolt
+              engine.
+            properties:
+              accountId:
+                description: |-
+                  AccountID is the metadata service account identifier, resolved during
+                  the first reconciliation and reused on subsequent ones.
+                type: string
+              activeGeneration:
+                description: ActiveGeneration is the generation currently serving
+                  traffic.
+                type: integer
+              currentGeneration:
+                description: CurrentGeneration is the latest generation number created.
+                type: integer
+              drainingGeneration:
+                description: DrainingGeneration is the generation being drained, if
+                  any.
+                type: integer
+              lastAppliedConfig:
+                description: LastAppliedConfig is the spec that was used to create
+                  the current/active generation.
+                properties:
+                  drainCheckInterval:
+                    description: DrainCheckInterval controls how often to check if
+                      old pods have finished serving queries.
+                    type: string
+                  image:
+                    description: Image defines the container image to use.
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy defines when to pull the image.
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      repository:
+                        description: Repository is the container image repository.
+                        minLength: 1
+                        type: string
+                      tag:
+                        description: Tag is the container image tag.
+                        minLength: 1
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
+                  metadataService:
+                    description: MetadataService configures the per-engine metadata
+                      service (PostgreSQL + metadata server).
+                    properties:
+                      image:
+                        description: |-
+                          Image overrides the metadata service container image.
+                          If not specified, derived from the engine image
+                          (same registry prefix, "dedicated-pensieve" repo, same tag).
+                        properties:
+                          pullPolicy:
+                            default: IfNotPresent
+                            description: PullPolicy defines when to pull the image.
+                            enum:
+                            - Always
+                            - Never
+                            - IfNotPresent
+                            type: string
+                          repository:
+                            description: Repository is the container image repository.
+                            minLength: 1
+                            type: string
+                          tag:
+                            description: Tag is the container image tag.
+                            minLength: 1
+                            type: string
+                        required:
+                        - repository
+                        - tag
+                        type: object
+                    type: object
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector constrains which nodes the engine pods
+                      can be scheduled on.
+                    type: object
+                  replicas:
+                    description: Replicas is the number of engine nodes.
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: Resources defines the CPU and memory for engine pods.
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: CPU request and limit (Kubernetes quantity, e.g.
+                          "2", "500m").
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Memory request and limit (Kubernetes quantity,
+                          e.g. "8Gi", "4096Mi").
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - cpu
+                    - memory
+                    type: object
+                  rollout:
+                    default: graceful
+                    description: 'Rollout strategy for transitions: "graceful" waits
+                      for drain, "recreate" deletes immediately.'
+                    enum:
+                    - graceful
+                    - recreate
+                    type: string
+                  tolerations:
+                    description: Tolerations allow engine pods to be scheduled on
+                      tainted nodes.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                            Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                required:
+                - image
+                - replicas
+                - resources
+                type: object
+              lastReconciled:
+                description: LastReconciled is the timestamp of the last reconciliation.
+                format: date-time
+                type: string
+              pendingMutation:
+                description: PendingMutation holds a queued spec change to apply after
+                  the current transition completes.
+                properties:
+                  drainCheckInterval:
+                    description: DrainCheckInterval controls how often to check if
+                      old pods have finished serving queries.
+                    type: string
+                  image:
+                    description: Image defines the container image to use.
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy defines when to pull the image.
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      repository:
+                        description: Repository is the container image repository.
+                        minLength: 1
+                        type: string
+                      tag:
+                        description: Tag is the container image tag.
+                        minLength: 1
+                        type: string
+                    required:
+                    - repository
+                    - tag
+                    type: object
+                  metadataService:
+                    description: MetadataService configures the per-engine metadata
+                      service (PostgreSQL + metadata server).
+                    properties:
+                      image:
+                        description: |-
+                          Image overrides the metadata service container image.
+                          If not specified, derived from the engine image
+                          (same registry prefix, "dedicated-pensieve" repo, same tag).
+                        properties:
+                          pullPolicy:
+                            default: IfNotPresent
+                            description: PullPolicy defines when to pull the image.
+                            enum:
+                            - Always
+                            - Never
+                            - IfNotPresent
+                            type: string
+                          repository:
+                            description: Repository is the container image repository.
+                            minLength: 1
+                            type: string
+                          tag:
+                            description: Tag is the container image tag.
+                            minLength: 1
+                            type: string
+                        required:
+                        - repository
+                        - tag
+                        type: object
+                    type: object
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector constrains which nodes the engine pods
+                      can be scheduled on.
+                    type: object
+                  replicas:
+                    description: Replicas is the number of engine nodes.
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: Resources defines the CPU and memory for engine pods.
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: CPU request and limit (Kubernetes quantity, e.g.
+                          "2", "500m").
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Memory request and limit (Kubernetes quantity,
+                          e.g. "8Gi", "4096Mi").
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - cpu
+                    - memory
+                    type: object
+                  rollout:
+                    default: graceful
+                    description: 'Rollout strategy for transitions: "graceful" waits
+                      for drain, "recreate" deletes immediately.'
+                    enum:
+                    - graceful
+                    - recreate
+                    type: string
+                  tolerations:
+                    description: Tolerations allow engine pods to be scheduled on
+                      tainted nodes.
+                    items:
+                      description: |-
+                        The pod this Toleration is attached to tolerates any taint that matches
+                        the triple <key,value,effect> using the matching operator <operator>.
+                      properties:
+                        effect:
+                          description: |-
+                            Effect indicates the taint effect to match. Empty means match all taint effects.
+                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                          type: string
+                        key:
+                          description: |-
+                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                          type: string
+                        operator:
+                          description: |-
+                            Operator represents a key's relationship to the value.
+                            Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                            Exists is equivalent to wildcard for value, so that a pod can
+                            tolerate all taints of a particular category.
+                            Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                          type: string
+                        tolerationSeconds:
+                          description: |-
+                            TolerationSeconds represents the period of time the toleration (which must be
+                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                            it is not set, which means tolerate the taint forever (do not evict). Zero and
+                            negative values will be treated as 0 (evict immediately) by the system.
+                          format: int64
+                          type: integer
+                        value:
+                          description: |-
+                            Value is the taint value the toleration matches to.
+                            If the operator is Exists, the value should be empty, otherwise just a regular string.
+                          type: string
+                      type: object
+                    type: array
+                required:
+                - image
+                - replicas
+                - resources
+                type: object
+              phase:
+                description: Phase is the current lifecycle phase of the engine.
+                type: string
+            required:
+            - activeGeneration
+            - currentGeneration
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

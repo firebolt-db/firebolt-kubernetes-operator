@@ -1,0 +1,6 @@
+apiVersion: v2
+appVersion: e67bde0b
+description: Dedicated Pensieve Server for PackDB Firebolt Core
+name: dedicated-pensieve
+type: application
+version: 4.32.0-pre.0.20260331033249.e67bde0be1cd

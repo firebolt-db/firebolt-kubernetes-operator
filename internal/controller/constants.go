@@ -25,15 +25,28 @@ import (
 
 const (
 	// Label keys used by the operator
-	LabelCluster    = "core-operator/cluster"
-	LabelGeneration = "core-operator/generation"
+	LabelEngine     = "firebolt.io/engine"
+	LabelGeneration = "firebolt.io/generation"
+
+	// Annotation for tracking rendered manifest content
+	AnnotationManifestHash = "firebolt.io/manifest-hash"
 
 	// Suffix constants for resource naming
-	SuffixStatus  = "-status"
-	SuffixService = "-service"
-	SuffixGen     = "-g"
-	SuffixHL      = "-hl"
-	SuffixConfig  = "-config"
+	SuffixService         = "-service"
+	SuffixGen             = "-g"
+	SuffixHL              = "-hl"
+	SuffixConfig          = "-config"
+	SuffixMetadata        = "-metadata"
+	SuffixMetadataPG      = "-metadata-pg"
+	SuffixMetadataPGCreds = "-metadata-pg-creds"
+
+	// Metadata service (dedicated pensieve) configuration
+	MetadataServicePort = 7000
+	PostgresPort        = 5432
+	PostgresImage       = "postgres:16-alpine"
+	PostgresDBName      = "pensieve"
+	PostgresUser        = "pensieve"
+	PostgresPVCSize     = "1Gi"
 
 	// Container name
 	ContainerNameCore = "core"

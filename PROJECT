@@ -9,8 +9,13 @@ layout:
 projectName: operator
 repo: github.com/firebolt-analytics/core-operator
 resources:
-- controller: true
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
   domain: firebolt.io
-  kind: ConfigMap
-  version: v1
+  group: compute
+  kind: FireboltEngine
+  path: github.com/firebolt-analytics/core-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

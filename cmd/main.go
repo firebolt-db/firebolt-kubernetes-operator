@@ -36,6 +36,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
 	"github.com/firebolt-analytics/core-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -47,6 +48,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(computev1alpha1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
@@ -60,7 +62,6 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
-	var configPrefix string
 	var watchNamespace string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -80,10 +81,8 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	flag.StringVar(&configPrefix, "config-prefix", "core-cluster",
-		"Prefix for ConfigMaps the operator watches")
 	flag.StringVar(&watchNamespace, "namespace", "",
-		"Namespace to watch for ConfigMaps (required)")
+		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -91,11 +90,6 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-
-	if watchNamespace == "" {
-		setupLog.Error(nil, "--namespace flag is required")
-		os.Exit(1)
-	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -164,18 +158,13 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgrOpts := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "c662f7f5.firebolt.io",
-		Cache: cache.Options{
-			DefaultNamespaces: map[string]cache.Config{
-				watchNamespace: {},
-			},
-		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -187,19 +176,27 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-	})
+	}
+
+	if watchNamespace != "" {
+		mgrOpts.Cache = cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				watchNamespace: {},
+			},
+		}
+	}
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	if err := (&controller.ConfigMapReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		ConfigPrefix: configPrefix,
-		Namespace:    watchNamespace,
+	if err := (&controller.FireboltEngineReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ConfigMap")
+		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -30,59 +30,60 @@ import (
 // queryConfig is defined in query_config_light_test.go or query_config_heavy_test.go
 // based on build tags. Run with -tags=e2e for light queries, -tags=e2e,heavy for heavy queries.
 
-var _ = Describe("Core Operator", func() {
+var _ = Describe("Firebolt Engine", func() {
 	BeforeEach(func() {
 		GinkgoWriter.Printf("Running tests with query mode: %s\n", queryConfig.Mode)
 	})
-	// Test 1: Single node cluster lifecycle
-	Describe("Single Node Cluster", Ordered, func() {
+	// Test 1: Single node engine lifecycle
+	Describe("Single Node Engine", Ordered, func() {
 		var (
-			clusterPrefix = "test-single" + queryConfig.Suffix
-			clusterName   = "test-single" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-single" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for single node test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for single node test")
+			By("Cleaning up single node test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
-		It("should create a single node cluster, run queries, and clean up", func() {
-			By("Creating cluster config with 1 replica")
-			err := CreateClusterConfig(ctx, clusterName, 1)
+		It("should create a single node engine, run queries, and clean up", func() {
+			By("Creating engine with 1 replica")
+			err := CreateEngine(ctx, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 1, clusterReadyTimeout)
+			By("Waiting for engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running SELECT 42 query")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running query")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -90,64 +91,65 @@ var _ = Describe("Core Operator", func() {
 	// Test 2: Scale up from 2 to 4 nodes with continuous queries
 	Describe("Scale Up 2 to 4 Nodes", Ordered, func() {
 		var (
-			clusterPrefix = "test-scaleup" + queryConfig.Suffix
-			clusterName   = "test-scaleup" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
-			bgRunner      *BackgroundQueryRunner
+			engineName = "test-scaleup" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for scale up test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for scale up test")
+			By("Cleaning up scale up test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should scale up while maintaining query availability", func() {
-			By("Creating cluster config with 2 replicas")
-			err := CreateClusterConfig(ctx, clusterName, 2)
+			By("Creating engine with 2 replicas")
+			err := CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running initial SELECT 42 query")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running initial query")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling up to 4 replicas")
-			err = UpdateClusterReplicas(ctx, clusterName, 4)
+			err = UpdateEngineReplicas(ctx, engineName, 4)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for scaled cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 4, clusterTransitionTimeout)
+			By("Waiting for scaled engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 4, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable after scaling")
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			By("Waiting for engine status to be stable after scaling")
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running SELECT 42 query on scaled cluster")
-			output, err = RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running query on scaled engine")
+			output, err = RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -162,16 +164,15 @@ var _ = Describe("Core Operator", func() {
 				bgRunner.PrintFailureSummary()
 			}
 
-			// Zero failures allowed - zero-downtime scaling must be achieved
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scale up")
 			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -179,64 +180,65 @@ var _ = Describe("Core Operator", func() {
 	// Test 3: Scale down from 3 to 1 node with continuous queries
 	Describe("Scale Down 3 to 1 Node", Ordered, func() {
 		var (
-			clusterPrefix = "test-scaledown" + queryConfig.Suffix
-			clusterName   = "test-scaledown" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
-			bgRunner      *BackgroundQueryRunner
+			engineName = "test-scaledown" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for scale down test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for scale down test")
+			By("Cleaning up scale down test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should scale down while maintaining query availability", func() {
-			By("Creating cluster config with 3 replicas")
-			err := CreateClusterConfig(ctx, clusterName, 3)
+			By("Creating engine with 3 replicas")
+			err := CreateEngine(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterReadyTimeout)
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running initial SELECT 42 query")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running initial query")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling down to 1 replica")
-			err = UpdateClusterReplicas(ctx, clusterName, 1)
+			err = UpdateEngineReplicas(ctx, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for scaled cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 1, clusterTransitionTimeout)
+			By("Waiting for scaled engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable after scaling")
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			By("Waiting for engine status to be stable after scaling")
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running SELECT 42 query on scaled cluster")
-			output, err = RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running query on scaled engine")
+			output, err = RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -251,16 +253,15 @@ var _ = Describe("Core Operator", func() {
 				bgRunner.PrintFailureSummary()
 			}
 
-			// Zero failures allowed - zero-downtime scaling must be achieved
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scale down")
 			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -268,82 +269,75 @@ var _ = Describe("Core Operator", func() {
 	// Test 4: Rapid config changes - only the last change should be applied
 	Describe("Rapid Config Changes", Ordered, func() {
 		var (
-			clusterPrefix = "test-rapid" + queryConfig.Suffix
-			clusterName   = "test-rapid" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
-			bgRunner      *BackgroundQueryRunner
+			engineName = "test-rapid" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for rapid changes test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for rapid changes test")
+			By("Cleaning up rapid changes test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should only apply the last config change when multiple rapid changes occur", func() {
-			By("Creating cluster config with 2 replicas")
-			err := CreateClusterConfig(ctx, clusterName, 2)
+			By("Creating engine with 2 replicas")
+			err := CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Triggering scale up to 4 replicas")
-			err = UpdateClusterReplicas(ctx, clusterName, 4)
+			err = UpdateEngineReplicas(ctx, engineName, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Rapidly applying 15 config changes alternating between 3 and 1, ending with 1")
-			// Once the operator takes in a config change, it snapshots the target
-			// config into the status ConfigMap. Subsequent changes are queued as
-			// "pending" and only the most recent pending change is kept.
 			for i := 0; i < 15; i++ {
 				replicas := 3
 				if i%2 == 1 {
 					replicas = 1
 				}
-				// Last change (i=14, even) would be 3, but we want to end with 1
 				if i == 14 {
 					replicas = 1
 				}
-				err = UpdateClusterReplicas(ctx, clusterName, replicas)
+				err = UpdateEngineReplicas(ctx, engineName, replicas)
 				Expect(err).NotTo(HaveOccurred())
-				// No delay between changes - rapid succession
 			}
 
 			By("Waiting for scale up to 4 to complete first")
-			// The operator should complete the 4-replica transition it already started
-			err = WaitForClusterReady(ctx, clusterName, 4, clusterTransitionTimeout)
+			err = WaitForEngineReady(ctx, engineName, 4, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for final scale down to 1 node (last change applied)")
-			// After the 4-replica transition completes, the operator picks up the
-			// most recent pending change (1 replica) and executes that transition
-			err = WaitForClusterReady(ctx, clusterName, 1, clusterTransitionTimeout)
+			err = WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster to be stable at 1 node")
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			By("Waiting for engine to be stable at 1 node")
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster has exactly 1 node")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine has exactly 1 node")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -361,12 +355,12 @@ var _ = Describe("Core Operator", func() {
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during rapid changes")
 			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -374,71 +368,70 @@ var _ = Describe("Core Operator", func() {
 	// Test 5: Harmonic minor scale - 1->2->3->2->1
 	Describe("Harmonic Minor Scale", Ordered, func() {
 		var (
-			clusterPrefix = "test-harmonic" + queryConfig.Suffix
-			clusterName   = "test-harmonic" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
-			bgRunner      *BackgroundQueryRunner
+			engineName = "test-harmonic" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for harmonic scale test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for harmonic scale test")
+			By("Cleaning up harmonic scale test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should scale up and down through 1->2->3->2->1 without downtime", func() {
-			By("Creating cluster config with 1 replica")
-			err := CreateClusterConfig(ctx, clusterName, 1)
+			By("Creating engine with 1 replica")
+			err := CreateEngine(ctx, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 1, clusterReadyTimeout)
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
-			// Scale up: 1 -> 2 -> 3
 			for replicas := 2; replicas <= 3; replicas++ {
 				By(fmt.Sprintf("Scaling up to %d replicas", replicas))
-				err = UpdateClusterReplicas(ctx, clusterName, replicas)
+				err = UpdateEngineReplicas(ctx, engineName, replicas)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = WaitForClusterReady(ctx, clusterName, replicas, clusterTransitionTimeout)
+				err = WaitForEngineReady(ctx, engineName, replicas, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+				err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			// Scale down: 3 -> 2 -> 1
 			for replicas := 2; replicas >= 1; replicas-- {
 				By(fmt.Sprintf("Scaling down to %d replicas", replicas))
-				err = UpdateClusterReplicas(ctx, clusterName, replicas)
+				err = UpdateEngineReplicas(ctx, engineName, replicas)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = WaitForClusterReady(ctx, clusterName, replicas, clusterTransitionTimeout)
+				err = WaitForEngineReady(ctx, engineName, replicas, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+				err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("Running final query to verify cluster health")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running final query to verify engine health")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -456,12 +449,12 @@ var _ = Describe("Core Operator", func() {
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during harmonic scaling")
 			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -469,65 +462,65 @@ var _ = Describe("Core Operator", func() {
 	// Test 6: Image switching
 	Describe("Image Switching", Ordered, func() {
 		var (
-			clusterPrefix = "test-image" + queryConfig.Suffix
-			clusterName   = "test-image" + queryConfig.Suffix + "-cluster"
-			newImageTag   = "latest"
-			operator      *OperatorInstance
-			bgRunner      *BackgroundQueryRunner
+			engineName = "test-image" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for image switching test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for image switching test")
+			By("Cleaning up image switching test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should switch image without downtime", func() {
-			By("Creating cluster config with 3 replicas")
-			err := CreateClusterConfig(ctx, clusterName, 3)
+			By("Creating engine with 3 replicas")
+			err := CreateEngine(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterReadyTimeout)
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running initial SELECT 42 query")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running initial query")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Switching to new image tag")
-			err = UpdateClusterImageTag(ctx, clusterName, newImageTag)
+			err = UpdateEngineImageTag(ctx, engineName, newImageTag)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster to complete image switch")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			By("Waiting for engine to complete image switch")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster to be stable after image switch")
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			By("Waiting for engine to be stable after image switch")
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running SELECT 42 query after image switch")
-			output, err = RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running query after image switch")
+			output, err = RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -545,93 +538,96 @@ var _ = Describe("Core Operator", func() {
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during image switch")
 			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	// Test 7: Multiple clusters managed by same operator
-	Describe("Multi Cluster Management", Ordered, func() {
+	// Test 7: Multiple engines managed by same operator
+	Describe("Multi Engine Management", Ordered, func() {
 		var (
-			clusterPrefix = "test-multi" + queryConfig.Suffix
-			clusterNames  = []string{
-				"test-multi" + queryConfig.Suffix + "-cluster1",
-				"test-multi" + queryConfig.Suffix + "-cluster2",
-				"test-multi" + queryConfig.Suffix + "-cluster3",
+			engineNames = []string{
+				"test-multi" + queryConfig.Suffix + "-engine1",
+				"test-multi" + queryConfig.Suffix + "-engine2",
+				"test-multi" + queryConfig.Suffix + "-engine3",
 			}
-			clusterSizes = []int{1, 2, 3}
+			engineSizes = []int{1, 2, 3}
 			operator     *OperatorInstance
 			bgRunners    []*BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for multi-cluster test")
+			By("Starting operator for multi-engine test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator("test-multi" + queryConfig.Suffix)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for multi-cluster test")
+			By("Cleaning up multi-engine test")
+			for _, name := range engineNames {
+				_ = DeleteEngine(ctx, name)
+				_ = WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)
+			}
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
-		It("should manage multiple clusters independently", func() {
-			By("Creating 3 clusters of sizes 1, 2, 3")
-			for i, name := range clusterNames {
-				err := CreateClusterConfig(ctx, name, clusterSizes[i])
+		It("should manage multiple engines independently", func() {
+			By("Creating 3 engines of sizes 1, 2, 3")
+			for i, name := range engineNames {
+				err := CreateEngine(ctx, name, engineSizes[i])
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("Waiting for all clusters to become ready")
-			for i, name := range clusterNames {
-				err := WaitForClusterReady(ctx, name, clusterSizes[i], clusterReadyTimeout)
+			By("Waiting for all engines to become ready")
+			for i, name := range engineNames {
+				err := WaitForEngineReady(ctx, name, engineSizes[i], clusterReadyTimeout)
 				Expect(err).NotTo(HaveOccurred())
-				err = WaitForClusterStable(ctx, name, clusterReadyTimeout)
+				err = WaitForEngineStable(ctx, name, clusterReadyTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("Starting background query runner for each cluster")
-			bgRunners = make([]*BackgroundQueryRunner, len(clusterNames))
-			for i, name := range clusterNames {
+			By("Starting background query runner for each engine")
+			bgRunners = make([]*BackgroundQueryRunner, len(engineNames))
+			for i, name := range engineNames {
 				bgRunners[i] = NewBackgroundQueryRunnerWithValidator(name, queryConfig.Query, queryConfig.Validator)
 				bgRunners[i].Start(ctx)
 			}
 
-			By("Scaling up each cluster by 1")
-			for i, name := range clusterNames {
-				newSize := clusterSizes[i] + 1
-				err := UpdateClusterReplicas(ctx, name, newSize)
+			By("Scaling up each engine by 1")
+			for i, name := range engineNames {
+				newSize := engineSizes[i] + 1
+				err := UpdateEngineReplicas(ctx, name, newSize)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("Waiting for all clusters to finish scaling up")
-			for i, name := range clusterNames {
-				newSize := clusterSizes[i] + 1
-				err := WaitForClusterReady(ctx, name, newSize, clusterTransitionTimeout)
+			By("Waiting for all engines to finish scaling up")
+			for i, name := range engineNames {
+				newSize := engineSizes[i] + 1
+				err := WaitForEngineReady(ctx, name, newSize, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
-				err = WaitForClusterStable(ctx, name, clusterTransitionTimeout)
-				Expect(err).NotTo(HaveOccurred())
-			}
-
-			By("Scaling all clusters down to 1")
-			for _, name := range clusterNames {
-				err := UpdateClusterReplicas(ctx, name, 1)
+				err = WaitForEngineStable(ctx, name, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			By("Waiting for all clusters to finish scaling down")
-			for _, name := range clusterNames {
-				err := WaitForClusterReady(ctx, name, 1, clusterTransitionTimeout)
+			By("Scaling all engines down to 1")
+			for _, name := range engineNames {
+				err := UpdateEngineReplicas(ctx, name, 1)
 				Expect(err).NotTo(HaveOccurred())
-				err = WaitForClusterStable(ctx, name, clusterTransitionTimeout)
+			}
+
+			By("Waiting for all engines to finish scaling down")
+			for _, name := range engineNames {
+				err := WaitForEngineReady(ctx, name, 1, clusterTransitionTimeout)
+				Expect(err).NotTo(HaveOccurred())
+				err = WaitForEngineStable(ctx, name, clusterTransitionTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
@@ -639,22 +635,22 @@ var _ = Describe("Core Operator", func() {
 			for i, runner := range bgRunners {
 				runner.Stop()
 				successes, failures := runner.GetStats()
-				fmt.Fprintf(GinkgoWriter, "Cluster %s: %d successes, %d failures\n", clusterNames[i], successes, failures)
+				fmt.Fprintf(GinkgoWriter, "Engine %s: %d successes, %d failures\n", engineNames[i], successes, failures)
 				if failures > 0 {
 					runner.PrintFailureSummary()
 				}
-				Expect(failures).To(Equal(int32(0)), fmt.Sprintf("Cluster %s should have no query failures", clusterNames[i]))
-				Expect(successes).To(BeNumerically(">", 0), fmt.Sprintf("Cluster %s should have some successful queries", clusterNames[i]))
+				Expect(failures).To(Equal(int32(0)), fmt.Sprintf("Engine %s should have no query failures", engineNames[i]))
+				Expect(successes).To(BeNumerically(">", 0), fmt.Sprintf("Engine %s should have some successful queries", engineNames[i]))
 			}
 
-			By("Deleting all cluster configs")
-			for _, name := range clusterNames {
-				err := DeleteClusterConfig(ctx, name)
+			By("Deleting all engines")
+			for _, name := range engineNames {
+				err := DeleteEngine(ctx, name)
 				Expect(err).NotTo(HaveOccurred())
 			}
 
 			By("Waiting for all resources to be deleted")
-			for _, name := range clusterNames {
+			for _, name := range engineNames {
 				err := WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)
 				Expect(err).NotTo(HaveOccurred())
 			}
@@ -664,54 +660,55 @@ var _ = Describe("Core Operator", func() {
 	// Test 8: Recreate rollout strategy - no drain wait
 	Describe("Recreate Rollout Strategy", Ordered, func() {
 		var (
-			clusterPrefix = "test-recreate" + queryConfig.Suffix
-			clusterName   = "test-recreate" + queryConfig.Suffix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-recreate" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		BeforeAll(func() {
 			By("Starting operator for recreate rollout test")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		AfterAll(func() {
-			By("Stopping operator for recreate rollout test")
+			By("Cleaning up recreate rollout test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 			}
 		})
 
 		It("should transition without waiting for drain when rollout is 'recreate'", func() {
-			By("Creating cluster config with 2 replicas and recreate rollout")
-			err := CreateClusterConfigWithRollout(ctx, clusterName, 2, "recreate")
+			By("Creating engine with 2 replicas and recreate rollout")
+			err := CreateEngineWithRollout(ctx, engineName, 2, "recreate")
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster to become ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Waiting for engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for cluster status to be stable")
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Running one-shot query to verify cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Running one-shot query to verify engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Initial query result validation failed")
 
 			By("Scaling to 3 replicas - should transition quickly without drain wait")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Polling query until successful with 2 minute timeout")
 			deadline := time.Now().Add(2 * time.Minute)
 			var querySuccess bool
 			for time.Now().Before(deadline) {
-				output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+				output, err := RunQuery(ctx, engineName, queryConfig.Query)
 				if err == nil {
 					result, parseErr := ParseQueryResult(output)
 					if parseErr == nil && queryConfig.Validator(result) {
@@ -723,18 +720,18 @@ var _ = Describe("Core Operator", func() {
 			}
 			Expect(querySuccess).To(BeTrue(), "Query should succeed within timeout after recreate rollout")
 
-			By("Verifying cluster is stable with 3 replicas")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterReadyTimeout)
+			By("Verifying engine is stable with 3 replicas")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting cluster config")
-			err = DeleteClusterConfig(ctx, clusterName)
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for resources to be deleted")
-			err = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})

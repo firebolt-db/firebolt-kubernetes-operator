@@ -37,9 +37,8 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Creating - Initial Deployment", Ordered, func() {
 		var (
-			clusterPrefix = "test-crash-create" + queryConfig.Suffix
-			clusterName   = clusterPrefix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-crash-create" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		AfterEach(func() {
@@ -48,24 +47,24 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteClusterConfig(ctx, clusterName)
-			_ = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after ConfigMap created", func() {
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashAfterCoreConfigMapCreated, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterCoreConfigMapCreated, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: after core ConfigMap created\n")
 			})
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating cluster config")
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			By("Creating engine")
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -83,17 +82,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -102,18 +101,18 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		It("should recover from crash after StatefulSet created", func() {
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashAfterStatefulSetCreated, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterStatefulSetCreated, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: after StatefulSet created\n")
 			})
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating cluster config")
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			By("Creating engine")
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -131,17 +130,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -150,18 +149,18 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		It("should recover from crash before status update to switching", func() {
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashBeforeCreatingToSwitching, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashBeforeCreatingToSwitching, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: before creating-to-switching status update\n")
 			})
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating cluster config")
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			By("Creating engine")
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -179,17 +178,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes ready")
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -199,9 +198,8 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Switching - Scale Transition", Ordered, func() {
 		var (
-			clusterPrefix = "test-crash-switch" + queryConfig.Suffix
-			clusterName   = clusterPrefix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-crash-switch" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		AfterEach(func() {
@@ -210,33 +208,33 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteClusterConfig(ctx, clusterName)
-			_ = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after service selector update (CRITICAL)", func() {
-			By("Creating initial cluster")
+			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Setting crash point for the scale transition")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashAfterServiceSelectorUpdate, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterServiceSelectorUpdate, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: after service selector update (traffic already switched!)\n")
 			})
 
 			By("Triggering scale up")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -254,17 +252,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes ready with new size")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			By("Verifying recovery - engine becomes ready with new size")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -272,28 +270,28 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		})
 
 		It("should recover from crash before switching status update", func() {
-			By("Creating initial cluster")
+			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Setting crash point for the scale transition")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashBeforeSwitchingStatusUpdate, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashBeforeSwitchingStatusUpdate, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: before switching status update\n")
 			})
 
 			By("Triggering scale up")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -311,17 +309,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes ready with new size")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			By("Verifying recovery - engine becomes ready with new size")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -331,9 +329,8 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Cleaning - After Drain", Ordered, func() {
 		var (
-			clusterPrefix = "test-crash-clean" + queryConfig.Suffix
-			clusterName   = clusterPrefix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-crash-clean" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		AfterEach(func() {
@@ -342,33 +339,33 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteClusterConfig(ctx, clusterName)
-			_ = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after StatefulSet deleted", func() {
-			By("Creating initial cluster")
+			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Setting crash point for the cleaning phase")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashAfterStatefulSetDeleted, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterStatefulSetDeleted, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: after StatefulSet deleted\n")
 			})
 
 			By("Triggering scale up")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -386,17 +383,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes stable")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			By("Verifying recovery - engine becomes stable")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -404,28 +401,28 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		})
 
 		It("should recover from crash before status update to stable", func() {
-			By("Creating initial cluster")
+			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Setting crash point for the final phase")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashBeforeCleaningToStable, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashBeforeCleaningToStable, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: before cleaning-to-stable status update\n")
 			})
 
 			By("Triggering scale up")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -443,17 +440,17 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - cluster becomes stable")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			By("Verifying recovery - engine becomes stable")
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying cluster works")
-			output, err := RunQuery(ctx, clusterName, queryConfig.Query)
+			By("Verifying engine works")
+			output, err := RunQuery(ctx, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -463,9 +460,8 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Availability During Crash", Ordered, func() {
 		var (
-			clusterPrefix = "test-crash-avail" + queryConfig.Suffix
-			clusterName   = clusterPrefix + "-cluster"
-			operator      *OperatorInstance
+			engineName = "test-crash-avail" + queryConfig.Suffix + "-engine"
+			operator   *OperatorInstance
 		)
 
 		AfterEach(func() {
@@ -474,40 +470,39 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteClusterConfig(ctx, clusterName)
-			_ = WaitForResourcesDeleted(ctx, clusterName, resourceCleanupTimeout)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should maintain query availability when crash occurs after service selector update", func() {
-			By("Creating initial cluster")
+			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateClusterConfig(ctx, clusterName, 2)
+			err = CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = WaitForClusterReady(ctx, clusterName, 2, clusterReadyTimeout)
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterReadyTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background queries")
-			bgRunner := NewBackgroundQueryRunnerWithValidator(clusterName, queryConfig.Query, queryConfig.Validator)
+			bgRunner := NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
-			// Let some successful queries accumulate
 			time.Sleep(3 * time.Second)
 
 			By("Setting crash point for the scale transition")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(clusterName, controller.CrashAfterServiceSelectorUpdate, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterServiceSelectorUpdate, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit during availability test\n")
 			})
 
 			By("Triggering scale up")
-			err = UpdateClusterReplicas(ctx, clusterName, 3)
+			err = UpdateEngineReplicas(ctx, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -519,20 +514,19 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			operator.Stop()
 			operator = nil
 
-			// Queries should continue working because the service selector was already updated
 			time.Sleep(3 * time.Second)
 
 			By("Releasing blocked reconcile and restarting")
 			close(restartCh)
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(clusterPrefix)
+			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for recovery")
-			err = WaitForClusterReady(ctx, clusterName, 3, clusterTransitionTimeout)
+			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
-			err = WaitForClusterStable(ctx, clusterName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Stopping background queries and checking results")
