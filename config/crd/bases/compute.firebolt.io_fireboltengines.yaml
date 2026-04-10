@@ -83,37 +83,13 @@ spec:
                 - repository
                 - tag
                 type: object
-              metadataService:
-                description: MetadataService configures the per-engine metadata service
-                  (PostgreSQL + metadata server).
-                properties:
-                  image:
-                    description: |-
-                      Image overrides the metadata service container image.
-                      If not specified, derived from the engine image
-                      (same registry prefix, "dedicated-pensieve" repo, same tag).
-                    properties:
-                      pullPolicy:
-                        default: IfNotPresent
-                        description: PullPolicy defines when to pull the image.
-                        enum:
-                        - Always
-                        - Never
-                        - IfNotPresent
-                        type: string
-                      repository:
-                        description: Repository is the container image repository.
-                        minLength: 1
-                        type: string
-                      tag:
-                        description: Tag is the container image tag.
-                        minLength: 1
-                        type: string
-                    required:
-                    - repository
-                    - tag
-                    type: object
-                type: object
+              metadataEndpointOverride:
+                description: |-
+                  MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
+                  If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
+                  topology-aware routing). Set this for cross-cluster scenarios where the engine
+                  connects to a Pensieve in a different cluster via private link.
+                type: string
               nodeSelector:
                 additionalProperties:
                   type: string
@@ -123,7 +99,6 @@ spec:
               replicas:
                 description: Replicas is the number of engine nodes.
                 format: int32
-                maximum: 100
                 minimum: 1
                 type: integer
               resources:
@@ -207,11 +182,6 @@ spec:
             description: FireboltEngineStatus defines the observed state of a Firebolt
               engine.
             properties:
-              accountId:
-                description: |-
-                  AccountID is the metadata service account identifier, resolved during
-                  the first reconciliation and reused on subsequent ones.
-                type: string
               activeGeneration:
                 description: ActiveGeneration is the generation currently serving
                   traffic.
@@ -254,37 +224,13 @@ spec:
                     - repository
                     - tag
                     type: object
-                  metadataService:
-                    description: MetadataService configures the per-engine metadata
-                      service (PostgreSQL + metadata server).
-                    properties:
-                      image:
-                        description: |-
-                          Image overrides the metadata service container image.
-                          If not specified, derived from the engine image
-                          (same registry prefix, "dedicated-pensieve" repo, same tag).
-                        properties:
-                          pullPolicy:
-                            default: IfNotPresent
-                            description: PullPolicy defines when to pull the image.
-                            enum:
-                            - Always
-                            - Never
-                            - IfNotPresent
-                            type: string
-                          repository:
-                            description: Repository is the container image repository.
-                            minLength: 1
-                            type: string
-                          tag:
-                            description: Tag is the container image tag.
-                            minLength: 1
-                            type: string
-                        required:
-                        - repository
-                        - tag
-                        type: object
-                    type: object
+                  metadataEndpointOverride:
+                    description: |-
+                      MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
+                      If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
+                      topology-aware routing). Set this for cross-cluster scenarios where the engine
+                      connects to a Pensieve in a different cluster via private link.
+                    type: string
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -294,7 +240,6 @@ spec:
                   replicas:
                     description: Replicas is the number of engine nodes.
                     format: int32
-                    maximum: 100
                     minimum: 1
                     type: integer
                   resources:
@@ -409,37 +354,13 @@ spec:
                     - repository
                     - tag
                     type: object
-                  metadataService:
-                    description: MetadataService configures the per-engine metadata
-                      service (PostgreSQL + metadata server).
-                    properties:
-                      image:
-                        description: |-
-                          Image overrides the metadata service container image.
-                          If not specified, derived from the engine image
-                          (same registry prefix, "dedicated-pensieve" repo, same tag).
-                        properties:
-                          pullPolicy:
-                            default: IfNotPresent
-                            description: PullPolicy defines when to pull the image.
-                            enum:
-                            - Always
-                            - Never
-                            - IfNotPresent
-                            type: string
-                          repository:
-                            description: Repository is the container image repository.
-                            minLength: 1
-                            type: string
-                          tag:
-                            description: Tag is the container image tag.
-                            minLength: 1
-                            type: string
-                        required:
-                        - repository
-                        - tag
-                        type: object
-                    type: object
+                  metadataEndpointOverride:
+                    description: |-
+                      MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
+                      If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
+                      topology-aware routing). Set this for cross-cluster scenarios where the engine
+                      connects to a Pensieve in a different cluster via private link.
+                    type: string
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -449,7 +370,6 @@ spec:
                   replicas:
                     description: Replicas is the number of engine nodes.
                     format: int32
-                    maximum: 100
                     minimum: 1
                     type: integer
                   resources:
@@ -536,8 +456,6 @@ spec:
             - activeGeneration
             - currentGeneration
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

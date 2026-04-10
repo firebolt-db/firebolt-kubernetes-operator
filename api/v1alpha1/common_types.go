@@ -1,0 +1,98 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+)
+
+// ImageSpec defines the container image configuration.
+type ImageSpec struct {
+	// Repository is the container image repository.
+	// +kubebuilder:validation:MinLength=1
+	Repository string `json:"repository"`
+
+	// Tag is the container image tag.
+	// +kubebuilder:validation:MinLength=1
+	Tag string `json:"tag"`
+
+	// PullPolicy defines when to pull the image.
+	// +kubebuilder:validation:Enum=Always;Never;IfNotPresent
+	// +kubebuilder:default=IfNotPresent
+	// +optional
+	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
+}
+
+// ResourceRequirements defines the CPU and memory resources for engine pods.
+type ResourceRequirements struct {
+	// CPU request and limit (Kubernetes quantity, e.g. "2", "500m").
+	CPU resource.Quantity `json:"cpu"`
+
+	// Memory request and limit (Kubernetes quantity, e.g. "8Gi", "4096Mi").
+	Memory resource.Quantity `json:"memory"`
+}
+
+// ComponentSpec defines deployment configuration shared by sub-components
+// (gateway, metadata) that the operator deploys via embedded Helm charts.
+// Typed fields take precedence over values set in ValuesOverride.
+type ComponentSpec struct {
+	// Replicas is the number of pods for this component.
+	// +kubebuilder:default=2
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Image overrides the container image for this component.
+	// +optional
+	Image *ImageSpec `json:"image,omitempty"`
+
+	// Resources overrides CPU and memory for this component's pods.
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeSelector constrains which nodes this component's pods can be scheduled on.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Tolerations allow this component's pods to be scheduled on tainted nodes.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// Affinity defines scheduling affinity rules for this component's pods.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// Labels are additional labels applied to this component's pods.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations are additional annotations applied to this component's pods.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// ServiceAccountName is the ServiceAccount for this component's pods.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// ValuesOverride passes arbitrary values to the embedded Helm chart.
+	// Typed fields above take precedence over values set here.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	ValuesOverride *apiextensionsv1.JSON `json:"valuesOverride,omitempty"`
+}

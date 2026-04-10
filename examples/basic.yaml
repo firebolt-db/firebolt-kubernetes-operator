@@ -1,7 +1,7 @@
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: core-engine-basic
+  name: core-engine
   namespace: firebolt
 spec:
   replicas: 1

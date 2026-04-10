@@ -152,8 +152,9 @@ func StartOperator(labelValue string) (*OperatorInstance, error) {
 	}
 
 	reconciler := &controller.FireboltEngineReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Namespace: testNamespace,
 		RestConfig: config,
 		Clientset:  clientset,
 	}
@@ -229,13 +230,6 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 			},
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
-			MetadataService: &computev1alpha1.MetadataServiceSpec{
-				Image: &computev1alpha1.ImageSpec{
-					Repository: pensieveImage,
-					Tag:        pensieveTag,
-					PullPolicy: corev1.PullIfNotPresent,
-				},
-			},
 		},
 	}
 
@@ -301,17 +295,13 @@ func DeleteEngine(ctx context.Context, name string) error {
 	return err
 }
 
-// WaitForEngineReady waits for the metadata service and all pods in an engine to be ready.
+// WaitForEngineReady waits for all pods in an engine to be ready
 func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas int, timeout time.Duration) error {
-	if err := WaitForMetadataServiceReady(ctx, engineName, timeout); err != nil {
-		return fmt.Errorf("metadata service not ready: %w", err)
-	}
-
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
 		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s,firebolt.io/generation", engineName),
+			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
 		})
 		if err != nil {
 			time.Sleep(pollInterval)
@@ -366,37 +356,13 @@ func WaitForEngineStable(ctx context.Context, engineName string, timeout time.Du
 	return fmt.Errorf("timeout waiting for engine %s to be stable", engineName)
 }
 
-// WaitForMetadataServiceReady waits for the metadata service (dedicated pensieve)
-// Deployment to have at least 1 ready replica.
-func WaitForMetadataServiceReady(ctx context.Context, engineName string, timeout time.Duration) error {
-	metadataDeployName := engineName + "-metadata"
-	deadline := time.Now().Add(timeout)
-
-	for time.Now().Before(deadline) {
-		deploy, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, metadataDeployName, metav1.GetOptions{})
-		if err != nil {
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		if deploy.Status.ReadyReplicas >= 1 {
-			return nil
-		}
-
-		time.Sleep(pollInterval)
-	}
-
-	return fmt.Errorf("timeout waiting for metadata service %s to become ready", metadataDeployName)
-}
-
 // WaitForResourcesDeleted waits for all engine resources to be deleted
 func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	engineSelector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
 
 	for time.Now().Before(deadline) {
 		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: engineSelector,
+			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
 		})
 		if err == nil && len(pods.Items) > 0 {
 			time.Sleep(pollInterval)
@@ -404,7 +370,7 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 		}
 
 		svcs, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: engineSelector,
+			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
 		})
 		if err == nil && len(svcs.Items) > 0 {
 			time.Sleep(pollInterval)
@@ -412,25 +378,9 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 		}
 
 		stsList, err := k8sClient.AppsV1().StatefulSets(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: engineSelector,
+			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
 		})
 		if err == nil && len(stsList.Items) > 0 {
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		deployList, err := k8sClient.AppsV1().Deployments(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: engineSelector,
-		})
-		if err == nil && len(deployList.Items) > 0 {
-			time.Sleep(pollInterval)
-			continue
-		}
-
-		pvcList, err := k8sClient.CoreV1().PersistentVolumeClaims(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: engineSelector,
-		})
-		if err == nil && len(pvcList.Items) > 0 {
 			time.Sleep(pollInterval)
 			continue
 		}

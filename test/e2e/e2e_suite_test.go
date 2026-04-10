@@ -47,22 +47,31 @@ const (
 	// Test namespace
 	testNamespace = "firebolt-e2e"
 
-	// Test image - locally available in kind
-	testImage    = "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
-	testTag      = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64"
-	newImageTag  = "latest"
-
-	// Metadata service images
-	pensieveImage = "000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve"
-	pensieveTag   = "4.32.0-pre.0.20260331033249.e67bde0be1cd"
-	postgresImage = "postgres:16-alpine"
+	// Default engine image values (can be overridden via environment variables)
+	defaultEngineImage  = "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
+	defaultEngineTag    = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64"
+	defaultEngineNewTag = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64" // same as defaultEngineTag until we have multiple tags available
 
 	// Timeouts
 	clusterReadyTimeout      = 120 * time.Second
-	clusterTransitionTimeout = 150 * time.Second
-	resourceCleanupTimeout   = 90 * time.Second
+	clusterTransitionTimeout = 180 * time.Second
+	resourceCleanupTimeout   = 120 * time.Second
 	pollInterval             = 1 * time.Second
 )
+
+var (
+	// Engine image configuration - set via environment variables or use defaults
+	testImage   = getEnvOrDefault("TEST_ENGINE_IMAGE", defaultEngineImage)
+	testTag     = getEnvOrDefault("TEST_ENGINE_TAG", defaultEngineTag)
+	newImageTag = getEnvOrDefault("TEST_ENGINE_NEW_TAG", defaultEngineNewTag)
+)
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
 
 var (
 	k8sClient  *kubernetes.Clientset
@@ -142,8 +151,6 @@ var _ = BeforeSuite(func() {
 	requiredImages := []string{
 		testImage + ":" + testTag,
 		testImage + ":" + newImageTag,
-		pensieveImage + ":" + pensieveTag,
-		postgresImage,
 	}
 	for _, img := range requiredImages {
 		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()

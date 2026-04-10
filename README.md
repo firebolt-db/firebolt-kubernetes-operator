@@ -99,9 +99,6 @@ All associated resources (StatefulSets, Services, etc.) are automatically delete
 | `spec.rollout` | No | `graceful` | Rollout strategy: `graceful` waits for drain, `recreate` deletes immediately |
 | `spec.nodeSelector` | No | - | Node selector map |
 | `spec.tolerations` | No | - | Tolerations array |
-| `spec.metadataService.image.repository` | No | *(derived from engine image)* | Metadata service image repository |
-| `spec.metadataService.image.tag` | No | *(derived from engine image)* | Metadata service image tag |
-| `spec.metadataService.image.pullPolicy` | No | `IfNotPresent` | Metadata service image pull policy |
 
 ### Full Example
 
@@ -122,10 +119,6 @@ spec:
     memory: "16Gi"
   drainCheckInterval: "10s"
   rollout: graceful
-  metadataService:
-    image:
-      repository: "ghcr.io/firebolt-db/dedicated-pensieve"
-      tag: "v1.2.0"
   nodeSelector:
     dedicated: firebolt-nodes
     zone: us-east-1a
@@ -136,46 +129,11 @@ spec:
       effect: NoSchedule
 ```
 
-## Metadata Service
-
-Each engine automatically gets a **metadata service** that provides cluster coordination. The operator deploys and manages it without any manual intervention.
-
-The metadata service consists of:
-- A lightweight PostgreSQL instance (1 Gi persistent storage) for metadata storage
-- A metadata server that provides the coordination endpoint to engine nodes
-
-The engine nodes are automatically configured to connect to the metadata service via `config.multi_cluster_endpoint`.
-
-### Image Configuration
-
-By default, the metadata service image is derived from the engine image (same registry prefix, `dedicated-pensieve` repository, same tag). You can override it:
-
-```yaml
-spec:
-  metadataService:
-    image:
-      repository: "my-registry/dedicated-pensieve"
-      tag: "v1.2.0"
-```
-
 ## Operator-Managed Resources
 
 **Do not modify these resources manually.** The operator creates and manages them automatically.
 
 For an engine named `core-engine-production`, the operator creates:
-
-### Per-Engine Resources (shared across generations)
-
-| Resource | Name Pattern | Purpose |
-|----------|--------------|---------|
-| **Metadata Service** | `core-engine-production-metadata` | Metadata coordination endpoint |
-| **Metadata ConfigMap** | `core-engine-production-metadata` | Metadata service configuration |
-| **PostgreSQL Deployment** | `core-engine-production-metadata-pg` | Metadata database |
-| **PostgreSQL Service** | `core-engine-production-metadata-pg` | Database endpoint |
-| **PostgreSQL PVC** | `core-engine-production-metadata-pg` | Persistent database storage |
-| **PostgreSQL Credentials** | `core-engine-production-metadata-pg-creds` | Database credentials |
-
-### Per-Generation Resources (created during blue-green transitions)
 
 | Resource | Name Pattern | Purpose |
 |----------|--------------|---------|
@@ -186,9 +144,9 @@ For an engine named `core-engine-production`, the operator creates:
 
 ### Important Rules
 
-1. **Never edit operator-created resources** - The operator assumes full control. Manual changes will be overwritten or cause conflicts.
+1. **Never edit operator-created StatefulSets or Services** - The operator assumes full control. Manual changes will be overwritten or cause conflicts.
 
-2. **To delete an engine, delete the `FireboltEngine` resource** - All other resources (including metadata service and PostgreSQL) will be garbage collected automatically.
+2. **To delete an engine, delete the `FireboltEngine` resource** - All other resources will be garbage collected automatically.
 
 3. **To modify an engine, edit only the `FireboltEngine` resource** - The operator handles everything else.
 

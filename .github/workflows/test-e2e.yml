@@ -8,14 +8,20 @@ jobs:
   test-e2e:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Clone the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
         with:
           go-version-file: go.mod
+
+      - name: Login to Amazon ECR
+        uses: firebolt-analytics/gha-workflows/.github/actions/ecr-login@main
 
       - name: Install the latest version of kind
         run: |

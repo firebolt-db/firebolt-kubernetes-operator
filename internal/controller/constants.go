@@ -28,25 +28,11 @@ const (
 	LabelEngine     = "firebolt.io/engine"
 	LabelGeneration = "firebolt.io/generation"
 
-	// Annotation for tracking rendered manifest content
-	AnnotationManifestHash = "firebolt.io/manifest-hash"
-
 	// Suffix constants for resource naming
-	SuffixService         = "-service"
-	SuffixGen             = "-g"
-	SuffixHL              = "-hl"
-	SuffixConfig          = "-config"
-	SuffixMetadata        = "-metadata"
-	SuffixMetadataPG      = "-metadata-pg"
-	SuffixMetadataPGCreds = "-metadata-pg-creds"
-
-	// Metadata service (dedicated pensieve) configuration
-	MetadataServicePort = 7000
-	PostgresPort        = 5432
-	PostgresImage       = "postgres:16-alpine"
-	PostgresDBName      = "pensieve"
-	PostgresUser        = "pensieve"
-	PostgresPVCSize     = "1Gi"
+	SuffixService = "-service"
+	SuffixGen     = "-g"
+	SuffixHL      = "-hl"
+	SuffixConfig  = "-config"
 
 	// Container name
 	ContainerNameCore = "core"

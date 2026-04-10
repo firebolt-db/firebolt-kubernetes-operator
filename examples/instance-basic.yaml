@@ -1,0 +1,8 @@
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: production
+  namespace: firebolt
+spec:
+  metadata: {}
+  gateway: {}

@@ -67,23 +67,25 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= operator-test-e2e
 
+# E2E test image configuration (override via environment or make arguments)
+TEST_ENGINE_IMAGE ?= 000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core
+TEST_ENGINE_TAG ?= release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64
+TEST_ENGINE_NEW_TAG ?= $(TEST_ENGINE_TAG)
+
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
+	@./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
+
+.PHONY: load-test-images
+load-test-images: ## Load required Docker images into the Kind cluster
+	@ENGINE_IMAGE=$(TEST_ENGINE_IMAGE) ENGINE_TAG=$(TEST_ENGINE_TAG) ENGINE_NEW_TAG=$(TEST_ENGINE_NEW_TAG) \
+		./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+test-e2e: manifests generate fmt docker-build setup-test-e2e load-test-images deploy ## Run the e2e tests. Expected an isolated environment using Kind.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+		TEST_ENGINE_IMAGE=$(TEST_ENGINE_IMAGE) TEST_ENGINE_TAG=$(TEST_ENGINE_TAG) TEST_ENGINE_NEW_TAG=$(TEST_ENGINE_NEW_TAG) \
+		go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.no-color 2>&1 | tee test.log
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e

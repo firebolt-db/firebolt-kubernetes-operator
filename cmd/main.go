@@ -193,8 +193,9 @@ func main() {
 	}
 
 	if err := (&controller.FireboltEngineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Namespace: watchNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
 		os.Exit(1)

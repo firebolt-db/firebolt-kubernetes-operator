@@ -1,0 +1,20 @@
+---
+description: Plans must break work into meaningful commits
+alwaysApply: true
+---
+# Plan Commit Structure
+
+When creating a plan for any task, always divide the work into meaningful, self-contained commits.
+
+**Each commit must:**
+- Follow the commit convention: `<type>(<scope>): <description> (FB-<ticket>)`
+- Compile and pass codegen independently (no broken intermediate states)
+- Contain a single logical change (don't mix refactoring with new features)
+
+**Ordering principles:**
+1. Refactors and type extractions first (non-functional changes)
+2. New types and CRDs second
+3. Modifications to existing types third
+4. Controller/reconciler logic last
+
+**Ask the user for the ticket number if not provided.**

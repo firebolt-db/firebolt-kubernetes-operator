@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -42,46 +41,10 @@ const (
 	PhaseCleaning  EnginePhase = "cleaning"
 )
 
-// ImageSpec defines the container image configuration.
-type ImageSpec struct {
-	// Repository is the container image repository.
-	// +kubebuilder:validation:MinLength=1
-	Repository string `json:"repository"`
-
-	// Tag is the container image tag.
-	// +kubebuilder:validation:MinLength=1
-	Tag string `json:"tag"`
-
-	// PullPolicy defines when to pull the image.
-	// +kubebuilder:validation:Enum=Always;Never;IfNotPresent
-	// +kubebuilder:default=IfNotPresent
-	// +optional
-	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
-}
-
-// ResourceRequirements defines the CPU and memory resources for the engine pods.
-type ResourceRequirements struct {
-	// CPU request and limit (Kubernetes quantity, e.g. "2", "500m").
-	CPU resource.Quantity `json:"cpu"`
-
-	// Memory request and limit (Kubernetes quantity, e.g. "8Gi", "4096Mi").
-	Memory resource.Quantity `json:"memory"`
-}
-
-// MetadataServiceSpec configures the per-engine metadata service.
-type MetadataServiceSpec struct {
-	// Image overrides the metadata service container image.
-	// If not specified, derived from the engine image
-	// (same registry prefix, "dedicated-pensieve" repo, same tag).
-	// +optional
-	Image *ImageSpec `json:"image,omitempty"`
-}
-
 // FireboltEngineSpec defines the desired state of a Firebolt engine.
 type FireboltEngineSpec struct {
 	// Replicas is the number of engine nodes.
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100
 	Replicas int32 `json:"replicas"`
 
 	// Image defines the container image to use.
@@ -107,9 +70,12 @@ type FireboltEngineSpec struct {
 	// +optional
 	Rollout RolloutStrategy `json:"rollout,omitempty"`
 
-	// MetadataService configures the per-engine metadata service (PostgreSQL + metadata server).
+	// MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
+	// If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
+	// topology-aware routing). Set this for cross-cluster scenarios where the engine
+	// connects to a Pensieve in a different cluster via private link.
 	// +optional
-	MetadataService *MetadataServiceSpec `json:"metadataService,omitempty"`
+	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
@@ -139,11 +105,6 @@ type FireboltEngineStatus struct {
 	// LastAppliedConfig is the spec that was used to create the current/active generation.
 	// +optional
 	LastAppliedConfig *FireboltEngineSpec `json:"lastAppliedConfig,omitempty"`
-
-	// AccountID is the metadata service account identifier, resolved during
-	// the first reconciliation and reused on subsequent ones.
-	// +optional
-	AccountID string `json:"accountId,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -159,7 +120,7 @@ type FireboltEngine struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   FireboltEngineSpec   `json:"spec"`
+	Spec   FireboltEngineSpec   `json:"spec,omitempty"`
 	Status FireboltEngineStatus `json:"status,omitempty"`
 }
 

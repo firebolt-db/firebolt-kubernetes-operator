@@ -14,10 +14,6 @@ spec:
     memory: "16Gi"
   drainCheckInterval: "10s"
   rollout: graceful
-  metadataService:
-    image:
-      repository: "ghcr.io/firebolt-db/dedicated-pensieve"
-      tag: "v1.2.0"
   nodeSelector:
     dedicated: firebolt-nodes
     zone: us-east-1a

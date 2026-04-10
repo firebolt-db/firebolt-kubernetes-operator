@@ -47,6 +47,7 @@ import (
 type FireboltEngineReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
+	Namespace  string
 	RestConfig *rest.Config
 	Clientset  *kubernetes.Clientset
 }
@@ -57,11 +58,8 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create
 
 // Reconcile handles changes to FireboltEngine resources
 func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -85,41 +83,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	spec := &engine.Spec
 	status := &engine.Status
 
-	// Ensure per-engine metadata service resources exist (PostgreSQL + dedicated pensieve)
-	if err := r.ensureMetadataService(ctx, engine, spec); err != nil {
-		log.Error(err, "Failed to ensure metadata service")
-		return ctrl.Result{}, err
-	}
-
-	// Wait until the metadata service Deployment has at least one ready replica
-	// before attempting gRPC calls against it.
-	if status.AccountID == "" {
-		ready, err := r.isMetadataServiceReady(ctx, engine)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if !ready {
-			log.Info("Metadata service not ready yet, requeueing")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-
-		accountID, err := r.ensureAccountInitialized(ctx, engine)
-		if err != nil {
-			log.Error(err, "Failed to ensure metadata service account")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		status.AccountID = accountID
-		if err := r.updateStatus(ctx, engine); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
 	// Initialize status on first reconcile
 	if status.Phase == "" {
 		status.Phase = computev1alpha1.PhaseCreating
 		status.ActiveGeneration = -1
-		status.LastAppliedConfig = spec.DeepCopy()
 		if err := r.updateStatus(ctx, engine); err != nil {
 			log.Error(err, "Failed to initialize status")
 			return ctrl.Result{}, err
@@ -188,10 +155,6 @@ func specsEqual(a, b *computev1alpha1.FireboltEngineSpec) bool {
 		}
 	}
 
-	if !metadataServiceEqual(a.MetadataService, b.MetadataService) {
-		return false
-	}
-
 	return true
 }
 
@@ -200,41 +163,6 @@ func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec) time.Durati
 		return spec.DrainCheckInterval.Duration
 	}
 	return DefaultDrainCheckInterval
-}
-
-func servicePortsNeedUpdate(existing, desired []corev1.ServicePort) bool {
-	if len(existing) != len(desired) {
-		return true
-	}
-	for i := range desired {
-		if existing[i].Name != desired[i].Name ||
-			existing[i].Port != desired[i].Port ||
-			existing[i].Protocol != desired[i].Protocol ||
-			existing[i].TargetPort.IntValue() != desired[i].TargetPort.IntValue() {
-			return true
-		}
-	}
-	return false
-}
-
-func metadataServiceEqual(a, b *computev1alpha1.MetadataServiceSpec) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return imageSpecEqual(a.Image, b.Image)
-}
-
-func imageSpecEqual(a, b *computev1alpha1.ImageSpec) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Repository == b.Repository && a.Tag == b.Tag && a.PullPolicy == b.PullPolicy
 }
 
 func tolerationEqual(a, b corev1.Toleration) bool {
@@ -410,7 +338,6 @@ func (r *FireboltEngineReconciler) reconcileSwitching(ctx context.Context, engin
 		log.Info("Traffic switched, starting drain of old generation",
 			"newGeneration", gen, "drainingGeneration", oldGen)
 	} else {
-		status.LastAppliedConfig = spec
 		status.Phase = computev1alpha1.PhaseStable
 		log.Info("Initial deployment complete", "generation", gen)
 	}
@@ -439,14 +366,7 @@ func (r *FireboltEngineReconciler) reconcileDraining(ctx context.Context, engine
 
 	drainingGen := *status.DrainingGeneration
 
-	// Scale the draining StatefulSet to 0 so Kubernetes won't restart crashed pods.
-	// Running pods receive SIGTERM and stay in Terminating state until they exit;
-	// the drain check below continues to monitor them until queries complete.
-	if err := r.scaleStatefulSet(ctx, engineName, engine.Namespace, drainingGen, 0); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to scale down draining StatefulSet: %w", err)
-	}
-
-	if engine.Spec.Rollout == computev1alpha1.RolloutRecreate {
+	if spec.Rollout == computev1alpha1.RolloutRecreate {
 		log.Info("Rollout strategy is 'recreate', skipping drain check", "drainingGeneration", drainingGen)
 		status.Phase = computev1alpha1.PhaseCleaning
 		if err := r.updateStatus(ctx, engine); err != nil {
@@ -534,12 +454,24 @@ func genResourceName(engineName string, gen int, suffix string) string {
 	return fmt.Sprintf("%s%s%d%s", engineName, SuffixGen, gen, suffix)
 }
 
+func isGenerationResource(name string) bool {
+	idx := strings.LastIndex(name, SuffixGen)
+	if idx == -1 {
+		return false
+	}
+	afterGen := name[idx+len(SuffixGen):]
+	if len(afterGen) == 0 {
+		return false
+	}
+	return afterGen[0] >= '0' && afterGen[0] <= '9'
+}
+
 func (r *FireboltEngineReconciler) ensureCoreConfigMap(ctx context.Context, engineName string, engine *computev1alpha1.FireboltEngine, spec *computev1alpha1.FireboltEngineSpec, gen int) error {
 	name := genResourceName(engineName, gen, SuffixConfig)
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
 	ns := engine.Namespace
 
-	coreConfig := r.generateCoreConfig(engineName, gen, headlessSvcName, ns, engine.Status.AccountID, int(spec.Replicas))
+	coreConfig := r.generateCoreConfig(engineName, gen, headlessSvcName, ns, int(spec.Replicas))
 	configJSON, err := json.MarshalIndent(coreConfig, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal nodes config: %w", err)
@@ -579,7 +511,7 @@ func (r *FireboltEngineReconciler) ensureCoreConfigMap(ctx context.Context, engi
 	return r.Update(ctx, existing)
 }
 
-func (r *FireboltEngineReconciler) generateCoreConfig(engineName string, gen int, headlessSvcName, namespace, accountID string, replicas int) map[string]interface{} {
+func (r *FireboltEngineReconciler) generateCoreConfig(engineName string, gen int, headlessSvcName, namespace string, replicas int) map[string]interface{} {
 	stsName := genResourceName(engineName, gen, "")
 
 	nodes := make([]map[string]string, replicas)
@@ -591,10 +523,6 @@ func (r *FireboltEngineReconciler) generateCoreConfig(engineName string, gen int
 
 	return map[string]interface{}{
 		"nodes": nodes,
-		"config": map[string]interface{}{
-			"multi_cluster_endpoint": MetadataServiceEndpoint(engineName, namespace),
-			"account_id":            accountID,
-		},
 	}
 }
 
@@ -635,11 +563,8 @@ func (r *FireboltEngineReconciler) ensureHeadlessService(ctx context.Context, en
 		return err
 	}
 
-	needsUpdate := existing.Spec.PublishNotReadyAddresses != svc.Spec.PublishNotReadyAddresses ||
-		servicePortsNeedUpdate(existing.Spec.Ports, svc.Spec.Ports)
-	if needsUpdate {
+	if existing.Spec.PublishNotReadyAddresses != svc.Spec.PublishNotReadyAddresses {
 		existing.Spec.PublishNotReadyAddresses = svc.Spec.PublishNotReadyAddresses
-		existing.Spec.Ports = svc.Spec.Ports
 		return r.Update(ctx, existing)
 	}
 	return nil
@@ -793,15 +718,7 @@ func (r *FireboltEngineReconciler) ensureClusterService(ctx context.Context, eng
 	if errors.IsNotFound(err) {
 		return r.Create(ctx, svc)
 	}
-	if err != nil {
-		return err
-	}
-
-	if servicePortsNeedUpdate(existing.Spec.Ports, svc.Spec.Ports) {
-		existing.Spec.Ports = svc.Spec.Ports
-		return r.Update(ctx, existing)
-	}
-	return nil
+	return err
 }
 
 func (r *FireboltEngineReconciler) updateClusterServiceSelector(ctx context.Context, engine *computev1alpha1.FireboltEngine, gen int) error {
@@ -951,22 +868,6 @@ func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1
 	}
 }
 
-func (r *FireboltEngineReconciler) scaleStatefulSet(ctx context.Context, engineName, namespace string, gen int, replicas int32) error {
-	name := genResourceName(engineName, gen, "")
-	sts := &appsv1.StatefulSet{}
-	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, sts); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	if sts.Spec.Replicas != nil && *sts.Spec.Replicas == replicas {
-		return nil
-	}
-	sts.Spec.Replicas = &replicas
-	return r.Update(ctx, sts)
-}
-
 func (r *FireboltEngineReconciler) deleteStatefulSet(ctx context.Context, engineName, namespace string, gen int) error {
 	name := genResourceName(engineName, gen, "")
 	sts := &appsv1.StatefulSet{
@@ -1024,7 +925,6 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltEngine{}).
 		Owns(&appsv1.StatefulSet{}).
-		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Named(name).
