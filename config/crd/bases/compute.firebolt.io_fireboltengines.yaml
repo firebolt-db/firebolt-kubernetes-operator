@@ -56,9 +56,19 @@ spec:
             description: FireboltEngineSpec defines the desired state of a Firebolt
               engine.
             properties:
+              drainCheckEnabled:
+                default: true
+                description: |-
+                  DrainCheckEnabled controls whether the operator performs a SQL-based drain
+                  check on old-generation pods during graceful rollouts. When false, the
+                  operator skips directly to cleaning after switching traffic, without
+                  verifying that in-flight queries have completed. Requires a reachable
+                  metadata endpoint (Pensieve) when enabled.
+                type: boolean
               drainCheckInterval:
-                description: DrainCheckInterval controls how often to check if old
-                  pods have finished serving queries.
+                description: |-
+                  DrainCheckInterval controls how often to check if old pods have finished serving queries.
+                  Only used when drainCheckEnabled is true.
                 type: string
               image:
                 description: Image defines the container image to use.
@@ -193,262 +203,15 @@ spec:
                 description: DrainingGeneration is the generation being drained, if
                   any.
                 type: integer
-              lastAppliedConfig:
-                description: LastAppliedConfig is the spec that was used to create
-                  the current/active generation.
-                properties:
-                  drainCheckInterval:
-                    description: DrainCheckInterval controls how often to check if
-                      old pods have finished serving queries.
-                    type: string
-                  image:
-                    description: Image defines the container image to use.
-                    properties:
-                      pullPolicy:
-                        default: IfNotPresent
-                        description: PullPolicy defines when to pull the image.
-                        enum:
-                        - Always
-                        - Never
-                        - IfNotPresent
-                        type: string
-                      repository:
-                        description: Repository is the container image repository.
-                        minLength: 1
-                        type: string
-                      tag:
-                        description: Tag is the container image tag.
-                        minLength: 1
-                        type: string
-                    required:
-                    - repository
-                    - tag
-                    type: object
-                  metadataEndpointOverride:
-                    description: |-
-                      MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
-                      If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
-                      topology-aware routing). Set this for cross-cluster scenarios where the engine
-                      connects to a Pensieve in a different cluster via private link.
-                    type: string
-                  nodeSelector:
-                    additionalProperties:
-                      type: string
-                    description: NodeSelector constrains which nodes the engine pods
-                      can be scheduled on.
-                    type: object
-                  replicas:
-                    description: Replicas is the number of engine nodes.
-                    format: int32
-                    minimum: 1
-                    type: integer
-                  resources:
-                    description: Resources defines the CPU and memory for engine pods.
-                    properties:
-                      cpu:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: CPU request and limit (Kubernetes quantity, e.g.
-                          "2", "500m").
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                      memory:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: Memory request and limit (Kubernetes quantity,
-                          e.g. "8Gi", "4096Mi").
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                    required:
-                    - cpu
-                    - memory
-                    type: object
-                  rollout:
-                    default: graceful
-                    description: 'Rollout strategy for transitions: "graceful" waits
-                      for drain, "recreate" deletes immediately.'
-                    enum:
-                    - graceful
-                    - recreate
-                    type: string
-                  tolerations:
-                    description: Tolerations allow engine pods to be scheduled on
-                      tainted nodes.
-                    items:
-                      description: |-
-                        The pod this Toleration is attached to tolerates any taint that matches
-                        the triple <key,value,effect> using the matching operator <operator>.
-                      properties:
-                        effect:
-                          description: |-
-                            Effect indicates the taint effect to match. Empty means match all taint effects.
-                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
-                          type: string
-                        key:
-                          description: |-
-                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
-                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
-                          type: string
-                        operator:
-                          description: |-
-                            Operator represents a key's relationship to the value.
-                            Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
-                            Exists is equivalent to wildcard for value, so that a pod can
-                            tolerate all taints of a particular category.
-                            Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
-                          type: string
-                        tolerationSeconds:
-                          description: |-
-                            TolerationSeconds represents the period of time the toleration (which must be
-                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
-                            it is not set, which means tolerate the taint forever (do not evict). Zero and
-                            negative values will be treated as 0 (evict immediately) by the system.
-                          format: int64
-                          type: integer
-                        value:
-                          description: |-
-                            Value is the taint value the toleration matches to.
-                            If the operator is Exists, the value should be empty, otherwise just a regular string.
-                          type: string
-                      type: object
-                    type: array
-                required:
-                - image
-                - replicas
-                - resources
-                type: object
               lastReconciled:
                 description: LastReconciled is the timestamp of the last reconciliation.
                 format: date-time
                 type: string
-              pendingMutation:
-                description: PendingMutation holds a queued spec change to apply after
-                  the current transition completes.
-                properties:
-                  drainCheckInterval:
-                    description: DrainCheckInterval controls how often to check if
-                      old pods have finished serving queries.
-                    type: string
-                  image:
-                    description: Image defines the container image to use.
-                    properties:
-                      pullPolicy:
-                        default: IfNotPresent
-                        description: PullPolicy defines when to pull the image.
-                        enum:
-                        - Always
-                        - Never
-                        - IfNotPresent
-                        type: string
-                      repository:
-                        description: Repository is the container image repository.
-                        minLength: 1
-                        type: string
-                      tag:
-                        description: Tag is the container image tag.
-                        minLength: 1
-                        type: string
-                    required:
-                    - repository
-                    - tag
-                    type: object
-                  metadataEndpointOverride:
-                    description: |-
-                      MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
-                      If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
-                      topology-aware routing). Set this for cross-cluster scenarios where the engine
-                      connects to a Pensieve in a different cluster via private link.
-                    type: string
-                  nodeSelector:
-                    additionalProperties:
-                      type: string
-                    description: NodeSelector constrains which nodes the engine pods
-                      can be scheduled on.
-                    type: object
-                  replicas:
-                    description: Replicas is the number of engine nodes.
-                    format: int32
-                    minimum: 1
-                    type: integer
-                  resources:
-                    description: Resources defines the CPU and memory for engine pods.
-                    properties:
-                      cpu:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: CPU request and limit (Kubernetes quantity, e.g.
-                          "2", "500m").
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                      memory:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: Memory request and limit (Kubernetes quantity,
-                          e.g. "8Gi", "4096Mi").
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                    required:
-                    - cpu
-                    - memory
-                    type: object
-                  rollout:
-                    default: graceful
-                    description: 'Rollout strategy for transitions: "graceful" waits
-                      for drain, "recreate" deletes immediately.'
-                    enum:
-                    - graceful
-                    - recreate
-                    type: string
-                  tolerations:
-                    description: Tolerations allow engine pods to be scheduled on
-                      tainted nodes.
-                    items:
-                      description: |-
-                        The pod this Toleration is attached to tolerates any taint that matches
-                        the triple <key,value,effect> using the matching operator <operator>.
-                      properties:
-                        effect:
-                          description: |-
-                            Effect indicates the taint effect to match. Empty means match all taint effects.
-                            When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
-                          type: string
-                        key:
-                          description: |-
-                            Key is the taint key that the toleration applies to. Empty means match all taint keys.
-                            If the key is empty, operator must be Exists; this combination means to match all values and all keys.
-                          type: string
-                        operator:
-                          description: |-
-                            Operator represents a key's relationship to the value.
-                            Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
-                            Exists is equivalent to wildcard for value, so that a pod can
-                            tolerate all taints of a particular category.
-                            Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
-                          type: string
-                        tolerationSeconds:
-                          description: |-
-                            TolerationSeconds represents the period of time the toleration (which must be
-                            of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
-                            it is not set, which means tolerate the taint forever (do not evict). Zero and
-                            negative values will be treated as 0 (evict immediately) by the system.
-                          format: int64
-                          type: integer
-                        value:
-                          description: |-
-                            Value is the taint value the toleration matches to.
-                            If the operator is Exists, the value should be empty, otherwise just a regular string.
-                          type: string
-                      type: object
-                    type: array
-                required:
-                - image
-                - replicas
-                - resources
-                type: object
+              observedGeneration:
+                description: ObservedGeneration is the metadata.generation that was
+                  last fully reconciled to stable.
+                format: int64
+                type: integer
               phase:
                 description: Phase is the current lifecycle phase of the engine.
                 type: string

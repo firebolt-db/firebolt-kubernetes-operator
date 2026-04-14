@@ -12,6 +12,7 @@ spec:
   resources:
     cpu: "4"
     memory: "16Gi"
+  drainCheckEnabled: true
   drainCheckInterval: "10s"
   rollout: graceful
   nodeSelector:

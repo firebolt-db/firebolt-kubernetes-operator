@@ -61,7 +61,7 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
+# TODO(user): To use a different vendor for e2e tests, modify the setup under 'test/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
@@ -83,10 +83,18 @@ load-test-images: ## Load required Docker images into the Kind cluster
 
 .PHONY: test-e2e
 test-e2e: manifests generate fmt docker-build setup-test-e2e load-test-images deploy ## Run the e2e tests. Expected an isolated environment using Kind.
+	@EXIT_CODE=0; \
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
 		TEST_ENGINE_IMAGE=$(TEST_ENGINE_IMAGE) TEST_ENGINE_TAG=$(TEST_ENGINE_TAG) TEST_ENGINE_NEW_TAG=$(TEST_ENGINE_NEW_TAG) \
-		go test -tags=e2e ./test/e2e/ -v -ginkgo.v --ginkgo.no-color 2>&1 | tee test.log
-	$(MAKE) cleanup-test-e2e
+		go test -tags=e2e ./test/e2e/ -v -timeout 30m \
+		-ginkgo.v \
+		--ginkgo.no-color \
+		--ginkgo.junit-report=e2e-report.xml \
+		--ginkgo.poll-progress-after=30s \
+		--ginkgo.poll-progress-interval=30s \
+		2>&1 | tee test.log || EXIT_CODE=$$?; \
+	$(MAKE) cleanup-test-e2e; \
+	exit $$EXIT_CODE
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests

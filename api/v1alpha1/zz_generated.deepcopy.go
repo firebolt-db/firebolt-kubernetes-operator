@@ -179,6 +179,11 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 	*out = *in
 	out.Image = in.Image
 	in.Resources.DeepCopyInto(&out.Resources)
+	if in.DrainCheckEnabled != nil {
+		in, out := &in.DrainCheckEnabled, &out.DrainCheckEnabled
+		*out = new(bool)
+		**out = **in
+	}
 	if in.DrainCheckInterval != nil {
 		in, out := &in.DrainCheckInterval, &out.DrainCheckInterval
 		*out = new(metav1.Duration)
@@ -226,16 +231,6 @@ func (in *FireboltEngineStatus) DeepCopyInto(out *FireboltEngineStatus) {
 	if in.LastReconciled != nil {
 		in, out := &in.LastReconciled, &out.LastReconciled
 		*out = (*in).DeepCopy()
-	}
-	if in.PendingMutation != nil {
-		in, out := &in.PendingMutation, &out.PendingMutation
-		*out = new(FireboltEngineSpec)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.LastAppliedConfig != nil {
-		in, out := &in.LastAppliedConfig, &out.LastAppliedConfig
-		*out = new(FireboltEngineSpec)
-		(*in).DeepCopyInto(*out)
 	}
 }
 

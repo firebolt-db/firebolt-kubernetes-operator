@@ -6,8 +6,8 @@ metadata:
 spec:
   replicas: 1
   image:
-    repository: "ghcr.io/firebolt-db/firebolt-core"
-    tag: "v1.2.0"
+    repository: "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
+    tag: "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64"
   resources:
     cpu: "1"
     memory: "4Gi"

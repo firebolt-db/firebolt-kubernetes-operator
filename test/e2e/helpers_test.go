@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -152,9 +153,9 @@ func StartOperator(labelValue string) (*OperatorInstance, error) {
 	}
 
 	reconciler := &controller.FireboltEngineReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Namespace: testNamespace,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Namespace:  testNamespace,
 		RestConfig: config,
 		Clientset:  clientset,
 	}
@@ -212,6 +213,7 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 		return err
 	}
 
+	drainCheckEnabled := false
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -228,6 +230,7 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 				CPU:    resource.MustParse("100m"),
 				Memory: resource.MustParse("3Gi"),
 			},
+			DrainCheckEnabled:  &drainCheckEnabled,
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
 		},
@@ -295,18 +298,22 @@ func DeleteEngine(ctx context.Context, name string) error {
 	return err
 }
 
-// WaitForEngineReady waits for all pods in an engine to be ready
+// WaitForEngineReady waits for all pods in an engine to be ready.
+// On timeout it dumps detailed pod and event diagnostics.
 func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	selector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
 
+	var lastPods *corev1.PodList
 	for time.Now().Before(deadline) {
 		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
+			LabelSelector: selector,
 		})
 		if err != nil {
 			time.Sleep(pollInterval)
 			continue
 		}
+		lastPods = pods
 
 		readyCount := 0
 		for _, pod := range pods.Items {
@@ -327,7 +334,53 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 		time.Sleep(pollInterval)
 	}
 
-	return fmt.Errorf("timeout waiting for engine %s to have %d ready pods", engineName, expectedReplicas)
+	diag := fmt.Sprintf("timeout waiting for engine %s to have %d ready pods", engineName, expectedReplicas)
+	if lastPods != nil {
+		diag += fmt.Sprintf("\n  Total pods found: %d", len(lastPods.Items))
+		for _, pod := range lastPods.Items {
+			diag += fmt.Sprintf("\n  Pod %s: phase=%s", pod.Name, pod.Status.Phase)
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Waiting != nil {
+					diag += fmt.Sprintf(" container=%s waiting(reason=%s, message=%s)",
+						cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+				if cs.State.Terminated != nil {
+					diag += fmt.Sprintf(" container=%s terminated(reason=%s, exit=%d)",
+						cs.Name, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+				}
+				if cs.RestartCount > 0 {
+					diag += fmt.Sprintf(" restarts=%d", cs.RestartCount)
+				}
+			}
+			for _, cond := range pod.Status.Conditions {
+				if cond.Status != corev1.ConditionTrue {
+					diag += fmt.Sprintf("\n    condition %s=%s: %s", cond.Type, cond.Status, cond.Message)
+				}
+			}
+		}
+	} else {
+		diag += "\n  No pod listing was obtained"
+	}
+
+	events, err := k8sClient.CoreV1().Events(testNamespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		var relevant []corev1.Event
+		for _, ev := range events.Items {
+			if strings.Contains(ev.InvolvedObject.Name, engineName) &&
+				(ev.Type == "Warning" || ev.Reason == "FailedScheduling" || ev.Reason == "Failed" || ev.Reason == "BackOff") {
+				relevant = append(relevant, ev)
+			}
+		}
+		if len(relevant) > 0 {
+			diag += "\n  Warning events:"
+			for _, ev := range relevant {
+				diag += fmt.Sprintf("\n    %s/%s: %s - %s (count=%d)",
+					ev.InvolvedObject.Kind, ev.InvolvedObject.Name, ev.Reason, ev.Message, ev.Count)
+			}
+		}
+	}
+
+	return fmt.Errorf("%s", diag)
 }
 
 // WaitForEngineStable waits for the engine status phase to be "stable"
@@ -411,6 +464,8 @@ func executeQueryViaService(ctx context.Context, serviceName, query string) (str
 		args = append([]string{"--context", "kind-" + kindCluster}, args...)
 	}
 	cmd := exec.Command("kubectl", args...)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start port-forward: %w", err)
 	}
@@ -418,21 +473,26 @@ func executeQueryViaService(ctx context.Context, serviceName, query string) (str
 	defer func() {
 		if cmd.Process != nil {
 			cmd.Process.Kill()
+			cmd.Wait() //nolint:errcheck
 		}
 	}()
 
 	var connected bool
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			connected = true
 			break
 		}
+		// Check if port-forward exited early (e.g. no endpoints)
+		if cmd.ProcessState != nil {
+			return "", fmt.Errorf("port-forward exited early: %s", strings.TrimSpace(stderrBuf.String()))
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if !connected {
-		return "", fmt.Errorf("timeout waiting for port-forward to be ready")
+		return "", fmt.Errorf("timeout waiting for port-forward to be ready: %s", strings.TrimSpace(stderrBuf.String()))
 	}
 
 	queryURL := fmt.Sprintf("http://127.0.0.1:%d/?query_label=e2e-test-query&output_format=JSON_Compact", localPort)

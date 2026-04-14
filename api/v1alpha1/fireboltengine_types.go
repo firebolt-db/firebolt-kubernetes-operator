@@ -53,7 +53,17 @@ type FireboltEngineSpec struct {
 	// Resources defines the CPU and memory for engine pods.
 	Resources ResourceRequirements `json:"resources"`
 
+	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
+	// check on old-generation pods during graceful rollouts. When false, the
+	// operator skips directly to cleaning after switching traffic, without
+	// verifying that in-flight queries have completed. Requires a reachable
+	// metadata endpoint (Pensieve) when enabled.
+	// +kubebuilder:default=true
+	// +optional
+	DrainCheckEnabled *bool `json:"drainCheckEnabled,omitempty"`
+
 	// DrainCheckInterval controls how often to check if old pods have finished serving queries.
+	// Only used when drainCheckEnabled is true.
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
 
@@ -80,6 +90,10 @@ type FireboltEngineSpec struct {
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
 type FireboltEngineStatus struct {
+	// ObservedGeneration is the metadata.generation that was last fully reconciled to stable.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// CurrentGeneration is the latest generation number created.
 	CurrentGeneration int `json:"currentGeneration"`
 
@@ -97,14 +111,6 @@ type FireboltEngineStatus struct {
 	// LastReconciled is the timestamp of the last reconciliation.
 	// +optional
 	LastReconciled *metav1.Time `json:"lastReconciled,omitempty"`
-
-	// PendingMutation holds a queued spec change to apply after the current transition completes.
-	// +optional
-	PendingMutation *FireboltEngineSpec `json:"pendingMutation,omitempty"`
-
-	// LastAppliedConfig is the spec that was used to create the current/active generation.
-	// +optional
-	LastAppliedConfig *FireboltEngineSpec `json:"lastAppliedConfig,omitempty"`
 }
 
 // +kubebuilder:object:root=true

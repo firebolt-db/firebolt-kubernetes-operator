@@ -31,6 +31,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/ginkgo/v2/types"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,8 +83,40 @@ var (
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	fmt.Fprintf(GinkgoWriter, "Starting Firebolt Engine E2E test suite\n")
-	RunSpecs(t, "Firebolt Engine E2E Suite")
+	RunSpecs(t, "Firebolt Engine E2E Suite", Label("e2e"))
 }
+
+var _ = ReportAfterSuite("E2E Summary", func(report Report) {
+	fmt.Fprintf(os.Stdout, "\n============================== E2E SUMMARY ==============================\n")
+	fmt.Fprintf(os.Stdout, "  Total:   %d\n", report.PreRunStats.TotalSpecs)
+	fmt.Fprintf(os.Stdout, "  Passed:  %d\n", report.SpecReports.CountWithState(types.SpecStatePassed))
+	fmt.Fprintf(os.Stdout, "  Failed:  %d\n", report.SpecReports.CountWithState(types.SpecStateFailed))
+	fmt.Fprintf(os.Stdout, "  Skipped: %d\n", report.SpecReports.CountWithState(types.SpecStateSkipped))
+	fmt.Fprintf(os.Stdout, "  Pending: %d\n", report.SpecReports.CountWithState(types.SpecStatePending))
+	fmt.Fprintf(os.Stdout, "  Duration: %s\n", report.RunTime.Truncate(time.Second))
+
+	failed := report.SpecReports.WithState(types.SpecStateFailed)
+	if len(failed) > 0 {
+		fmt.Fprintf(os.Stdout, "\n  FAILED TESTS:\n")
+		for _, spec := range failed {
+			fmt.Fprintf(os.Stdout, "    ✗ %s (%s)\n", spec.FullText(), spec.RunTime.Truncate(time.Second))
+			if spec.Failure.Message != "" {
+				fmt.Fprintf(os.Stdout, "      %s\n", spec.Failure.Message)
+				fmt.Fprintf(os.Stdout, "      %s\n", spec.Failure.Location)
+			}
+		}
+	}
+
+	passed := report.SpecReports.WithState(types.SpecStatePassed)
+	if len(passed) > 0 {
+		fmt.Fprintf(os.Stdout, "\n  PASSED TESTS:\n")
+		for _, spec := range passed {
+			fmt.Fprintf(os.Stdout, "    ✓ %s (%s)\n", spec.FullText(), spec.RunTime.Truncate(time.Second))
+		}
+	}
+
+	fmt.Fprintf(os.Stdout, "==========================================================================\n\n")
+})
 
 var _ = BeforeSuite(func() {
 	// Setup controller-runtime logger
@@ -145,7 +178,7 @@ var _ = BeforeSuite(func() {
 	By("Verifying required container images are loaded in Kind cluster")
 	kindCluster := os.Getenv("KIND_CLUSTER")
 	if kindCluster == "" {
-		kindCluster = "kind"
+		kindCluster = "operator-test-e2e"
 	}
 	kindNode := kindCluster + "-control-plane"
 	requiredImages := []string{
