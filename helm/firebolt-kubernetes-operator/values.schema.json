@@ -74,12 +74,6 @@
         "create": { "type": "boolean" }
       }
     },
-    "crds": {
-      "type": "object",
-      "properties": {
-        "install": { "type": "boolean" }
-      }
-    },
     "leaderElection": {
       "type": "object",
       "properties": {

@@ -41,10 +41,6 @@ rbac:
   # -- Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources.
   create: true
 
-crds:
-  # -- Whether to install CRDs. Set to false if CRDs are managed externally.
-  install: true
-
 leaderElection:
   # -- Enable leader election for the controller manager.
   enabled: true

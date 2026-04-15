@@ -13,9 +13,9 @@ metadata:
 spec:
   ports:
     - name: https
-      port: 8443
+      port: {{ .Values.metrics.bindAddress | trimPrefix ":" | int }}
       protocol: TCP
-      targetPort: 8443
+      targetPort: {{ .Values.metrics.bindAddress | trimPrefix ":" | int }}
   selector:
     {{- include "firebolt-operator.selectorLabels" . | nindent 4 }}
     control-plane: controller-manager
