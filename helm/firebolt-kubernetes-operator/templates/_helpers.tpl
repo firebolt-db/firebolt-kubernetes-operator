@@ -54,6 +54,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Extract port number from a bind address (":8081" or "0.0.0.0:8081").
+*/}}
+{{- define "firebolt-operator.portNumber" -}}
+{{- $parts := splitList ":" . -}}
+{{- index $parts (sub (len $parts) 1) | int -}}
+{{- end }}
+
+{{/*
 Create the name of the service account to use.
 */}}
 {{- define "firebolt-operator.serviceAccountName" -}}

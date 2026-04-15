@@ -12,10 +12,10 @@ metadata:
   {{- end }}
 spec:
   ports:
-    - name: https
-      port: {{ .Values.metrics.bindAddress | trimPrefix ":" | int }}
+    - name: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+      port: {{ include "firebolt-operator.portNumber" .Values.metrics.bindAddress }}
       protocol: TCP
-      targetPort: {{ .Values.metrics.bindAddress | trimPrefix ":" | int }}
+      targetPort: {{ include "firebolt-operator.portNumber" .Values.metrics.bindAddress }}
   selector:
     {{- include "firebolt-operator.selectorLabels" . | nindent 4 }}
     control-plane: controller-manager

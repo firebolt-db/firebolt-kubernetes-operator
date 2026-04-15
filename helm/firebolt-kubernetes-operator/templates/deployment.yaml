@@ -83,13 +83,13 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: {{ .Values.healthProbeBindAddress | trimPrefix ":" | int }}
+              port: {{ include "firebolt-operator.portNumber" .Values.healthProbeBindAddress }}
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
               path: /readyz
-              port: {{ .Values.healthProbeBindAddress | trimPrefix ":" | int }}
+              port: {{ include "firebolt-operator.portNumber" .Values.healthProbeBindAddress }}
             initialDelaySeconds: 5
             periodSeconds: 10
           {{- with .Values.resources }}
