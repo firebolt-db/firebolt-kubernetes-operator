@@ -39,14 +39,9 @@ const (
 	CrashAfterServiceSelectorUpdate  CrashPoint = "after_service_selector_update"
 	CrashBeforeSwitchingStatusUpdate CrashPoint = "before_switching_status_update"
 
-	// PhaseDraining crash points
-	CrashBeforeDrainingToCleaning CrashPoint = "before_draining_to_cleaning"
-
 	// PhaseCleaning crash points
-	CrashAfterStatefulSetDeleted     CrashPoint = "after_statefulset_deleted"
-	CrashAfterHeadlessServiceDeleted CrashPoint = "after_headless_service_deleted"
-	CrashAfterCoreConfigMapDeleted   CrashPoint = "after_core_configmap_deleted"
-	CrashBeforeCleaningToStable      CrashPoint = "before_cleaning_to_stable"
+	CrashAfterStatefulSetDeleted CrashPoint = "after_statefulset_deleted"
+	CrashBeforeCleaningToStable  CrashPoint = "before_cleaning_to_stable"
 )
 
 // CrashPointManager manages crash points for testing

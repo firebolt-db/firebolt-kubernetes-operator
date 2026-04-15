@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Load required Docker images into Kind cluster for e2e testing
-# This script pulls images from ECR and loads them into Kind
+# Load required Docker images into Kind cluster for e2e testing.
+# All image values come from test/e2e/defaults.env (single source of truth).
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 
-# Engine image configuration (passed from Makefile)
-ENGINE_IMAGE="${ENGINE_IMAGE:-000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core}"
-ENGINE_TAG="${ENGINE_TAG:-release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64}"
-ENGINE_NEW_TAG="${ENGINE_NEW_TAG:-${ENGINE_TAG}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../test/e2e/defaults.env
+source "${SCRIPT_DIR}/../test/e2e/defaults.env"
 
-# Other images
-PENSIEVE_TAG="${PENSIEVE_TAG:-4.32.0-pre.0.20260331033249.e67bde0be1cd}"
-PENSIEVE_IMAGE="${PENSIEVE_IMAGE:-000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve}"
-OPERATOR_IMAGE="${OPERATOR_IMAGE:-controller:latest}"
+OPERATOR_IMAGE="controller:latest"
 
 echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} ==="
 
@@ -31,21 +27,21 @@ fi
 
 # Build list of images to load
 declare -a IMAGES=(
-    "${ENGINE_IMAGE}:${ENGINE_TAG}"
-    "${PENSIEVE_IMAGE}:${PENSIEVE_TAG}"
-    "postgres:16-alpine"
+    "${TEST_ENGINE_IMAGE}:${TEST_ENGINE_TAG}"
+    "${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_TAG}"
+    "${TEST_POSTGRES_IMAGE}"
 )
 
 # Add new engine tag if different from current tag (for upgrade tests)
-if [[ "${ENGINE_NEW_TAG}" != "${ENGINE_TAG}" ]]; then
-    IMAGES+=("${ENGINE_IMAGE}:${ENGINE_NEW_TAG}")
+if [[ "${TEST_ENGINE_NEW_TAG}" != "${TEST_ENGINE_TAG}" ]]; then
+    IMAGES+=("${TEST_ENGINE_IMAGE}:${TEST_ENGINE_NEW_TAG}")
 fi
 
 # Pull and load each image
 for IMAGE in "${IMAGES[@]}"; do
     echo ""
     echo "--- Processing: ${IMAGE} ---"
-    
+
     # Check if image exists locally
     if ! docker image inspect "${IMAGE}" &>/dev/null; then
         echo "Pulling ${IMAGE}..."
@@ -53,7 +49,7 @@ for IMAGE in "${IMAGES[@]}"; do
     else
         echo "Image ${IMAGE} already exists locally."
     fi
-    
+
     echo "Loading ${IMAGE} into Kind..."
     kind load docker-image "${IMAGE}" --name "${CLUSTER_NAME}"
     echo "Successfully loaded ${IMAGE}"

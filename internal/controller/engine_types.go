@@ -27,8 +27,7 @@ import (
 )
 
 // EngineState captures the observed cluster state for a FireboltEngine,
-// including all generation-scoped resources, pod readiness, drain status,
-// and any orphaned resources that need cleanup.
+// including all generation-scoped resources, pod readiness, and drain status.
 type EngineState struct {
 	CurrentSTS         *appsv1.StatefulSet
 	CurrentConfigMap   *corev1.ConfigMap
@@ -43,8 +42,6 @@ type EngineState struct {
 
 	ClusterService          *corev1.Service
 	ClusterServiceTargetGen int
-
-	OrphanedResources []client.Object
 }
 
 // EngineReconcileResult describes the resources to create, update, or delete

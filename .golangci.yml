@@ -8,11 +8,11 @@ linters:
     - dupl
     - errcheck
     - ginkgolinter
-    - goconst
     - gocyclo
     - govet
     - ineffassign
     - lll
+    - goconst
     - misspell
     - nakedret
     - prealloc
@@ -26,12 +26,19 @@ linters:
       rules:
         - name: comment-spacings
         - name: import-shadowing
+    goconst:
+      # Minimum occurrences of string usage to be reported.
+      min-occurrences: 5
+      # Minimum length of string to be reported.
+      # Default: 3
+      min-len: 10
+
   exclusions:
     generated: lax
     rules:
       - linters:
-          - lll
-        path: api/*
+          - goconst
+        path: _test\.go
       - linters:
           - dupl
           - lll

@@ -56,8 +56,8 @@ type FireboltEngineSpec struct {
 	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
 	// check on old-generation pods during graceful rollouts. When false, the
 	// operator skips directly to cleaning after switching traffic, without
-	// verifying that in-flight queries have completed. Requires a reachable
-	// metadata endpoint (Pensieve) when enabled.
+	// verifying that in-flight queries have completed. Requires a running
+	// node that can execute the drain-check query when enabled.
 	// +kubebuilder:default=true
 	// +optional
 	DrainCheckEnabled *bool `json:"drainCheckEnabled,omitempty"`
@@ -80,10 +80,10 @@ type FireboltEngineSpec struct {
 	// +optional
 	Rollout RolloutStrategy `json:"rollout,omitempty"`
 
-	// MetadataEndpointOverride overrides the Pensieve endpoint for this engine.
+	// MetadataEndpointOverride overrides the metadata endpoint for this engine.
 	// If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
 	// topology-aware routing). Set this for cross-cluster scenarios where the engine
-	// connects to a Pensieve in a different cluster via private link.
+	// connects to a metadata service in a different cluster via private link.
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
 }

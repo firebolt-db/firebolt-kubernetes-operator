@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -26,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
 )
@@ -51,11 +49,11 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 	}
 }
 
-func stableStatus(activeGen int) *computev1alpha1.FireboltEngineStatus {
+func stableStatus() *computev1alpha1.FireboltEngineStatus {
 	return &computev1alpha1.FireboltEngineStatus{
 		Phase:             computev1alpha1.PhaseStable,
-		CurrentGeneration: activeGen,
-		ActiveGeneration:  activeGen,
+		CurrentGeneration: 0,
+		ActiveGeneration:  0,
 	}
 }
 
@@ -131,14 +129,8 @@ func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 	if result.Status.CurrentGeneration != 0 {
 		t.Errorf("expected generation 0, got %d", result.Status.CurrentGeneration)
 	}
-	if result.EnsureStatefulSet == nil {
-		t.Fatal("expected StatefulSet to be created")
-	}
-	if result.EnsureConfigMap == nil {
-		t.Fatal("expected ConfigMap to be created")
-	}
-	if result.EnsureHeadlessSvc == nil {
-		t.Fatal("expected headless service to be created")
+	if result.EnsureStatefulSet != nil {
+		t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
 	}
 	if !result.Requeue {
 		t.Error("expected Requeue=true")
@@ -150,7 +142,7 @@ func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 	spec := testSpec()
 	spec.Image.Tag = "v2.0"
-	status := stableStatus(0)
+	status := stableStatus()
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
@@ -169,12 +161,11 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 	if result.Status.CurrentGeneration != 1 {
 		t.Errorf("expected generation 1, got %d", result.Status.CurrentGeneration)
 	}
-	if result.EnsureStatefulSet == nil {
-		t.Fatal("expected new gen StatefulSet")
+	if result.EnsureStatefulSet != nil {
+		t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
 	}
-	expectedImage := fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
-	if result.EnsureStatefulSet.Spec.Template.Spec.Containers[0].Image != expectedImage {
-		t.Errorf("expected image %s, got %s", expectedImage, result.EnsureStatefulSet.Spec.Template.Spec.Containers[0].Image)
+	if !result.Requeue {
+		t.Error("expected Requeue=true")
 	}
 }
 
@@ -347,33 +338,31 @@ func TestComputeEngineReconcile_S3_DrainingComplete(t *testing.T) {
 	}
 }
 
-func TestComputeEngineReconcile_S3_DrainingRecreateStrategy(t *testing.T) {
-	drainingGen := 0
+func TestComputeEngineReconcile_S3_DrainingNilDrainingGeneration(t *testing.T) {
 	spec := testSpec()
-	spec.Rollout = computev1alpha1.RolloutRecreate
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:              computev1alpha1.PhaseDraining,
 		CurrentGeneration:  1,
 		ActiveGeneration:   1,
-		DrainingGeneration: &drainingGen,
+		DrainingGeneration: nil,
 	}
-	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
-		DrainingPodsDrained: false,
-	}
+	current := EngineState{}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
 
-	if result.Status.Phase != computev1alpha1.PhaseCleaning {
-		t.Errorf("expected phase Cleaning (recreate skips drain), got %s", result.Status.Phase)
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
+	}
+	if !result.Requeue {
+		t.Error("expected Requeue=true")
 	}
 }
 
-func TestComputeEngineReconcile_S3_DrainingSkippedWhenDisabled(t *testing.T) {
+func TestComputeEngineReconcile_S3_DrainingCustomInterval(t *testing.T) {
 	drainingGen := 0
 	spec := testSpec()
-	disabled := false
-	spec.DrainCheckEnabled = &disabled
+	interval := metav1.Duration{Duration: 15 * time.Second}
+	spec.DrainCheckInterval = &interval
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:              computev1alpha1.PhaseDraining,
 		CurrentGeneration:  1,
@@ -387,8 +376,8 @@ func TestComputeEngineReconcile_S3_DrainingSkippedWhenDisabled(t *testing.T) {
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
 
-	if result.Status.Phase != computev1alpha1.PhaseCleaning {
-		t.Errorf("expected phase Cleaning (drain check disabled), got %s", result.Status.Phase)
+	if result.RequeueAfter != 15*time.Second {
+		t.Errorf("expected RequeueAfter 15s (custom interval), got %v", result.RequeueAfter)
 	}
 }
 
@@ -427,7 +416,7 @@ func TestComputeEngineReconcile_S3_CleaningDeletesOldResources(t *testing.T) {
 
 func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 	spec := testSpec()
-	status := stableStatus(0)
+	status := stableStatus()
 	current := EngineState{
 		CurrentSTS:              nil,
 		CurrentHeadlessSvc:      &corev1.Service{},
@@ -444,11 +433,14 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 	if result.Status.CurrentGeneration != 1 {
 		t.Errorf("expected new generation 1, got %d", result.Status.CurrentGeneration)
 	}
+	if result.EnsureStatefulSet != nil {
+		t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
+	}
 }
 
 func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
 	spec := testSpec()
-	status := stableStatus(0)
+	status := stableStatus()
 	driftedCM := buildConfigMap(spec, testEngineName, testNamespace, 0)
 	driftedCM.Data["config.json"] = `{"nodes": []}`
 	current := EngineState{
@@ -473,7 +465,7 @@ func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
 
 func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 	spec := testSpec()
-	status := stableStatus(0)
+	status := stableStatus()
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
@@ -501,7 +493,7 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 
 func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 	spec := testSpec()
-	status := stableStatus(0)
+	status := stableStatus()
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
@@ -534,41 +526,11 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 	}
 }
 
-// --- S8: Orphan cleanup ---
-
-func TestComputeEngineReconcile_S8_OrphanCleanup(t *testing.T) {
-	spec := testSpec()
-	status := stableStatus(2)
-	orphanSTS := makeSTS(testEngineName, 0, 3, "firebolt/core:old")
-	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 2, 3, "firebolt/core:v1.0"),
-		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 2),
-		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
-		ClusterService:          makeClusterSvc(testEngineName, 2),
-		ClusterServiceTargetGen: 2,
-		OrphanedResources:       []client.Object{orphanSTS},
-	}
-
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
-
-	found := false
-	for _, obj := range result.DeleteResources {
-		if obj.GetName() == orphanSTS.Name {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected orphaned STS to be in DeleteResources")
-	}
-}
-
 // --- Idempotency (I1) ---
 
 func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 	spec := testSpec()
-	status := stableStatus(0)
+	status := stableStatus()
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
@@ -652,5 +614,199 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 	}
 	if result.Status.CurrentGeneration != 1 {
 		t.Errorf("should not increment generation during creating, got %d", result.Status.CurrentGeneration)
+	}
+}
+
+// --- Nil cluster service (buildClusterService paths) ---
+
+func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
+	spec := testSpec()
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseCreating,
+		CurrentGeneration: 0,
+		ActiveGeneration:  -1,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentPodsReady:        false,
+		CurrentPodCount:         1,
+		ClusterService:          nil,
+		ClusterServiceTargetGen: -1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+
+	if result.EnsureClusterSvc == nil {
+		t.Fatal("expected cluster service to be created from scratch")
+	}
+	if result.EnsureClusterSvc.Spec.Selector[LabelGeneration] != "0" {
+		t.Errorf("expected selector gen 0, got %s", result.EnsureClusterSvc.Spec.Selector[LabelGeneration])
+	}
+}
+
+func TestComputeEngineReconcile_SwitchingNilClusterService(t *testing.T) {
+	spec := testSpec()
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseSwitching,
+		CurrentGeneration: 1,
+		ActiveGeneration:  0,
+	}
+	current := EngineState{
+		ClusterService:          nil,
+		ClusterServiceTargetGen: -1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+
+	if result.EnsureClusterSvc == nil {
+		t.Fatal("expected cluster service to be created from scratch")
+	}
+	if result.EnsureClusterSvc.Spec.Selector[LabelGeneration] != "1" {
+		t.Errorf("expected selector gen 1, got %s", result.EnsureClusterSvc.Spec.Selector[LabelGeneration])
+	}
+}
+
+func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
+	spec := testSpec()
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentPodsReady:        true,
+		CurrentPodCount:         3,
+		ClusterService:          nil,
+		ClusterServiceTargetGen: -1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+
+	if result.EnsureClusterSvc == nil {
+		t.Fatal("expected cluster service to be created")
+	}
+	if result.EnsureClusterSvc.Spec.Selector[LabelGeneration] != "0" {
+		t.Errorf("expected selector gen 0, got %s", result.EnsureClusterSvc.Spec.Selector[LabelGeneration])
+	}
+}
+
+// --- Headless service missing (without STS missing) ---
+
+func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
+	spec := testSpec()
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      nil,
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentPodsReady:        true,
+		CurrentPodCount:         3,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+
+	if result.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Errorf("expected new transition (Creating), got %s", result.Status.Phase)
+	}
+	if result.Status.CurrentGeneration != 1 {
+		t.Errorf("expected new generation 1, got %d", result.Status.CurrentGeneration)
+	}
+}
+
+// --- Cleaning nil DrainingGeneration guard ---
+
+func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {
+	spec := testSpec()
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:              computev1alpha1.PhaseCleaning,
+		CurrentGeneration:  1,
+		ActiveGeneration:   1,
+		DrainingGeneration: nil,
+	}
+	current := EngineState{}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
+	}
+	if len(result.DeleteResources) != 0 {
+		t.Errorf("expected no deletes, got %d", len(result.DeleteResources))
+	}
+}
+
+// --- Spec change during creating: pods ready but STS stale ---
+
+func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
+	spec := testSpec()
+	spec.Image.Tag = "v3.0"
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseCreating,
+		CurrentGeneration: 1,
+		ActiveGeneration:  0,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentPodsReady:        true,
+		CurrentPodCount:         3,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3)
+
+	if result.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Errorf("expected to stay Creating (STS stale, waiting for roll), got %s", result.Status.Phase)
+	}
+	if result.RequeueAfter != 5*time.Second {
+		t.Errorf("expected RequeueAfter 5s, got %v", result.RequeueAfter)
+	}
+}
+
+// --- stsMatchesSpec coverage ---
+
+func TestStsMatchesSpec(t *testing.T) {
+	spec := testSpec()
+
+	mutate := func(fn func(*appsv1.StatefulSet)) *appsv1.StatefulSet {
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		fn(sts)
+		return sts
+	}
+
+	tests := []struct {
+		name  string
+		sts   *appsv1.StatefulSet
+		match bool
+	}{
+		{"matching", makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"), true},
+		{"replica mismatch", makeSTS(testEngineName, 0, 5, "firebolt/core:v1.0"), false},
+		{"image mismatch", makeSTS(testEngineName, 0, 3, "firebolt/core:v2.0"), false},
+		{"pull policy mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullAlways
+		}), false},
+		{"resource mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("4")
+		}), false},
+		{"node selector mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.NodeSelector = map[string]string{"zone": "us-east-1a"}
+		}), false},
+		{"toleration mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Tolerations = []corev1.Toleration{{Key: "special", Operator: corev1.TolerationOpExists}}
+		}), false},
+		{"nil replicas", mutate(func(s *appsv1.StatefulSet) { s.Spec.Replicas = nil }), false},
+		{"no containers", mutate(func(s *appsv1.StatefulSet) { s.Spec.Template.Spec.Containers = nil }), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stsMatchesSpec(tt.sts, spec)
+			if got != tt.match {
+				t.Errorf("stsMatchesSpec() = %v, want %v", got, tt.match)
+			}
+		})
 	}
 }

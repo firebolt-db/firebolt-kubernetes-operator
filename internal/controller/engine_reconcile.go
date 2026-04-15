@@ -48,10 +48,6 @@ func computeEngineReconcile(
 		Status: *status.DeepCopy(),
 	}
 
-	if len(current.OrphanedResources) > 0 {
-		result.DeleteResources = append(result.DeleteResources, current.OrphanedResources...)
-	}
-
 	switch status.Phase {
 	case "", computev1alpha1.PhaseStable:
 		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration)
@@ -73,6 +69,13 @@ func computeEngineReconcile(
 // computeStable handles the stable phase: detects spec drift or missing
 // resources and starts a new blue-green transition if needed, or fixes
 // in-place drift for ConfigMaps and service selectors.
+//
+// When a new generation is needed, computeStable only writes the intent
+// to status (Phase=Creating, bumped CurrentGeneration) and requeues.
+// Resource creation is deferred to computeCreating on the next reconcile.
+// This ensures the status update is persisted before any resources are
+// created, preventing leaked resources if the operator crashes between
+// resource creation and the status write.
 func computeStable(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -87,7 +90,6 @@ func computeStable(
 		status.Phase = computev1alpha1.PhaseCreating
 		status.CurrentGeneration = 0
 		r.Requeue = true
-		buildGenResources(spec, r, engineName, engineNamespace, 0)
 		return
 	}
 
@@ -110,7 +112,6 @@ func computeStable(
 		status.CurrentGeneration = newGen
 		status.Phase = computev1alpha1.PhaseCreating
 		r.Requeue = true
-		buildGenResources(spec, r, engineName, engineNamespace, newGen)
 		return
 	}
 
@@ -210,8 +211,9 @@ func computeSwitching(
 }
 
 // computeDraining waits for the old generation's pods to finish serving
-// queries before transitioning to cleaning. Skips the drain check when
-// the rollout strategy is "recreate" or drainCheckEnabled is false.
+// queries before transitioning to cleaning. The read layer (getEngineState)
+// already sets DrainingPodsDrained=true when the rollout strategy is
+// "recreate" or drainCheckEnabled is false.
 func computeDraining(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -221,13 +223,6 @@ func computeDraining(
 
 	if status.DrainingGeneration == nil {
 		status.Phase = computev1alpha1.PhaseStable
-		r.Requeue = true
-		return
-	}
-
-	drainCheckDisabled := spec.DrainCheckEnabled != nil && !*spec.DrainCheckEnabled
-	if spec.Rollout == computev1alpha1.RolloutRecreate || drainCheckDisabled {
-		status.Phase = computev1alpha1.PhaseCleaning
 		r.Requeue = true
 		return
 	}

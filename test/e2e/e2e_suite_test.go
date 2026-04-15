@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -48,11 +49,6 @@ const (
 	// Test namespace
 	testNamespace = "firebolt-e2e"
 
-	// Default engine image values (can be overridden via environment variables)
-	defaultEngineImage  = "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
-	defaultEngineTag    = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64"
-	defaultEngineNewTag = "release-4.32.0-pre.0.20260331033249.e67bde0be1cd-amd64" // same as defaultEngineTag until we have multiple tags available
-
 	// Timeouts
 	clusterReadyTimeout      = 120 * time.Second
 	clusterTransitionTimeout = 180 * time.Second
@@ -61,17 +57,44 @@ const (
 )
 
 var (
-	// Engine image configuration - set via environment variables or use defaults
-	testImage   = getEnvOrDefault("TEST_ENGINE_IMAGE", defaultEngineImage)
-	testTag     = getEnvOrDefault("TEST_ENGINE_TAG", defaultEngineTag)
-	newImageTag = getEnvOrDefault("TEST_ENGINE_NEW_TAG", defaultEngineNewTag)
+	testImage   string
+	testTag     string
+	newImageTag string
 )
 
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func init() {
+	defaults := loadDefaults()
+	testImage = defaults["TEST_ENGINE_IMAGE"]
+	testTag = defaults["TEST_ENGINE_TAG"]
+	newImageTag = defaults["TEST_ENGINE_NEW_TAG"]
+}
+
+// loadDefaults reads key=value pairs from defaults.env next to this source file.
+func loadDefaults() map[string]string {
+	_, thisFile, _, _ := runtime.Caller(0)
+	path := filepath.Join(filepath.Dir(thisFile), "defaults.env")
+	f, err := os.Open(path)
+	if err != nil {
+		panic(fmt.Sprintf("cannot open defaults.env: %v", err))
 	}
-	return defaultValue
+	defer f.Close()
+
+	m := make(map[string]string)
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if ok {
+			m[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		panic(fmt.Sprintf("cannot read defaults.env: %v", err))
+	}
+	return m
 }
 
 var (
@@ -123,6 +146,9 @@ var _ = BeforeSuite(func() {
 	log.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancelFunc = context.WithCancel(context.Background())
+
+	Expect(testTag).NotTo(Equal(newImageTag),
+		"TEST_ENGINE_TAG and TEST_ENGINE_NEW_TAG must differ; upgrade tests would be no-ops")
 
 	By("Setting up Kubernetes client")
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(

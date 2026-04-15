@@ -91,8 +91,8 @@ The engine lifecycle is a five-phase state machine stored in `.status.phase`:
 
 | Phase | What happens | Next phase |
 |---|---|---|
-| **stable** | All resources match spec. No work to do. Requeues after 30s for drift detection. | `creating` (on spec change) |
-| **creating** | New-generation StatefulSet, headless Service, and ConfigMap are created. Waits for all pods to become ready. Absorbs further spec changes into the current generation (no new generation created). | `switching` (all pods ready) |
+| **stable** | All resources match spec. No work to do. Requeues after 30s for drift detection. On spec change, writes only the status intent (`Phase=creating`, bumped `currentGeneration`) and requeues — no resources are created in this pass. | `creating` (on spec change) |
+| **creating** | New-generation StatefulSet, headless Service, and ConfigMap are ensured. Waits for all pods to become ready. Absorbs further spec changes into the current generation (no new generation created). | `switching` (all pods ready) |
 | **switching** | Updates the cluster Service selector to point to the new generation. | `draining` (if old generation exists) or `stable` (initial deploy) |
 | **draining** | Waits for old-generation pods to finish serving queries. Skipped entirely when `drainCheckEnabled: false` or `rollout: recreate`. | `cleaning` (drain complete) |
 | **cleaning** | Deletes old-generation StatefulSet, headless Service, and ConfigMap. Clears `drainingGeneration`. | `stable` |
@@ -126,7 +126,7 @@ The operator runs a SQL query via `kubectl exec` inside each draining pod to cou
 
 | Field | Default | Description |
 |---|---|---|
-| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the SQL drain check entirely. Required when no metadata endpoint (Pensieve) is available. |
+| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the SQL drain check entirely. Requires a running node that can execute the drain-check query when enabled. |
 | `spec.drainCheckInterval` | `5s` | How often to poll each pod. Only used when drain check is enabled. |
 | `spec.rollout` | `graceful` | Set to `recreate` to skip draining and delete old pods immediately. |
 
@@ -140,17 +140,14 @@ Status updates use `r.Status().Update()` with a single retry on conflict. If a r
 
 The operator is crash-safe at every phase boundary. If the process terminates:
 
-- **During creating**: the next reconcile sees an existing StatefulSet with not-ready pods and waits.
+- **During stable → creating transition**: the `stable` phase writes only the status intent (`Phase=creating`, bumped `currentGeneration`) in one pass, then requeues. Resources are not created until the status update is persisted. If the operator crashes before the status write, no resources were created and the next reconcile retries from `stable`. If it crashes after, the next reconcile enters `creating` and creates the resources normally.
+- **During creating**: the next reconcile sees an existing StatefulSet with not-ready pods and waits. All `ensure` calls are idempotent, so partial resource creation is safe.
 - **During switching**: the next reconcile checks the service selector and either updates it or proceeds.
 - **During draining**: the next reconcile re-runs the drain check.
 - **During cleaning**: the next reconcile re-deletes any remaining old resources (delete is idempotent).
 - **During stable**: no work needed.
 
 No persistent state outside of the Kubernetes API server is required.
-
-## Orphan detection
-
-On every reconcile, the operator scans for StatefulSets, Services, and ConfigMaps labeled with `firebolt.io/engine=<name>` that belong to generations other than the current, active, or draining generation. These orphans (from past crashes or bugs) are deleted immediately.
 
 ## Resource ownership
 

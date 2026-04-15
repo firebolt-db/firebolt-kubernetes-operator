@@ -72,7 +72,7 @@ type MetadataSpec struct {
 	// +optional
 	Postgres *PostgresSpec `json:"postgres,omitempty"`
 
-	// EngineRegistration enables registration of Engine objects in Pensieve for SQL-level RBAC.
+	// EngineRegistration enables registration of Engine objects in the metadata service for SQL-level RBAC.
 	// +kubebuilder:default=false
 	// +optional
 	EngineRegistration bool `json:"engineRegistration,omitempty"`

@@ -35,8 +35,7 @@ import (
 )
 
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
-// Services, ConfigMaps, pod readiness, drain status, and orphaned resources
-// from stale generations.
+// Services, ConfigMaps, pod readiness, and drain status.
 func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
 	state := EngineState{
 		ClusterServiceTargetGen: -1,
@@ -47,7 +46,6 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	status := &engine.Status
 
 	currentGen := status.CurrentGeneration
-	activeGen := status.ActiveGeneration
 
 	var drainingGen = -1
 	if status.DrainingGeneration != nil {
@@ -97,8 +95,6 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 			}
 		}
 	}
-
-	state.OrphanedResources = r.findOrphanedResources(ctx, engine, currentGen, activeGen, drainingGen)
 
 	return state, nil
 }
@@ -272,65 +268,4 @@ func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1
 
 	count := response.Data[0][0]
 	return count == "0", nil
-}
-
-func (r *FireboltEngineReconciler) findOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine, currentGen, activeGen, drainingGen int) []client.Object {
-	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
-	var orphans []client.Object
-
-	keepGens := map[int]bool{}
-	if currentGen >= 0 {
-		keepGens[currentGen] = true
-	}
-	if activeGen >= 0 {
-		keepGens[activeGen] = true
-	}
-	if drainingGen >= 0 {
-		keepGens[drainingGen] = true
-	}
-
-	stsList := &appsv1.StatefulSetList{}
-	if err := r.List(ctx, stsList, client.InNamespace(engine.Namespace), client.MatchingLabels{
-		LabelEngine: engine.Name,
-	}); err == nil {
-		for i := range stsList.Items {
-			if genStr, ok := stsList.Items[i].Labels[LabelGeneration]; ok {
-				if g, err := strconv.Atoi(genStr); err == nil && !keepGens[g] {
-					orphans = append(orphans, &stsList.Items[i])
-				}
-			}
-		}
-	}
-
-	svcList := &corev1.ServiceList{}
-	if err := r.List(ctx, svcList, client.InNamespace(engine.Namespace), client.MatchingLabels{
-		LabelEngine: engine.Name,
-	}); err == nil {
-		for i := range svcList.Items {
-			if genStr, ok := svcList.Items[i].Labels[LabelGeneration]; ok {
-				if g, err := strconv.Atoi(genStr); err == nil && !keepGens[g] {
-					orphans = append(orphans, &svcList.Items[i])
-				}
-			}
-		}
-	}
-
-	cmList := &corev1.ConfigMapList{}
-	if err := r.List(ctx, cmList, client.InNamespace(engine.Namespace), client.MatchingLabels{
-		LabelEngine: engine.Name,
-	}); err == nil {
-		for i := range cmList.Items {
-			if genStr, ok := cmList.Items[i].Labels[LabelGeneration]; ok {
-				if g, err := strconv.Atoi(genStr); err == nil && !keepGens[g] {
-					orphans = append(orphans, &cmList.Items[i])
-				}
-			}
-		}
-	}
-
-	if len(orphans) > 0 {
-		log.Info("Found orphaned resources", "count", len(orphans))
-	}
-
-	return orphans
 }

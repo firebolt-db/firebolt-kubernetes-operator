@@ -2126,7 +2126,7 @@ spec:
                   engineRegistration:
                     default: false
                     description: EngineRegistration enables registration of Engine
-                      objects in Pensieve for SQL-level RBAC.
+                      objects in the metadata service for SQL-level RBAC.
                     type: boolean
                   image:
                     description: Image overrides the container image for this component.
