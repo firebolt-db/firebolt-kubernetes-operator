@@ -1,0 +1,90 @@
+# Default values for firebolt-kubernetes-operator.
+
+# -- Number of operator replicas.
+replicaCount: 1
+
+image:
+  # -- Container image repository.
+  repository: controller
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+# -- Secrets for pulling images from private registries.
+imagePullSecrets: []
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full resource name.
+fullnameOverride: ""
+
+# -- Extra labels added to all operator manifests.
+extraLabels: {}
+# -- Extra annotations added to all operator manifests.
+extraAnnotations: {}
+
+# -- Extra labels added only to the operator pod.
+podLabels: {}
+# -- Extra annotations added only to the operator pod.
+podAnnotations: {}
+
+serviceAccount:
+  # -- Whether to create a ServiceAccount.
+  create: true
+  # -- Annotations to add to the ServiceAccount (e.g. for IRSA / Workload Identity).
+  annotations: {}
+  # -- The name of the ServiceAccount to use. If empty, a name is generated from the fullname template.
+  name: ""
+
+rbac:
+  # -- Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources.
+  create: true
+
+crds:
+  # -- Whether to install CRDs. Set to false if CRDs are managed externally.
+  install: true
+
+leaderElection:
+  # -- Enable leader election for the controller manager.
+  enabled: true
+
+metrics:
+  # -- Enable the metrics Service.
+  enabled: true
+  # -- Address the metrics endpoint binds to.
+  bindAddress: ":8443"
+  # -- Serve metrics via HTTPS with authn/authz.
+  secure: true
+
+# -- Address the health probe endpoint binds to.
+healthProbeBindAddress: ":8081"
+
+# -- Namespace to watch for FireboltEngine resources. Empty watches all namespaces.
+watchNamespace: ""
+
+# -- Priority class name for the operator pod.
+priorityClassName: ""
+
+# -- Additional CLI arguments passed to the operator binary.
+additionalArgs: []
+
+# -- Additional environment variables for the operator container.
+additionalEnv: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Node selector for the operator pod.
+nodeSelector: {}
+# -- Tolerations for the operator pod.
+tolerations: []
+# -- Affinity rules for the operator pod.
+affinity: {}
+# -- Topology spread constraints for the operator pod.
+topologySpreadConstraints: []

@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+    control-plane: controller-manager
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "firebolt-operator.selectorLabels" . | nindent 6 }}
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "firebolt-operator.selectorLabels" . | nindent 8 }}
+        control-plane: controller-manager
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "firebolt-operator.serviceAccountName" . }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /manager
+          args:
+            {{- if .Values.leaderElection.enabled }}
+            - --leader-elect
+            {{- end }}
+            - --health-probe-bind-address={{ .Values.healthProbeBindAddress }}
+            {{- if .Values.metrics.enabled }}
+            - --metrics-bind-address={{ .Values.metrics.bindAddress }}
+            {{- else }}
+            - --metrics-bind-address=0
+            {{- end }}
+            {{- if .Values.metrics.secure }}
+            - --metrics-secure=true
+            {{- else }}
+            - --metrics-secure=false
+            {{- end }}
+            {{- with .Values.watchNamespace }}
+            - --namespace={{ . }}
+            {{- end }}
+            {{- with .Values.additionalArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.additionalEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+          ports: []
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

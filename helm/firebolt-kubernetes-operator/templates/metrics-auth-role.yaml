@@ -1,0 +1,25 @@
+{{- if and .Values.rbac.create .Values.metrics.enabled .Values.metrics.secure -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-metrics-auth
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+{{- end }}

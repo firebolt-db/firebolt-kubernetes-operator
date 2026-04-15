@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": ["repository"]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "extraLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "extraAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "name": { "type": "string" }
+      }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" }
+      }
+    },
+    "crds": {
+      "type": "object",
+      "properties": {
+        "install": { "type": "boolean" }
+      }
+    },
+    "leaderElection": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "bindAddress": { "type": "string" },
+        "secure": { "type": "boolean" }
+      }
+    },
+    "healthProbeBindAddress": {
+      "type": "string"
+    },
+    "watchNamespace": {
+      "type": "string"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "additionalArgs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "additionalEnv": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" }
+        },
+        "required": ["name"]
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "requests": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "topologySpreadConstraints": {
+      "type": "array"
+    }
+  },
+  "required": ["replicaCount", "image"]
+}

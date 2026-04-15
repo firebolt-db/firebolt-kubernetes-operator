@@ -1,6 +1,10 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
+# Helm chart configuration
+HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
+HELM_REGISTRY ?= oci://000000000000.dkr.ecr.us-east-1.amazonaws.com
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -169,6 +173,25 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ Helm
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart.
+	helm lint $(HELM_CHART_DIR)
+
+.PHONY: helm-template
+helm-template: ## Render Helm chart templates locally.
+	helm template firebolt-operator $(HELM_CHART_DIR)
+
+.PHONY: helm-package
+helm-package: ## Package the Helm chart into dist/.
+	mkdir -p dist
+	helm package $(HELM_CHART_DIR) --destination dist/
+
+.PHONY: helm-push
+helm-push: helm-package ## Package and push the Helm chart to ECR.
+	helm push dist/firebolt-kubernetes-operator-*.tgz $(HELM_REGISTRY)
 
 ##@ Dependencies
 

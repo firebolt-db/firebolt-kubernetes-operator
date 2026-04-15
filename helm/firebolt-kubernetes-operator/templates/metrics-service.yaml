@@ -1,0 +1,22 @@
+{{- if .Values.metrics.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-metrics
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+    control-plane: controller-manager
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ports:
+    - name: https
+      port: 8443
+      protocol: TCP
+      targetPort: 8443
+  selector:
+    {{- include "firebolt-operator.selectorLabels" . | nindent 4 }}
+    control-plane: controller-manager
+{{- end }}

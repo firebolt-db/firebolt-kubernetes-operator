@@ -1,0 +1,101 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines
+      - fireboltinstances
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines/finalizers
+      - fireboltinstances/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines/status
+      - fireboltinstances/status
+    verbs:
+      - get
+      - patch
+      - update
+{{- end }}

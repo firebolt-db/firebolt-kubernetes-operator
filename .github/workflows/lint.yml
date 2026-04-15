@@ -34,3 +34,12 @@ jobs:
           version: v2.5.0
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: make helm-lint
+
+      - name: Validate Helm templates
+        run: make helm-template > /dev/null
