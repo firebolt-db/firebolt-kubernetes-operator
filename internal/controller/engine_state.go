@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
@@ -58,7 +58,10 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		state.CurrentHeadlessSvc = r.getHeadlessService(ctx, engineName, ns, currentGen)
 
 		if state.CurrentSTS != nil {
-			ready, count, _ := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
+			ready, count, err := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
+			if err != nil {
+				return state, fmt.Errorf("checkPodsReady (gen %d): %w", currentGen, err)
+			}
 			state.CurrentPodsReady = ready
 			state.CurrentPodCount = count
 		}
@@ -74,7 +77,10 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		if state.DrainingSTS != nil && (engine.Spec.Rollout == computev1alpha1.RolloutRecreate || drainCheckDisabled) {
 			state.DrainingPodsDrained = true
 		} else if state.DrainingSTS != nil {
-			drained, _ := r.checkDrainComplete(ctx, engine, drainingGen)
+			drained, err := r.checkDrainComplete(ctx, engine, drainingGen)
+			if err != nil {
+				return state, fmt.Errorf("checkDrainComplete (gen %d): %w", drainingGen, err)
+			}
 			state.DrainingPodsDrained = drained
 		} else {
 			state.DrainingPodsDrained = true
@@ -218,7 +224,7 @@ func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1
 		"--core",
 		"--no-spinner",
 		"--concise",
-		"--label", "core-operator-drain-check",
+		"--label", "firebolt-k8s-operator-drain-check",
 		"--extra", "access_internal_system_tables=1",
 		"--format", "JSON_Compact",
 		"--command", DrainCheckSQL,
@@ -229,7 +235,7 @@ func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1
 		Name(pod.Name).
 		Namespace(pod.Namespace).
 		SubResource("exec").
-		Param("container", ContainerNameCore).
+		Param("container", ContainerNameEngine).
 		Param("command", cmd[0])
 
 	for _, c := range cmd[1:] {

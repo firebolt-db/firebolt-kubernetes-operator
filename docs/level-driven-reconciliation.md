@@ -1,6 +1,34 @@
 # Level-Driven Reconciliation
 
-This document describes the reconciliation architecture used by the Firebolt Engine operator.
+This document describes the reconciliation architecture used by the Firebolt operator. The operator manages two custom resources with a strict dependency relationship: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway, account initialization), and **FireboltEngine** deploys stateful compute nodes that require a ready instance. An engine cannot be created or updated without a ready instance in its namespace.
+
+## Resource dependency model
+
+The operator enforces a hierarchical dependency between instances and engines:
+
+```
+┌──────────────────┐         ┌──────────────────┐
+│ FireboltInstance  │◄────────│  FireboltEngine   │
+│                  │  reads  │                  │
+│ Provisions:      │ status  │ spec.instanceRef  │
+│ - PostgreSQL     │         │ points to the     │
+│ - Metadata svc   │         │ instance by name  │
+│ - Gateway        │         │                  │
+│ - Account init   │         │ Blocked until     │
+│                  │         │ instance has:     │
+│ status:          │         │ - metadataEndpoint│
+│   metadataEndpoint│        │ - accountId       │
+│   accountId      │         │                  │
+└──────────────────┘         └──────────────────┘
+```
+
+**Rules:**
+
+- Each `FireboltEngine` declares its parent via `spec.instanceRef` (the name of a `FireboltInstance` in the same namespace).
+- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `accountId`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable** and **creating** phases (which build ConfigMaps referencing instance data). Phases that operate on already-created resources — **switching**, **draining**, **cleaning** — proceed without blocking on instance readiness.
+- The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
+- The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
+- The instance reconciler is independent and has no dependency on engines.
 
 ## Design principles
 
@@ -12,53 +40,72 @@ This means:
 - **Crash-safe**: if the operator crashes at any point, the next reconciliation will observe the actual cluster state and resume from the correct phase.
 - **No queued operations**: there is no internal queue of "things to do". The status phase and observed resources determine the next action.
 
-## Architecture
+## Engine reconciler architecture
 
-The reconciler is split into three layers:
+The engine reconciler is split into three layers, with instance resolution as a hard prerequisite:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Reconcile()                                                │
 │  Entry point — reads CR, delegates to layers below          │
 │  File: engine_controller.go                                 │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-          ┌────────────┴────────────┐
-          ▼                         ▼
-┌──────────────────┐    ┌──────────────────────────┐
-│  getEngineState  │    │  computeEngineReconcile  │
-│  (read layer)    │    │  (pure logic layer)      │
-│                  │    │                          │
-│  Reads all K8s   │    │  No I/O. Takes spec,     │
-│  resources for   │    │  status, and observed     │
-│  this engine.    │    │  state. Returns a struct  │
-│                  │    │  describing what to       │
-│  File:           │    │  create/update/delete.    │
-│  engine_state.go │    │                          │
-│                  │    │  File:                    │
-│                  │    │  engine_reconcile.go      │
-└──────────────────┘    └──────────────────────────┘
-                                    │
-                                    ▼
-                        ┌──────────────────────────┐
-                        │  applyEngineState        │
-                        │  (write layer)           │
-                        │                          │
-                        │  Takes the reconcile     │
-                        │  result and applies it   │
-                        │  to the cluster.          │
-                        │                          │
-                        │  File: engine_apply.go   │
-                        └──────────────────────────┘
+└──────┬──────────────────┬───────────────────────────────────┘
+       │                  │
+       ▼                  ▼
+┌──────────────────┐ ┌────────────────────┐
+│ resolveInstance  │ │  getEngineState    │
+│ Info (gate)      │ │  (read layer)      │
+│                  │ │                    │
+│ Reads the        │ │  Reads all K8s     │
+│ FireboltInstance │ │  resources for     │
+│ referenced by    │ │  this engine.      │
+│ spec.instanceRef │ │                    │
+│                  │ │  File:             │
+│ Blocks if the    │ │  engine_state.go   │
+│ instance is not  │ │                    │
+│ ready.           │ │                    │
+└────────┬─────────┘ └─────────┬──────────┘
+         │                     │
+         └──────────┬──────────┘
+                    ▼
+         ┌──────────────────────────┐
+         │  computeEngineReconcile  │
+         │  (pure logic layer)      │
+         │                          │
+         │  No I/O. Takes spec,     │
+         │  status, observed state, │
+         │  and InstanceInfo.       │
+         │  Returns a struct        │
+         │  describing what to      │
+         │  create/update/delete.   │
+         │                          │
+         │  File:                   │
+         │  engine_reconcile.go     │
+         └────────────┬─────────────┘
+                      │
+                      ▼
+         ┌──────────────────────────┐
+         │  applyEngineState        │
+         │  (write layer)           │
+         │                          │
+         │  Takes the reconcile     │
+         │  result and applies it   │
+         │  to the cluster.          │
+         │                          │
+         │  File: engine_apply.go   │
+         └──────────────────────────┘
 ```
 
 ### Layer responsibilities
 
 | Layer | File | I/O | Testability |
 |---|---|---|---|
+| Instance gate | `engine_controller.go` | Yes (reads `FireboltInstance`) | Requires envtest |
 | Read | `engine_state.go` | Yes (K8s API reads) | Requires envtest |
 | Compute | `engine_reconcile.go` | None | Pure unit tests |
 | Write | `engine_apply.go` | Yes (K8s API writes) | Requires envtest |
+
+The instance gate runs after the read layer but before the compute layer. It only blocks for phases that need instance data (**stable** and **creating**, which build ConfigMaps containing `metadata_endpoint` and `account_id`). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call — there is no separate status write for conditions.
 
 The compute layer is the core of the operator. It is a pure function with no side effects, making it easy to test exhaustively without a running cluster.
 
@@ -132,6 +179,25 @@ The operator runs a SQL query via `kubectl exec` inside each draining pod to cou
 
 When `drainCheckEnabled: false`, the operator transitions directly from `switching` to `cleaning` without waiting, which is safe when there is no query routing layer that could send traffic to old pods.
 
+## Error handling
+
+The operator follows strict error propagation rules to ensure failures are always visible.
+
+**No swallowed errors.** Every error from an I/O operation is either:
+1. Returned to the caller (causing a retry via requeue), or
+2. Logged and aggregated when multiple independent cleanup operations must all be attempted (e.g. `reconcileDelete`).
+
+Specific policies:
+
+| Category | Policy |
+|---|---|
+| Status update failures | Always propagated — a failed status write returns an error so the next reconcile retries with fresh state. |
+| Resource list/delete during cleanup | Errors are logged, collected, and aggregated. The finalizer is only removed when all cleanup operations succeed. This prevents premature garbage collection when the API server is unhealthy. |
+| Pod readiness and drain checks | Errors are propagated from `checkPodsReady` and `checkDrainComplete` rather than defaulting to "not ready". This surfaces API failures rather than masking them as slow rollouts. |
+| JSON marshalling | Config values passed to `json.MarshalIndent` are always well-typed maps. The error path is unreachable and guarded with a panic to catch programming bugs immediately. |
+| Helm values override | `mergeJSONOverride` returns an error if the user-provided JSON is malformed, which propagates to the reconciler and prevents applying a chart with silently-ignored overrides. |
+| Terminal errors | Unrecoverable conditions (e.g. multiple accounts in metadata service) set the instance phase to `Failed` and surface the error, rather than entering an infinite retry loop. |
+
 ## Status update strategy
 
 Status updates use `r.Status().Update()` with a single retry on conflict. If a resource version conflict occurs (because a concurrent spec update changed the object), the operator re-fetches the latest object, applies the new status, and retries once. This avoids unnecessary reconcile-loop failures from optimistic concurrency.
@@ -157,3 +223,119 @@ All per-engine resources have:
 - A `firebolt.io/engine` label (for listing/filtering).
 - A `firebolt.io/generation` label (for generation-based selection).
 - A finalizer on the CR itself to ensure cleanup runs before the CR is removed.
+
+---
+
+## FireboltInstance reconciler
+
+The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, the core-gateway, and account initialization. It follows the same level-triggered principles as the engine reconciler.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Reconcile()                                                     │
+│  Entry point — reads FireboltInstance CR, runs steps in order    │
+│  File: instance_controller.go                                    │
+└──────┬───────────┬──────────────┬──────────────┬─────────────────┘
+       │           │              │              │
+       ▼           ▼              ▼              ▼
+┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────────┐
+│ PostgreSQL│ │ Metadata │ │ Account   │ │ Gateway      │
+│ (native)  │ │ (Helm)   │ │ Init      │ │ (Helm)       │
+│           │ │          │ │ (gRPC)    │ │              │
+│ instance_ │ │ instance_│ │ instance_ │ │ instance_    │
+│ postgres  │ │ metadata │ │ account_  │ │ gateway.go   │
+│ .go       │ │ .go      │ │ init.go   │ │              │
+└───────────┘ └──────────┘ └───────────┘ └──────────────┘
+```
+
+### Reconcile steps
+
+Each `Reconcile` call runs through five sequential steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist).
+
+| Step | Description | Implementation |
+|---|---|---|
+| 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
+| 2. Ensure metadata service | Loads the metadata Helm chart via `ChartCache`, renders it with values derived from the instance spec (PG connection, image, replicas, resources), and applies the resulting manifests. | `instance_metadata.go` |
+| 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
+| 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures exactly one active account exists. If the account exists but is not active (e.g. a previous activation was interrupted), the operator retries activation. Multiple accounts trigger a terminal `Failed` phase. Persists the `accountId` in instance status. | `instance_account_init.go` |
+| 5. Ensure Gateway | Loads the `core-gateway` Helm chart via `ChartCache`, renders it with organization and routing values, and applies the resulting manifests. | `instance_gateway.go` |
+
+### Instance lifecycle phases
+
+```
+  ┌──────────────┐     all components ready     ┌────────┐
+  │ Provisioning ├─────────────────────────────►│ Ready  │
+  └──────────────┘                               └───┬────┘
+                                                     │
+  ┌──────────┐         all components recover        │ component
+  │ Degraded │◄─────────────────────────────────────-┘ becomes
+  │          ├──────────────────────────────────►Ready  unready
+  └──────────┘
+
+  ┌──────────┐
+  │ Failed   │  terminal — requires manual intervention
+  └──────────┘
+```
+
+The instance starts in `Provisioning` and transitions to `Ready` once both the metadata service and gateway have at least one ready replica. If a previously-ready component becomes unhealthy, the phase transitions to `Degraded`. It returns to `Ready` once all components recover.
+
+The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone (e.g. multiple accounts found in the metadata service). The operator continues to requeue but will not transition out of `Failed` without manual intervention.
+
+When the metadata service or gateway becomes not-ready, the operator clears the corresponding endpoint from the instance status (`metadataEndpoint` or `gatewayEndpoint`). This ensures that dependent engines observe consistent state and block until the instance is fully operational again.
+
+### Helm chart loading and caching
+
+The operator does not ship chart sources. Charts are fetched at runtime from a local filesystem path (for development) or an OCI registry (production), configured via operator flags:
+
+```
+--metadata-chart-source=oci://ghcr.io/firebolt-db/dedicated-pensieve
+--gateway-chart-source=oci://ghcr.io/firebolt-db/core-gateway
+```
+
+The chart version is specified per-instance via `spec.metadataChartVersion` and `spec.gatewayChartVersion` (default: `0.1.0`).
+
+Charts are cached in memory using a version-keyed cache (`internal/helm/loader.go`):
+
+| Behaviour | Detail |
+|---|---|
+| Cache key | `<source>:<version>` |
+| Cache miss | Pull from OCI registry or load from local path, store in cache |
+| Cache hit | Return immediately, update `lastUsed` timestamp |
+| Eviction | Entries unused for 7+ days are evicted whenever a new chart is loaded |
+
+### Manifest application
+
+Rendered Helm manifests are applied using a content-hash-based idempotent strategy (`applyRenderedManifest` in `instance_controller.go`):
+
+1. The entire rendered YAML is hashed (SHA-256, truncated to 16 hex chars).
+2. Each decoded resource is annotated with `firebolt.io/manifest-hash`.
+3. On create: the resource is created with the hash annotation.
+4. On update: if the existing resource's hash matches, the update is skipped. Otherwise, the spec fields are patched and the hash is updated.
+
+This avoids unnecessary writes when the rendered output has not changed.
+
+### Integration with engine reconciler
+
+Each `FireboltEngine` declares its parent instance via `spec.instanceRef`. During reconciliation, the engine controller resolves this reference and reads two fields from the instance's status:
+
+- `metadata_endpoint` — the in-cluster address of the metadata gRPC service
+- `account_id` — the metadata account identifier
+
+These are written to the engine ConfigMap. The resolution is only required during the **stable** and **creating** phases (which build ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
+
+When the instance gate blocks, it sets the `InstanceReady=False` condition on the engine's status and requeues after 10 seconds. When the instance is healthy, the condition is updated to `InstanceReady=True`. In both cases the condition update is part of the single `updateStatus` call at the end of the reconcile — the engine controller performs exactly one status write per reconcile loop, never two.
+
+The engine controller watches `FireboltInstance` resources via `Watches()` with a mapper that enqueues all engines referencing the changed instance by name. This means engines react within seconds when their parent instance becomes ready, rather than waiting for error-driven backoff to expire.
+
+The `spec.metadataEndpointOverride` field on the engine overrides the instance-derived endpoint (but not the account ID), supporting cross-cluster scenarios where the engine connects to a metadata service via private link.
+
+### Instance resource ownership
+
+All resources created by the instance reconciler have:
+
+- An `ownerReference` pointing to the `FireboltInstance` CR.
+- A `firebolt.io/instance` label for listing/filtering.
+- A `firebolt.io/component` label (`postgres`, `metadata`, or `gateway`).
+- A finalizer on the CR to ensure cleanup of all labelled resources on deletion.

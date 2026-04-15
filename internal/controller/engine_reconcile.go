@@ -30,8 +30,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// InstanceInfo holds the metadata endpoint and account ID resolved from the
+// FireboltInstance in the engine's namespace. These are injected into the
+// engine ConfigMap so engine nodes can connect to the metadata service.
+type InstanceInfo struct {
+	MetadataEndpoint string
+	AccountID        string
+}
 
 // computeEngineReconcile determines what resources need to be created, updated,
 // or deleted based on the engine spec, its current status, and the observed
@@ -43,6 +51,7 @@ func computeEngineReconcile(
 	engineName string,
 	engineNamespace string,
 	metadataGeneration int64,
+	instanceInfo InstanceInfo,
 ) EngineReconcileResult {
 	result := EngineReconcileResult{
 		Status: *status.DeepCopy(),
@@ -50,9 +59,9 @@ func computeEngineReconcile(
 
 	switch status.Phase {
 	case "", computev1alpha1.PhaseStable:
-		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration)
+		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration, instanceInfo)
 	case computev1alpha1.PhaseCreating:
-		computeCreating(spec, &result, current, engineName, engineNamespace)
+		computeCreating(spec, &result, current, engineName, engineNamespace, instanceInfo)
 	case computev1alpha1.PhaseSwitching:
 		computeSwitching(&result, current, engineName, engineNamespace)
 	case computev1alpha1.PhaseDraining:
@@ -83,6 +92,7 @@ func computeStable(
 	engineName string,
 	engineNamespace string,
 	metadataGeneration int64,
+	instanceInfo InstanceInfo,
 ) {
 	status := &r.Status
 
@@ -115,7 +125,7 @@ func computeStable(
 		return
 	}
 
-	wantCM := buildConfigMap(spec, engineName, engineNamespace, gen)
+	wantCM := buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
 	if current.CurrentConfigMap == nil || current.CurrentConfigMap.Data["config.json"] != wantCM.Data["config.json"] {
 		r.EnsureConfigMap = wantCM
 	}
@@ -144,11 +154,12 @@ func computeCreating(
 	current EngineState,
 	engineName string,
 	engineNamespace string,
+	instanceInfo InstanceInfo,
 ) {
 	status := &r.Status
 	gen := status.CurrentGeneration
 
-	buildGenResources(spec, r, engineName, engineNamespace, gen)
+	buildGenResources(spec, r, engineName, engineNamespace, gen, instanceInfo)
 
 	if current.ClusterService == nil {
 		r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
@@ -276,13 +287,14 @@ func buildGenResources(
 	engineName string,
 	engineNamespace string,
 	gen int,
+	instanceInfo InstanceInfo,
 ) {
-	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen)
+	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
 	r.EnsureHeadlessSvc = buildHeadlessService(engineName, engineNamespace, gen)
 	r.EnsureStatefulSet = buildStatefulSet(spec, engineName, engineNamespace, gen)
 }
 
-func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int) *corev1.ConfigMap {
+func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo) *corev1.ConfigMap {
 	name := genResourceName(engineName, gen, SuffixConfig)
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
 	stsName := genResourceName(engineName, gen, "")
@@ -297,7 +309,19 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	coreConfig := map[string]interface{}{
 		"nodes": nodes,
 	}
-	configJSON, _ := json.MarshalIndent(coreConfig, "", "  ")
+
+	if spec.MetadataEndpointOverride != nil {
+		coreConfig["metadata_endpoint"] = *spec.MetadataEndpointOverride
+	} else {
+		coreConfig["metadata_endpoint"] = instanceInfo.MetadataEndpoint
+	}
+
+	coreConfig["account_id"] = instanceInfo.AccountID
+
+	configJSON, err := json.MarshalIndent(coreConfig, "", "  ")
+	if err != nil {
+		panic(fmt.Sprintf("BUG: failed to marshal config.json: %v", err))
+	}
 
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -369,7 +393,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					Tolerations:  spec.Tolerations,
 					Containers: []corev1.Container{
 						{
-							Name:            ContainerNameCore,
+							Name:            ContainerNameEngine,
 							Image:           fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag),
 							ImagePullPolicy: pullPolicy,
 							Resources: corev1.ResourceRequirements{
@@ -384,7 +408,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 							},
 							Ports:   GetContainerPorts(),
 							Command: []string{"/bin/bash", "-c"},
-							Args:    []string{strings.TrimSpace(CoreStartupScript)},
+							Args:    []string{strings.TrimSpace(EngineStartupScript)},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "nodes-config",

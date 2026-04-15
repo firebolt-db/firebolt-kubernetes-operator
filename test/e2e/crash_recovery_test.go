@@ -27,7 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/firebolt-analytics/core-operator/internal/controller"
+	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 )
 
 var _ = Describe("Crash Recovery", Ordered, func() {
@@ -53,9 +53,9 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		It("should recover from crash after ConfigMap created", func() {
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterCoreConfigMapCreated, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterEngineConfigMapCreated, func() {
 				crashHit.Store(true)
-				fmt.Fprintf(GinkgoWriter, "Crash point hit: after core ConfigMap created\n")
+				fmt.Fprintf(GinkgoWriter, "Crash point hit: after engine ConfigMap created\n")
 			})
 
 			By("Starting operator")

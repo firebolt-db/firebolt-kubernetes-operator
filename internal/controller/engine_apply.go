@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 // applyEngineState writes the EngineReconcileResult to the cluster: ensures
@@ -43,7 +43,7 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 		if err := r.ensureConfigMap(ctx, engine, result.EnsureConfigMap); err != nil {
 			return fmt.Errorf("failed to ensure ConfigMap: %w", err)
 		}
-		MaybeCrash(engine.Name, CrashAfterCoreConfigMapCreated)
+		MaybeCrash(engine.Name, CrashAfterEngineConfigMapCreated)
 	}
 
 	if result.EnsureHeadlessSvc != nil {

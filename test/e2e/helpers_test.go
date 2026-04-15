@@ -52,8 +52,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
-	"github.com/firebolt-analytics/core-operator/internal/controller"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 )
 
 // Test query constants
@@ -220,7 +220,8 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			Replicas: int32(replicas),
+			InstanceRef: "test-instance",
+			Replicas:    int32(replicas),
 			Image: computev1alpha1.ImageSpec{
 				Repository: testImage,
 				Tag:        testTag,

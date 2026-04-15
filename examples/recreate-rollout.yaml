@@ -4,6 +4,7 @@ metadata:
   name: core-engine-dev
   namespace: firebolt
 spec:
+  instanceRef: production
   replicas: 2
   image:
     repository: "ghcr.io/firebolt-db/firebolt-core"

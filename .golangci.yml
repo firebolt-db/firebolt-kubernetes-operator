@@ -1,52 +1,154 @@
+---
 version: "2"
 run:
   allow-parallel-runners: true
+
 linters:
   default: none
   enable:
-    - copyloopvar
-    - dupl
+    # Default
     - errcheck
-    - ginkgolinter
-    - gocyclo
     - govet
     - ineffassign
-    - lll
+    - staticcheck
+    - unused
+    # Code quality
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - dupl
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - ginkgolinter
     - goconst
+    - gocritic
+    - gocyclo
+    - gosec
+    - lll
     - misspell
     - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
     - prealloc
+    - predeclared
     - revive
-    - staticcheck
+    - thelper
     - unconvert
     - unparam
-    - unused
+    - wastedassign
+
   settings:
-    revive:
-      rules:
-        - name: comment-spacings
-        - name: import-shadowing
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
     goconst:
-      # Minimum occurrences of string usage to be reported.
       min-occurrences: 5
-      # Minimum length of string to be reported.
-      # Default: 3
       min-len: 10
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - paramTypeCombine
+        - unnamedResult
+      settings:
+        hugeParam:
+          sizeThreshold: 140
+
+    gocyclo:
+      min-complexity: 30
+
+    lll:
+      line-length: 140
+
+    misspell:
+      locale: US
+      ignore-rules:
+        - firebolt
+
+    nakedret:
+      max-func-lines: 1
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    revive:
+      enable-all-rules: true
+      rules:
+        - name: line-length-limit
+          disabled: true
+        - name: nested-structs
+          disabled: true
+        - name: add-constant
+          disabled: true
+        - name: cognitive-complexity
+          disabled: true
+        - name: cyclomatic
+          disabled: true
+        - name: function-result-limit
+          disabled: true
+        - name: argument-limit
+          disabled: true
+        - name: function-length
+          disabled: true
+        - name: use-any
+          disabled: true
+        - name: unused-receiver
+          disabled: true
+        - name: flag-parameter
+          disabled: true
+        - name: max-public-structs
+          disabled: true
+        - name: unchecked-type-assertion
+          disabled: true
+        - name: bare-return
+          disabled: true
+        - name: defer
+          disabled: false
+        - name: modifies-value-receiver
+          disabled: false
+        - name: comment-spacings
+          disabled: false
+        - name: import-shadowing
+          disabled: false
 
   exclusions:
     generated: lax
     rules:
       - linters:
           - goconst
+          - lll
+          - dupl
+          - funlen
+          - gocyclo
+          - prealloc
+          - gosec
+          - forcetypeassert
         path: _test\.go
       - linters:
           - dupl
           - lll
         path: internal/*
+      - path: _test\.go
+        text: "is deprecated:"
+      - path: (.+)\.go$
+        text: "package-comments: should have a package comment"
+      - path: (.+)\.go$
+        text: Error return value of .((os\.)?std(out|err)\..*|.*Flush|.*printf?). is not checked
     paths:
       - third_party$
       - builtin$
       - examples$
+
 formatters:
   enable:
     - gofmt
@@ -57,3 +159,7 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0

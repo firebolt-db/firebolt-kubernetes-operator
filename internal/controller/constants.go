@@ -27,21 +27,35 @@ const (
 	// Label keys used by the operator
 	LabelEngine     = "firebolt.io/engine"
 	LabelGeneration = "firebolt.io/generation"
+	LabelInstance   = "firebolt.io/instance"
+	LabelComponent  = "firebolt.io/component"
+
+	// Annotation for tracking rendered manifest content
+	AnnotationManifestHash = "firebolt.io/manifest-hash"
 
 	// Suffix constants for resource naming
-	SuffixService = "-service"
-	SuffixGen     = "-g"
-	SuffixHL      = "-hl"
-	SuffixConfig  = "-config"
+	SuffixService             = "-service"
+	SuffixGen                 = "-g"
+	SuffixHL                  = "-hl"
+	SuffixConfig              = "-config"
+	SuffixMetadataService     = "-metadata"
+	SuffixMetadataPG          = "-metadata-pg"
+	SuffixMetadataPostgresCreds = "-metadata-postgres-creds"
+	SuffixGateway             = "-gateway"
+
+	// Metadata service configuration
+	MetadataServicePort = 7000
+	PostgresPort        = 5432
+	PostgresImage       = "postgres:16-alpine"
+	PostgresDBName      = "firebolt_metadata"
+	PostgresUser        = "firebolt"
+	PostgresPVCSize     = "10Gi"
 
 	// Container name
-	ContainerNameCore = "core"
+	ContainerNameEngine = "core"
 
 	// Default drain check interval
 	DefaultDrainCheckInterval = 5 * time.Second
-
-	// Core binary path
-	CoreBinaryPath = "/firebolt-core/firebolt-core"
 
 	// Health check endpoints
 	HealthReadyPath = "/health/ready"
@@ -69,13 +83,13 @@ const DrainCheckSQL = `SELECT count(*) as num_running_queries FROM (
   LIMIT 1
 )`
 
-// CoreStartupScript is the script used to start the Core process
-const CoreStartupScript = `
+// EngineStartupScript is the script used to start the engine process
+const EngineStartupScript = `
 NODE_ORDINAL=${HOSTNAME##*-}
 exec /firebolt-core/firebolt-core --node $NODE_ORDINAL
 `
 
-// GetServicePorts returns the standard service ports for Firebolt Core
+// GetServicePorts returns the standard service ports for a Firebolt engine
 func GetServicePorts() []corev1.ServicePort {
 	return []corev1.ServicePort{
 		{Name: "http-query", Port: 3473, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(3473)},
@@ -89,7 +103,7 @@ func GetServicePorts() []corev1.ServicePort {
 	}
 }
 
-// GetContainerPorts returns the container ports for the Core container
+// GetContainerPorts returns the container ports for the engine container
 func GetContainerPorts() []corev1.ContainerPort {
 	return []corev1.ContainerPort{
 		{Name: "http-query", ContainerPort: 3473, Protocol: corev1.ProtocolTCP},

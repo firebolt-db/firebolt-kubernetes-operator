@@ -25,7 +25,7 @@ type CrashPoint string
 
 const (
 	// PhaseCreating crash points
-	CrashAfterCoreConfigMapCreated   CrashPoint = "after_core_configmap_created"
+	CrashAfterEngineConfigMapCreated CrashPoint = "after_engine_configmap_created"
 	CrashAfterHeadlessServiceCreated CrashPoint = "after_headless_service_created"
 	CrashAfterStatefulSetCreated     CrashPoint = "after_statefulset_created"
 	CrashAfterClusterServiceEnsured  CrashPoint = "after_cluster_service_ensured"

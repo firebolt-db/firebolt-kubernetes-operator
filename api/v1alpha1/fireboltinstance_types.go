@@ -124,6 +124,16 @@ type FireboltInstanceSpec struct {
 	// Auth configures authentication. If nil, authentication is disabled.
 	// +optional
 	Auth *AuthSpec `json:"auth,omitempty"`
+
+	// MetadataChartVersion is the Helm chart version for the metadata service.
+	// +kubebuilder:default="0.1.0"
+	// +optional
+	MetadataChartVersion string `json:"metadataChartVersion,omitempty"`
+
+	// GatewayChartVersion is the Helm chart version for core-gateway.
+	// +kubebuilder:default="0.1.0"
+	// +optional
+	GatewayChartVersion string `json:"gatewayChartVersion,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.

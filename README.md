@@ -1,42 +1,63 @@
-# Firebolt Core Operator
+# Firebolt Engine Operator
 
-A Kubernetes controller that manages Firebolt engines with zero-downtime scaling via blue-green deployments.
+A Kubernetes operator that manages Firebolt infrastructure: metadata services, gateways, and compute engines with zero-downtime scaling via blue-green deployments.
 
 ## Overview
 
-The operator watches `FireboltEngine` custom resources and automatically manages the lifecycle of Firebolt engines. When you change the configuration (e.g., scale from 3 to 5 nodes), the operator:
+The operator manages two custom resources:
 
-1. Creates a new engine generation with the desired configuration
-2. Waits for all pods to become ready
-3. Switches traffic to the new generation
-4. Drains the old generation (waits for running queries to complete)
-5. Deletes the old generation
+- **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, the gateway, and account initialization.
+- **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
 
-All of this happens automatically with zero downtime for clients.
+When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it.
 
 ## Quick Start
 
 ### 1. Deploy the Operator
 
 ```bash
-# Build and push the operator image
-make docker-build docker-push IMG=<your-registry>/core-operator:latest
-
-# Deploy to your cluster (includes CRD installation)
-make deploy IMG=<your-registry>/core-operator:latest
+make docker-build docker-push IMG=<your-registry>/firebolt-kubernetes-operator:latest
+make deploy IMG=<your-registry>/firebolt-kubernetes-operator:latest
 ```
 
-### 2. Create a Firebolt Engine
+### 2. Create a FireboltInstance
 
-Create a `FireboltEngine` resource:
+An instance provisions the metadata infrastructure. Create one per namespace:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: production
+  namespace: firebolt
+spec:
+  metadata: {}
+  gateway: {}
+```
+
+This creates an internal PostgreSQL database, deploys the metadata service, initializes an account, and deploys the gateway. Check progress with:
+
+```bash
+kubectl get fi -n firebolt
+```
+
+```
+NAME         PHASE   GATEWAY   METADATA   ENGINES   READY   AGE
+production   Ready   true      true       0         0       2m
+```
+
+### 3. Create a FireboltEngine
+
+Once the instance is `Ready`, create an engine that references it:
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: core-engine-production
+  name: my-engine
   namespace: firebolt
 spec:
+  instanceRef: production
   replicas: 3
   image:
     repository: "ghcr.io/firebolt-db/firebolt-core"
@@ -46,59 +67,209 @@ spec:
     memory: "8Gi"
 ```
 
-```bash
-kubectl apply -f my-engine.yaml
+The engine will not start until the referenced instance has a populated metadata endpoint and account ID. Connect via:
+
+```
+my-engine-service.firebolt.svc:3473
 ```
 
-The operator will create a 3-node engine. Connect to it via the engine service:
-```
-core-engine-production-service.firebolt.svc:3473
-```
-
-### 3. Scale or Update
-
-Simply update the `FireboltEngine` resource:
+### 4. Scale or Update
 
 ```bash
-kubectl patch fireboltengine core-engine-production -n firebolt \
-  --type merge -p '{"spec":{"replicas":5}}'
-```
-
-Or use the short name:
-
-```bash
-kubectl patch fire core-engine-production -n firebolt \
+kubectl patch fire my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":5}}'
 ```
 
 The operator handles the zero-downtime transition automatically.
 
-### 4. Delete an Engine
-
-Delete the `FireboltEngine` resource:
+### 5. Delete
 
 ```bash
-kubectl delete fireboltengine core-engine-production -n firebolt
+kubectl delete fire my-engine -n firebolt
+kubectl delete fi production -n firebolt
 ```
 
-All associated resources (StatefulSets, Services, etc.) are automatically deleted via Kubernetes owner references.
+All associated resources are cleaned up automatically.
 
-## Configuration Reference
+---
 
-### FireboltEngine Spec
+## FireboltInstance
+
+### Spec Reference
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `spec.replicas` | **Yes** | - | Number of nodes (must be ≥ 1) |
+| `spec.metadata` | **Yes** | - | Metadata service configuration (can be empty `{}` for defaults) |
+| `spec.metadata.postgres` | No | (internal) | External PostgreSQL connection. If omitted, the operator deploys an internal PostgreSQL StatefulSet |
+| `spec.metadata.postgres.host` | Yes* | - | PostgreSQL hostname |
+| `spec.metadata.postgres.port` | No | `5432` | PostgreSQL port |
+| `spec.metadata.postgres.database` | Yes* | - | Database name |
+| `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
+| `spec.metadata.image` | No | (chart default) | Override the metadata service container image |
+| `spec.metadata.replicas` | No | `2` | Number of metadata service pods |
+| `spec.metadata.resources` | No | (chart default) | CPU/memory for metadata service pods |
+| `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
+| `spec.metadata.valuesOverride` | No | - | Raw JSON passed to the metadata Helm chart (typed fields take precedence) |
+| `spec.gateway` | **Yes** | - | Gateway configuration (can be empty `{}` for defaults) |
+| `spec.gateway.image` | No | (chart default) | Override the gateway container image |
+| `spec.gateway.replicas` | No | `2` | Number of gateway pods |
+| `spec.gateway.resources` | No | (chart default) | CPU/memory for gateway pods |
+| `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |
+| `spec.gateway.valuesOverride` | No | - | Raw JSON passed to the gateway Helm chart |
+| `spec.auth` | No | disabled | Authentication configuration |
+| `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
+| `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |
+| `spec.metadataChartVersion` | No | `0.1.0` | Helm chart version for the metadata service |
+| `spec.gatewayChartVersion` | No | `0.1.0` | Helm chart version for the gateway |
+
+\* Required when the parent field is set.
+
+### Instance Phases
+
+| Phase | Meaning |
+|-------|---------|
+| `Provisioning` | Components are being deployed; not yet ready |
+| `Ready` | Metadata service and gateway are healthy |
+| `Degraded` | Was previously Ready, but one or more components became unhealthy |
+| `Failed` | Terminal error requiring manual intervention (e.g., multiple accounts found in metadata) |
+
+### Monitoring
+
+```bash
+kubectl get fi -n firebolt
+```
+
+```
+NAME         PHASE   GATEWAY   METADATA   ENGINES   READY   AGE
+production   Ready   true      true       2         2       24h
+```
+
+Inspect details:
+
+```bash
+kubectl get fi production -n firebolt -o yaml
+```
+
+Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `accountId`.
+
+### Full Example
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: production
+  namespace: firebolt
+spec:
+  metadata:
+    postgres:
+      host: "postgres.firebolt.svc"
+      port: 5432
+      database: "firebolt_metadata"
+      credentialsSecretRef:
+        name: metadata-postgres-credentials
+    image:
+      repository: "ghcr.io/firebolt-analytics/dedicated-pensieve"
+      tag: "1.0.0"
+    replicas: 2
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "1Gi"
+      limits:
+        memory: "2Gi"
+    nodeSelector:
+      firebolt.dev/pool: system
+
+  gateway:
+    replicas: 3
+    image:
+      repository: "ghcr.io/firebolt-analytics/core-gateway"
+      tag: "1.0.0"
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+    nodeSelector:
+      firebolt.dev/pool: system
+
+  auth:
+    mode: openid
+    oidc:
+      issuerURL: "https://company.okta.com/oauth2/default"
+      clientID: "firebolt"
+      clientSecretRef:
+        name: oidc-client-secret
+      claimMappings:
+        username: "email"
+```
+
+---
+
+## FireboltEngine
+
+### Spec Reference
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
+| `spec.replicas` | **Yes** | - | Number of engine nodes (must be >= 1) |
 | `spec.image.repository` | **Yes** | - | Container image repository |
 | `spec.image.tag` | **Yes** | - | Container image tag |
-| `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy: `Always`, `Never`, or `IfNotPresent` |
-| `spec.resources.cpu` | **Yes** | - | CPU request and limit (Kubernetes quantity, e.g., `"2"`, `"500m"`) |
-| `spec.resources.memory` | **Yes** | - | Memory request and limit (Kubernetes quantity, e.g., `"8Gi"`, `"4096Mi"`) |
-| `spec.drainCheckInterval` | No | `5s` | How often to check if old pods have finished serving queries |
-| `spec.rollout` | No | `graceful` | Rollout strategy: `graceful` waits for drain, `recreate` deletes immediately |
-| `spec.nodeSelector` | No | - | Node selector map |
-| `spec.tolerations` | No | - | Tolerations array |
+| `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy |
+| `spec.resources.cpu` | **Yes** | - | CPU request and limit (e.g., `"2"`, `"500m"`) |
+| `spec.resources.memory` | **Yes** | - | Memory request and limit (e.g., `"8Gi"`) |
+| `spec.rollout` | No | `graceful` | `graceful` waits for drain; `recreate` deletes immediately |
+| `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the SQL drain check |
+| `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status |
+| `spec.nodeSelector` | No | - | Node selector for engine pods |
+| `spec.tolerations` | No | - | Tolerations for engine pods |
+| `spec.metadataEndpointOverride` | No | - | Override the instance-derived metadata endpoint (for cross-cluster setups) |
+
+### Engine Phases
+
+| Phase | Meaning |
+|-------|---------|
+| `stable` | All resources match spec; no transition in progress |
+| `creating` | New generation being created; waiting for pods to be ready |
+| `switching` | Traffic being switched to the new generation |
+| `draining` | Waiting for old generation pods to finish serving queries |
+| `cleaning` | Deleting old generation resources |
+
+### Conditions
+
+| Condition | Meaning |
+|-----------|---------|
+| `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata |
+| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / account ID |
+
+### Monitoring
+
+```bash
+kubectl get fire -n firebolt
+```
+
+```
+NAME        REPLICAS   PHASE    GENERATION   AGE
+my-engine   5          stable   2            24h
+```
+
+### Operator-Managed Resources
+
+**Do not modify these resources manually.** For an engine named `my-engine`:
+
+| Resource | Name Pattern | Purpose |
+|----------|--------------|---------|
+| **Engine Service** | `my-engine-service` | Stable endpoint for clients |
+| **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
+| **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
+| **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
+
+### Rollout Strategies
+
+**Graceful (default):** new generation is created, traffic is switched, old generation is drained (waits for running queries to complete), then deleted. Use for production.
+
+**Recreate:** new generation is created, traffic is switched, old generation is immediately deleted. Use for dev/test or when you can tolerate interrupted queries.
 
 ### Full Example
 
@@ -106,9 +277,10 @@ All associated resources (StatefulSets, Services, etc.) are automatically delete
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: core-engine-production
+  name: my-engine
   namespace: firebolt
 spec:
+  instanceRef: production
   replicas: 5
   image:
     repository: "ghcr.io/firebolt-db/firebolt-core"
@@ -121,7 +293,6 @@ spec:
   rollout: graceful
   nodeSelector:
     dedicated: firebolt-nodes
-    zone: us-east-1a
   tolerations:
     - key: dedicated
       operator: Equal
@@ -129,141 +300,62 @@ spec:
       effect: NoSchedule
 ```
 
-## Operator-Managed Resources
-
-**Do not modify these resources manually.** The operator creates and manages them automatically.
-
-For an engine named `core-engine-production`, the operator creates:
-
-| Resource | Name Pattern | Purpose |
-|----------|--------------|---------|
-| **Engine Service** | `core-engine-production-service` | Stable endpoint for clients |
-| **StatefulSet** | `core-engine-production-g{N}` | Pods for generation N |
-| **Headless Service** | `core-engine-production-g{N}-hl` | Pod DNS for generation N |
-| **Config ConfigMap** | `core-engine-production-g{N}-config` | Core config for generation N |
-
-### Important Rules
-
-1. **Never edit operator-created StatefulSets or Services** - The operator assumes full control. Manual changes will be overwritten or cause conflicts.
-
-2. **To delete an engine, delete the `FireboltEngine` resource** - All other resources will be garbage collected automatically.
-
-3. **To modify an engine, edit only the `FireboltEngine` resource** - The operator handles everything else.
-
-## Supported Operations
-
-| Operation | How to Do It | What Happens |
-|-----------|--------------|--------------|
-| **Create engine** | Create `FireboltEngine` resource | Operator creates generation 0 |
-| **Scale up/down** | Update `spec.replicas` | Zero-downtime blue-green transition |
-| **Change image** | Update `spec.image` | Zero-downtime blue-green transition |
-| **Change resources** | Update `spec.resources` | Zero-downtime blue-green transition |
-| **Delete engine** | Delete `FireboltEngine` resource | All resources garbage collected |
-
-Any change to the spec triggers a new generation. The operator:
-1. Creates new resources with the updated config
-2. Waits for them to be ready
-3. Switches traffic
-4. Drains and deletes the old resources
-
-## Rollout Strategies
-
-### Graceful (default)
-
-```yaml
-spec:
-  rollout: "graceful"
-```
-
-- New generation is created and must become fully ready
-- Traffic is switched to the new generation
-- Old generation is drained (operator waits for running queries to complete)
-- Old generation is deleted only after drain completes
-
-Use this for production workloads where you want zero query interruption.
-
-### Recreate
-
-```yaml
-spec:
-  rollout: "recreate"
-```
-
-- New generation is created and must become fully ready
-- Traffic is switched to the new generation
-- Old generation is **immediately deleted** (no drain check)
-
-Use this for development/testing or when you need faster transitions and can tolerate interrupted queries.
+---
 
 ## Operator Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--namespace` | (optional) | Namespace to watch. Watches all namespaces if empty. |
-| `--metrics-bind-address` | `0` | Address for metrics endpoint |
+| `--namespace` | (all) | Namespace to watch. Watches all namespaces if empty |
+| `--metadata-chart-source` | `oci://ghcr.io/firebolt-db/dedicated-pensieve` | OCI registry or local path for the metadata Helm chart |
+| `--gateway-chart-source` | `oci://ghcr.io/firebolt-db/core-gateway` | OCI registry or local path for the gateway Helm chart |
+| `--metrics-bind-address` | `0` | Address for the metrics endpoint |
 | `--health-probe-bind-address` | `:8081` | Address for health probes |
-| `--leader-elect` | `false` | Enable leader election for HA |
-
-## Monitoring
-
-### Engine Status
-
-Check the engine status to see the current state:
-
-```bash
-kubectl get fireboltengine core-engine-production -n firebolt -o yaml
-```
-
-Or use short names:
-
-```bash
-kubectl get fire -n firebolt
-```
-
-Output:
-```
-NAME                      REPLICAS   PHASE    GENERATION   AGE
-core-engine-production    5          stable   2            24h
-```
-
-### Phases
-
-| Phase | Meaning |
-|-------|---------|
-| `stable` | Engine is running normally, no transition in progress |
-| `creating` | New generation is being created, waiting for pods to be ready |
-| `switching` | Traffic is being switched to the new generation |
-| `draining` | Waiting for old generation pods to finish serving queries |
-| `cleaning` | Deleting old generation resources |
+| `--leader-elect` | `false` | Enable leader election for HA deployments |
 
 ## Troubleshooting
 
+### Engine stuck with `InstanceReady=False`
+
+The referenced instance is not ready. Check instance status:
+
+```bash
+kubectl get fi -n firebolt
+kubectl describe fi <instance-name> -n firebolt
+```
+
+Common causes: instance still provisioning, metadata service pods not ready, account initialization failed.
+
+### Instance stuck in "Provisioning"
+
+Components are not becoming healthy. Check the underlying resources:
+
+```bash
+kubectl get pods -l firebolt.io/instance=<instance-name> -n firebolt
+kubectl logs -l firebolt.io/component=metadata -n firebolt
+```
+
+### Instance in "Failed" phase
+
+A terminal error occurred (e.g., multiple accounts found in the metadata service). Inspect the operator logs for details and resolve the underlying issue manually. The operator will not automatically recover from this state.
+
 ### Engine stuck in "creating" phase
 
-Pods in the new generation are not becoming ready. Check:
+Pods in the new generation are not becoming ready:
+
 ```bash
-kubectl get pods -l firebolt.io/engine=core-engine-production -n firebolt
+kubectl get pods -l firebolt.io/engine=<engine-name> -n firebolt
 kubectl describe pod <pod-name> -n firebolt
 kubectl logs <pod-name> -n firebolt
 ```
 
 ### Engine stuck in "draining" phase
 
-Old pods still have running queries. This is normal for long-running queries. If you need to force the transition:
-
-1. Change to `rollout: recreate` in the engine spec, or
-2. Manually delete the old StatefulSet (not recommended)
-
-### Engine changes not being picked up
-
-Check operator logs:
-```bash
-kubectl logs -l app=core-operator -n firebolt
-```
+Old pods still have running queries. This is normal for long-running queries. To force the transition, set `rollout: recreate` in the engine spec.
 
 ## Design Documentation
 
-For detailed architecture and design decisions, see [docs/operator-based-scaling.md](docs/operator-based-scaling.md).
+For detailed architecture and design decisions, see [docs/level-driven-reconciliation.md](docs/level-driven-reconciliation.md).
 
 ## License
 

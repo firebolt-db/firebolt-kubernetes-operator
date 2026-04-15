@@ -4,6 +4,7 @@ metadata:
   name: core-engine
   namespace: firebolt
 spec:
+  instanceRef: production
   replicas: 1
   image:
     repository: "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"

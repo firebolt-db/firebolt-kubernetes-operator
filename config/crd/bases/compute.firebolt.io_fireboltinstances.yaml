@@ -1194,6 +1194,10 @@ spec:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 type: object
+              gatewayChartVersion:
+                default: 0.1.0
+                description: GatewayChartVersion is the Helm chart version for core-gateway.
+                type: string
               metadata:
                 description: Metadata configures the metadata service.
                 properties:
@@ -2318,6 +2322,11 @@ spec:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 type: object
+              metadataChartVersion:
+                default: 0.1.0
+                description: MetadataChartVersion is the Helm chart version for the
+                  metadata service.
+                type: string
             required:
             - gateway
             - metadata

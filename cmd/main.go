@@ -36,8 +36,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
-	"github.com/firebolt-analytics/core-operator/internal/controller"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -63,6 +63,8 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var watchNamespace string
+	var metadataChartSource string
+	var gatewayChartSource string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -83,6 +85,10 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&watchNamespace, "namespace", "",
 		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
+	flag.StringVar(&metadataChartSource, "metadata-chart-source", "oci://ghcr.io/firebolt-db/dedicated-pensieve",
+		"Helm chart source for the metadata service (local path or oci:// URI)")
+	flag.StringVar(&gatewayChartSource, "gateway-chart-source", "oci://ghcr.io/firebolt-db/core-gateway",
+		"Helm chart source for core-gateway (local path or oci:// URI)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -198,6 +204,16 @@ func main() {
 		Namespace: watchNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
+		os.Exit(1)
+	}
+
+	if err := (&controller.FireboltInstanceReconciler{
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		MetadataChartSource: metadataChartSource,
+		GatewayChartSource:  gatewayChartSource,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

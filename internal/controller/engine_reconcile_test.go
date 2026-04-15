@@ -26,17 +26,27 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 const (
-	testEngineName = "test-engine"
-	testNamespace  = "default"
+	testEngineName        = "test-engine"
+	testNamespace         = "default"
+	testMetadataEndpoint  = "test-instance-metadata.default.svc.cluster.local:7000"
+	testAccountID         = "test-account-id"
 )
+
+func testInstanceInfo() InstanceInfo {
+	return InstanceInfo{
+		MetadataEndpoint: testMetadataEndpoint,
+		AccountID:        testAccountID,
+	}
+}
 
 func testSpec() *computev1alpha1.FireboltEngineSpec {
 	return &computev1alpha1.FireboltEngineSpec{
-		Replicas: 3,
+		InstanceRef: "test-instance",
+		Replicas:    3,
 		Image: computev1alpha1.ImageSpec{
 			Repository: "firebolt/core",
 			Tag:        "v1.0",
@@ -121,7 +131,7 @@ func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 	}
 	current := EngineState{ClusterServiceTargetGen: -1}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating, got %s", result.Status.Phase)
@@ -146,14 +156,14 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating, got %s", result.Status.Phase)
@@ -181,14 +191,14 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseSwitching {
 		t.Errorf("expected phase Switching, got %s", result.Status.Phase)
@@ -214,7 +224,7 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating (waiting), got %s", result.Status.Phase)
@@ -236,7 +246,7 @@ func TestComputeEngineReconcile_S3_SwitchingUpdateSelector(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service selector update")
@@ -258,7 +268,7 @@ func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 		ClusterServiceTargetGen: 1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseDraining {
 		t.Errorf("expected phase Draining, got %s", result.Status.Phase)
@@ -283,7 +293,7 @@ func TestComputeEngineReconcile_S3_SwitchingToStable_InitialDeploy(t *testing.T)
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable, got %s", result.Status.Phase)
@@ -307,7 +317,7 @@ func TestComputeEngineReconcile_S3_DrainingWait(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseDraining {
 		t.Errorf("expected phase Draining, got %s", result.Status.Phase)
@@ -331,7 +341,7 @@ func TestComputeEngineReconcile_S3_DrainingComplete(t *testing.T) {
 		DrainingPodsDrained: true,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCleaning {
 		t.Errorf("expected phase Cleaning, got %s", result.Status.Phase)
@@ -348,7 +358,7 @@ func TestComputeEngineReconcile_S3_DrainingNilDrainingGeneration(t *testing.T) {
 	}
 	current := EngineState{}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
@@ -374,7 +384,7 @@ func TestComputeEngineReconcile_S3_DrainingCustomInterval(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.RequeueAfter != 15*time.Second {
 		t.Errorf("expected RequeueAfter 15s (custom interval), got %v", result.RequeueAfter)
@@ -399,7 +409,7 @@ func TestComputeEngineReconcile_S3_CleaningDeletesOldResources(t *testing.T) {
 		DrainingConfigMap:   oldCM,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable, got %s", result.Status.Phase)
@@ -420,12 +430,12 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              nil,
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected new transition (Creating), got %s", result.Status.Phase)
@@ -441,7 +451,7 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
-	driftedCM := buildConfigMap(spec, testEngineName, testNamespace, 0)
+	driftedCM := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
 	driftedCM.Data["config.json"] = `{"nodes": []}`
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
@@ -453,7 +463,7 @@ func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected to stay Stable (in-place fix), got %s", result.Status.Phase)
@@ -469,14 +479,14 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 99),
 		ClusterServiceTargetGen: 99,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected to stay Stable (in-place fix), got %s", result.Status.Phase)
@@ -497,14 +507,14 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected Stable, got %s", result.Status.Phase)
@@ -534,15 +544,15 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	d1 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
-	d2 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	d1 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	d2 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if d1.Status.Phase != d2.Status.Phase {
 		t.Errorf("idempotency violated: phases differ %s vs %s", d1.Status.Phase, d2.Status.Phase)
@@ -572,7 +582,7 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
 
 	if result.Status.CurrentGeneration != 1 {
 		t.Errorf("OC1 violated: generation changed to %d during draining", result.Status.CurrentGeneration)
@@ -600,7 +610,7 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected to stay in Creating, got %s", result.Status.Phase)
@@ -635,7 +645,7 @@ func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created from scratch")
@@ -657,7 +667,7 @@ func TestComputeEngineReconcile_SwitchingNilClusterService(t *testing.T) {
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created from scratch")
@@ -673,14 +683,14 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          nil,
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created")
@@ -698,14 +708,14 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      nil,
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected new transition (Creating), got %s", result.Status.Phase)
@@ -727,7 +737,7 @@ func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {
 	}
 	current := EngineState{}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
@@ -756,7 +766,7 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3)
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected to stay Creating (STS stale, waiting for roll), got %s", result.Status.Phase)

@@ -165,15 +165,22 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = kubernetes.NewForConfig(config)
 	Expect(err).NotTo(HaveOccurred())
 
-	By("Installing FireboltEngine CRD")
+	By("Installing CRDs")
 	_, thisFile, _, _ := runtime.Caller(0)
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
-	crdPath := filepath.Join(projectRoot, "config", "crd", "bases", "compute.firebolt.io_fireboltengines.yaml")
-	output, err := exec.Command("kubectl", "apply", "-f", crdPath).CombinedOutput()
-	if err != nil {
-		fmt.Fprintf(GinkgoWriter, "CRD install output: %s\n", string(output))
+
+	crds := []string{
+		"compute.firebolt.io_fireboltengines.yaml",
+		"compute.firebolt.io_fireboltinstances.yaml",
 	}
-	Expect(err).NotTo(HaveOccurred(), "Failed to install CRD")
+	for _, crd := range crds {
+		crdPath := filepath.Join(projectRoot, "config", "crd", "bases", crd)
+		output, err := exec.Command("kubectl", "apply", "-f", crdPath).CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(GinkgoWriter, "CRD install output for %s: %s\n", crd, string(output))
+		}
+		Expect(err).NotTo(HaveOccurred(), "Failed to install CRD %s", crd)
+	}
 
 	By("Deleting test namespace if it exists")
 	err = k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})

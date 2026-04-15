@@ -41,8 +41,22 @@ const (
 	PhaseCleaning  EnginePhase = "cleaning"
 )
 
+// Condition types for FireboltEngine.
+const (
+	// ConditionInstanceReady indicates whether the referenced FireboltInstance
+	// has a populated metadata endpoint and account ID.
+	ConditionInstanceReady = "InstanceReady"
+)
+
 // FireboltEngineSpec defines the desired state of a Firebolt engine.
 type FireboltEngineSpec struct {
+	// InstanceRef is the name of the FireboltInstance in the same namespace
+	// that this engine depends on. The engine reconciler will not proceed
+	// until the referenced instance has a populated metadata endpoint and
+	// account ID.
+	// +kubebuilder:validation:MinLength=1
+	InstanceRef string `json:"instanceRef"`
+
 	// Replicas is the number of engine nodes.
 	// +kubebuilder:validation:Minimum=1
 	Replicas int32 `json:"replicas"`
@@ -111,6 +125,10 @@ type FireboltEngineStatus struct {
 	// LastReconciled is the timestamp of the last reconciliation.
 	// +optional
 	LastReconciled *metav1.Time `json:"lastReconciled,omitempty"`
+
+	// Conditions represent the latest available observations of the engine's state.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

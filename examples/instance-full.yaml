@@ -10,7 +10,7 @@ spec:
       port: 5432
       database: "firebolt_metadata"
       credentialsSecretRef:
-        name: pensieve-postgres-credentials
+        name: metadata-postgres-credentials
     engineRegistration: true
     image:
       repository: "ghcr.io/firebolt-analytics/dedicated-pensieve"
@@ -23,7 +23,7 @@ spec:
         memory: "2Gi"
     nodeSelector:
       firebolt.dev/pool: system
-    serviceAccountName: pensieve
+    serviceAccountName: metadata
     valuesOverride:
       server:
         log_level: information

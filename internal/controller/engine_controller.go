@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,15 +32,17 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	computev1alpha1 "github.com/firebolt-analytics/core-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 const finalizerName = "compute.firebolt.io/engine-cleanup"
 
 // FireboltEngineReconciler reconciles FireboltEngine objects by managing
-// blue-green generational deployments of Firebolt Core StatefulSets.
+// blue-green generational deployments of Firebolt engine StatefulSets.
 type FireboltEngineReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
@@ -48,6 +51,7 @@ type FireboltEngineReconciler struct {
 	Clientset  *kubernetes.Clientset
 }
 
+// +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines/finalizers,verbs=update
@@ -108,6 +112,41 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("getEngineState failed: %w", err)
 	}
 
+	// Resolve instance info. Only stable and creating phases need it (they
+	// build ConfigMaps with metadata_endpoint / account_id). Switching,
+	// draining, and cleaning operate on existing resources and must not be
+	// blocked by a transient instance issue.
+	var instanceInfo InstanceInfo
+	needsInstance := engine.Status.Phase == "" ||
+		engine.Status.Phase == computev1alpha1.PhaseStable ||
+		engine.Status.Phase == computev1alpha1.PhaseCreating
+
+	if needsInstance {
+		instanceInfo, err = r.resolveInstanceInfo(ctx, engine)
+		if err != nil {
+			setCondition(&engine.Status.Conditions, metav1.Condition{
+				Type:               computev1alpha1.ConditionInstanceReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: engine.Generation,
+				LastTransitionTime: metav1.Now(),
+				Reason:             "InstanceNotReady",
+				Message:            err.Error(),
+			})
+			if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		setCondition(&engine.Status.Conditions, metav1.Condition{
+			Type:               computev1alpha1.ConditionInstanceReady,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: engine.Generation,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "InstanceReady",
+			Message:            "Referenced FireboltInstance is ready",
+		})
+	}
+
 	result := computeEngineReconcile(
 		&engine.Spec,
 		&engine.Status,
@@ -115,6 +154,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		engine.Name,
 		engine.Namespace,
 		engine.Generation,
+		instanceInfo,
 	)
 
 	if result.Status.Phase != engine.Status.Phase {
@@ -138,35 +178,58 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	log.Info("Handling engine deletion")
 
 	ns := engine.Namespace
+	var errs []error
 
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList, client.InNamespace(ns), client.MatchingLabels{
 		LabelEngine: engine.Name,
-	}); err == nil {
+	}); err != nil {
+		log.Error(err, "Failed to list StatefulSets for cleanup")
+		errs = append(errs, err)
+	} else {
 		for i := range stsList.Items {
 			log.Info("Deleting StatefulSet", "name", stsList.Items[i].Name)
-			_ = r.Delete(ctx, &stsList.Items[i])
+			if err := r.Delete(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
+				log.Error(err, "Failed to delete StatefulSet", "name", stsList.Items[i].Name)
+				errs = append(errs, err)
+			}
 		}
 	}
 
 	svcList := &corev1.ServiceList{}
 	if err := r.List(ctx, svcList, client.InNamespace(ns), client.MatchingLabels{
 		LabelEngine: engine.Name,
-	}); err == nil {
+	}); err != nil {
+		log.Error(err, "Failed to list Services for cleanup")
+		errs = append(errs, err)
+	} else {
 		for i := range svcList.Items {
 			log.Info("Deleting Service", "name", svcList.Items[i].Name)
-			_ = r.Delete(ctx, &svcList.Items[i])
+			if err := r.Delete(ctx, &svcList.Items[i]); err != nil && !errors.IsNotFound(err) {
+				log.Error(err, "Failed to delete Service", "name", svcList.Items[i].Name)
+				errs = append(errs, err)
+			}
 		}
 	}
 
 	cmList := &corev1.ConfigMapList{}
 	if err := r.List(ctx, cmList, client.InNamespace(ns), client.MatchingLabels{
 		LabelEngine: engine.Name,
-	}); err == nil {
+	}); err != nil {
+		log.Error(err, "Failed to list ConfigMaps for cleanup")
+		errs = append(errs, err)
+	} else {
 		for i := range cmList.Items {
 			log.Info("Deleting ConfigMap", "name", cmList.Items[i].Name)
-			_ = r.Delete(ctx, &cmList.Items[i])
+			if err := r.Delete(ctx, &cmList.Items[i]); err != nil && !errors.IsNotFound(err) {
+				log.Error(err, "Failed to delete ConfigMap", "name", cmList.Items[i].Name)
+				errs = append(errs, err)
+			}
 		}
+	}
+
+	if len(errs) > 0 {
+		return ctrl.Result{}, fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
 
 	controllerutil.RemoveFinalizer(engine, finalizerName)
@@ -193,6 +256,45 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 	return r.Status().Update(ctx, fresh)
 }
 
+// resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
+// spec.instanceRef and returns its metadata endpoint and account ID.
+// Reconciliation is blocked until the instance exists and has both fields populated.
+func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (InstanceInfo, error) {
+	inst := &computev1alpha1.FireboltInstance{}
+	key := types.NamespacedName{Name: engine.Spec.InstanceRef, Namespace: engine.Namespace}
+	if err := r.Get(ctx, key, inst); err != nil {
+		if errors.IsNotFound(err) {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q not found in namespace %s", engine.Spec.InstanceRef, engine.Namespace)
+		}
+		return InstanceInfo{}, fmt.Errorf("getting FireboltInstance %q: %w", engine.Spec.InstanceRef, err)
+	}
+
+	if inst.Status.MetadataEndpoint == "" {
+		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no metadata endpoint yet", inst.Name)
+	}
+	if inst.Status.AccountID == "" {
+		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no account ID yet", inst.Name)
+	}
+
+	return InstanceInfo{
+		MetadataEndpoint: inst.Status.MetadataEndpoint,
+		AccountID:        inst.Status.AccountID,
+	}, nil
+}
+
+// setCondition upserts a condition in the given slice.
+func setCondition(conditions *[]metav1.Condition, cond metav1.Condition) {
+	for i, c := range *conditions {
+		if c.Type == cond.Type {
+			if c.Status != cond.Status || c.Reason != cond.Reason {
+				(*conditions)[i] = cond
+			}
+			return
+		}
+	}
+	*conditions = append(*conditions, cond)
+}
+
 func genResourceName(engineName string, gen int, suffix string) string {
 	return fmt.Sprintf("%s%s%d%s", engineName, SuffixGen, gen, suffix)
 }
@@ -217,9 +319,34 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltEngine{}).
+		Watches(&computev1alpha1.FireboltInstance{},
+			handler.EnqueueRequestsFromMapFunc(r.instanceToEngines)).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Named(name).
 		Complete(r)
+}
+
+// instanceToEngines maps a FireboltInstance event to reconcile requests for
+// all engines in the same namespace that reference it via spec.instanceRef.
+func (r *FireboltEngineReconciler) instanceToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+	engineList := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engineList, client.InNamespace(obj.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for instance watch")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range engineList.Items {
+		if engineList.Items[i].Spec.InstanceRef == obj.GetName() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      engineList.Items[i].Name,
+					Namespace: engineList.Items[i].Namespace,
+				},
+			})
+		}
+	}
+	return requests
 }
