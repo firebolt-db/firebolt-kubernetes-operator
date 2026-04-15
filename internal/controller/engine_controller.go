@@ -24,6 +24,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -124,11 +125,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if needsInstance {
 		instanceInfo, err = r.resolveInstanceInfo(ctx, engine)
 		if err != nil {
-			setCondition(&engine.Status.Conditions, metav1.Condition{
+			apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: engine.Generation,
-				LastTransitionTime: metav1.Now(),
 				Reason:             "InstanceNotReady",
 				Message:            err.Error(),
 			})
@@ -137,11 +137,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
-		setCondition(&engine.Status.Conditions, metav1.Condition{
+		apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 			Type:               computev1alpha1.ConditionInstanceReady,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: engine.Generation,
-			LastTransitionTime: metav1.Now(),
 			Reason:             "InstanceReady",
 			Message:            "Referenced FireboltInstance is ready",
 		})
@@ -161,7 +160,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		log.Info("Phase transition", "from", engine.Status.Phase, "to", result.Status.Phase)
 	}
 
-	if err := r.applyEngineState(ctx, engine, result); err != nil {
+	if err := r.applyEngineState(ctx, engine, &result); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
@@ -280,19 +279,6 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
 		AccountID:        inst.Status.AccountID,
 	}, nil
-}
-
-// setCondition upserts a condition in the given slice.
-func setCondition(conditions *[]metav1.Condition, cond metav1.Condition) {
-	for i, c := range *conditions {
-		if c.Type == cond.Type {
-			if c.Status != cond.Status || c.Reason != cond.Reason {
-				(*conditions)[i] = cond
-			}
-			return
-		}
-	}
-	*conditions = append(*conditions, cond)
 }
 
 func genResourceName(engineName string, gen int, suffix string) string {

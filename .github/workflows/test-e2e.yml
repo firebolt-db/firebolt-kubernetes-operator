@@ -11,8 +11,20 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Generate app token
+        id: generate_token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a  # v2.1.0
+        with:
+          app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
+          private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
+
+      - name: Configure Git for private modules
+        run: git config --global url."https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
       - name: Clone the code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
 
       - name: Setup Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
@@ -35,3 +47,5 @@ jobs:
         run: |
           go mod tidy
           make test-e2e
+        env:
+          GOPRIVATE: github.com/firebolt-analytics/*

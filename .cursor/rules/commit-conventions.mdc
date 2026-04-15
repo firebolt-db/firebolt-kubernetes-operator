@@ -4,7 +4,9 @@ alwaysApply: true
 ---
 # Commit Message Convention
 
-Commits must follow conventional commit format with a Linear ticket reference:
+Commits must follow conventional commit format with a Linear ticket reference.
+The ticket reference can usually be found in current branch name, or in the last commit.
+Do not commit or amend commits without asking user first.
 
 ```
 <type>(<scope>): <description> (FB-<ticket>)
@@ -17,8 +19,8 @@ Commits must follow conventional commit format with a Linear ticket reference:
 **Rules:**
 - Subject line: imperative mood, lowercase, no period at the end
 - The `(FB-XXX)` ticket reference is required
-- Keep the subject under 72 characters
-- Body (optional) explains the "why", not the "what"
+- Keep the subject under 100 characters
+- Body: explain what was changed and "why"
 
 **Examples:**
 - `feat(api): add Instance CRD types (FB-550)`

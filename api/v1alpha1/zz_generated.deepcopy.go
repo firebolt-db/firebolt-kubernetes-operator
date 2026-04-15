@@ -22,7 +22,6 @@ package v1alpha1
 
 import (
 	"k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -97,11 +96,6 @@ func (in *ComponentSpec) DeepCopyInto(out *ComponentSpec) {
 		for key, val := range *in {
 			(*out)[key] = val
 		}
-	}
-	if in.ValuesOverride != nil {
-		in, out := &in.ValuesOverride, &out.ValuesOverride
-		*out = new(apiextensionsv1.JSON)
-		(*in).DeepCopyInto(*out)
 	}
 }
 
@@ -231,6 +225,13 @@ func (in *FireboltEngineStatus) DeepCopyInto(out *FireboltEngineStatus) {
 	if in.LastReconciled != nil {
 		in, out := &in.LastReconciled, &out.LastReconciled
 		*out = (*in).DeepCopy()
+	}
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]metav1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 

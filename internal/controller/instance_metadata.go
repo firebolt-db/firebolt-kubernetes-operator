@@ -18,158 +18,353 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
-	helmutil "github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/helm"
 )
 
-const defaultMetadataChartVersion = "0.1.0"
+const (
+	metadataCredsMount    = "/secrets/postgres" //nolint:gosec // mount path, not a credential
+	metadataConfigMount   = "/configs"
+	metadataContainerName = "dedicated-pensieve"
+)
 
-// ensureMetadataService loads the metadata service Helm chart, renders it with
-// values derived from the instance spec, and applies the resulting manifests.
-func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+// ensureMetadataResources creates or updates the ConfigMap, Deployment, and
+// Service for the metadata service.
+func (r *FireboltInstanceReconciler) ensureMetadataResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	version := instance.Spec.MetadataChartVersion
-	if version == "" {
-		version = defaultMetadataChartVersion
+	configXML := buildMetadataConfigXML(instance)
+
+	if err := r.ensureMetadataConfigMap(ctx, instance, configXML); err != nil {
+		return fmt.Errorf("ensuring metadata configmap: %w", err)
 	}
 
-	ch, err := r.ChartCache.GetOrLoad(r.MetadataChartSource, version)
-	if err != nil {
-		return fmt.Errorf("loading metadata chart: %w", err)
+	if err := r.ensureMetadataDeployment(ctx, instance, configXML); err != nil {
+		return fmt.Errorf("ensuring metadata deployment: %w", err)
 	}
 
-	if err := r.ensureMetadataPostgresCredsSecret(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring metadata postgres credentials secret: %w", err)
+	if err := r.ensureMetadataService(ctx, instance); err != nil {
+		return fmt.Errorf("ensuring metadata service: %w", err)
 	}
 
-	values, err := r.buildMetadataValues(instance)
-	if err != nil {
-		return fmt.Errorf("building metadata values: %w", err)
-	}
-	releaseName := instance.Name + SuffixMetadataService
-	manifest, err := helmutil.RenderChart(ch, releaseName, instance.Namespace, values)
-	if err != nil {
-		return fmt.Errorf("rendering metadata chart: %w", err)
-	}
-
-	if err := r.applyRenderedManifest(ctx, instance, manifest); err != nil {
-		return fmt.Errorf("applying metadata manifests: %w", err)
-	}
-
-	log.Info("Metadata service chart applied", "version", version)
+	log.Info("Metadata service resources ensured")
 	return nil
 }
 
-// ensureMetadataPostgresCredsSecret creates the credentials secret that the
-// metadata Helm chart reads via existingSecret. When using internal PG, the
-// secret is already created by ensurePostgresSecret with the correct name, so
-// this is a no-op. When using external PG, it copies credentials from the
-// user-provided secret into the operator-managed secret.
-func (r *FireboltInstanceReconciler) ensureMetadataPostgresCredsSecret(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	if instance.Spec.Metadata.Postgres == nil {
-		return nil
+// metadataCredsSecretName returns the name of the Kubernetes Secret that holds
+// the PostgreSQL credentials for the metadata service. For internal PG, this
+// is the operator-created secret. For external PG, this is the user-provided
+// secret referenced in the CRD — no copy is made.
+func metadataCredsSecretName(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Spec.Metadata.Postgres != nil {
+		return instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
 	}
-
-	secretName := instance.Name + SuffixMetadataPostgresCreds
-
-	existing := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: instance.Namespace}, existing); err == nil {
-		return nil
-	} else if !errors.IsNotFound(err) {
-		return err
-	}
-
-	sourceSecretName := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
-	sourceSecret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: sourceSecretName, Namespace: instance.Namespace}, sourceSecret); err != nil {
-		return fmt.Errorf("getting source credentials secret %s: %w", sourceSecretName, err)
-	}
-
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: instance.Namespace,
-			Labels:    instanceLabels(instance.Name, "metadata"),
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"username": sourceSecret.Data["username"],
-			"password": sourceSecret.Data["password"],
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(instance, secret, r.Scheme); err != nil {
-		return err
-	}
-
-	return r.Create(ctx, secret)
+	return pgCredentialsSecretName(instance.Name)
 }
 
-func (r *FireboltInstanceReconciler) buildMetadataValues(instance *computev1alpha1.FireboltInstance) (map[string]interface{}, error) {
+func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 	pgHost := pgResourceName(instance.Name) + "." + instance.Namespace + ".svc.cluster.local"
-	pgPort := int64(PostgresPort)
+	pgPort := int32(PostgresPort)
 	pgDatabase := PostgresDBName
 
 	if instance.Spec.Metadata.Postgres != nil {
 		pgHost = instance.Spec.Metadata.Postgres.Host
-		pgPort = int64(instance.Spec.Metadata.Postgres.Port)
+		pgPort = instance.Spec.Metadata.Postgres.Port
 		if pgPort == 0 {
-			pgPort = int64(PostgresPort)
+			pgPort = int32(PostgresPort)
 		}
 		pgDatabase = instance.Spec.Metadata.Postgres.Database
 	}
 
-	values := map[string]interface{}{
-		"fullnameOverride": instance.Name + SuffixMetadataService,
-		"postgresql": map[string]interface{}{
-			"host":     pgHost,
-			"port":     pgPort,
-			"database": pgDatabase,
-			"credentials": map[string]interface{}{
-				"existingSecret": instance.Name + SuffixMetadataPostgresCreds,
-			},
+	return fmt.Sprintf(`<?xml version="1.0"?>
+<config>
+  <pensieve_lite>
+    <host>0.0.0.0</host>
+    <port>%d</port>
+    <server_threads>0</server_threads>
+    <log_level>information</log_level>
+    <metadata_storage>
+      <postgresql>
+        <host>%s</host>
+        <port>%d</port>
+        <database>%s</database>
+        <schema>public</schema>
+        <keepalive>
+          <enabled>1</enabled>
+          <idle_sec>120</idle_sec>
+          <interval_sec>30</interval_sec>
+          <count>5</count>
+        </keepalive>
+        <connect_timeout_sec>5</connect_timeout_sec>
+      </postgresql>
+      <garbage_collection>
+        <enabled>true</enabled>
+        <interval_seconds>3600</interval_seconds>
+        <max_age_seconds>86400</max_age_seconds>
+      </garbage_collection>
+    </metadata_storage>
+  </pensieve_lite>
+</config>`,
+		MetadataServicePort, pgHost, pgPort, pgDatabase)
+}
+
+func metadataConfigMapName(instanceName string) string {
+	return instanceName + SuffixMetadataService + "-config"
+}
+
+func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
+	name := metadataConfigMapName(instance.Name)
+	labels := instanceLabels(instance.Name, "metadata")
+
+	desired := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: instance.Namespace,
+			Labels:    labels,
 		},
-		"service": map[string]interface{}{
-			"type":       "ClusterIP",
-			"port":       int64(MetadataServicePort),
-			"targetPort": int64(MetadataServicePort),
+		Data: map[string]string{
+			"config.xml": configXML,
 		},
 	}
+
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+
+	existing.Data = desired.Data
+	existing.Labels = desired.Labels
+	return r.Update(ctx, existing)
+}
+
+func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
+	name := instance.Name + SuffixMetadataService
+	configMapName := metadataConfigMapName(instance.Name)
+	labels := instanceLabels(instance.Name, "metadata")
+	secretName := metadataCredsSecretName(instance)
 
 	spec := &instance.Spec.Metadata.ComponentSpec
-	if spec.Image != nil {
-		values["image"] = map[string]interface{}{
-			"repository": spec.Image.Repository,
-			"tag":        spec.Image.Tag,
-		}
-	}
+
+	var replicas int32 = 2
 	if spec.Replicas != nil {
-		dep, _ := values["deployment"].(map[string]interface{})
-		if dep == nil {
-			dep = make(map[string]interface{})
-		}
-		dep["replicas"] = int64(*spec.Replicas)
-		values["deployment"] = dep
+		replicas = *spec.Replicas
 	}
+
+	image := "dedicated-pensieve:latest"
+	pullPolicy := corev1.PullIfNotPresent
+	if spec.Image != nil {
+		image = spec.Image.Repository + ":" + spec.Image.Tag
+		pullPolicy = spec.Image.PullPolicy
+		if pullPolicy == "" {
+			pullPolicy = corev1.PullIfNotPresent
+		}
+	}
+
+	configHash := contentHash(configXML)
+
+	maxSurge := intstr.FromInt32(1)
+	maxUnavailable := intstr.FromInt32(0)
+
+	podLabels := mergeMaps(labels, spec.Labels)
+	podAnnotations := mergeMaps(map[string]string{
+		"firebolt.io/config-hash": configHash,
+	}, spec.Annotations)
+
+	desired := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: instance.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{MatchLabels: labels},
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: &maxUnavailable,
+					MaxSurge:       &maxSurge,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      podLabels,
+					Annotations: podAnnotations,
+				},
+				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: int64Ptr(30),
+					Containers: []corev1.Container{{
+						Name:            metadataContainerName,
+						Image:           image,
+						ImagePullPolicy: pullPolicy,
+						Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
+						Ports: []corev1.ContainerPort{
+							{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
+						},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{
+									Port: intstr.FromInt32(int32(MetadataServicePort)),
+								},
+							},
+							InitialDelaySeconds: 10,
+							PeriodSeconds:       15,
+							FailureThreshold:    3,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								GRPC: &corev1.GRPCAction{
+									Port:    int32(MetadataServicePort),
+									Service: strPtr(""),
+								},
+							},
+							InitialDelaySeconds: 5,
+							PeriodSeconds:       10,
+							FailureThreshold:    3,
+						},
+						Env: []corev1.EnvVar{
+							{Name: "POSTGRES_USERNAME_FILE", Value: metadataCredsMount + "/username"},
+							{Name: "POSTGRES_PASSWORD_FILE", Value: metadataCredsMount + "/password"},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "config", MountPath: metadataConfigMount, ReadOnly: true},
+							{Name: "postgres-creds", MountPath: metadataCredsMount, ReadOnly: true},
+						},
+					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: "config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+								},
+							},
+						},
+						{
+							Name: "postgres-creds",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName: secretName,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
 	if spec.Resources != nil {
-		values["resources"] = buildResourceValues(spec.Resources)
+		desired.Spec.Template.Spec.Containers[0].Resources = *spec.Resources
+	}
+	if len(spec.NodeSelector) > 0 {
+		desired.Spec.Template.Spec.NodeSelector = spec.NodeSelector
+	}
+	if len(spec.Tolerations) > 0 {
+		desired.Spec.Template.Spec.Tolerations = spec.Tolerations
+	}
+	if spec.Affinity != nil {
+		desired.Spec.Template.Spec.Affinity = spec.Affinity
 	}
 
-	if spec.ValuesOverride != nil && spec.ValuesOverride.Raw != nil {
-		if err := mergeJSONOverride(values, spec.ValuesOverride.Raw); err != nil {
-			return nil, fmt.Errorf("metadata values override: %w", err)
-		}
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return err
 	}
 
-	return values, nil
+	existing := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+
+	existing.Spec.Replicas = desired.Spec.Replicas
+	existing.Spec.Template = desired.Spec.Template
+	existing.Spec.Strategy = desired.Spec.Strategy
+	return r.Update(ctx, existing)
+}
+
+func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	name := instance.Name + SuffixMetadataService
+	labels := instanceLabels(instance.Name, "metadata")
+
+	desired := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: instance.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: labels,
+			Ports: []corev1.ServicePort{
+				{Name: "grpc", Port: int32(MetadataServicePort), TargetPort: intstr.FromInt32(int32(MetadataServicePort)), Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &corev1.Service{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+
+	existing.Spec.Ports = desired.Spec.Ports
+	existing.Spec.Selector = desired.Spec.Selector
+	return r.Update(ctx, existing)
+}
+
+// contentHash returns a truncated SHA-256 hash of the given string, used
+// as a pod-template annotation to trigger rollouts on config changes.
+func contentHash(content string) string {
+	h := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+func strPtr(v string) *string { return &v }
+
+// mergeMaps returns a new map containing all entries from base, with overrides
+// merged on top. Nil-safe: returns base if overrides is empty and vice versa.
+func mergeMaps(base, overrides map[string]string) map[string]string {
+	if len(overrides) == 0 {
+		return base
+	}
+	out := make(map[string]string, len(base)+len(overrides))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overrides {
+		out[k] = v
+	}
+	return out
 }

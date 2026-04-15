@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -95,7 +96,7 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 
 // dialMetadataService establishes a gRPC connection to the metadata service
 // via its in-cluster DNS name.
-func (r *FireboltInstanceReconciler) dialMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
+func (r *FireboltInstanceReconciler) dialMetadataService(_ context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
 	endpoint := metadataServiceEndpoint(instance.Name, instance.Namespace)
 
 	conn, err := grpc.NewClient(endpoint,
@@ -104,7 +105,7 @@ func (r *FireboltInstanceReconciler) dialMetadataService(ctx context.Context, in
 	if err != nil {
 		return nil, nil, fmt.Errorf("dialing metadata service at %s: %w", endpoint, err)
 	}
-	return conn, func() { conn.Close() }, nil
+	return conn, func() { _ = conn.Close() }, nil
 }
 
 func listAllAccounts(ctx context.Context, client adminv2.AdminServiceClient, adminTxID string) (ids []string, states []adminv2.AccountState, err error) {
@@ -116,7 +117,7 @@ func listAllAccounts(ctx context.Context, client adminv2.AdminServiceClient, adm
 	}
 	for {
 		resp, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

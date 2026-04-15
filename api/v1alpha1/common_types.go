@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -48,9 +47,8 @@ type ResourceRequirements struct {
 	Memory resource.Quantity `json:"memory"`
 }
 
-// ComponentSpec defines deployment configuration shared by sub-components
-// (gateway, metadata) that the operator deploys via embedded Helm charts.
-// Typed fields take precedence over values set in ValuesOverride.
+// ComponentSpec defines deployment configuration shared by operator-managed
+// sub-components (gateway, metadata).
 type ComponentSpec struct {
 	// Replicas is the number of pods for this component.
 	// +kubebuilder:default=2
@@ -88,11 +86,4 @@ type ComponentSpec struct {
 	// ServiceAccountName is the ServiceAccount for this component's pods.
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-
-	// ValuesOverride passes arbitrary values to the embedded Helm chart.
-	// Typed fields above take precedence over values set here.
-	// +optional
-	// +kubebuilder:pruning:PreserveUnknownFields
-	// +kubebuilder:validation:Type=object
-	ValuesOverride *apiextensionsv1.JSON `json:"valuesOverride,omitempty"`
 }

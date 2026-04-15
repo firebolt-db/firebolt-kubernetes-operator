@@ -30,10 +30,10 @@ import (
 )
 
 const (
-	testEngineName        = "test-engine"
-	testNamespace         = "default"
-	testMetadataEndpoint  = "test-instance-metadata.default.svc.cluster.local:7000"
-	testAccountID         = "test-account-id"
+	testEngineName       = "test-engine"
+	testNamespace        = "default"
+	testMetadataEndpoint = "test-instance-metadata.default.svc.cluster.local:7000"
+	testAccountID        = "test-account-id"
 )
 
 func testInstanceInfo() InstanceInfo {
@@ -67,7 +67,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 	}
 }
 
-func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam
+func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	spec := testSpec()
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -106,7 +106,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 	}
 }
 
-func makeClusterSvc(engineName string, gen int) *corev1.Service { //nolint:unparam
+func makeClusterSvc(engineName string, gen int) *corev1.Service { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      engineName + SuffixService,

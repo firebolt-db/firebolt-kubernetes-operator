@@ -1,0 +1,13 @@
+---
+description: Code quality
+alwaysApply: true
+---
+
+# Code quality
+
+Ignoring errors is forbidden and allowed only in exceptional cases.
+Add rationale in the comments when ignoring errors, or ask user if ignoring the error has important consequences.
+
+# Build
+
+Use the existing Makefile targets like `make build`; do not run `go vet`.

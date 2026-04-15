@@ -24,10 +24,6 @@ spec:
     nodeSelector:
       firebolt.dev/pool: system
     serviceAccountName: metadata
-    valuesOverride:
-      server:
-        log_level: information
-        threads: 4
 
   gateway:
     replicas: 3

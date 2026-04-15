@@ -25,6 +25,8 @@ import (
 // +kubebuilder:validation:Enum=Provisioning;Ready;Degraded;Failed
 type InstancePhase string
 
+// InstancePhaseProvisioning through InstancePhaseFailed enumerate
+// the lifecycle phases of a FireboltInstance.
 const (
 	InstancePhaseProvisioning InstancePhase = "Provisioning"
 	InstancePhaseReady        InstancePhase = "Ready"
@@ -36,6 +38,8 @@ const (
 // +kubebuilder:validation:Enum=disabled;native;openid
 type AuthMode string
 
+// AuthModeDisabled through AuthModeOpenID enumerate the supported
+// authentication modes.
 const (
 	AuthModeDisabled AuthMode = "disabled"
 	AuthModeNative   AuthMode = "native"
@@ -62,8 +66,6 @@ type PostgresSpec struct {
 }
 
 // MetadataSpec configures the metadata service.
-// The operator deploys Metadata using an embedded Helm chart, so these fields
-// map to chart values rather than raw Kubernetes pod specs.
 type MetadataSpec struct {
 	ComponentSpec `json:",inline"`
 
@@ -79,7 +81,6 @@ type MetadataSpec struct {
 }
 
 // GatewaySpec configures the gateway component.
-// The operator deploys the gateway using an embedded Helm chart.
 type GatewaySpec struct {
 	ComponentSpec `json:",inline"`
 }
@@ -124,16 +125,6 @@ type FireboltInstanceSpec struct {
 	// Auth configures authentication. If nil, authentication is disabled.
 	// +optional
 	Auth *AuthSpec `json:"auth,omitempty"`
-
-	// MetadataChartVersion is the Helm chart version for the metadata service.
-	// +kubebuilder:default="0.1.0"
-	// +optional
-	MetadataChartVersion string `json:"metadataChartVersion,omitempty"`
-
-	// GatewayChartVersion is the Helm chart version for core-gateway.
-	// +kubebuilder:default="0.1.0"
-	// +optional
-	GatewayChartVersion string `json:"gatewayChartVersion,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.

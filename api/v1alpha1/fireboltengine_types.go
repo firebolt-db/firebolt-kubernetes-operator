@@ -25,6 +25,7 @@ import (
 // +kubebuilder:validation:Enum=graceful;recreate
 type RolloutStrategy string
 
+// RolloutGraceful and RolloutRecreate define the supported rollout strategies.
 const (
 	RolloutGraceful RolloutStrategy = "graceful"
 	RolloutRecreate RolloutStrategy = "recreate"
@@ -33,6 +34,8 @@ const (
 // EnginePhase represents the current phase of the engine transition.
 type EnginePhase string
 
+// PhaseStable through PhaseCleaning enumerate the lifecycle phases
+// of a FireboltEngine during a blue-green rollout.
 const (
 	PhaseStable    EnginePhase = "stable"
 	PhaseCreating  EnginePhase = "creating"

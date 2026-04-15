@@ -24,45 +24,59 @@ import (
 )
 
 const (
-	// Label keys used by the operator
-	LabelEngine     = "firebolt.io/engine"
+	// LabelEngine identifies the engine a resource belongs to.
+	LabelEngine = "firebolt.io/engine"
+	// LabelGeneration identifies the generation of a resource.
 	LabelGeneration = "firebolt.io/generation"
-	LabelInstance   = "firebolt.io/instance"
-	LabelComponent  = "firebolt.io/component"
+	// LabelInstance identifies the instance a resource belongs to.
+	LabelInstance = "firebolt.io/instance"
+	// LabelComponent identifies the component type (metadata, gateway, etc.).
+	LabelComponent = "firebolt.io/component"
 
-	// Annotation for tracking rendered manifest content
-	AnnotationManifestHash = "firebolt.io/manifest-hash"
+	// SuffixService is appended to form the cluster Service name.
+	SuffixService = "-service"
+	// SuffixGen is appended to form generation-scoped resource names.
+	SuffixGen = "-g"
+	// SuffixHL is appended to form headless Service names.
+	SuffixHL = "-hl"
+	// SuffixConfig is appended to form ConfigMap names.
+	SuffixConfig = "-config"
+	// SuffixMetadataService is appended to form metadata Deployment/Service names.
+	SuffixMetadataService = "-metadata"
+	// SuffixMetadataPG is appended to form the internal PostgreSQL resource names.
+	SuffixMetadataPG = "-metadata-pg"
+	// SuffixMetadataPostgresCreds is appended to form the PG credentials Secret name.
+	SuffixMetadataPostgresCreds = "-metadata-postgres-creds" //nolint:gosec // resource name suffix, not a credential
+	// SuffixGateway is appended to form gateway Deployment/Service names.
+	SuffixGateway = "-gateway"
 
-	// Suffix constants for resource naming
-	SuffixService             = "-service"
-	SuffixGen                 = "-g"
-	SuffixHL                  = "-hl"
-	SuffixConfig              = "-config"
-	SuffixMetadataService     = "-metadata"
-	SuffixMetadataPG          = "-metadata-pg"
-	SuffixMetadataPostgresCreds = "-metadata-postgres-creds"
-	SuffixGateway             = "-gateway"
-
-	// Metadata service configuration
+	// MetadataServicePort is the gRPC port the metadata service listens on.
 	MetadataServicePort = 7000
-	PostgresPort        = 5432
-	PostgresImage       = "postgres:16-alpine"
-	PostgresDBName      = "firebolt_metadata"
-	PostgresUser        = "firebolt"
-	PostgresPVCSize     = "10Gi"
+	// PostgresPort is the default PostgreSQL port.
+	PostgresPort = 5432
+	// PostgresImage is the container image for the internal PostgreSQL instance.
+	PostgresImage = "postgres:16-alpine"
+	// PostgresDBName is the database name for the internal PostgreSQL instance.
+	PostgresDBName = "firebolt_metadata"
+	// PostgresUser is the database user for the internal PostgreSQL instance.
+	PostgresUser = "firebolt"
+	// PostgresPVCSize is the default PVC size for the internal PostgreSQL instance.
+	PostgresPVCSize = "10Gi"
 
-	// Container name
+	// ContainerNameEngine is the container name inside engine StatefulSet pods.
 	ContainerNameEngine = "core"
 
-	// Default drain check interval
+	// DefaultDrainCheckInterval is how often the operator polls draining pods.
 	DefaultDrainCheckInterval = 5 * time.Second
 
-	// Health check endpoints
+	// HealthReadyPath is the HTTP path for readiness probes on engine pods.
 	HealthReadyPath = "/health/ready"
-	HealthLivePath  = "/health/live"
-	HealthPort      = 8122
+	// HealthLivePath is the HTTP path for liveness probes on engine pods.
+	HealthLivePath = "/health/live"
+	// HealthPort is the port exposing health endpoints on engine pods.
+	HealthPort = 8122
 
-	// Config mount path
+	// ConfigMountPath is where the engine config.json is mounted in the container.
 	ConfigMountPath = "/firebolt-core/config.json"
 )
 

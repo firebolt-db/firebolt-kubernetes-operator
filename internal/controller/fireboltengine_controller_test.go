@@ -22,9 +22,7 @@ import (
 
 var _ = Describe("FireboltEngine Controller", func() {
 	Context("When reconciling a resource", func() {
-
 		It("should successfully reconcile the resource", func() {
-
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 		})
 	})

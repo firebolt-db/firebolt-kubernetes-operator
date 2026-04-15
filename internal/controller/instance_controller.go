@@ -18,27 +18,22 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
-	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
-	helmutil "github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/helm"
 )
 
 const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
@@ -48,10 +43,6 @@ const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
 type FireboltInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-
-	MetadataChartSource string
-	GatewayChartSource  string
-	ChartCache          *helmutil.ChartCache
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch;create;update;patch;delete
@@ -61,9 +52,15 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
+// Reconcile ensures the PostgreSQL, metadata service, account, and gateway
+// components described by a FireboltInstance are running and healthy.
 func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx).WithValues("instance", req.Name)
 
@@ -99,14 +96,14 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if instance.Spec.Metadata.Postgres == nil {
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
 			log.Error(err, "Failed to ensure PostgreSQL")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			return r.writeStatusAndRequeue(ctx, instance)
 		}
 	}
 
-	// Step 2: Ensure metadata service (via Helm chart)
-	if err := r.ensureMetadataService(ctx, instance); err != nil {
+	// Step 2: Ensure metadata service (native Go resources)
+	if err := r.ensureMetadataResources(ctx, instance); err != nil {
 		log.Error(err, "Failed to ensure metadata service")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return r.writeStatusAndRequeue(ctx, instance)
 	}
 
 	// Step 3: Check metadata readiness
@@ -132,19 +129,14 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	accountID, err := r.ensureAccountInitialized(ctx, instance)
 	if err != nil {
 		log.Error(err, "Failed to ensure account initialization")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return r.writeStatusAndRequeue(ctx, instance)
 	}
-	if instance.Status.AccountID != accountID {
-		instance.Status.AccountID = accountID
-		if err := r.Status().Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
+	instance.Status.AccountID = accountID
 
-	// Step 5: Ensure Gateway (via Helm chart)
-	if err := r.ensureGateway(ctx, instance); err != nil {
-		log.Error(err, "Failed to ensure Gateway")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// Step 5: Ensure gateway (native Go resources)
+	if err := r.ensureGatewayResources(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure gateway")
+		return r.writeStatusAndRequeue(ctx, instance)
 	}
 
 	gwReady, err := r.isGatewayReady(ctx, instance)
@@ -198,6 +190,10 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&corev1.ConfigMapList{}, "ConfigMap")
 	deleteList(&corev1.SecretList{}, "Secret")
 	deleteList(&corev1.PersistentVolumeClaimList{}, "PersistentVolumeClaim")
+	deleteList(&corev1.ServiceAccountList{}, "ServiceAccount")
+	deleteList(&rbacv1.RoleList{}, "Role")
+	deleteList(&rbacv1.RoleBindingList{}, "RoleBinding")
+	deleteList(&policyv1.PodDisruptionBudgetList{}, "PodDisruptionBudget")
 
 	if len(errs) > 0 {
 		return ctrl.Result{}, fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
@@ -253,9 +249,47 @@ func extractItems(list client.ObjectList) []client.Object {
 			out[i] = &l.Items[i]
 		}
 		return out
+	case *corev1.ServiceAccountList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *rbacv1.RoleList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *rbacv1.RoleBindingList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *policyv1.PodDisruptionBudgetList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
 	default:
 		return nil
 	}
+}
+
+// writeStatusAndRequeue persists the current in-memory status (including any
+// fields set earlier in the reconcile loop) and requeues. This ensures that
+// partial progress (e.g., MetadataReady becoming true) is visible to dependent
+// engines even when a later step fails.
+const statusRequeueInterval = 10 * time.Second
+
+func (r *FireboltInstanceReconciler) writeStatusAndRequeue(ctx context.Context, instance *computev1alpha1.FireboltInstance) (ctrl.Result, error) {
+	instance.Status.Phase = r.computePhase(instance)
+	if err := r.Status().Update(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: statusRequeueInterval}, nil
 }
 
 // computePhase derives the instance phase from the current readiness signals.
@@ -307,117 +341,18 @@ func instanceLabels(instanceName, component string) map[string]string {
 	}
 }
 
-// manifestHash returns a truncated SHA-256 hash of the given content.
-func manifestHash(content string) string {
-	h := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(h[:])[:16]
-}
-
-// applyRenderedManifest decodes a multi-document YAML string and creates or
-// updates each resource. Resources are labelled with the instance name and
-// annotated with a content hash to skip no-op updates.
-func (r *FireboltInstanceReconciler) applyRenderedManifest(ctx context.Context, instance *computev1alpha1.FireboltInstance, manifest string) error {
-	log := logf.FromContext(ctx)
-	hash := manifestHash(manifest)
-
-	decoder := yamlutil.NewYAMLOrJSONDecoder(strings.NewReader(manifest), 4096)
-	for {
-		obj := &unstructured.Unstructured{}
-		if err := decoder.Decode(obj); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("decoding manifest: %w", err)
-		}
-
-		if obj.GetKind() == "" {
-			continue
-		}
-
-		obj.SetNamespace(instance.Namespace)
-
-		labels := obj.GetLabels()
-		if labels == nil {
-			labels = make(map[string]string)
-		}
-		labels[LabelInstance] = instance.Name
-		obj.SetLabels(labels)
-
-		annotations := obj.GetAnnotations()
-		if annotations == nil {
-			annotations = make(map[string]string)
-		}
-		annotations[AnnotationManifestHash] = hash
-		obj.SetAnnotations(annotations)
-
-		if err := controllerutil.SetControllerReference(instance, obj, r.Scheme); err != nil {
-			return fmt.Errorf("setting owner reference on %s/%s: %w", obj.GetKind(), obj.GetName(), err)
-		}
-
-		existing := &unstructured.Unstructured{}
-		existing.SetGroupVersionKind(obj.GroupVersionKind())
-		err := r.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, existing)
-		if errors.IsNotFound(err) {
-			if err := r.Create(ctx, obj); err != nil {
-				return fmt.Errorf("creating %s/%s: %w", obj.GetKind(), obj.GetName(), err)
-			}
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("getting %s/%s: %w", obj.GetKind(), obj.GetName(), err)
-		}
-
-		existingHash := existing.GetAnnotations()[AnnotationManifestHash]
-		if existingHash == hash {
-			continue
-		}
-
-		log.Info("Updating instance resource",
-			"kind", obj.GetKind(), "name", obj.GetName())
-
-		for key, value := range obj.Object {
-			if key == "metadata" || key == "status" {
-				continue
-			}
-			existing.Object[key] = value
-		}
-
-		existingAnnotations := existing.GetAnnotations()
-		if existingAnnotations == nil {
-			existingAnnotations = make(map[string]string)
-		}
-		existingAnnotations[AnnotationManifestHash] = hash
-		existing.SetAnnotations(existingAnnotations)
-
-		existingLabels := existing.GetLabels()
-		if existingLabels == nil {
-			existingLabels = make(map[string]string)
-		}
-		for k, v := range obj.GetLabels() {
-			existingLabels[k] = v
-		}
-		existing.SetLabels(existingLabels)
-
-		if err := r.Update(ctx, existing); err != nil {
-			return fmt.Errorf("updating %s/%s: %w", obj.GetKind(), obj.GetName(), err)
-		}
-	}
-
-	return nil
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if r.ChartCache == nil {
-		r.ChartCache = helmutil.NewChartCache()
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&rbacv1.Role{}).
+		Owns(&rbacv1.RoleBinding{}).
+		Owns(&policyv1.PodDisruptionBudget{}).
 		Named("fireboltinstance").
 		Complete(r)
 }

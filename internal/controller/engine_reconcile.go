@@ -68,6 +68,9 @@ func computeEngineReconcile(
 		computeDraining(spec, &result, current)
 	case computev1alpha1.PhaseCleaning:
 		computeCleaning(&result, current)
+	default:
+		result.Status.Phase = computev1alpha1.PhaseStable
+		result.Requeue = true
 	}
 
 	now := metav1.Now()
@@ -105,17 +108,9 @@ func computeStable(
 
 	gen := status.ActiveGeneration
 
-	needsNewGen := false
-
-	if current.CurrentSTS == nil {
-		needsNewGen = true
-	} else if !stsMatchesSpec(current.CurrentSTS, spec) {
-		needsNewGen = true
-	}
-
-	if current.CurrentHeadlessSvc == nil {
-		needsNewGen = true
-	}
+	needsNewGen := current.CurrentSTS == nil ||
+		!stsMatchesSpec(current.CurrentSTS, spec) ||
+		current.CurrentHeadlessSvc == nil
 
 	if needsNewGen {
 		newGen := status.CurrentGeneration + 1

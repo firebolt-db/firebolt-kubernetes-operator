@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,24 +74,25 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		state.DrainingHeadlessSvc = r.getHeadlessService(ctx, engineName, ns, drainingGen)
 
 		drainCheckDisabled := engine.Spec.DrainCheckEnabled != nil && !*engine.Spec.DrainCheckEnabled
+		skipDrain := state.DrainingSTS == nil ||
+			engine.Spec.Rollout == computev1alpha1.RolloutRecreate ||
+			drainCheckDisabled
 
-		if state.DrainingSTS != nil && (engine.Spec.Rollout == computev1alpha1.RolloutRecreate || drainCheckDisabled) {
+		if skipDrain {
 			state.DrainingPodsDrained = true
-		} else if state.DrainingSTS != nil {
+		} else {
 			drained, err := r.checkDrainComplete(ctx, engine, drainingGen)
 			if err != nil {
 				return state, fmt.Errorf("checkDrainComplete (gen %d): %w", drainingGen, err)
 			}
 			state.DrainingPodsDrained = drained
-		} else {
-			state.DrainingPodsDrained = true
 		}
 	}
 
 	clusterSvcName := engineName + SuffixService
 	clusterSvc := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterSvcName, Namespace: ns}, clusterSvc); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			return state, fmt.Errorf("failed to get cluster service: %w", err)
 		}
 	} else {
@@ -150,7 +152,8 @@ func (r *FireboltEngineReconciler) checkPodsReady(ctx context.Context, engine *c
 	}
 
 	notReady := 0
-	for _, pod := range podList.Items {
+	for i := range podList.Items {
+		pod := &podList.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
 			notReady++
 			continue
@@ -192,12 +195,13 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 		return true, nil
 	}
 
-	for _, pod := range podList.Items {
+	for i := range podList.Items {
+		pod := &podList.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
 
-		drained, err := r.isPodDrained(ctx, &pod)
+		drained, err := r.isPodDrained(ctx, pod)
 		if err != nil {
 			log.Info("Drain check failed for pod", "pod", pod.Name, "error", err)
 			return false, nil
@@ -216,7 +220,7 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 
 func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	if r.Clientset == nil || r.RestConfig == nil {
-		return false, fmt.Errorf("clientset or rest config not initialized")
+		return false, errors.New("clientset or rest config not initialized")
 	}
 
 	cmd := []string{

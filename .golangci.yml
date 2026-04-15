@@ -134,6 +134,23 @@ linters:
           - gosec
           - forcetypeassert
         path: _test\.go
+      # Ginkgo and Gomega are designed around dot imports; this is the standard
+      # usage pattern endorsed by the frameworks' documentation.
+      - linters:
+          - revive
+        path: _test\.go
+        text: "dot-imports"
+      # json:",inline" is standard Kubernetes CRD embedding for TypeMeta,
+      # ObjectMeta, and spec composition; revive incorrectly flags it.
+      - linters:
+          - revive
+        text: "unknown option \"inline\" in json tag"
+      # Test helpers run kubectl and kind as subprocesses; these are not
+      # user-facing and don't need CommandContext or input sanitization.
+      - linters:
+          - gosec
+          - noctx
+        path: test/testhelpers/
       - linters:
           - dupl
           - lll

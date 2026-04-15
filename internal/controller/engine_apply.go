@@ -35,7 +35,7 @@ import (
 // applyEngineState writes the EngineReconcileResult to the cluster: ensures
 // resources exist, deletes stale ones, and updates the engine status.
 // All operations are idempotent.
-func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine, result EngineReconcileResult) error {
+func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine, result *EngineReconcileResult) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
 	if result.EnsureConfigMap != nil {
@@ -101,6 +101,7 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 		if newPhase == computev1alpha1.PhaseStable {
 			MaybeCrash(engine.Name, CrashBeforeCleaningToStable)
 		}
+	default:
 	}
 
 	engine.Status = result.Status

@@ -195,7 +195,6 @@ Specific policies:
 | Resource list/delete during cleanup | Errors are logged, collected, and aggregated. The finalizer is only removed when all cleanup operations succeed. This prevents premature garbage collection when the API server is unhealthy. |
 | Pod readiness and drain checks | Errors are propagated from `checkPodsReady` and `checkDrainComplete` rather than defaulting to "not ready". This surfaces API failures rather than masking them as slow rollouts. |
 | JSON marshalling | Config values passed to `json.MarshalIndent` are always well-typed maps. The error path is unreachable and guarded with a panic to catch programming bugs immediately. |
-| Helm values override | `mergeJSONOverride` returns an error if the user-provided JSON is malformed, which propagates to the reconciler and prevents applying a chart with silently-ignored overrides. |
 | Terminal errors | Unrecoverable conditions (e.g. multiple accounts in metadata service) set the instance phase to `Failed` and surface the error, rather than entering an infinite retry loop. |
 
 ## Status update strategy
@@ -242,7 +241,7 @@ The `FireboltInstanceReconciler` manages the infrastructure that engines depend 
        ▼           ▼              ▼              ▼
 ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────────┐
 │ PostgreSQL│ │ Metadata │ │ Account   │ │ Gateway      │
-│ (native)  │ │ (Helm)   │ │ Init      │ │ (Helm)       │
+│ (native)  │ │ (native) │ │ Init      │ │ (native)     │
 │           │ │          │ │ (gRPC)    │ │              │
 │ instance_ │ │ instance_│ │ instance_ │ │ instance_    │
 │ postgres  │ │ metadata │ │ account_  │ │ gateway.go   │
@@ -257,10 +256,10 @@ Each `Reconcile` call runs through five sequential steps. If any step fails, the
 | Step | Description | Implementation |
 |---|---|---|
 | 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
-| 2. Ensure metadata service | Loads the metadata Helm chart via `ChartCache`, renders it with values derived from the instance spec (PG connection, image, replicas, resources), and applies the resulting manifests. | `instance_metadata.go` |
+| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
 | 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures exactly one active account exists. If the account exists but is not active (e.g. a previous activation was interrupted), the operator retries activation. Multiple accounts trigger a terminal `Failed` phase. Persists the `accountId` in instance status. | `instance_account_init.go` |
-| 5. Ensure Gateway | Loads the `core-gateway` Helm chart via `ChartCache`, renders it with organization and routing values, and applies the resulting manifests. | `instance_gateway.go` |
+| 5. Ensure Gateway | Creates ConfigMap (YAML config), ServiceAccount, Role, RoleBinding, Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the gateway. Values are derived from the instance spec and account ID. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
 ### Instance lifecycle phases
 
@@ -284,37 +283,6 @@ The instance starts in `Provisioning` and transitions to `Ready` once both the m
 The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone (e.g. multiple accounts found in the metadata service). The operator continues to requeue but will not transition out of `Failed` without manual intervention.
 
 When the metadata service or gateway becomes not-ready, the operator clears the corresponding endpoint from the instance status (`metadataEndpoint` or `gatewayEndpoint`). This ensures that dependent engines observe consistent state and block until the instance is fully operational again.
-
-### Helm chart loading and caching
-
-The operator does not ship chart sources. Charts are fetched at runtime from a local filesystem path (for development) or an OCI registry (production), configured via operator flags:
-
-```
---metadata-chart-source=oci://ghcr.io/firebolt-db/dedicated-pensieve
---gateway-chart-source=oci://ghcr.io/firebolt-db/core-gateway
-```
-
-The chart version is specified per-instance via `spec.metadataChartVersion` and `spec.gatewayChartVersion` (default: `0.1.0`).
-
-Charts are cached in memory using a version-keyed cache (`internal/helm/loader.go`):
-
-| Behaviour | Detail |
-|---|---|
-| Cache key | `<source>:<version>` |
-| Cache miss | Pull from OCI registry or load from local path, store in cache |
-| Cache hit | Return immediately, update `lastUsed` timestamp |
-| Eviction | Entries unused for 7+ days are evicted whenever a new chart is loaded |
-
-### Manifest application
-
-Rendered Helm manifests are applied using a content-hash-based idempotent strategy (`applyRenderedManifest` in `instance_controller.go`):
-
-1. The entire rendered YAML is hashed (SHA-256, truncated to 16 hex chars).
-2. Each decoded resource is annotated with `firebolt.io/manifest-hash`.
-3. On create: the resource is created with the hash annotation.
-4. On update: if the existing resource's hash matches, the update is skipped. Otherwise, the spec fields are patched and the hash is updated.
-
-This avoids unnecessary writes when the rendered output has not changed.
 
 ### Integration with engine reconciler
 

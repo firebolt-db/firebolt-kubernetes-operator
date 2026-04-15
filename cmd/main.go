@@ -53,7 +53,6 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-// nolint:gocyclo
 func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -63,8 +62,6 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var watchNamespace string
-	var metadataChartSource string
-	var gatewayChartSource string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -85,10 +82,6 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&watchNamespace, "namespace", "",
 		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
-	flag.StringVar(&metadataChartSource, "metadata-chart-source", "oci://ghcr.io/firebolt-db/dedicated-pensieve",
-		"Helm chart source for the metadata service (local path or oci:// URI)")
-	flag.StringVar(&gatewayChartSource, "gateway-chart-source", "oci://ghcr.io/firebolt-db/core-gateway",
-		"Helm chart source for core-gateway (local path or oci:// URI)")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -118,7 +111,7 @@ func main() {
 		TLSOpts: webhookTLSOpts,
 	}
 
-	if len(webhookCertPath) > 0 {
+	if webhookCertPath != "" {
 		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
 			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
 
@@ -155,7 +148,7 @@ func main() {
 	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
 	// managed by cert-manager for the metrics server.
 	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
-	if len(metricsCertPath) > 0 {
+	if metricsCertPath != "" {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
 
@@ -208,10 +201,8 @@ func main() {
 	}
 
 	if err := (&controller.FireboltInstanceReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		MetadataChartSource: metadataChartSource,
-		GatewayChartSource:  gatewayChartSource,
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)

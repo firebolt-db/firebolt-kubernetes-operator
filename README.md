@@ -105,22 +105,18 @@ All associated resources are cleaned up automatically.
 | `spec.metadata.postgres.port` | No | `5432` | PostgreSQL port |
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
-| `spec.metadata.image` | No | (chart default) | Override the metadata service container image |
+| `spec.metadata.image` | No | (operator default) | Override the metadata service container image |
 | `spec.metadata.replicas` | No | `2` | Number of metadata service pods |
-| `spec.metadata.resources` | No | (chart default) | CPU/memory for metadata service pods |
+| `spec.metadata.resources` | No | (operator default) | CPU/memory for metadata service pods |
 | `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
-| `spec.metadata.valuesOverride` | No | - | Raw JSON passed to the metadata Helm chart (typed fields take precedence) |
 | `spec.gateway` | **Yes** | - | Gateway configuration (can be empty `{}` for defaults) |
-| `spec.gateway.image` | No | (chart default) | Override the gateway container image |
+| `spec.gateway.image` | No | (operator default) | Override the gateway container image |
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods |
-| `spec.gateway.resources` | No | (chart default) | CPU/memory for gateway pods |
+| `spec.gateway.resources` | No | (operator default) | CPU/memory for gateway pods |
 | `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |
-| `spec.gateway.valuesOverride` | No | - | Raw JSON passed to the gateway Helm chart |
 | `spec.auth` | No | disabled | Authentication configuration |
 | `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
 | `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |
-| `spec.metadataChartVersion` | No | `0.1.0` | Helm chart version for the metadata service |
-| `spec.gatewayChartVersion` | No | `0.1.0` | Helm chart version for the gateway |
 
 \* Required when the parent field is set.
 
@@ -307,8 +303,6 @@ spec:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--namespace` | (all) | Namespace to watch. Watches all namespaces if empty |
-| `--metadata-chart-source` | `oci://ghcr.io/firebolt-db/dedicated-pensieve` | OCI registry or local path for the metadata Helm chart |
-| `--gateway-chart-source` | `oci://ghcr.io/firebolt-db/core-gateway` | OCI registry or local path for the gateway Helm chart |
 | `--metrics-bind-address` | `0` | Address for the metrics endpoint |
 | `--health-probe-bind-address` | `:8081` | Address for health probes |
 | `--leader-elect` | `false` | Enable leader election for HA deployments |
