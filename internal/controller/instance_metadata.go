@@ -170,7 +170,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		replicas = *instance.Spec.Metadata.Replicas
 	}
 
-	image := "dedicated-pensieve:latest"
+	image := DefaultMetadataImage
 	pullPolicy := corev1.PullIfNotPresent
 	if spec.Image != nil {
 		image = spec.Image.Repository + ":" + spec.Image.Tag

@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Load required Docker images into Kind cluster for e2e testing.
-# All image values come from test/e2e/defaults.env (single source of truth).
+# All image values come from config/images/defaults.env (single source of truth).
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../test/e2e/defaults.env
-source "${SCRIPT_DIR}/../test/e2e/defaults.env"
+# shellcheck source=../config/images/defaults.env
+source "${SCRIPT_DIR}/../config/images/defaults.env"
 
 OPERATOR_IMAGE="controller:latest"
 
@@ -27,19 +27,19 @@ fi
 
 # Build list of images to load
 declare -a IMAGES=(
-    "${TEST_ENGINE_IMAGE}:${TEST_ENGINE_TAG}"
-    "${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_TAG}"
-    "${TEST_POSTGRES_IMAGE}"
-    "${TEST_ENVOY_IMAGE}:${TEST_ENVOY_TAG}"
-    "${TEST_CURL_IMAGE}"
+    "${ENGINE_IMAGE}:${ENGINE_TAG}"
+    "${PENSIEVE_IMAGE}:${PENSIEVE_TAG}"
+    "${POSTGRES_IMAGE}"
+    "${ENVOY_IMAGE}:${ENVOY_TAG}"
+    "${CURL_IMAGE}"
 )
 
 # Add new tags if different from current tags (for upgrade/switch tests)
-if [[ "${TEST_ENGINE_NEW_TAG}" != "${TEST_ENGINE_TAG}" ]]; then
-    IMAGES+=("${TEST_ENGINE_IMAGE}:${TEST_ENGINE_NEW_TAG}")
+if [[ "${ENGINE_NEW_TAG}" != "${ENGINE_TAG}" ]]; then
+    IMAGES+=("${ENGINE_IMAGE}:${ENGINE_NEW_TAG}")
 fi
-if [[ "${TEST_PENSIEVE_NEW_TAG}" != "${TEST_PENSIEVE_TAG}" ]]; then
-    IMAGES+=("${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_NEW_TAG}")
+if [[ "${PENSIEVE_NEW_TAG}" != "${PENSIEVE_TAG}" ]]; then
+    IMAGES+=("${PENSIEVE_IMAGE}:${PENSIEVE_NEW_TAG}")
 fi
 
 # Pull and load each image

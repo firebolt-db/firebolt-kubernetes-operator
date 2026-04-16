@@ -20,7 +20,6 @@ limitations under the License.
 package e2e
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -43,6 +42,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"github.com/firebolt-analytics/firebolt-kubernetes-operator/config/images"
 )
 
 const (
@@ -71,45 +72,16 @@ var (
 )
 
 func init() {
-	defaults := loadDefaults()
-	testImage = defaults["TEST_ENGINE_IMAGE"]
-	testTag = defaults["TEST_ENGINE_TAG"]
-	newImageTag = defaults["TEST_ENGINE_NEW_TAG"]
-	pensieveImage = defaults["TEST_PENSIEVE_IMAGE"]
-	pensieveTag = defaults["TEST_PENSIEVE_TAG"]
-	newPensieveTag = defaults["TEST_PENSIEVE_NEW_TAG"]
-	postgresImage = defaults["TEST_POSTGRES_IMAGE"]
-	envoyImage = defaults["TEST_ENVOY_IMAGE"]
-	envoyTag = defaults["TEST_ENVOY_TAG"]
-	curlImage = defaults["TEST_CURL_IMAGE"]
-}
-
-// loadDefaults reads key=value pairs from defaults.env next to this source file.
-func loadDefaults() map[string]string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	path := filepath.Join(filepath.Dir(thisFile), "defaults.env")
-	f, err := os.Open(path)
-	if err != nil {
-		panic(fmt.Sprintf("cannot open defaults.env: %v", err))
-	}
-	defer f.Close()
-
-	m := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if ok {
-			m[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		panic(fmt.Sprintf("cannot read defaults.env: %v", err))
-	}
-	return m
+	testImage = images.Get("ENGINE_IMAGE")
+	testTag = images.Get("ENGINE_TAG")
+	newImageTag = images.Get("ENGINE_NEW_TAG")
+	pensieveImage = images.Get("PENSIEVE_IMAGE")
+	pensieveTag = images.Get("PENSIEVE_TAG")
+	newPensieveTag = images.Get("PENSIEVE_NEW_TAG")
+	postgresImage = images.Get("POSTGRES_IMAGE")
+	envoyImage = images.Get("ENVOY_IMAGE")
+	envoyTag = images.Get("ENVOY_TAG")
+	curlImage = images.Get("CURL_IMAGE")
 }
 
 var (

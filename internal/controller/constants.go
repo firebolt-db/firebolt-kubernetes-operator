@@ -21,6 +21,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"github.com/firebolt-analytics/firebolt-kubernetes-operator/config/images"
 )
 
 const (
@@ -54,8 +56,6 @@ const (
 	MetadataServicePort = 7000
 	// PostgresPort is the default PostgreSQL port.
 	PostgresPort = 5432
-	// PostgresImage is the container image for the internal PostgreSQL instance.
-	PostgresImage = "postgres:16-alpine"
 	// PostgresDBName is the database name for the internal PostgreSQL instance.
 	PostgresDBName = "firebolt_metadata"
 	// PostgresUser is the database user for the internal PostgreSQL instance.
@@ -78,6 +78,13 @@ const (
 
 	// ConfigMountPath is where the engine config.json is mounted in the container.
 	ConfigMountPath = "/firebolt-core/config.json"
+)
+
+// Default container images, sourced from config/images/defaults.env.
+var (
+	PostgresImage        = images.PostgresImage
+	DefaultMetadataImage = images.DefaultMetadata()
+	DefaultEnvoyImage    = images.DefaultEnvoy()
 )
 
 // DrainCheckSQL is the SQL query used to check if a node has finished serving queries.

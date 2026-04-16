@@ -217,7 +217,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *spec.Replicas
 	}
 
-	image := "envoyproxy/envoy:v1.33-latest"
+	image := DefaultEnvoyImage
 	pullPolicy := corev1.PullIfNotPresent
 	if spec.Image != nil {
 		image = spec.Image.Repository + ":" + spec.Image.Tag
