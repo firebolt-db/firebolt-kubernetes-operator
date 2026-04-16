@@ -34,18 +34,6 @@ const (
 	InstancePhaseFailed       InstancePhase = "Failed"
 )
 
-// AuthMode defines the authentication mode for the Firebolt Instance.
-// +kubebuilder:validation:Enum=disabled;native;openid
-type AuthMode string
-
-// AuthModeDisabled through AuthModeOpenID enumerate the supported
-// authentication modes.
-const (
-	AuthModeDisabled AuthMode = "disabled"
-	AuthModeNative   AuthMode = "native"
-	AuthModeOpenID   AuthMode = "openid"
-)
-
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
 type PostgresSpec struct {
 	// Host is the PostgreSQL server hostname or IP.
@@ -85,46 +73,13 @@ type GatewaySpec struct {
 	ComponentSpec `json:",inline"`
 }
 
-// OIDCSpec configures OpenID Connect authentication.
-type OIDCSpec struct {
-	// IssuerURL is the OIDC provider's issuer URL.
-	// +kubebuilder:validation:MinLength=1
-	IssuerURL string `json:"issuerURL"`
-
-	// ClientID is the OIDC client identifier.
-	// +kubebuilder:validation:MinLength=1
-	ClientID string `json:"clientID"`
-
-	// ClientSecretRef references a Secret containing the OIDC client secret.
-	// +optional
-	ClientSecretRef *corev1.LocalObjectReference `json:"clientSecretRef,omitempty"`
-
-	// ClaimMappings maps OIDC claims to Firebolt user attributes (e.g. {"username": "email"}).
-	// +optional
-	ClaimMappings map[string]string `json:"claimMappings,omitempty"`
-}
-
-// AuthSpec configures authentication for the Firebolt Instance.
-type AuthSpec struct {
-	// Mode is the authentication mode.
-	Mode AuthMode `json:"mode"`
-
-	// OIDC configures OpenID Connect. Required when mode is "openid".
-	// +optional
-	OIDC *OIDCSpec `json:"oidc,omitempty"`
-}
-
 // FireboltInstanceSpec defines the desired state of a Firebolt Instance.
 type FireboltInstanceSpec struct {
 	// Metadata configures the metadata service.
 	Metadata MetadataSpec `json:"metadata"`
 
-	// Gateway configures the query routing gateway.
+	// Gateway configures the query routing gateway (Envoy proxy).
 	Gateway GatewaySpec `json:"gateway"`
-
-	// Auth configures authentication. If nil, authentication is disabled.
-	// +optional
-	Auth *AuthSpec `json:"auth,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.

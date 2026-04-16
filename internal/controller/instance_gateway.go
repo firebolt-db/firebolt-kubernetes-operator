@@ -93,14 +93,6 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 }
 
 func buildGatewayConfigYAML(instance *computev1alpha1.FireboltInstance) string {
-	authEnabled := instance.Spec.Auth != nil && instance.Spec.Auth.Mode == computev1alpha1.AuthModeOpenID
-
-	// deployment_suffix must match the engine StatefulSet naming pattern used
-	// by genResourceName: "{engine}-g{N}". The gateway discovers per-node
-	// resources as "{engine}{suffix}{N}" (no extra separator). Features that
-	// depend on this (autoscaler, rendezvous_routing, autochaos) are currently
-	// incompatible with the operator's StatefulSet-based engine model and must
-	// remain disabled.
 	return fmt.Sprintf(`organization:
   account_id: %q
   namespace: %q
@@ -112,7 +104,7 @@ http_server:
   shutdown_delay: 5s
   shutdown_timeout: 30s
 auth:
-  enabled: %t
+  enabled: false
 telemetry:
   log_level: "info"
   log_all_requests: false
@@ -125,7 +117,6 @@ filter_headers: true
 		instance.Status.AccountID,
 		instance.Namespace,
 		gatewayContainerPort,
-		authEnabled,
 	)
 }
 
