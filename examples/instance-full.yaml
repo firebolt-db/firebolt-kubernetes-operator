@@ -27,22 +27,9 @@ spec:
 
   gateway:
     replicas: 3
-    image:
-      repository: "ghcr.io/firebolt-analytics/core-gateway"
-      tag: "1.0.0"
     resources:
       requests:
         cpu: "100m"
         memory: "256Mi"
     nodeSelector:
       firebolt.dev/pool: system
-
-  auth:
-    mode: openid
-    oidc:
-      issuerURL: "https://company.okta.com/oauth2/default"
-      clientID: "firebolt"
-      clientSecretRef:
-        name: oidc-client-secret
-      claimMappings:
-        username: "email"

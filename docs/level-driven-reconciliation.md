@@ -240,7 +240,7 @@ All per-engine resources have:
 
 ## FireboltInstance reconciler
 
-The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, the core-gateway, and account initialization. It follows the same level-triggered principles as the engine reconciler.
+The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, the Envoy gateway proxy, and account initialization. It follows the same level-triggered principles as the engine reconciler.
 
 ### Architecture
 
@@ -272,7 +272,7 @@ Each `Reconcile` call runs through five sequential steps. If any step fails, the
 | 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
 | 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures exactly one active account exists. If the account exists but is not active (e.g. a previous activation was interrupted), the operator retries activation. Multiple accounts trigger a terminal `Failed` phase. Persists the `accountId` in instance status. | `instance_account_init.go` |
-| 5. Ensure Gateway | Creates ConfigMap (YAML config), ServiceAccount, Role, RoleBinding, Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the gateway. Values are derived from the instance spec and account ID. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
+| 5. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
 ### Instance lifecycle phases
 
@@ -325,27 +325,25 @@ All resources created by the instance reconciler have:
 
 ## Gateway query routing
 
-The gateway acts as the entry point for client queries. It discovers engine Services by naming convention and routes requests to the correct engine.
+The Envoy gateway proxy acts as the entry point for client queries. It uses a Lua filter to extract the engine name from the `X-Firebolt-Engine` request header and a dynamic forward proxy to resolve the engine's ClusterIP Service via DNS.
 
 ### Configuration
 
-The gateway ConfigMap (`{instance}-gateway-config`) contains a YAML configuration with key discovery parameters:
+The gateway ConfigMap (`{instance}-gateway-config`) contains a static Envoy configuration (`envoy.yaml`) with:
 
-| Key | Value | Description |
-|-----|-------|-------------|
-| `internal_service_suffix` | `"-service"` | Appended to engine name to form the Service name |
-| `internal_service_port` | `3473` | Port of the engine Service |
-| `deployment_suffix` | `"-g"` | Used for per-node resource discovery (StatefulSet naming pattern) |
+- A Lua HTTP filter that reads `X-Firebolt-Engine` and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`
+- A dynamic forward proxy cluster that resolves the rewritten hostname via DNS
+- An admin listener on port 9901 for health checks
 
-The gateway resolves engine endpoints as `{engine-name}-service:{port}` within the same namespace.
+The gateway resolves engine endpoints as `{engine-name}-service:3473` within the same namespace.
 
 ### Traffic path
 
 ```
-Client → Gateway Service (:80) → Engine Service (:3473) → Engine Pod
+Client (X-Firebolt-Engine: my-engine) → Gateway Service (:80) → Envoy (:8080) → my-engine-service:3473 → Engine Pod
 ```
 
-The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `maxUnavailable: 0`, ensuring zero downtime during gateway image upgrades.
+The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `maxUnavailable: 0`, ensuring zero downtime during gateway upgrades.
 
 ---
 
