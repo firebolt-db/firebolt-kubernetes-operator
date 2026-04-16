@@ -51,7 +51,8 @@ type ResourceRequirements struct {
 // sub-components (gateway, metadata).
 type ComponentSpec struct {
 	// Replicas is the number of pods for this component.
-	// +kubebuilder:default=2
+	// When nil, the controller applies a component-specific default
+	// (1 for metadata, 2 for gateway).
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 

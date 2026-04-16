@@ -4,12 +4,29 @@ on:
   pull_request:
 
 jobs:
+  plan:
+    name: Plan E2E matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.groups.outputs.matrix }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+      - name: Extract test groups
+        id: groups
+        run: echo "matrix=$(./scripts/extract-e2e-groups.sh 4)" >> "$GITHUB_OUTPUT"
+
   test-e2e:
-    name: Run on Ubuntu
+    name: "E2E (${{ matrix.name }})"
+    needs: plan
     runs-on: ubuntu-22.04-14-cores-54gb-amd64
     permissions:
       id-token: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - name: Generate app token
         id: generate_token
@@ -43,9 +60,24 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
-      - name: Running Test e2e
+      - name: Prepare Kind cluster and images
         run: |
           go mod tidy
-          make test-e2e
+          make prepare-test-e2e KIND_CLUSTER="e2e-${{ matrix.name }}"
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
+
+      - name: Running E2E tests (${{ matrix.name }})
+        run: make test-e2e KIND_CLUSTER="e2e-${{ matrix.name }}" GINKGO_FOCUS="${{ matrix.focus }}"
+        env:
+          GOPRIVATE: github.com/firebolt-analytics/*
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ matrix.name }}
+          path: |
+            e2e-report.xml
+            test.log
+          retention-days: 7

@@ -1059,9 +1059,13 @@ func WaitForInstanceMetadataImage(ctx context.Context, instanceName, expectedTag
 	for time.Now().Before(deadline) {
 		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
 		if err == nil {
+			desired := int32(1)
+			if dep.Spec.Replicas != nil {
+				desired = *dep.Spec.Replicas
+			}
 			for _, c := range dep.Spec.Template.Spec.Containers {
 				if strings.Contains(c.Image, expectedTag) {
-					if dep.Status.ReadyReplicas == *dep.Spec.Replicas && dep.Status.UpdatedReplicas == *dep.Spec.Replicas {
+					if dep.Status.ReadyReplicas == desired && dep.Status.UpdatedReplicas == desired {
 						return nil
 					}
 				}
@@ -1080,9 +1084,13 @@ func WaitForInstanceGatewayImage(ctx context.Context, instanceName, expectedTag 
 	for time.Now().Before(deadline) {
 		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
 		if err == nil {
+			desired := int32(1)
+			if dep.Spec.Replicas != nil {
+				desired = *dep.Spec.Replicas
+			}
 			for _, c := range dep.Spec.Template.Spec.Containers {
 				if strings.Contains(c.Image, expectedTag) {
-					if dep.Status.ReadyReplicas == *dep.Spec.Replicas && dep.Status.UpdatedReplicas == *dep.Spec.Replicas {
+					if dep.Status.ReadyReplicas == desired && dep.Status.UpdatedReplicas == desired {
 						return nil
 					}
 				}

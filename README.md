@@ -106,7 +106,7 @@ All associated resources are cleaned up automatically.
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
 | `spec.metadata.image` | No | (operator default) | Override the metadata service container image |
-| `spec.metadata.replicas` | No | `2` | Number of metadata service pods |
+| `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported) |
 | `spec.metadata.resources` | No | (operator default) | CPU/memory for metadata service pods |
 | `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
 | `spec.gateway` | **Yes** | - | Gateway configuration (can be empty `{}` for defaults) |
@@ -167,7 +167,7 @@ spec:
     image:
       repository: "ghcr.io/firebolt-analytics/dedicated-pensieve"
       tag: "1.0.0"
-    replicas: 2
+    replicas: 1
     resources:
       requests:
         cpu: "200m"
@@ -361,11 +361,27 @@ This runs the controller unit tests and envtest suite, excluding the `test/e2e/`
 
 **E2E tests** (requires a Kind cluster):
 
+First-time setup — create a Kind cluster and load the required container images:
+
+```bash
+make prepare-test-e2e
+```
+
+Then run the tests (the operator starts in-process, no deployment needed):
+
 ```bash
 make test-e2e
 ```
 
-This sets up a Kind cluster, builds and loads the operator image, deploys the operator, and runs the full e2e suite with a lightweight query configuration. The e2e suite uses the `e2e` build tag, which also activates crash-point injection in the controller for crash-recovery testing.
+On subsequent runs, only `make test-e2e` is needed — it reuses the existing cluster. Re-run `make prepare-test-e2e` if you change the test images in `test/e2e/defaults.env`.
+
+To run a subset of tests:
+
+```bash
+make test-e2e GINKGO_FOCUS="Single Node Engine"
+```
+
+The e2e suite uses the `e2e` build tag, which also activates crash-point injection in the controller for crash-recovery testing.
 
 **Heavy E2E tests** (stress / large query workloads):
 
@@ -373,7 +389,7 @@ This sets up a Kind cluster, builds and loads the operator image, deploys the op
 go test -tags=e2e,heavy ./test/e2e/ -v -timeout 30m
 ```
 
-The `heavy` tag swaps in a stress-oriented query configuration. Use this for validating behavior under sustained load. The Kind cluster must already be set up and the operator deployed (`make setup-test-e2e load-test-images deploy`).
+The `heavy` tag swaps in a stress-oriented query configuration. Use this for validating behavior under sustained load. The Kind cluster and images must already be prepared (`make prepare-test-e2e`).
 
 ### Build Tags
 

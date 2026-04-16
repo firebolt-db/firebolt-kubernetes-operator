@@ -165,9 +165,9 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 
 	spec := &instance.Spec.Metadata.ComponentSpec
 
-	var replicas int32 = 2
-	if spec.Replicas != nil {
-		replicas = *spec.Replicas
+	var replicas int32 = 1
+	if instance.Spec.Metadata.Replicas != nil {
+		replicas = *instance.Spec.Metadata.Replicas
 	}
 
 	image := "dedicated-pensieve:latest"

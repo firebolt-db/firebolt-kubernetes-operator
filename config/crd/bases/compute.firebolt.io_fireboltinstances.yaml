@@ -1077,8 +1077,10 @@ spec:
                       pods can be scheduled on.
                     type: object
                   replicas:
-                    default: 2
-                    description: Replicas is the number of pods for this component.
+                    description: |-
+                      Replicas is the number of pods for this component.
+                      When nil, the controller applies a component-specific default
+                      (1 for metadata, 2 for gateway).
                     format: int32
                     type: integer
                   resources:
@@ -2195,8 +2197,10 @@ spec:
                     - host
                     type: object
                   replicas:
-                    default: 2
-                    description: Replicas is the number of pods for this component.
+                    description: |-
+                      Replicas is the number of pods for this component.
+                      When nil, the controller applies a component-specific default
+                      (1 for metadata, 2 for gateway).
                     format: int32
                     type: integer
                   resources:

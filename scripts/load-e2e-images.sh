@@ -17,7 +17,7 @@ echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} ==="
 # Check if Kind cluster exists
 if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "Error: Kind cluster '${CLUSTER_NAME}' does not exist."
-    echo "Run 'make setup-test-e2e' first."
+    echo "Run 'make setup-kind' first."
     exit 1
 fi
 
@@ -33,9 +33,15 @@ declare -a IMAGES=(
     "${TEST_GATEWAY_IMAGE}:${TEST_GATEWAY_TAG}"
 )
 
-# Add new engine tag if different from current tag (for upgrade tests)
+# Add new tags if different from current tags (for upgrade/switch tests)
 if [[ "${TEST_ENGINE_NEW_TAG}" != "${TEST_ENGINE_TAG}" ]]; then
     IMAGES+=("${TEST_ENGINE_IMAGE}:${TEST_ENGINE_NEW_TAG}")
+fi
+if [[ "${TEST_PENSIEVE_NEW_TAG}" != "${TEST_PENSIEVE_TAG}" ]]; then
+    IMAGES+=("${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_NEW_TAG}")
+fi
+if [[ "${TEST_GATEWAY_NEW_TAG}" != "${TEST_GATEWAY_TAG}" ]]; then
+    IMAGES+=("${TEST_GATEWAY_IMAGE}:${TEST_GATEWAY_NEW_TAG}")
 fi
 
 # Pull and load each image

@@ -40,6 +40,7 @@ func SetupFireboltInstanceWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
+// ValidateCreate validates a FireboltInstance on creation.
 func (v *FireboltInstanceCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
 	inst, ok := obj.(*FireboltInstance)
 	if !ok {
@@ -48,6 +49,7 @@ func (v *FireboltInstanceCustomValidator) ValidateCreate(_ context.Context, obj 
 	return nil, validateMetadataReplicas(inst)
 }
 
+// ValidateUpdate validates a FireboltInstance on update.
 func (v *FireboltInstanceCustomValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
 	inst, ok := newObj.(*FireboltInstance)
 	if !ok {
@@ -56,6 +58,7 @@ func (v *FireboltInstanceCustomValidator) ValidateUpdate(_ context.Context, _, n
 	return nil, validateMetadataReplicas(inst)
 }
 
+// ValidateDelete validates a FireboltInstance on deletion.
 func (v *FireboltInstanceCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }

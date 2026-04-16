@@ -53,30 +53,27 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
-.PHONY: fmt
-fmt: ## Run go fmt against code.
-	go fmt ./...
-
 .PHONY: test
-test: manifests generate fmt setup-envtest ## Run tests.
+test: manifests generate setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'test/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= operator-test-e2e
 
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
+.PHONY: setup-kind
+setup-kind: ## Create a Kind cluster if it does not exist
 	@./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
 
 .PHONY: load-test-images
 load-test-images: ## Load required Docker images into the Kind cluster
 	./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
+.PHONY: prepare-test-e2e
+prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster, load images
+
+GINKGO_FOCUS ?=
+
 .PHONY: test-e2e
-test-e2e: manifests generate fmt docker-build setup-test-e2e load-test-images deploy ## Run the e2e tests. Expected an isolated environment using Kind.
+test-e2e: ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
 	@EXIT_CODE=0; \
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
 		go test -tags=e2e ./test/e2e/ -v -timeout 30m \
@@ -85,6 +82,7 @@ test-e2e: manifests generate fmt docker-build setup-test-e2e load-test-images de
 		--ginkgo.junit-report=e2e-report.xml \
 		--ginkgo.poll-progress-after=30s \
 		--ginkgo.poll-progress-interval=30s \
+		$(if $(GINKGO_FOCUS),--ginkgo.focus="$(GINKGO_FOCUS)") \
 		2>&1 | tee test.log || EXIT_CODE=$$?; \
 	$(MAKE) cleanup-test-e2e; \
 	exit $$EXIT_CODE
@@ -108,11 +106,11 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt ## Build manager binary.
+build: manifests generate ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt ## Run a controller from your host.
+run: manifests generate ## Run a controller from your host.
 	go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.

@@ -46,7 +46,7 @@ func TestValidateMetadataReplicas(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:      "replicas=nil is allowed",
+			name:      "replicas=nil is allowed (controller defaults to 1)",
 			replicas:  nil,
 			wantError: false,
 		},
@@ -70,7 +70,7 @@ func TestValidateMetadataReplicas(t *testing.T) {
 			// ValidateCreate
 			_, err := v.ValidateCreate(context.Background(), inst)
 			if tc.wantError && err == nil {
-				t.Errorf("ValidateCreate: expected error, got nil")
+				t.Error("ValidateCreate: expected error, got nil")
 			}
 			if !tc.wantError && err != nil {
 				t.Errorf("ValidateCreate: unexpected error: %v", err)
@@ -79,7 +79,7 @@ func TestValidateMetadataReplicas(t *testing.T) {
 			// ValidateUpdate
 			_, err = v.ValidateUpdate(context.Background(), inst, inst)
 			if tc.wantError && err == nil {
-				t.Errorf("ValidateUpdate: expected error, got nil")
+				t.Error("ValidateUpdate: expected error, got nil")
 			}
 			if !tc.wantError && err != nil {
 				t.Errorf("ValidateUpdate: unexpected error: %v", err)

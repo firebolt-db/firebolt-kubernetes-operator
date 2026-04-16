@@ -144,6 +144,15 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
+			Eventually(func() int32 {
+				ss, err := k8sClient.AppsV1().StatefulSets(testNamespace).Get(ctx, pgName, metav1.GetOptions{})
+				if err != nil {
+					return -1
+				}
+				return ss.Status.ReadyReplicas
+			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+
 			By("Waiting for StatefulSet to recover the pod")
 			Eventually(func() bool {
 				ss, err := k8sClient.AppsV1().StatefulSets(testNamespace).Get(ctx, pgName, metav1.GetOptions{})
@@ -158,11 +167,20 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine still responds via gateway")
-			output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(LightQueryValidator(result)).To(BeTrue())
+			Eventually(func() error {
+				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				if err != nil {
+					return err
+				}
+				result, err := ParseQueryResult(output)
+				if err != nil {
+					return err
+				}
+				if !LightQueryValidator(result) {
+					return fmt.Errorf("query result validation failed")
+				}
+				return nil
+			}, clusterReadyTimeout, pollInterval).Should(Succeed())
 		})
 	})
 
@@ -179,6 +197,15 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
+			Eventually(func() int32 {
+				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, mdName, metav1.GetOptions{})
+				if err != nil {
+					return -1
+				}
+				return dep.Status.ReadyReplicas
+			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+
 			By("Waiting for Deployment to recover the pod")
 			Eventually(func() bool {
 				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, mdName, metav1.GetOptions{})
@@ -193,11 +220,20 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine still responds via gateway")
-			output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(LightQueryValidator(result)).To(BeTrue())
+			Eventually(func() error {
+				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				if err != nil {
+					return err
+				}
+				result, err := ParseQueryResult(output)
+				if err != nil {
+					return err
+				}
+				if !LightQueryValidator(result) {
+					return fmt.Errorf("query result validation failed")
+				}
+				return nil
+			}, clusterReadyTimeout, pollInterval).Should(Succeed())
 		})
 	})
 
@@ -214,6 +250,15 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
+			Eventually(func() int32 {
+				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
+				if err != nil {
+					return -1
+				}
+				return dep.Status.ReadyReplicas
+			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+
 			By("Waiting for Deployment to recover the pod")
 			Eventually(func() bool {
 				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
@@ -228,11 +273,20 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying queries still route through gateway")
-			output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(LightQueryValidator(result)).To(BeTrue())
+			Eventually(func() error {
+				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				if err != nil {
+					return err
+				}
+				result, err := ParseQueryResult(output)
+				if err != nil {
+					return err
+				}
+				if !LightQueryValidator(result) {
+					return fmt.Errorf("query result validation failed")
+				}
+				return nil
+			}, clusterReadyTimeout, pollInterval).Should(Succeed())
 		})
 	})
 
