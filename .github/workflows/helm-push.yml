@@ -4,6 +4,7 @@ name: Helm - Release Chart
 env:
   HELM_CHARTS_NAMESPACE: helm-charts
   GHCR_REGISTRY: ghcr.io
+  GHCR_ORG: firebolt-db
 
 on:
   push:
@@ -118,7 +119,7 @@ jobs:
         run: |
           helm push \
             /tmp/helm-packages/firebolt-kubernetes-operator-${{ steps.chart.outputs.chart_version }}.tgz \
-            oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}
+            oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}
           echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to GHCR"
 
       - name: Job summary
@@ -129,10 +130,10 @@ jobs:
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Chart** | \`firebolt-kubernetes-operator\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Version** | \`${{ steps.chart.outputs.chart_version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Registry** | \`oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Registry** | \`oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Install" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
-          echo "helm install firebolt-operator oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}/firebolt-kubernetes-operator --version ${{ steps.chart.outputs.chart_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "helm install firebolt-operator oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}/firebolt-kubernetes-operator --version ${{ steps.chart.outputs.chart_version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
 

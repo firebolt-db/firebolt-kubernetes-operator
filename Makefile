@@ -176,6 +176,10 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ##@ Helm
 
+.PHONY: helm-docs
+helm-docs: ## Generate Helm chart README from values.yaml comments.
+	helm-docs --chart-search-root $(HELM_CHART_DIR) --template-files README.md.gotmpl
+
 .PHONY: helm-lint
 helm-lint: ## Lint the Helm chart.
 	helm lint $(HELM_CHART_DIR)

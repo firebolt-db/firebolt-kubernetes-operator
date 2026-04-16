@@ -1,0 +1,21 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+## Installation
+
+```bash
+helm install firebolt-operator \
+  oci://ghcr.io/firebolt-db/helm-charts/firebolt-kubernetes-operator \
+  --version {{ template "chart.version" . }}
+```
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+---
+
+_This README is generated with [helm-docs](https://github.com/norwoodj/helm-docs). Run `make helm-docs` to regenerate._
