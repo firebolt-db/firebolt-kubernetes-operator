@@ -36,8 +36,13 @@ jobs:
         with:
           client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
-          permission-packages: write
-          owner: firebolt-db
+
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: ghcr-token
+        with:
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
+          owner: ${{ env.GHCR_ORG }}
 
       - name: Determine chart version
         id: chart
@@ -106,8 +111,8 @@ jobs:
 
       - name: Login to GitHub Container Registry (Helm)
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | helm registry login ${{ env.GHCR_REGISTRY }} --username ${{ github.actor }} --password-stdin
+          echo "${{ steps.ghcr-token.outputs.token }}" \
+            | helm registry login ${{ env.GHCR_REGISTRY }} --username x-access-token --password-stdin
 
       - name: Package Helm chart
         run: |
