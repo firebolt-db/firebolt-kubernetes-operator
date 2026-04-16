@@ -38,6 +38,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Single Node Engine", Ordered, func() {
 		var (
 			engineName = "test-single" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-single" + queryConfig.Suffix
 			operator   *OperatorInstance
 		)
 
@@ -46,10 +47,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up single node test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -71,7 +75,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running query")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 
 			result, err := ParseQueryResult(output)
@@ -92,6 +96,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Scale Up 2 to 4 Nodes", Ordered, func() {
 		var (
 			engineName = "test-scaleup" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-scaleup" + queryConfig.Suffix
 			operator   *OperatorInstance
 			bgRunner   *BackgroundQueryRunner
 		)
@@ -101,10 +106,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up scale up test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -126,14 +134,14 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running initial query")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling up to 4 replicas")
@@ -149,7 +157,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running query on scaled engine")
-			output, err = RunQuery(ctx, engineName, queryConfig.Query)
+			output, err = RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -181,6 +189,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Scale Down 3 to 1 Node", Ordered, func() {
 		var (
 			engineName = "test-scaledown" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-scaledown" + queryConfig.Suffix
 			operator   *OperatorInstance
 			bgRunner   *BackgroundQueryRunner
 		)
@@ -190,10 +199,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up scale down test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -215,14 +227,14 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running initial query")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling down to 1 replica")
@@ -238,7 +250,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running query on scaled engine")
-			output, err = RunQuery(ctx, engineName, queryConfig.Query)
+			output, err = RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -270,6 +282,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Rapid Config Changes", Ordered, func() {
 		var (
 			engineName = "test-rapid" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-rapid" + queryConfig.Suffix
 			operator   *OperatorInstance
 			bgRunner   *BackgroundQueryRunner
 		)
@@ -279,10 +292,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up rapid changes test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -291,6 +307,8 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 
 		It("should only apply the last config change when multiple rapid changes occur", func() {
+			rapidTimeout := 120 * time.Second
+
 			By("Creating engine with 2 replicas")
 			err := CreateEngine(ctx, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
@@ -304,7 +322,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Triggering scale up to 4 replicas")
@@ -329,15 +347,15 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			By("Waiting for final scale down to 1 node (last change applied)")
-			err = WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)
+			err = WaitForEngineReady(ctx, engineName, 1, rapidTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for engine to be stable at 1 node")
-			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
+			err = WaitForEngineStable(ctx, engineName, rapidTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine has exactly 1 node")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -369,6 +387,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Harmonic Minor Scale", Ordered, func() {
 		var (
 			engineName = "test-harmonic" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-harmonic" + queryConfig.Suffix
 			operator   *OperatorInstance
 			bgRunner   *BackgroundQueryRunner
 		)
@@ -378,10 +397,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up harmonic scale test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -403,7 +425,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			for replicas := 2; replicas <= 3; replicas++ {
@@ -431,7 +453,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			By("Running final query to verify engine health")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -463,6 +485,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Image Switching", Ordered, func() {
 		var (
 			engineName = "test-image" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-image" + queryConfig.Suffix
 			operator   *OperatorInstance
 			bgRunner   *BackgroundQueryRunner
 		)
@@ -472,10 +495,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up image switching test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -497,14 +523,14 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running initial query")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Switching to new image tag")
@@ -520,7 +546,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running query after image switch")
-			output, err = RunQuery(ctx, engineName, queryConfig.Query)
+			output, err = RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err = ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -557,8 +583,9 @@ var _ = Describe("Firebolt Engine", func() {
 				"test-multi" + queryConfig.Suffix + "-engine3",
 			}
 			engineSizes = []int{1, 2, 3}
-			operator     *OperatorInstance
-			bgRunners    []*BackgroundQueryRunner
+			clientPod   = "client-multi" + queryConfig.Suffix
+			operator    *OperatorInstance
+			bgRunners   []*BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -566,10 +593,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator("test-multi" + queryConfig.Suffix)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up multi-engine test")
+			DeleteClientPod(ctx, clientPod)
 			for _, name := range engineNames {
 				_ = DeleteEngine(ctx, name)
 				_ = WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)
@@ -597,7 +627,7 @@ var _ = Describe("Firebolt Engine", func() {
 			By("Starting background query runner for each engine")
 			bgRunners = make([]*BackgroundQueryRunner, len(engineNames))
 			for i, name := range engineNames {
-				bgRunners[i] = NewBackgroundQueryRunnerWithValidator(name, queryConfig.Query, queryConfig.Validator)
+				bgRunners[i] = NewBackgroundQueryRunnerWithValidator(clientPod, name, queryConfig.Query, queryConfig.Validator)
 				bgRunners[i].Start(ctx)
 			}
 
@@ -661,6 +691,7 @@ var _ = Describe("Firebolt Engine", func() {
 	Describe("Recreate Rollout Strategy", Ordered, func() {
 		var (
 			engineName = "test-recreate" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-recreate" + queryConfig.Suffix
 			operator   *OperatorInstance
 		)
 
@@ -669,10 +700,13 @@ var _ = Describe("Firebolt Engine", func() {
 			var err error
 			operator, err = StartOperator(engineName)
 			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
 			By("Cleaning up recreate rollout test")
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
@@ -694,7 +728,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Running one-shot query to verify engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -708,7 +742,7 @@ var _ = Describe("Firebolt Engine", func() {
 			deadline := time.Now().Add(2 * time.Minute)
 			var querySuccess bool
 			for time.Now().Before(deadline) {
-				output, err := RunQuery(ctx, engineName, queryConfig.Query)
+				output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 				if err == nil {
 					result, parseErr := ParseQueryResult(output)
 					if parseErr == nil && queryConfig.Validator(result) {

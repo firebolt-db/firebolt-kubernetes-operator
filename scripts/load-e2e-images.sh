@@ -31,6 +31,7 @@ declare -a IMAGES=(
     "${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_TAG}"
     "${TEST_POSTGRES_IMAGE}"
     "${TEST_ENVOY_IMAGE}:${TEST_ENVOY_TAG}"
+    "${TEST_CURL_IMAGE}"
 )
 
 # Add new tags if different from current tags (for upgrade/switch tests)

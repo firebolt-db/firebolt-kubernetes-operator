@@ -31,7 +31,15 @@ import (
 )
 
 var _ = Describe("Crash Recovery", Ordered, func() {
+	clientPod := "client-crash" + queryConfig.Suffix
+
+	BeforeAll(func() {
+		By("Creating client pod for crash recovery tests")
+		Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+	})
+
 	AfterAll(func() {
+		DeleteClientPod(ctx, clientPod)
 		controller.ClearAllCrashPoints()
 	})
 
@@ -92,7 +100,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -140,7 +148,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -188,7 +196,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -262,7 +270,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -319,7 +327,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -393,7 +401,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -450,7 +458,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine works")
-			output, err := RunQuery(ctx, engineName, queryConfig.Query)
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -494,7 +502,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background queries")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			time.Sleep(3 * time.Second)

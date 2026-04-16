@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -299,11 +298,14 @@ func DeleteEngine(ctx context.Context, name string) error {
 	return err
 }
 
-// WaitForEngineReady waits for all pods in an engine to be ready.
+// WaitForEngineReady waits for all pods in an engine to be ready AND for the
+// engine service to have ready endpoint addresses. Checking both ensures that
+// kube-proxy/iptables rules have been updated and the service is routable.
 // On timeout it dumps detailed pod and event diagnostics.
 func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	selector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
+	serviceName := engineName + "-service"
 
 	var lastPods *corev1.PodList
 	for time.Now().Before(deadline) {
@@ -329,7 +331,16 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 		}
 
 		if readyCount == expectedReplicas {
-			return nil
+			ep, epErr := k8sClient.CoreV1().Endpoints(testNamespace).Get(ctx, serviceName, metav1.GetOptions{})
+			if epErr == nil {
+				readyAddrs := 0
+				for _, subset := range ep.Subsets {
+					readyAddrs += len(subset.Addresses)
+				}
+				if readyAddrs > 0 {
+					return nil
+				}
+			}
 		}
 
 		time.Sleep(pollInterval)
@@ -361,6 +372,30 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 		}
 	} else {
 		diag += "\n  No pod listing was obtained"
+	}
+
+	if lastPods != nil {
+		for _, pod := range lastPods.Items {
+			isReady := false
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+					isReady = true
+				}
+			}
+			if !isReady && pod.Status.Phase == corev1.PodRunning {
+				tailLines := int64(30)
+				logOpts := &corev1.PodLogOptions{TailLines: &tailLines}
+				req := k8sClient.CoreV1().Pods(testNamespace).GetLogs(pod.Name, logOpts)
+				logStream, logErr := req.Stream(ctx)
+				if logErr == nil {
+					logBytes, _ := io.ReadAll(io.LimitReader(logStream, 4096))
+					logStream.Close()
+					if len(logBytes) > 0 {
+						diag += fmt.Sprintf("\n  Logs for unready pod %s:\n%s", pod.Name, string(logBytes))
+					}
+				}
+			}
+		}
 	}
 
 	events, err := k8sClient.CoreV1().Events(testNamespace).List(ctx, metav1.ListOptions{})
@@ -445,85 +480,98 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 	return fmt.Errorf("timeout waiting for resources of engine %s to be deleted", engineName)
 }
 
-// RunQuery executes a SQL query through the engine service using port-forwarding.
-func RunQuery(ctx context.Context, engineName, query string) (string, error) {
-	serviceName := engineName + "-service"
-	return executeQueryViaService(ctx, serviceName, query)
-}
-
-// executeQueryViaService port-forwards to the engine service and executes an HTTP query
-func executeQueryViaService(ctx context.Context, serviceName, query string) (string, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", fmt.Errorf("failed to find free port: %w", err)
+// CreateClientPod creates a lightweight curl pod in the test namespace that can
+// be used to query services from inside the cluster. The pod blocks forever so
+// it stays running for the duration of the test.
+func CreateClientPod(ctx context.Context, podName string) error {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: testNamespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name:            "curl",
+				Image:           curlImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:         []string{"sleep", "infinity"},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10m"),
+						corev1.ResourceMemory: resource.MustParse("16Mi"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceMemory: resource.MustParse("16Mi"),
+					},
+				},
+			}},
+		},
 	}
-	localPort := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-
-	args := []string{"port-forward", "-n", testNamespace, "svc/" + serviceName, fmt.Sprintf("%d:3473", localPort)}
-	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
-		args = append([]string{"--context", "kind-" + kindCluster}, args...)
+	if _, err := k8sClient.CoreV1().Pods(testNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create client pod %s: %w", podName, err)
 	}
-	cmd := exec.Command("kubectl", args...)
+
+	waitArgs := kubectlArgs("wait", "--for=condition=Ready", "pod/"+podName,
+		"-n", testNamespace, "--timeout=60s")
+	cmd := exec.CommandContext(ctx, "kubectl", waitArgs...)
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start port-forward: %w", err)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("client pod %s not ready: %w (%s)", podName, err, strings.TrimSpace(stderrBuf.String()))
 	}
+	return nil
+}
 
-	defer func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-			cmd.Wait() //nolint:errcheck
-		}
-	}()
+// DeleteClientPod deletes the client pod created by CreateClientPod.
+func DeleteClientPod(ctx context.Context, podName string) {
+	args := kubectlArgs("delete", "pod", podName, "-n", testNamespace,
+		"--ignore-not-found", "--grace-period=0", "--force")
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	_ = cmd.Run()
+}
 
-	var connected bool
-	for i := 0; i < 100; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			connected = true
-			break
-		}
-		// Check if port-forward exited early (e.g. no endpoints)
-		if cmd.ProcessState != nil {
-			return "", fmt.Errorf("port-forward exited early: %s", strings.TrimSpace(stderrBuf.String()))
-		}
-		time.Sleep(100 * time.Millisecond)
+// execCurlQuery runs a curl command inside the given client pod and returns
+// the response body. It targets the given in-cluster URL and POSTs the query.
+func execCurlQuery(ctx context.Context, podName, url, query string, extraHeaders ...string) (string, error) {
+	curlArgs := []string{
+		"-sf", "--max-time", "30",
+		"-X", "POST",
+		"-H", "Content-Type: text/plain",
 	}
-	if !connected {
-		return "", fmt.Errorf("timeout waiting for port-forward to be ready: %s", strings.TrimSpace(stderrBuf.String()))
+	for _, h := range extraHeaders {
+		curlArgs = append(curlArgs, "-H", h)
 	}
+	curlArgs = append(curlArgs, "-d", query, url)
 
-	queryURL := fmt.Sprintf("http://127.0.0.1:%d/?query_label=e2e-test-query&output_format=JSON_Compact", localPort)
+	args := kubectlArgs("exec", podName, "-n", testNamespace, "--", "curl")
+	args = append(args, curlArgs...)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, queryURL, strings.NewReader(query))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("curl failed (exit %v): %s", err, strings.TrimSpace(stderrBuf.String()))
 	}
-	req.Header.Set("Content-Type", "text/plain")
+	return stdoutBuf.String(), nil
+}
 
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+// kubectlArgs prepends --context if KIND_CLUSTER is set.
+func kubectlArgs(args ...string) []string {
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		return append([]string{"--context", "kind-" + kindCluster}, args...)
 	}
+	return args
+}
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return string(body), nil
+// RunQuery executes a SQL query against the engine's ClusterIP service from
+// inside a client pod. The podName must reference a pod previously created
+// with CreateClientPod.
+func RunQuery(ctx context.Context, podName, engineName, query string) (string, error) {
+	url := fmt.Sprintf("http://%s-service.%s.svc.cluster.local:3473/?query_label=e2e-test&output_format=JSON_Compact&advanced_mode=true",
+		engineName, testNamespace)
+	return execCurlQuery(ctx, podName, url, query)
 }
 
 // QueryResponse represents the JSON response from fb
@@ -548,6 +596,7 @@ func ParseQueryResult(output string) (interface{}, error) {
 
 // BackgroundQueryRunner runs queries in the background and tracks failures
 type BackgroundQueryRunner struct {
+	podName        string
 	engineName     string
 	query          string
 	validator      QueryValidator
@@ -560,17 +609,18 @@ type BackgroundQueryRunner struct {
 }
 
 // NewBackgroundQueryRunner creates a new background query runner with automatic validator selection
-func NewBackgroundQueryRunner(engineName, query string) *BackgroundQueryRunner {
+func NewBackgroundQueryRunner(podName, engineName, query string) *BackgroundQueryRunner {
 	validator := LightQueryValidator
 	if strings.Contains(query, "array_agg") {
 		validator = HeavyQueryValidator
 	}
-	return NewBackgroundQueryRunnerWithValidator(engineName, query, validator)
+	return NewBackgroundQueryRunnerWithValidator(podName, engineName, query, validator)
 }
 
 // NewBackgroundQueryRunnerWithValidator creates a background query runner with custom validator
-func NewBackgroundQueryRunnerWithValidator(engineName, query string, validator QueryValidator) *BackgroundQueryRunner {
+func NewBackgroundQueryRunnerWithValidator(podName, engineName, query string, validator QueryValidator) *BackgroundQueryRunner {
 	return &BackgroundQueryRunner{
+		podName:        podName,
 		engineName:     engineName,
 		query:          query,
 		validator:      validator,
@@ -604,7 +654,7 @@ func (r *BackgroundQueryRunner) Start(ctx context.Context) {
 
 // runQuery executes a single query and records the result
 func (r *BackgroundQueryRunner) runQuery(ctx context.Context) {
-	output, err := RunQuery(ctx, r.engineName, r.query)
+	output, err := RunQuery(ctx, r.podName, r.engineName, r.query)
 	if err != nil {
 		r.recordFailure("query_error", err.Error())
 		return
@@ -654,8 +704,8 @@ func categorizeQueryError(detail string) string {
 		return "no ready pod"
 	case strings.Contains(detail, "context canceled"):
 		return "context canceled"
-	case strings.Contains(detail, "port-forward"):
-		return "port-forward error"
+	case strings.Contains(detail, "curl failed"):
+		return "curl error"
 	default:
 		if len(detail) > 50 {
 			return detail[:50] + "..."
@@ -1082,91 +1132,19 @@ func WaitForGatewayReplicas(ctx context.Context, instanceName string, expected i
 
 // --- Gateway query helpers ---
 
-// RunQueryViaGateway executes a SQL query through the gateway service.
-// The gateway routes the query to the specified engine.
-func RunQueryViaGateway(ctx context.Context, instanceName, engineName, query string) (string, error) {
+// RunQueryViaGateway executes a SQL query through the Envoy gateway service
+// from inside a client pod. The gateway routes the query to the specified
+// engine based on the X-Firebolt-Engine header.
+func RunQueryViaGateway(ctx context.Context, podName, instanceName, engineName, query string) (string, error) {
 	serviceName := instanceName + controller.SuffixGateway
-	return executeQueryViaGateway(ctx, serviceName, engineName, query)
-}
-
-// executeQueryViaGateway port-forwards to the gateway service and executes an HTTP query
-// targeting a specific engine via the X-Firebolt-Engine header.
-func executeQueryViaGateway(ctx context.Context, serviceName, engineName, query string) (string, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", fmt.Errorf("failed to find free port: %w", err)
-	}
-	localPort := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-
-	args := []string{"port-forward", "-n", testNamespace, "svc/" + serviceName, fmt.Sprintf("%d:80", localPort)}
-	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
-		args = append([]string{"--context", "kind-" + kindCluster}, args...)
-	}
-	cmd := exec.Command("kubectl", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start port-forward: %w", err)
-	}
-
-	defer func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-			cmd.Wait() //nolint:errcheck
-		}
-	}()
-
-	var connected bool
-	for i := 0; i < 100; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			connected = true
-			break
-		}
-		if cmd.ProcessState != nil {
-			return "", fmt.Errorf("port-forward exited early: %s", strings.TrimSpace(stderrBuf.String()))
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !connected {
-		return "", fmt.Errorf("timeout waiting for gateway port-forward to be ready: %s", strings.TrimSpace(stderrBuf.String()))
-	}
-
-	queryURL := fmt.Sprintf("http://127.0.0.1:%d/?query_label=e2e-gateway-test&output_format=JSON_Compact", localPort)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, queryURL, strings.NewReader(query))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "text/plain")
-	req.Header.Set("X-Firebolt-Engine", engineName)
-
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return string(body), nil
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?query_label=e2e-gateway-test&output_format=JSON_Compact&advanced_mode=true",
+		serviceName, testNamespace)
+	return execCurlQuery(ctx, podName, url, query, "X-Firebolt-Engine: "+engineName)
 }
 
 // GatewayBackgroundQueryRunner runs queries through the gateway in the background.
 type GatewayBackgroundQueryRunner struct {
+	podName        string
 	instanceName   string
 	engineName     string
 	query          string
@@ -1180,12 +1158,13 @@ type GatewayBackgroundQueryRunner struct {
 }
 
 // NewGatewayBackgroundQueryRunner creates a background query runner that routes queries through the gateway.
-func NewGatewayBackgroundQueryRunner(instanceName, engineName, query string) *GatewayBackgroundQueryRunner {
+func NewGatewayBackgroundQueryRunner(podName, instanceName, engineName, query string) *GatewayBackgroundQueryRunner {
 	validator := LightQueryValidator
 	if strings.Contains(query, "array_agg") {
 		validator = HeavyQueryValidator
 	}
 	return &GatewayBackgroundQueryRunner{
+		podName:        podName,
 		instanceName:   instanceName,
 		engineName:     engineName,
 		query:          query,
@@ -1219,7 +1198,7 @@ func (r *GatewayBackgroundQueryRunner) Start(ctx context.Context) {
 }
 
 func (r *GatewayBackgroundQueryRunner) runQuery(ctx context.Context) {
-	output, err := RunQueryViaGateway(ctx, r.instanceName, r.engineName, r.query)
+	output, err := RunQueryViaGateway(ctx, r.podName, r.instanceName, r.engineName, r.query)
 	if err != nil {
 		r.recordFailure("query_error", err.Error())
 		return

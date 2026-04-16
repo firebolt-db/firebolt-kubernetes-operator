@@ -115,7 +115,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             end
                             -- TODO: remove advanced_mode once Core supports x-request-id
                             local path = handle:headers():get(":path")
-                            if path:find("?") then
+                            if path:find("?", 1, true) then
                               handle:headers():replace(":path", path .. "&advanced_mode=true")
                             else
                               handle:headers():replace(":path", path .. "?advanced_mode=true")
@@ -155,7 +155,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 admin:
   address:
     socket_address:
-      address: 0.0.0.0
+      address: 127.0.0.1
       port_value: %d
 `,
 		gatewayContainerPort,
@@ -259,33 +259,11 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 						Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
-							{Name: "admin", ContainerPort: gatewayAdminPort, Protocol: corev1.ProtocolTCP},
-						},
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/ready",
-									Port: intstr.FromString("admin"),
-								},
-							},
-							InitialDelaySeconds: 1,
-							PeriodSeconds:       15,
-							TimeoutSeconds:      5,
-						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/ready",
-									Port: intstr.FromString("admin"),
-								},
-							},
-							InitialDelaySeconds: 2,
-							PeriodSeconds:       3,
-							TimeoutSeconds:      5,
 						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser:                &runAsUser,
 							RunAsNonRoot:             boolPtr(true),
+							ReadOnlyRootFilesystem:   boolPtr(true),
 							AllowPrivilegeEscalation: boolPtr(false),
 							Capabilities: &corev1.Capabilities{
 								Drop: []corev1.Capability{"ALL"},

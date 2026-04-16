@@ -66,6 +66,7 @@ var (
 	postgresImage  string
 	envoyImage     string
 	envoyTag       string
+	curlImage      string
 	instanceOp     *InstanceOperator
 )
 
@@ -80,6 +81,7 @@ func init() {
 	postgresImage = defaults["TEST_POSTGRES_IMAGE"]
 	envoyImage = defaults["TEST_ENVOY_IMAGE"]
 	envoyTag = defaults["TEST_ENVOY_TAG"]
+	curlImage = defaults["TEST_CURL_IMAGE"]
 }
 
 // loadDefaults reads key=value pairs from defaults.env next to this source file.
@@ -236,6 +238,7 @@ var _ = BeforeSuite(func() {
 		pensieveImage + ":" + newPensieveTag,
 		postgresImage,
 		envoyImage + ":" + envoyTag,
+		curlImage,
 	}
 	for _, img := range requiredImages {
 		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()

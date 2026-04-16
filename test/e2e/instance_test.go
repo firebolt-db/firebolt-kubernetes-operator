@@ -30,6 +30,7 @@ import (
 var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 	var (
 		engineName = "test-instance-lifecycle-engine"
+		clientPod  = "client-instance-lifecycle"
 		operator   *OperatorInstance
 	)
 
@@ -38,6 +39,9 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 		var err error
 		operator, err = StartOperator(engineName)
 		Expect(err).NotTo(HaveOccurred())
+
+		By("Creating client pod")
+		Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 
 		By("Creating a 2-replica engine for gateway query routing")
 		err = CreateEngine(ctx, engineName, 2)
@@ -52,7 +56,7 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Verifying initial query via gateway succeeds")
-		output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+		output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
 		Expect(err).NotTo(HaveOccurred())
 		result, err := ParseQueryResult(output)
 		Expect(err).NotTo(HaveOccurred())
@@ -61,6 +65,7 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 
 	AfterAll(func() {
 		By("Cleaning up lifecycle test engine")
+		DeleteClientPod(ctx, clientPod)
 		_ = DeleteEngine(ctx, engineName)
 		_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		if operator != nil {
@@ -93,7 +98,7 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engines still respond via gateway after metadata switch")
-			output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+			output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
 			Expect(err).NotTo(HaveOccurred())
 			result, err := ParseQueryResult(output)
 			Expect(err).NotTo(HaveOccurred())
@@ -121,7 +126,7 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 
 		It("should scale gateway 1 -> 3 -> 1 without query downtime", func() {
 			By("Starting background queries through gateway")
-			bgRunner = NewGatewayBackgroundQueryRunner(testInstance, engineName, LightQuery)
+			bgRunner = NewGatewayBackgroundQueryRunner(clientPod, testInstance, engineName, LightQuery)
 			bgRunner.Start(ctx)
 
 			time.Sleep(3 * time.Second)

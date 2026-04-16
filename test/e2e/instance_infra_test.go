@@ -34,6 +34,7 @@ import (
 var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 	var (
 		engineName = "test-infra-engine"
+		clientPod  = "client-infra"
 		operator   *OperatorInstance
 	)
 
@@ -42,6 +43,9 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		var err error
 		operator, err = StartOperator(engineName)
 		Expect(err).NotTo(HaveOccurred())
+
+		By("Creating client pod")
+		Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 
 		By("Creating a test engine for query validation")
 		err = CreateEngine(ctx, engineName, 1)
@@ -56,6 +60,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 
 	AfterAll(func() {
 		By("Cleaning up infrastructure test engine")
+		DeleteClientPod(ctx, clientPod)
 		_ = DeleteEngine(ctx, engineName)
 		_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		if operator != nil {
@@ -156,7 +161,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 
 			By("Verifying engine still responds via gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
@@ -209,7 +214,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 
 			By("Verifying engine still responds via gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
@@ -262,7 +267,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 
 			By("Verifying queries still route through gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
