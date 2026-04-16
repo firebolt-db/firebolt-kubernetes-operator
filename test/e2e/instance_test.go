@@ -101,58 +101,6 @@ var _ = Describe("FireboltInstance Lifecycle", Ordered, func() {
 		})
 	})
 
-	Describe("Gateway Image Switch", func() {
-		var bgRunner *GatewayBackgroundQueryRunner
-
-		AfterEach(func() {
-			if bgRunner != nil {
-				bgRunner.Stop()
-				bgRunner = nil
-			}
-
-			By("Restoring gateway image to original tag")
-			err := UpdateInstanceGatewayImage(ctx, testInstance, gatewayTag)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Waiting for instance to stabilize after restore")
-			err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should switch gateway image without query downtime", func() {
-			By("Starting background queries through gateway")
-			bgRunner = NewGatewayBackgroundQueryRunner(testInstance, engineName, LightQuery)
-			bgRunner.Start(ctx)
-
-			time.Sleep(3 * time.Second)
-
-			By(fmt.Sprintf("Updating gateway image to tag %s", newGatewayTag))
-			err := UpdateInstanceGatewayImage(ctx, testInstance, newGatewayTag)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Waiting for gateway deployment to roll out new image")
-			err = WaitForInstanceGatewayImage(ctx, testInstance, newGatewayTag, instanceReadyTimeout)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Waiting for instance to return to Ready")
-			err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
-			Expect(err).NotTo(HaveOccurred())
-
-			time.Sleep(3 * time.Second)
-
-			By("Stopping background queries and checking results")
-			bgRunner.Stop()
-
-			successes, failures := bgRunner.GetStats()
-			fmt.Fprintf(GinkgoWriter, "Gateway image switch: successes=%d failures=%d\n", successes, failures)
-			bgRunner.PrintFailureSummary()
-
-			Expect(successes).To(BeNumerically(">", 0), "Should have had successful queries")
-			Expect(failures).To(Equal(int32(0)), "Gateway image switch should cause zero query failures (rolling update)")
-			bgRunner = nil
-		})
-	})
-
 	Describe("Gateway Scaling", func() {
 		var bgRunner *GatewayBackgroundQueryRunner
 

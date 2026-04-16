@@ -57,17 +57,16 @@ const (
 )
 
 var (
-	testImage       string
-	testTag         string
-	newImageTag     string
-	pensieveImage   string
-	pensieveTag     string
-	newPensieveTag  string
-	postgresImage   string
-	gatewayImage    string
-	gatewayTag      string
-	newGatewayTag   string
-	instanceOp      *InstanceOperator
+	testImage      string
+	testTag        string
+	newImageTag    string
+	pensieveImage  string
+	pensieveTag    string
+	newPensieveTag string
+	postgresImage  string
+	envoyImage     string
+	envoyTag       string
+	instanceOp     *InstanceOperator
 )
 
 func init() {
@@ -79,9 +78,8 @@ func init() {
 	pensieveTag = defaults["TEST_PENSIEVE_TAG"]
 	newPensieveTag = defaults["TEST_PENSIEVE_NEW_TAG"]
 	postgresImage = defaults["TEST_POSTGRES_IMAGE"]
-	gatewayImage = defaults["TEST_GATEWAY_IMAGE"]
-	gatewayTag = defaults["TEST_GATEWAY_TAG"]
-	newGatewayTag = defaults["TEST_GATEWAY_NEW_TAG"]
+	envoyImage = defaults["TEST_ENVOY_IMAGE"]
+	envoyTag = defaults["TEST_ENVOY_TAG"]
 }
 
 // loadDefaults reads key=value pairs from defaults.env next to this source file.
@@ -237,8 +235,7 @@ var _ = BeforeSuite(func() {
 		pensieveImage + ":" + pensieveTag,
 		pensieveImage + ":" + newPensieveTag,
 		postgresImage,
-		gatewayImage + ":" + gatewayTag,
-		gatewayImage + ":" + newGatewayTag,
+		envoyImage + ":" + envoyTag,
 	}
 	for _, img := range requiredImages {
 		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()
@@ -255,7 +252,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Creating shared FireboltInstance")
-	err = CreateInstance(ctx, testInstance, pensieveImage, pensieveTag, gatewayImage, gatewayTag)
+	err = CreateInstance(ctx, testInstance, pensieveImage, pensieveTag)
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Waiting for instance to become Ready")

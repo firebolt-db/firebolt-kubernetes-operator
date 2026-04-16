@@ -113,18 +113,6 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			_, err = k8sClient.CoreV1().Services(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying Gateway ServiceAccount")
-			_, err = k8sClient.CoreV1().ServiceAccounts(testNamespace).Get(ctx, gwName+"-sa", metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Verifying Gateway Role")
-			_, err = k8sClient.RbacV1().Roles(testNamespace).Get(ctx, gwName+"-role", metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Verifying Gateway RoleBinding")
-			_, err = k8sClient.RbacV1().RoleBindings(testNamespace).Get(ctx, gwName+"-binding", metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-
 			By("Verifying Gateway PodDisruptionBudget")
 			_, err = k8sClient.PolicyV1().PodDisruptionBudgets(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -295,7 +283,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			sepInstance := "test-deletion-cleanup"
 
 			By("Creating a separate instance")
-			err := CreateInstance(ctx, sepInstance, pensieveImage, pensieveTag, gatewayImage, gatewayTag)
+			err := CreateInstance(ctx, sepInstance, pensieveImage, pensieveTag)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for the separate instance to become Ready")
@@ -322,15 +310,6 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 				if cms, err := k8sClient.CoreV1().ConfigMaps(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
 					total += len(cms.Items)
 				}
-				if sas, err := k8sClient.CoreV1().ServiceAccounts(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
-					total += len(sas.Items)
-				}
-				if roles, err := k8sClient.RbacV1().Roles(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
-					total += len(roles.Items)
-				}
-				if rbs, err := k8sClient.RbacV1().RoleBindings(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
-					total += len(rbs.Items)
-				}
 				if pdbs, err := k8sClient.PolicyV1().PodDisruptionBudgets(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
 					total += len(pdbs.Items)
 				}
@@ -353,7 +332,7 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 
 			By("Patching the ConfigMap with invalid data")
 			patched := original.DeepCopy()
-			patched.Data["core-gateway.yaml"] = "corrupted: true\n"
+			patched.Data["envoy.yaml"] = "corrupted: true\n"
 			_, err = k8sClient.CoreV1().ConfigMaps(testNamespace).Update(ctx, patched, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -363,8 +342,8 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 				if err != nil {
 					return ""
 				}
-				return cm.Data["core-gateway.yaml"]
-			}, 60*time.Second, pollInterval).Should(Equal(originalData["core-gateway.yaml"]),
+				return cm.Data["envoy.yaml"]
+			}, 60*time.Second, pollInterval).Should(Equal(originalData["envoy.yaml"]),
 				"Operator should revert the ConfigMap to its expected state")
 		})
 	})

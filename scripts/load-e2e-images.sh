@@ -30,7 +30,7 @@ declare -a IMAGES=(
     "${TEST_ENGINE_IMAGE}:${TEST_ENGINE_TAG}"
     "${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_TAG}"
     "${TEST_POSTGRES_IMAGE}"
-    "${TEST_GATEWAY_IMAGE}:${TEST_GATEWAY_TAG}"
+    "${TEST_ENVOY_IMAGE}:${TEST_ENVOY_TAG}"
 )
 
 # Add new tags if different from current tags (for upgrade/switch tests)
@@ -39,9 +39,6 @@ if [[ "${TEST_ENGINE_NEW_TAG}" != "${TEST_ENGINE_TAG}" ]]; then
 fi
 if [[ "${TEST_PENSIEVE_NEW_TAG}" != "${TEST_PENSIEVE_TAG}" ]]; then
     IMAGES+=("${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_NEW_TAG}")
-fi
-if [[ "${TEST_GATEWAY_NEW_TAG}" != "${TEST_GATEWAY_TAG}" ]]; then
-    IMAGES+=("${TEST_GATEWAY_IMAGE}:${TEST_GATEWAY_NEW_TAG}")
 fi
 
 # Pull and load each image

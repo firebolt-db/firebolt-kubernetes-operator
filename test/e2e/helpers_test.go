@@ -41,7 +41,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -790,7 +789,6 @@ func StartInstanceOperator() (*InstanceOperator, error) {
 	for _, addFn := range []func(*runtime.Scheme) error{
 		corev1.AddToScheme,
 		appsv1.AddToScheme,
-		rbacv1.AddToScheme,
 		policyv1.AddToScheme,
 		computev1alpha1.AddToScheme,
 	} {
@@ -857,8 +855,9 @@ func (o *InstanceOperator) Stop() {
 	o.wg.Wait()
 }
 
-// CreateInstance creates a FireboltInstance CR with the given images.
-func CreateInstance(ctx context.Context, name, metadataImage, metadataTag, gatewayImage, gatewayTag string) error {
+// CreateInstance creates a FireboltInstance CR with the given metadata images.
+// The gateway (Envoy proxy) image is set from the test suite's envoyImage/envoyTag.
+func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -897,8 +896,8 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag, gatew
 					Replicas:  &replicas,
 					Resources: smallResources,
 					Image: &computev1alpha1.ImageSpec{
-						Repository: gatewayImage,
-						Tag:        gatewayTag,
+						Repository: envoyImage,
+						Tag:        envoyTag,
 						PullPolicy: corev1.PullIfNotPresent,
 					},
 				},
@@ -1009,16 +1008,6 @@ func UpdateInstanceMetadataImage(ctx context.Context, name, tag string) error {
 	})
 }
 
-// UpdateInstanceGatewayImage updates the gateway image tag on the FireboltInstance (with retry on conflict).
-func UpdateInstanceGatewayImage(ctx context.Context, name, tag string) error {
-	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
-		if inst.Spec.Gateway.Image == nil {
-			inst.Spec.Gateway.Image = &computev1alpha1.ImageSpec{}
-		}
-		inst.Spec.Gateway.Image.Tag = tag
-	})
-}
-
 // UpdateInstanceGatewayReplicas updates the gateway replica count on the FireboltInstance (with retry on conflict).
 func UpdateInstanceGatewayReplicas(ctx context.Context, name string, replicas int32) error {
 	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
@@ -1074,31 +1063,6 @@ func WaitForInstanceMetadataImage(ctx context.Context, instanceName, expectedTag
 		time.Sleep(pollInterval)
 	}
 	return fmt.Errorf("timeout waiting for metadata deployment %s to use tag %s", deployName, expectedTag)
-}
-
-// WaitForInstanceGatewayImage polls until the gateway deployment uses the expected image tag.
-func WaitForInstanceGatewayImage(ctx context.Context, instanceName, expectedTag string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	deployName := instanceName + controller.SuffixGateway
-
-	for time.Now().Before(deadline) {
-		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
-		if err == nil {
-			desired := int32(1)
-			if dep.Spec.Replicas != nil {
-				desired = *dep.Spec.Replicas
-			}
-			for _, c := range dep.Spec.Template.Spec.Containers {
-				if strings.Contains(c.Image, expectedTag) {
-					if dep.Status.ReadyReplicas == desired && dep.Status.UpdatedReplicas == desired {
-						return nil
-					}
-				}
-			}
-		}
-		time.Sleep(pollInterval)
-	}
-	return fmt.Errorf("timeout waiting for gateway deployment %s to use tag %s", deployName, expectedTag)
 }
 
 // WaitForGatewayReplicas polls until the gateway deployment has the expected number of ready replicas.
