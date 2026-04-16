@@ -117,11 +117,11 @@
       "properties": {
         "limits": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": { "type": ["string", "number"] }
         },
         "requests": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": { "type": ["string", "number"] }
         }
       }
     },
