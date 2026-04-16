@@ -9,7 +9,7 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 - No Helm or manual multi-step processes
 - Custom Resource Definitions (CRDs) with status subresources for clean state management
 - Ephemeral engines (no persistent storage)
-- Instance-level infrastructure managed declaratively (PostgreSQL, metadata, gateway)
+- Instance-level infrastructure managed declaratively (PostgreSQL, metadata, Envoy gateway)
 
 ## Architecture Overview
 
@@ -18,7 +18,7 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 │                        Operator                            │
 │                                                            │
 │  - Watches FireboltInstance and FireboltEngine CRs         │
-│  - Manages instance infra (PG, metadata, gateway)          │
+│  - Manages instance infra (PG, metadata, Envoy gateway)    │
 │  - Manages StatefulSets + Services per engine generation   │
 │  - Pre-generates engine config (predictable pod names)     │
 │  - Switches traffic via engine Service selector            │
@@ -31,7 +31,7 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 │                   FireboltInstance CR                        │
 │  firebolt-production                                        │
 │                                                             │
-│  Provisions: PostgreSQL, metadata service, gateway          │
+│  Provisions: PostgreSQL, metadata service, Envoy gateway    │
 │  Engines reference this via spec.instanceRef                │
 │                                                             │
 │  status:                                                    │
@@ -477,16 +477,16 @@ This ensures:
 
 ## Traffic Flow
 
-Queries flow through the gateway, which discovers engine services by naming convention:
+Queries flow through an Envoy proxy, which routes to engine services based on the `X-Firebolt-Engine` header. A Lua filter extracts the engine name and sets the upstream hostname to `{engine}-service:3473`, then the dynamic forward proxy resolves it via DNS:
 
 ```
-Client
+Client (X-Firebolt-Engine: core-engine-production)
    │
    ▼
 ┌──────────────────────────────────────────────┐
-│            Gateway Service                   │
+│        Envoy Gateway Service                 │
 │    firebolt-production-gateway:80            │
-│    (routes by engine name)                   │
+│    (Lua filter → dynamic forward proxy)      │
 └──────────────────────┬───────────────────────┘
                        │
                        ▼
@@ -509,7 +509,7 @@ During transition, g0 continues serving existing connections
 until drain check confirms 0 active queries on all pods.
 ```
 
-The gateway uses `internal_service_suffix: "-service"` and `internal_service_port: 3473` to discover engine endpoints by convention. It routes queries to the correct engine based on the engine name provided in the request.
+The Envoy proxy discovers engine endpoints dynamically via DNS. It resolves `{engine}-service` (the ClusterIP Service) and forwards queries to port 3473.
 
 ## Operator RBAC
 

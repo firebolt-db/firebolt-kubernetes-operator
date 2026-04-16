@@ -1,12 +1,12 @@
 # Firebolt Engine Operator
 
-A Kubernetes operator that manages Firebolt infrastructure: metadata services, gateways, and compute engines with zero-downtime scaling via blue-green deployments.
+A Kubernetes operator that manages Firebolt infrastructure: metadata services, an Envoy query routing proxy, and compute engines with zero-downtime scaling via blue-green deployments.
 
 ## Overview
 
 The operator manages two custom resources:
 
-- **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, the gateway, and account initialization.
+- **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, an Envoy gateway proxy, and account initialization.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it.
@@ -46,7 +46,7 @@ spec:
   gateway: {}
 ```
 
-This creates an internal PostgreSQL database, deploys the metadata service, initializes an account, and deploys the gateway. Check progress with:
+This creates an internal PostgreSQL database, deploys the metadata service, initializes an account, and deploys the Envoy gateway proxy. Check progress with:
 
 ```bash
 kubectl get fi -n firebolt
@@ -120,14 +120,11 @@ All associated resources are cleaned up automatically.
 | `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported) |
 | `spec.metadata.resources` | No | (operator default) | CPU/memory for metadata service pods |
 | `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
-| `spec.gateway` | **Yes** | - | Gateway configuration (can be empty `{}` for defaults) |
-| `spec.gateway.image` | No | (operator default) | Override the gateway container image |
+| `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
+| `spec.gateway.image` | No | `envoyproxy/envoy:v1.33-latest` | Override the Envoy container image |
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods |
 | `spec.gateway.resources` | No | (operator default) | CPU/memory for gateway pods |
 | `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |
-| `spec.auth` | No | disabled | Authentication configuration |
-| `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
-| `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |
 
 \* Required when the parent field is set.
 
@@ -190,25 +187,12 @@ spec:
 
   gateway:
     replicas: 3
-    image:
-      repository: "ghcr.io/firebolt-analytics/core-gateway"
-      tag: "1.0.0"
     resources:
       requests:
         cpu: "100m"
         memory: "256Mi"
     nodeSelector:
       firebolt.dev/pool: system
-
-  auth:
-    mode: openid
-    oidc:
-      issuerURL: "https://company.okta.com/oauth2/default"
-      clientID: "firebolt"
-      clientSecretRef:
-        name: oidc-client-secret
-      claimMappings:
-        username: "email"
 ```
 
 ---
