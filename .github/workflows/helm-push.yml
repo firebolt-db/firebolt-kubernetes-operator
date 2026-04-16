@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   release-chart:
+    if: "!startsWith(github.event.head_commit.message, 'chore(helm): bump chart to')"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -38,7 +39,7 @@ jobs:
       - name: Determine chart version
         id: chart
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           CURR_VERSION=$(yq '.version' helm/firebolt-kubernetes-operator/Chart.yaml)
           APP_VERSION=$(yq '.appVersion' helm/firebolt-kubernetes-operator/Chart.yaml)
@@ -118,16 +119,8 @@ jobs:
             oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}
           echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to GHCR"
 
-      - name: Annotate GHCR package
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Job summary
         run: |
-          gh api \
-            -X PATCH \
-            /orgs/${{ github.repository_owner }}/packages/container/${{ env.HELM_CHARTS_NAMESPACE }}%2Ffirebolt-kubernetes-operator/versions \
-            --jq '.[] | select(.metadata.container.tags[] == "${{ steps.chart.outputs.chart_version }}") | .id' \
-            || echo "Package annotation skipped (version not found or API unavailable)"
-
           echo "### Helm Chart Published :package:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
