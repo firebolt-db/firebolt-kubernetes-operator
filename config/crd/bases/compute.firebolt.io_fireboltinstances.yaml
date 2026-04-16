@@ -2322,6 +2322,12 @@ spec:
             description: FireboltInstanceStatus defines the observed state of a Firebolt
               Instance.
             properties:
+              accountReady:
+                description: |-
+                  AccountReady indicates whether the metadata account has been
+                  initialized and activated. Once true, the reconciler skips the
+                  gRPC account-check on subsequent loops.
+                type: boolean
               conditions:
                 description: Conditions represent the latest available observations
                   of the Instance's state.

@@ -611,14 +611,6 @@ type BackgroundQueryRunner struct {
 }
 
 // NewBackgroundQueryRunner creates a new background query runner with automatic validator selection
-func NewBackgroundQueryRunner(podName, engineName, query string) *BackgroundQueryRunner {
-	validator := LightQueryValidator
-	if strings.Contains(query, "array_agg") {
-		validator = HeavyQueryValidator
-	}
-	return NewBackgroundQueryRunnerWithValidator(podName, engineName, query, validator)
-}
-
 // NewBackgroundQueryRunnerWithValidator creates a background query runner with custom validator
 func NewBackgroundQueryRunnerWithValidator(podName, engineName, query string, validator QueryValidator) *BackgroundQueryRunner {
 	return &BackgroundQueryRunner{

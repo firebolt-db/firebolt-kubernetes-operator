@@ -40,6 +40,14 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 	log := logf.FromContext(ctx)
 	instanceID := instance.Spec.ID
 
+	if instanceID == "" {
+		return fmt.Errorf("FireboltInstance %q has no spec.id; defaulting webhook may not be running", instance.Name)
+	}
+
+	if instance.Status.AccountReady {
+		return nil
+	}
+
 	conn, cleanup, err := r.dialMetadataService(ctx, instance)
 	if err != nil {
 		return fmt.Errorf("dial metadata service: %w", err)
@@ -71,6 +79,7 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 		}
 		if states[0] == adminv2.AccountState_ACCOUNT_STATE_ACTIVE {
 			log.Info("Metadata service account already active", "accountId", accounts[0])
+			instance.Status.AccountReady = true
 			return nil
 		}
 		log.Info("Metadata service account exists but is not active, attempting activation",
@@ -79,6 +88,7 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 			return fmt.Errorf("activating existing account %s: %w", accounts[0], err)
 		}
 		log.Info("Metadata service account activated", "accountId", accounts[0])
+		instance.Status.AccountReady = true
 		return nil
 
 	case 0:
@@ -87,6 +97,7 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 			return fmt.Errorf("failed to create initial account: %w", err)
 		}
 		log.Info("Initial metadata service account created and activated", "accountId", instanceID)
+		instance.Status.AccountReady = true
 		return nil
 
 	default:
@@ -172,11 +183,7 @@ func createAndProvisionAccount(
 		return fmt.Errorf("CommitAdminTransaction (create): %w", err)
 	}
 
-	if err := activateAccount(ctx, txClient, adminClient, accountID); err != nil {
-		return err
-	}
-
-	return nil
+	return activateAccount(ctx, txClient, adminClient, accountID)
 }
 
 // activateAccount activates an existing account in a dedicated transaction.

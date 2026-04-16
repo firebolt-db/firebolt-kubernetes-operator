@@ -153,6 +153,12 @@ type FireboltInstanceStatus struct {
 	// +optional
 	MetadataEndpoint string `json:"metadataEndpoint,omitempty"`
 
+	// AccountReady indicates whether the metadata account has been
+	// initialized and activated. Once true, the reconciler skips the
+	// gRPC account-check on subsequent loops.
+	// +optional
+	AccountReady bool `json:"accountReady,omitempty"`
+
 	// GatewayReady indicates whether the gateway is healthy.
 	// +optional
 	GatewayReady bool `json:"gatewayReady,omitempty"`
