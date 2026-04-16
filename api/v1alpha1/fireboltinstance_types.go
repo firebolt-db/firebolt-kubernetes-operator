@@ -170,7 +170,7 @@ type FireboltInstanceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=fi;inst
+// +kubebuilder:resource:shortName=fire
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Gateway",type=boolean,JSONPath=`.status.gatewayReady`
 // +kubebuilder:printcolumn:name="Metadata",type=boolean,JSONPath=`.status.metadataReady`

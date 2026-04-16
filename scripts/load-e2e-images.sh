@@ -30,6 +30,7 @@ declare -a IMAGES=(
     "${TEST_ENGINE_IMAGE}:${TEST_ENGINE_TAG}"
     "${TEST_PENSIEVE_IMAGE}:${TEST_PENSIEVE_TAG}"
     "${TEST_POSTGRES_IMAGE}"
+    "${TEST_GATEWAY_IMAGE}:${TEST_GATEWAY_TAG}"
 )
 
 # Add new engine tag if different from current tag (for upgrade tests)

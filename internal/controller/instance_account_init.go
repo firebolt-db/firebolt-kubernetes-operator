@@ -94,9 +94,14 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 	}
 }
 
-// dialMetadataService establishes a gRPC connection to the metadata service
-// via its in-cluster DNS name.
-func (r *FireboltInstanceReconciler) dialMetadataService(_ context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
+// dialMetadataService establishes a gRPC connection to the metadata service.
+// If r.DialMetadata is set (e.g. in E2E tests), it delegates to that function;
+// otherwise it dials via in-cluster DNS.
+func (r *FireboltInstanceReconciler) dialMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
+	if r.DialMetadata != nil {
+		return r.DialMetadata(ctx, instance)
+	}
+
 	endpoint := metadataServiceEndpoint(instance.Name, instance.Namespace)
 
 	conn, err := grpc.NewClient(endpoint,

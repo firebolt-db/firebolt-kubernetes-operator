@@ -114,7 +114,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Resolve instance info. Only stable and creating phases need it (they
-	// build ConfigMaps with metadata_endpoint / account_id). Switching,
+	// build ConfigMaps with multi_engine_endpoint / account_id). Switching,
 	// draining, and cleaning operate on existing resources and must not be
 	// blocked by a transient instance issue.
 	var instanceInfo InstanceInfo

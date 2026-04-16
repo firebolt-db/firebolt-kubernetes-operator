@@ -93,7 +93,7 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 }
 
 func buildGatewayConfigYAML(instance *computev1alpha1.FireboltInstance) string {
-	oidcEnabled := instance.Spec.Auth != nil && instance.Spec.Auth.Mode == computev1alpha1.AuthModeOpenID
+	authEnabled := instance.Spec.Auth != nil && instance.Spec.Auth.Mode == computev1alpha1.AuthModeOpenID
 
 	// deployment_suffix must match the engine StatefulSet naming pattern used
 	// by genResourceName: "{engine}-g{N}". The gateway discovers per-node
@@ -112,12 +112,7 @@ http_server:
   shutdown_delay: 5s
   shutdown_timeout: 30s
 auth:
-  oidc:
-    enabled: %t
-    cookie_name: web_auth
-    authy_config:
-      cache_refresh_interval: 2m
-      jwt_cache_size: 100
+  enabled: %t
 telemetry:
   log_level: "info"
   log_all_requests: false
@@ -130,7 +125,7 @@ filter_headers: true
 		instance.Status.AccountID,
 		instance.Namespace,
 		gatewayContainerPort,
-		oidcEnabled,
+		authEnabled,
 	)
 }
 

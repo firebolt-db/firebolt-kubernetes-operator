@@ -130,6 +130,16 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 							envFromSecret("POSTGRES_PASSWORD", secretName, "password"),
 							envFromSecret("POSTGRES_DB", secretName, "database"),
 						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("25m"),
+								corev1.ResourceMemory: resource.MustParse("64Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("250m"),
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+						},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "data", MountPath: "/var/lib/postgresql/data", SubPath: "pgdata"},
 						},

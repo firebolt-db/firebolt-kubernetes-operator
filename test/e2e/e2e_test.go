@@ -311,6 +311,10 @@ var _ = Describe("Firebolt Engine", func() {
 			err = UpdateEngineReplicas(ctx, engineName, 4)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Waiting for scale up to 4 to complete")
+			err = WaitForEngineReady(ctx, engineName, 4, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
 			By("Rapidly applying 15 config changes alternating between 3 and 1, ending with 1")
 			for i := 0; i < 15; i++ {
 				replicas := 3
@@ -323,10 +327,6 @@ var _ = Describe("Firebolt Engine", func() {
 				err = UpdateEngineReplicas(ctx, engineName, replicas)
 				Expect(err).NotTo(HaveOccurred())
 			}
-
-			By("Waiting for scale up to 4 to complete first")
-			err = WaitForEngineReady(ctx, engineName, 4, clusterTransitionTimeout)
-			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for final scale down to 1 node (last change applied)")
 			err = WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)

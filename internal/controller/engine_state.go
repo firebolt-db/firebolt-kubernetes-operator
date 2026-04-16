@@ -38,6 +38,7 @@ import (
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
 // Services, ConfigMaps, pod readiness, and drain status.
 func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
+	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 	state := EngineState{
 		ClusterServiceTargetGen: -1,
 	}
@@ -95,6 +96,7 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		if !apierrors.IsNotFound(err) {
 			return state, fmt.Errorf("failed to get cluster service: %w", err)
 		}
+		log.Info("Cluster service not found", "name", clusterSvcName)
 	} else {
 		state.ClusterService = clusterSvc
 		if genStr, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
@@ -102,6 +104,11 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 				state.ClusterServiceTargetGen = g
 			}
 		}
+		log.Info("Cluster service state",
+			"name", clusterSvcName,
+			"targetGen", state.ClusterServiceTargetGen,
+			"selectorLabels", clusterSvc.Spec.Selector,
+		)
 	}
 
 	return state, nil

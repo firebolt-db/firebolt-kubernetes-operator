@@ -12,7 +12,6 @@ spec:
     listKind: FireboltEngineList
     plural: fireboltengines
     shortNames:
-    - fire
     - fireng
     singular: fireboltengine
   scope: Namespaced

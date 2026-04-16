@@ -347,6 +347,50 @@ kubectl logs <pod-name> -n firebolt
 
 Old pods still have running queries. This is normal for long-running queries. To force the transition, set `rollout: recreate` in the engine spec.
 
+## Development
+
+### Running Tests
+
+**Unit tests** (no cluster required):
+
+```bash
+make test
+```
+
+This runs the controller unit tests and envtest suite, excluding the `test/e2e/` directory.
+
+**E2E tests** (requires a Kind cluster):
+
+```bash
+make test-e2e
+```
+
+This sets up a Kind cluster, builds and loads the operator image, deploys the operator, and runs the full e2e suite with a lightweight query configuration. The e2e suite uses the `e2e` build tag, which also activates crash-point injection in the controller for crash-recovery testing.
+
+**Heavy E2E tests** (stress / large query workloads):
+
+```bash
+go test -tags=e2e,heavy ./test/e2e/ -v -timeout 30m
+```
+
+The `heavy` tag swaps in a stress-oriented query configuration. Use this for validating behavior under sustained load. The Kind cluster must already be set up and the operator deployed (`make setup-test-e2e load-test-images deploy`).
+
+### Build Tags
+
+| Tag | Effect |
+|-----|--------|
+| *(none)* | Unit tests only. `crash_points.go` compiles crash points as no-ops |
+| `e2e` | Enables all e2e test files. Activates `crash_points_e2e.go` with real crash injection |
+| `e2e,heavy` | Same as `e2e`, but uses the heavy query configuration instead of the light one |
+
+### Linting
+
+```bash
+make lint
+```
+
+Linter configuration is in `.golangci.yml`.
+
 ## Design Documentation
 
 For detailed architecture and design decisions, see [docs/level-driven-reconciliation.md](docs/level-driven-reconciliation.md).

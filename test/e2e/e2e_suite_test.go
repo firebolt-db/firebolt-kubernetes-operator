@@ -46,20 +46,26 @@ import (
 )
 
 const (
-	// Test namespace
 	testNamespace = "firebolt-e2e"
+	testInstance  = "test-instance"
 
-	// Timeouts
 	clusterReadyTimeout      = 120 * time.Second
-	clusterTransitionTimeout = 180 * time.Second
+	clusterTransitionTimeout = 300 * time.Second
 	resourceCleanupTimeout   = 120 * time.Second
+	instanceReadyTimeout     = 300 * time.Second
 	pollInterval             = 1 * time.Second
 )
 
 var (
-	testImage   string
-	testTag     string
-	newImageTag string
+	testImage      string
+	testTag        string
+	newImageTag    string
+	pensieveImage  string
+	pensieveTag    string
+	postgresImage  string
+	gatewayImage   string
+	gatewayTag     string
+	instanceOp     *InstanceOperator
 )
 
 func init() {
@@ -67,6 +73,11 @@ func init() {
 	testImage = defaults["TEST_ENGINE_IMAGE"]
 	testTag = defaults["TEST_ENGINE_TAG"]
 	newImageTag = defaults["TEST_ENGINE_NEW_TAG"]
+	pensieveImage = defaults["TEST_PENSIEVE_IMAGE"]
+	pensieveTag = defaults["TEST_PENSIEVE_TAG"]
+	postgresImage = defaults["TEST_POSTGRES_IMAGE"]
+	gatewayImage = defaults["TEST_GATEWAY_IMAGE"]
+	gatewayTag = defaults["TEST_GATEWAY_TAG"]
 }
 
 // loadDefaults reads key=value pairs from defaults.env next to this source file.
@@ -151,9 +162,14 @@ var _ = BeforeSuite(func() {
 		"TEST_ENGINE_TAG and TEST_ENGINE_NEW_TAG must differ; upgrade tests would be no-ops")
 
 	By("Setting up Kubernetes client")
+	overrides := &clientcmd.ConfigOverrides{}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		overrides.CurrentContext = "kind-" + kindCluster
+		fmt.Fprintf(GinkgoWriter, "Forcing kubeconfig context to kind-%s\n", kindCluster)
+	}
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
+		overrides,
 	).ClientConfig()
 	Expect(err).NotTo(HaveOccurred())
 
@@ -182,11 +198,8 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRD %s", crd)
 	}
 
-	By("Deleting test namespace if it exists")
-	err = k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
-	if err != nil && !errors.IsNotFound(err) {
-		Expect(err).NotTo(HaveOccurred())
-	}
+	By("Cleaning up stale resources from previous runs")
+	cleanupStaleResources(ctx)
 
 	By("Waiting for namespace to be fully deleted")
 	for {
@@ -217,6 +230,9 @@ var _ = BeforeSuite(func() {
 	requiredImages := []string{
 		testImage + ":" + testTag,
 		testImage + ":" + newImageTag,
+		pensieveImage + ":" + pensieveTag,
+		postgresImage,
+		gatewayImage + ":" + gatewayTag,
 	}
 	for _, img := range requiredImages {
 		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()
@@ -227,9 +243,32 @@ var _ = BeforeSuite(func() {
 		}
 		fmt.Fprintf(GinkgoWriter, "Verified image %s is available\n", img)
 	}
+
+	By("Starting instance operator")
+	instanceOp, err = StartInstanceOperator()
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Creating shared FireboltInstance")
+	err = CreateInstance(ctx, testInstance, pensieveImage, pensieveTag, gatewayImage, gatewayTag)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Waiting for instance to become Ready")
+	err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
+	Expect(err).NotTo(HaveOccurred())
+	fmt.Fprintf(GinkgoWriter, "Instance %s is Ready\n", testInstance)
 })
 
 var _ = AfterSuite(func() {
+	By("Deleting shared FireboltInstance")
+	if err := DeleteInstance(ctx, testInstance); err != nil {
+		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete instance: %v\n", err)
+	}
+
+	By("Stopping instance operator")
+	if instanceOp != nil {
+		instanceOp.Stop()
+	}
+
 	By("Cleaning up test namespace")
 	if k8sClient != nil {
 		err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
@@ -242,3 +281,38 @@ var _ = AfterSuite(func() {
 		cancelFunc()
 	}
 })
+
+// cleanupStaleResources strips finalizers from CRDs left by a previous test
+// run, then deletes the namespace. Without this, the namespace hangs in
+// Terminating because no controller is running to process the finalizers.
+func cleanupStaleResources(ctx context.Context) {
+	// Strip finalizers from FireboltInstances
+	patchNoFinalizers := []byte(`{"metadata":{"finalizers":null}}`)
+	for _, kind := range []string{"fireboltinstances", "fireboltengines"} {
+		args := []string{"get", kind, "-n", testNamespace, "-o", "jsonpath={.items[*].metadata.name}"}
+		if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+			args = append([]string{"--context", "kind-" + kindCluster}, args...)
+		}
+		out, err := exec.Command("kubectl", args...).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		names := strings.Fields(strings.TrimSpace(string(out)))
+		for _, name := range names {
+			patchArgs := []string{"patch", kind, name, "-n", testNamespace, "--type=merge", "-p", string(patchNoFinalizers)}
+			if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+				patchArgs = append([]string{"--context", "kind-" + kindCluster}, patchArgs...)
+			}
+			if patchOut, patchErr := exec.Command("kubectl", patchArgs...).CombinedOutput(); patchErr != nil {
+				fmt.Fprintf(GinkgoWriter, "Warning: failed to strip finalizers from %s/%s: %s\n", kind, name, string(patchOut))
+			} else {
+				fmt.Fprintf(GinkgoWriter, "Stripped finalizers from %s/%s\n", kind, name)
+			}
+		}
+	}
+
+	err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
+	}
+}

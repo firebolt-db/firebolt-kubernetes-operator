@@ -462,9 +462,14 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		var (
 			engineName = "test-crash-avail" + queryConfig.Suffix + "-engine"
 			operator   *OperatorInstance
+			bgRunner   *BackgroundQueryRunner
 		)
 
 		AfterEach(func() {
+			if bgRunner != nil {
+				bgRunner.Stop()
+				bgRunner = nil
+			}
 			controller.ClearAllCrashPoints()
 			if operator != nil {
 				operator.Stop()
@@ -489,7 +494,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background queries")
-			bgRunner := NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewBackgroundQueryRunnerWithValidator(engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			time.Sleep(3 * time.Second)

@@ -35,9 +35,13 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -112,10 +116,7 @@ var operatorInstanceCounter atomic.Int64
 // StartOperator starts an operator instance. The labelValue is used to scope the cache
 // so multiple operator instances in the same namespace don't interfere.
 func StartOperator(labelValue string) (*OperatorInstance, error) {
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
-	).ClientConfig()
+	config, err := getRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
 	}
@@ -220,17 +221,17 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef: "test-instance",
+			InstanceRef: testInstance,
 			Replicas:    int32(replicas),
 			Image: computev1alpha1.ImageSpec{
 				Repository: testImage,
 				Tag:        testTag,
 				PullPolicy: corev1.PullIfNotPresent,
 			},
-			Resources: computev1alpha1.ResourceRequirements{
-				CPU:    resource.MustParse("100m"),
-				Memory: resource.MustParse("3Gi"),
-			},
+		Resources: computev1alpha1.ResourceRequirements{
+			CPU:    resource.MustParse("50m"),
+			Memory: resource.MustParse("2Gi"),
+		},
 			DrainCheckEnabled:  &drainCheckEnabled,
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
@@ -701,6 +702,301 @@ func (r *BackgroundQueryRunner) PrintFailureSummary() {
 	fmt.Fprintf(GinkgoWriter, "=========================================\n")
 }
 
+// dialMetadataViaPortForward establishes a gRPC connection to the metadata
+// service by port-forwarding through kubectl. This is needed because the
+// reconciler runs on the host and cannot resolve in-cluster DNS.
+func dialMetadataViaPortForward(_ context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
+	serviceName := instance.Name + controller.SuffixMetadataService
+	servicePort := controller.MetadataServicePort
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to find free port: %w", err)
+	}
+	localPort := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	args := []string{"port-forward", "-n", testNamespace,
+		fmt.Sprintf("svc/%s", serviceName),
+		fmt.Sprintf("%d:%d", localPort, servicePort)}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		args = append([]string{"--context", "kind-" + kindCluster}, args...)
+	}
+	cmd := exec.Command("kubectl", args...)
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("failed to start port-forward to %s: %w", serviceName, err)
+	}
+
+	// Wait for port-forward to be ready
+	var connected bool
+	for i := 0; i < 50; i++ {
+		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
+		if err == nil {
+			c.Close()
+			connected = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !connected {
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+			cmd.Wait()         //nolint:errcheck
+		}
+		return nil, nil, fmt.Errorf("timeout waiting for port-forward to %s to be ready", serviceName)
+	}
+
+	target := fmt.Sprintf("127.0.0.1:%d", localPort)
+	conn, err := grpc.NewClient(target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+			cmd.Wait()         //nolint:errcheck
+		}
+		return nil, nil, fmt.Errorf("grpc dial to %s via port-forward: %w", serviceName, err)
+	}
+
+	cleanup := func() {
+		_ = conn.Close()
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+			cmd.Wait()         //nolint:errcheck
+		}
+	}
+
+	return conn, cleanup, nil
+}
+
+// InstanceOperator represents a running instance operator (FireboltInstanceReconciler)
+type InstanceOperator struct {
+	mgr        manager.Manager
+	cancelFunc context.CancelFunc
+	wg         sync.WaitGroup
+	crdClient  client.Client
+}
+
+// StartInstanceOperator starts a FireboltInstanceReconciler in its own manager.
+// Only one should be running at a time per test suite.
+func StartInstanceOperator() (*InstanceOperator, error) {
+	config, err := getRestConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config: %w", err)
+	}
+
+	scheme := runtime.NewScheme()
+	for _, addFn := range []func(*runtime.Scheme) error{
+		corev1.AddToScheme,
+		appsv1.AddToScheme,
+		rbacv1.AddToScheme,
+		policyv1.AddToScheme,
+		computev1alpha1.AddToScheme,
+	} {
+		if err := addFn(scheme); err != nil {
+			return nil, fmt.Errorf("failed to add scheme: %w", err)
+		}
+	}
+
+	mgr, err := ctrl.NewManager(config, ctrl.Options{
+		Scheme: scheme,
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				testNamespace: {},
+			},
+		},
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+		HealthProbeBindAddress: "0",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create instance manager: %w", err)
+	}
+
+	reconciler := &controller.FireboltInstanceReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		DialMetadata: dialMetadataViaPortForward,
+	}
+	if err := reconciler.SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("failed to setup instance reconciler: %w", err)
+	}
+
+	crdClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create crd client: %w", err)
+	}
+
+	ctxOp, cancel := context.WithCancel(context.Background())
+	inst := &InstanceOperator{
+		mgr:        mgr,
+		cancelFunc: cancel,
+		crdClient:  crdClient,
+	}
+
+	inst.wg.Add(1)
+	go func() {
+		defer inst.wg.Done()
+		defer GinkgoRecover()
+		if err := mgr.Start(ctxOp); err != nil {
+			fmt.Fprintf(GinkgoWriter, "Instance manager exited with error: %v\n", err)
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	return inst, nil
+}
+
+// Stop stops the instance operator
+func (o *InstanceOperator) Stop() {
+	if o.cancelFunc != nil {
+		o.cancelFunc()
+	}
+	o.wg.Wait()
+}
+
+// CreateInstance creates a FireboltInstance CR with the given images.
+func CreateInstance(ctx context.Context, name, metadataImage, metadataTag, gatewayImage, gatewayTag string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	replicas := int32(1)
+	smallResources := &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("25m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("200m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			Metadata: computev1alpha1.MetadataSpec{
+				ComponentSpec: computev1alpha1.ComponentSpec{
+					Replicas:  &replicas,
+					Resources: smallResources,
+					Image: &computev1alpha1.ImageSpec{
+						Repository: metadataImage,
+						Tag:        metadataTag,
+						PullPolicy: corev1.PullIfNotPresent,
+					},
+				},
+			},
+			Gateway: computev1alpha1.GatewaySpec{
+				ComponentSpec: computev1alpha1.ComponentSpec{
+					Replicas:  &replicas,
+					Resources: smallResources,
+					Image: &computev1alpha1.ImageSpec{
+						Repository: gatewayImage,
+						Tag:        gatewayTag,
+						PullPolicy: corev1.PullIfNotPresent,
+					},
+				},
+			},
+		},
+	}
+
+	return cl.Create(ctx, instance)
+}
+
+// WaitForInstanceReady waits for the FireboltInstance to reach the Ready phase.
+// On timeout it dumps instance status diagnostics.
+func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duration) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	deadline := time.Now().Add(timeout)
+	key := types.NamespacedName{Name: name, Namespace: testNamespace}
+
+	var lastInst *computev1alpha1.FireboltInstance
+	for time.Now().Before(deadline) {
+		inst := &computev1alpha1.FireboltInstance{}
+		if err := cl.Get(ctx, key, inst); err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+		lastInst = inst
+
+		if inst.Status.Phase == computev1alpha1.InstancePhaseReady {
+			return nil
+		}
+
+		fmt.Fprintf(GinkgoWriter, "Instance %s: phase=%s metadata=%t gateway=%t account=%q\n",
+			name, inst.Status.Phase, inst.Status.MetadataReady, inst.Status.GatewayReady, inst.Status.AccountID)
+		time.Sleep(5 * time.Second)
+	}
+
+	diag := fmt.Sprintf("timeout waiting for instance %s to become Ready", name)
+	if lastInst != nil {
+		diag += fmt.Sprintf("\n  Phase: %s", lastInst.Status.Phase)
+		diag += fmt.Sprintf("\n  MetadataReady: %t", lastInst.Status.MetadataReady)
+		diag += fmt.Sprintf("\n  GatewayReady: %t", lastInst.Status.GatewayReady)
+		diag += fmt.Sprintf("\n  AccountID: %q", lastInst.Status.AccountID)
+		diag += fmt.Sprintf("\n  MetadataEndpoint: %q", lastInst.Status.MetadataEndpoint)
+		diag += fmt.Sprintf("\n  GatewayEndpoint: %q", lastInst.Status.GatewayEndpoint)
+		for _, c := range lastInst.Status.Conditions {
+			diag += fmt.Sprintf("\n  Condition %s=%s: %s", c.Type, c.Status, c.Message)
+		}
+	}
+
+	pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("firebolt.io/instance=%s", name),
+	})
+	if err == nil && len(pods.Items) > 0 {
+		diag += fmt.Sprintf("\n  Instance pods (%d):", len(pods.Items))
+		for _, pod := range pods.Items {
+			diag += fmt.Sprintf("\n    %s: phase=%s", pod.Name, pod.Status.Phase)
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Waiting != nil {
+					diag += fmt.Sprintf(" container=%s waiting(reason=%s, message=%s)",
+						cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+				if cs.State.Terminated != nil {
+					diag += fmt.Sprintf(" container=%s terminated(reason=%s, exit=%d)",
+						cs.Name, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+				}
+				if cs.RestartCount > 0 {
+					diag += fmt.Sprintf(" restarts=%d", cs.RestartCount)
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("%s", diag)
+}
+
+// DeleteInstance deletes a FireboltInstance CR
+func DeleteInstance(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+	}
+	err = cl.Delete(ctx, instance)
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // getCRDClient returns a controller-runtime client that knows about the CRD types
 func getCRDClient() (client.Client, error) {
 	config, err := getRestConfig()
@@ -722,10 +1018,16 @@ func getCRDClient() (client.Client, error) {
 	return client.New(config, client.Options{Scheme: scheme})
 }
 
-// getRestConfig returns the kubernetes REST config
+// getRestConfig returns the kubernetes REST config.
+// When KIND_CLUSTER is set it forces the context to kind-<cluster> so the
+// tests never accidentally target a different cluster.
 func getRestConfig() (*rest.Config, error) {
+	overrides := &clientcmd.ConfigOverrides{}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		overrides.CurrentContext = "kind-" + kindCluster
+	}
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
+		overrides,
 	).ClientConfig()
 }

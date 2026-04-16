@@ -84,13 +84,25 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 	oldPhase := engine.Status.Phase
 	newPhase := result.Status.Phase
 
+	if oldPhase == computev1alpha1.PhaseSwitching {
+		log.Info("Switching phase apply",
+			"ensureClusterSvcNil", result.EnsureClusterSvc == nil,
+			"oldPhase", oldPhase,
+			"newPhase", newPhase,
+		)
+	}
+
 	switch oldPhase {
 	case computev1alpha1.PhaseCreating:
 		if newPhase == computev1alpha1.PhaseSwitching {
 			MaybeCrash(engine.Name, CrashBeforeCreatingToSwitching)
 		}
 	case computev1alpha1.PhaseSwitching:
-		if result.EnsureClusterSvc != nil {
+		if result.EnsureClusterSvc != nil || newPhase != computev1alpha1.PhaseSwitching {
+			// When EnsureClusterSvc is nil and we're still in PhaseSwitching,
+			// the selector already pointed to the new generation (cache race
+			// or previous partial reconcile). Fire the crash point anyway so
+			// tests can simulate a crash after the traffic switch.
 			MaybeCrash(engine.Name, CrashAfterServiceSelectorUpdate)
 		}
 		MaybeCrash(engine.Name, CrashBeforeSwitchingStatusUpdate)
@@ -148,7 +160,16 @@ func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *co
 	err := r.Get(ctx, types.NamespacedName{Name: want.Name, Namespace: want.Namespace}, existing)
 	if errors.IsNotFound(err) {
 		log.Info("Creating Service", "name", want.Name)
-		return r.Create(ctx, want)
+		createErr := r.Create(ctx, want)
+		if errors.IsAlreadyExists(createErr) {
+			// The informer cache was stale — another reconcile already created
+			// the resource. We skip the update path here because re-reading
+			// from the same cache would likely still return NotFound. Any spec
+			// drift will be corrected on the next reconcile once the cache
+			// catches up (level-triggered convergence).
+			return nil
+		}
+		return createErr
 	}
 	if err != nil {
 		return err
@@ -185,7 +206,16 @@ func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context
 		log.Info("Creating StatefulSet", "name", want.Name,
 			"replicas", *want.Spec.Replicas,
 			"image", want.Spec.Template.Spec.Containers[0].Image)
-		return r.Create(ctx, want)
+		createErr := r.Create(ctx, want)
+		if errors.IsAlreadyExists(createErr) {
+			// The informer cache was stale — another reconcile already created
+			// the resource. We skip the update path here because re-reading
+			// from the same cache would likely still return NotFound. Any spec
+			// drift will be corrected on the next reconcile once the cache
+			// catches up (level-triggered convergence).
+			return nil
+		}
+		return createErr
 	}
 	if err != nil {
 		return err

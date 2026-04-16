@@ -33,8 +33,8 @@ import (
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// InstanceInfo holds the metadata endpoint and account ID resolved from the
-// FireboltInstance in the engine's namespace. These are injected into the
+// InstanceInfo holds the multi-engine endpoint and account ID resolved from
+// the FireboltInstance in the engine's namespace. These are injected into the
 // engine ConfigMap so engine nodes can connect to the metadata service.
 type InstanceInfo struct {
 	MetadataEndpoint string
@@ -301,17 +301,29 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		nodes[i] = map[string]string{"host": host}
 	}
 
-	coreConfig := map[string]interface{}{
-		"nodes": nodes,
-	}
-
+	metadataEndpoint := instanceInfo.MetadataEndpoint
 	if spec.MetadataEndpointOverride != nil {
-		coreConfig["metadata_endpoint"] = *spec.MetadataEndpointOverride
-	} else {
-		coreConfig["metadata_endpoint"] = instanceInfo.MetadataEndpoint
+		metadataEndpoint = *spec.MetadataEndpointOverride
 	}
 
-	coreConfig["account_id"] = instanceInfo.AccountID
+	innerConfig := map[string]interface{}{
+		"account_id":                instanceInfo.AccountID,
+		"account_name":              "default-account",
+		"organization_id":           "01KP98J0000000000000000000",
+		"organization_name":         "default-org",
+		"engine_id":                 engineName,
+		"engine_name":               engineName,
+		"cluster_id":                "default-cluster",
+		"multi_engine_endpoint":     metadataEndpoint,
+		"multi_engine_mode_enabled": true,
+		"logger_formatting":         "json",
+		"logger_use_files":          false,
+	}
+
+	coreConfig := map[string]interface{}{
+		"config": innerConfig,
+		"nodes":  nodes,
+	}
 
 	configJSON, err := json.MarshalIndent(coreConfig, "", "  ")
 	if err != nil {

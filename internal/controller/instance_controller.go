@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/grpc"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -43,6 +45,11 @@ const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
 type FireboltInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// DialMetadata, if non-nil, overrides the default gRPC dialer used by
+	// account initialization. This is used in E2E tests where the operator
+	// runs on the host and cannot resolve in-cluster DNS names.
+	DialMetadata func(ctx context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error)
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch;create;update;patch;delete
@@ -97,6 +104,18 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
 			log.Error(err, "Failed to ensure PostgreSQL")
 			return r.writeStatusAndRequeue(ctx, instance)
+		}
+		pgReady, err := r.isPostgresReady(ctx, instance)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !pgReady {
+			log.Info("PostgreSQL not ready yet, requeueing", "instance", instance.Name)
+			instance.Status.Phase = r.computePhase(instance)
+			if err := r.Status().Update(ctx, instance); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 	}
 
@@ -314,6 +333,18 @@ func (r *FireboltInstanceReconciler) computePhase(instance *computev1alpha1.Fire
 	}
 
 	return computev1alpha1.InstancePhaseProvisioning
+}
+
+func (r *FireboltInstanceReconciler) isPostgresReady(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := pgResourceName(instance.Name)
+	var sts appsv1.StatefulSet
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &sts); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return sts.Status.ReadyReplicas > 0, nil
 }
 
 func (r *FireboltInstanceReconciler) isMetadataServiceReady(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {

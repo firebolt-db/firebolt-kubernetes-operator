@@ -136,7 +136,7 @@ type FireboltEngineStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=fire;fireng
+// +kubebuilder:resource:shortName=fireng
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.replicas`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Generation",type=integer,JSONPath=`.status.activeGeneration`
