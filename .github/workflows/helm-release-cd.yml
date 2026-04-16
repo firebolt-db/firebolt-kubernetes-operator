@@ -1,5 +1,5 @@
 ---
-name: Helm - Release Chart
+name: Helm - Release CD
 
 env:
   HELM_CHARTS_NAMESPACE: helm-charts
@@ -31,13 +31,27 @@ jobs:
           show-progress: "false"
           fetch-depth: 2
 
+      - name: Check if app-release-cd will handle this
+        if: github.event_name != 'workflow_dispatch'
+        id: check
+        run: |
+          APP_CHANGES=$(git diff --name-only HEAD~1 HEAD -- ':!helm/' ':!README.md' ':!.github/' | wc -l)
+          if [ "$APP_CHANGES" -gt 0 ]; then
+            echo "App code also changed; deferring to app-release-cd"
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        if: steps.check.outputs.proceed != 'false'
         id: app-token
         with:
           client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
 
       - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        if: steps.check.outputs.proceed != 'false'
         id: ghcr-token
         with:
           client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
@@ -45,6 +59,7 @@ jobs:
           owner: ${{ env.GHCR_ORG }}
 
       - name: Determine chart version
+        if: steps.check.outputs.proceed != 'false'
         id: chart
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -105,22 +120,26 @@ jobs:
           echo "chart_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up Helm
+        if: steps.check.outputs.proceed != 'false'
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4
         with:
           version: "latest"
 
       - name: Login to GitHub Container Registry (Helm)
+        if: steps.check.outputs.proceed != 'false'
         run: |
           echo "${{ steps.ghcr-token.outputs.token }}" \
             | helm registry login ${{ env.GHCR_REGISTRY }} --username x-access-token --password-stdin
 
       - name: Package Helm chart
+        if: steps.check.outputs.proceed != 'false'
         run: |
           mkdir -p /tmp/helm-packages
           helm package helm/firebolt-kubernetes-operator --destination /tmp/helm-packages
           echo "Packaged: $(ls /tmp/helm-packages)"
 
       - name: Push chart to GitHub Container Registry
+        if: steps.check.outputs.proceed != 'false'
         run: |
           helm push \
             /tmp/helm-packages/firebolt-kubernetes-operator-${{ steps.chart.outputs.chart_version }}.tgz \
@@ -128,6 +147,7 @@ jobs:
           echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to GHCR"
 
       - name: Job summary
+        if: steps.check.outputs.proceed != 'false'
         run: |
           echo "### Helm Chart Published :package:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"

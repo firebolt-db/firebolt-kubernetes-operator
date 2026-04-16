@@ -1,5 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+VERSION ?= dev
+LDFLAGS := -X main.version=$(VERSION)
 
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
@@ -107,11 +109,11 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate ## Build manager binary.
-	CGO_ENABLED=0 go build -o bin/manager cmd/main.go
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: docker-build
-docker-build: ## Build CI/production docker image (multi-stage Go build inside Docker).
-	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --secret id=gitconfig,src=$(HOME)/.gitconfig -f Dockerfile.ci -t ${IMG} .
+docker-build: ## Build docker image with the manager.
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) --secret id=gitconfig,src=$(HOME)/.gitconfig -f Dockerfile.ci -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
