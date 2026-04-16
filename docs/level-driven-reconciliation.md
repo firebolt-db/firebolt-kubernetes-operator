@@ -49,51 +49,64 @@ The engine reconciler is split into three layers, with instance resolution as a 
 │  Reconcile()                                                │
 │  Entry point — reads CR, delegates to layers below          │
 │  File: engine_controller.go                                 │
-└──────┬──────────────────┬───────────────────────────────────┘
-       │                  │
-       ▼                  ▼
-┌──────────────────┐ ┌────────────────────┐
-│ resolveInstance  │ │  getEngineState    │
-│ Info (gate)      │ │  (read layer)      │
-│                  │ │                    │
-│ Reads the        │ │  Reads all K8s     │
-│ FireboltInstance │ │  resources for     │
-│ referenced by    │ │  this engine.      │
-│ spec.instanceRef │ │                    │
-│                  │ │  File:             │
-│ Blocks if the    │ │  engine_state.go   │
-│ instance is not  │ │                    │
-│ ready.           │ │                    │
-└────────┬─────────┘ └─────────┬──────────┘
-         │                     │
-         └──────────┬──────────┘
-                    ▼
-         ┌──────────────────────────┐
-         │  computeEngineReconcile  │
-         │  (pure logic layer)      │
-         │                          │
-         │  No I/O. Takes spec,     │
-         │  status, observed state, │
-         │  and InstanceInfo.       │
-         │  Returns a struct        │
-         │  describing what to      │
-         │  create/update/delete.   │
-         │                          │
-         │  File:                   │
-         │  engine_reconcile.go     │
-         └────────────┬─────────────┘
-                      │
-                      ▼
-         ┌──────────────────────────┐
-         │  applyEngineState        │
-         │  (write layer)           │
-         │                          │
-         │  Takes the reconcile     │
-         │  result and applies it   │
-         │  to the cluster.          │
-         │                          │
-         │  File: engine_apply.go   │
-         └──────────────────────────┘
+└──────┬──────────────────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────┐
+│  getEngineState  │
+│  (read layer)    │
+│                  │
+│  Reads all K8s   │
+│  resources for   │
+│  this engine.    │
+│                  │
+│  File:           │
+│  engine_state.go │
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│ resolveInstance  │
+│ Info (gate)      │
+│                  │
+│ Reads the        │
+│ FireboltInstance │
+│ referenced by    │
+│ spec.instanceRef │
+│                  │
+│ Blocks if the    │
+│ instance is not  │
+│ ready (only in   │
+│ stable/creating).│
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────────────┐
+│  computeEngineReconcile  │
+│  (pure logic layer)      │
+│                          │
+│  No I/O. Takes spec,     │
+│  status, observed state, │
+│  and InstanceInfo.       │
+│  Returns a struct        │
+│  describing what to      │
+│  create/update/delete.   │
+│                          │
+│  File:                   │
+│  engine_reconcile.go     │
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────┐
+│  applyEngineState        │
+│  (write layer)           │
+│                          │
+│  Takes the reconcile     │
+│  result and applies it   │
+│  to the cluster.         │
+│                          │
+│  File: engine_apply.go   │
+└──────────────────────────┘
 ```
 
 ### Layer responsibilities
@@ -288,8 +301,8 @@ When the metadata service or gateway becomes not-ready, the operator clears the 
 
 Each `FireboltEngine` declares its parent instance via `spec.instanceRef`. During reconciliation, the engine controller resolves this reference and reads two fields from the instance's status:
 
-- `metadata_endpoint` — the in-cluster address of the metadata gRPC service
-- `account_id` — the metadata account identifier
+- `metadataEndpoint` — the in-cluster address of the metadata gRPC service
+- `accountId` — the metadata account identifier
 
 These are written to the engine ConfigMap. The resolution is only required during the **stable** and **creating** phases (which build ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
 
@@ -307,3 +320,98 @@ All resources created by the instance reconciler have:
 - A `firebolt.io/instance` label for listing/filtering.
 - A `firebolt.io/component` label (`postgres`, `metadata`, or `gateway`).
 - A finalizer on the CR to ensure cleanup of all labelled resources on deletion.
+
+---
+
+## Gateway query routing
+
+The gateway acts as the entry point for client queries. It discovers engine Services by naming convention and routes requests to the correct engine.
+
+### Configuration
+
+The gateway ConfigMap (`{instance}-gateway-config`) contains a YAML configuration with key discovery parameters:
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `internal_service_suffix` | `"-service"` | Appended to engine name to form the Service name |
+| `internal_service_port` | `3473` | Port of the engine Service |
+| `deployment_suffix` | `"-g"` | Used for per-node resource discovery (StatefulSet naming pattern) |
+
+The gateway resolves engine endpoints as `{engine-name}-service:{port}` within the same namespace.
+
+### Traffic path
+
+```
+Client → Gateway Service (:80) → Engine Service (:3473) → Engine Pod
+```
+
+The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `maxUnavailable: 0`, ensuring zero downtime during gateway image upgrades.
+
+---
+
+## Rolling update parameters
+
+### Metadata Deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `1` | Allow one extra pod during rollout |
+| `maxUnavailable` | `0` | Never reduce available replicas below desired count |
+| Replicas | `1` (enforced by webhook) | Multi-replica metadata is not currently supported |
+
+### Gateway Deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `25%` | Standard Kubernetes default for gradual rollout |
+| `maxUnavailable` | `0` | Maintain full capacity during image switches |
+| PodDisruptionBudget | `maxUnavailable: 1` | Allow voluntary disruptions while maintaining availability |
+
+---
+
+## Crash-point testing
+
+The E2E test suite verifies crash recovery at every phase boundary using a build-tag-based injection mechanism.
+
+### Mechanism
+
+Two files implement the `MaybeCrash` function:
+
+- `crash_points.go` (build tag `!e2e`): production no-op, compiled away by the Go compiler.
+- `crash_points_e2e.go` (build tag `e2e`): real implementation that blocks the reconciliation goroutine until a "restart" signal is received.
+
+### Crash points
+
+| Crash Point | Phase | Location |
+|-------------|-------|----------|
+| `after_engine_configmap_created` | creating | After ConfigMap is written |
+| `after_headless_service_created` | creating | After headless Service is written |
+| `after_statefulset_created` | creating | After StatefulSet is written |
+| `after_cluster_service_ensured` | creating | After cluster Service is ensured |
+| `before_creating_to_switching` | creating → switching | Before status transition |
+| `after_service_selector_update` | switching | After Service selector is updated |
+| `before_switching_status_update` | switching | Before status write |
+| `after_statefulset_deleted` | cleaning | After old StatefulSet is deleted |
+| `before_cleaning_to_stable` | cleaning → stable | Before final status write |
+
+### Test pattern
+
+```go
+// Set a crash point before triggering a state change
+restartCh := controller.SetCrashPoint(engineName, controller.CrashAfterServiceSelectorUpdate, func() {
+    // Called when the crash point is hit
+    crashPointHit.Store(true)
+})
+
+// Trigger the transition (e.g. scale change)
+UpdateEngineReplicas(ctx, engineName, 3)
+
+// Wait for crash point to be hit, then "restart" by closing the channel
+Eventually(func() bool { return crashPointHit.Load() }).Should(BeTrue())
+close(restartCh)
+
+// Verify the operator recovers and reaches stable state
+WaitForEngineStable(ctx, engineName, timeout)
+```
+
+The crash-point channel blocks the reconciliation goroutine inside `MaybeCrash`, simulating an operator process crash. Closing the channel resumes reconciliation, verifying that the operator recovers correctly from the interrupted state.

@@ -1,14 +1,15 @@
 # Operator-Based Zero-Downtime Scaling Design
 
-This document describes an architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator.
+This document describes the architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator. The operator manages two CRDs: `FireboltInstance` (shared infrastructure) and `FireboltEngine` (compute nodes).
 
 ## Goals
 
 - Zero-downtime scaling via blue-green engine transitions
 - Single configuration change triggers full orchestration
 - No Helm or manual multi-step processes
-- Custom Resource Definition (CRD) with status subresource for clean state management
+- Custom Resource Definitions (CRDs) with status subresources for clean state management
 - Ephemeral engines (no persistent storage)
+- Instance-level infrastructure managed declaratively (PostgreSQL, metadata, gateway)
 
 ## Architecture Overview
 
@@ -16,8 +17,9 @@ This document describes an architecture for zero-downtime scaling of Firebolt en
 ┌────────────────────────────────────────────────────────────┐
 │                        Operator                            │
 │                                                            │
-│  - Watches FireboltEngine CRs                              │
-│  - Manages StatefulSets + Services per generation          │
+│  - Watches FireboltInstance and FireboltEngine CRs         │
+│  - Manages instance infra (PG, metadata, gateway)          │
+│  - Manages StatefulSets + Services per engine generation   │
 │  - Pre-generates engine config (predictable pod names)     │
 │  - Switches traffic via engine Service selector            │
 │  - Runs drain check before deleting old generation         │
@@ -26,16 +28,33 @@ This document describes an architecture for zero-downtime scaling of Firebolt en
         │ watches / updates
         ▼
 ┌─────────────────────────────────────────────────────────────┐
+│                   FireboltInstance CR                        │
+│  firebolt-production                                        │
+│                                                             │
+│  Provisions: PostgreSQL, metadata service, gateway          │
+│  Engines reference this via spec.instanceRef                │
+│                                                             │
+│  status:                                                    │
+│    phase: Ready                                             │
+│    metadataEndpoint: ...-metadata.ns.svc:7000               │
+│    accountId: 01KP98J0...                                   │
+│    gatewayEndpoint: ...-gateway.ns.svc.cluster.local        │
+└─────────────────────────────────────────────────────────────┘
+        │
+        │ engines reference instance
+        ▼
+┌─────────────────────────────────────────────────────────────┐
 │                    FireboltEngine CR                         │
 │  core-engine-production                                     │
 │                                                             │
 │  spec:                          status:                     │
-│    replicas: 5                    currentGeneration: 1      │
-│    image:                         activeGeneration: 1       │
-│      repository: .../core         phase: stable             │
-│      tag: v1.2                    lastReconciled: ...       │
-│    resources:                                               │
-│      cpu: "2"                                               │
+│    instanceRef: firebolt-prod     currentGeneration: 1      │
+│    replicas: 5                    activeGeneration: 1       │
+│    image:                         phase: stable             │
+│      repository: .../core         observedGeneration: 3     │
+│      tag: v1.2                    conditions:               │
+│    resources:                       - type: InstanceReady   │
+│      cpu: "2"                         status: "True"        │
 │      memory: "8Gi"                                          │
 └─────────────────────────────────────────────────────────────┘
 
@@ -89,6 +108,7 @@ metadata:
   name: core-engine-production
   namespace: firebolt
 spec:
+  instanceRef: firebolt-production
   replicas: 5
   image:
     repository: ghcr.io/firebolt-db/firebolt-core
@@ -100,10 +120,15 @@ status:
   currentGeneration: 2
   activeGeneration: 2
   phase: stable
-  lastReconciled: "2024-01-15T10:00:00Z"
+  observedGeneration: 5
+  conditions:
+    - type: InstanceReady
+      status: "True"
 ```
 
-Initial generation starts at 0.
+The `spec.instanceRef` field is required and references a `FireboltInstance` in the same namespace. The engine reconciler gates on this instance being ready before creating or updating engine resources.
+
+Generation numbering: `activeGeneration` starts at `-1` (no active generation). The first deployment creates generation `0`.
 
 **Phases:**
 - `stable` - Single active generation, no transition in progress
@@ -249,6 +274,19 @@ metadata:
 data:
   config.json: |
     {
+      "config": {
+        "account_id": "01KP98J0000000000000000000",
+        "account_name": "default-account",
+        "organization_id": "01KP98J0000000000000000000",
+        "organization_name": "default-org",
+        "engine_id": "core-engine-production",
+        "engine_name": "core-engine-production",
+        "cluster_id": "default-cluster",
+        "multi_engine_endpoint": "firebolt-production-metadata.firebolt.svc.cluster.local:7000",
+        "multi_engine_mode_enabled": true,
+        "logger_formatting": "json",
+        "logger_use_files": false
+      },
       "nodes": [
         {"host": "core-engine-production-g2-0.core-engine-production-g2-hl.firebolt.svc"},
         {"host": "core-engine-production-g2-1.core-engine-production-g2-hl.firebolt.svc"},
@@ -258,6 +296,8 @@ data:
       ]
     }
 ```
+
+The `config` section is populated from the parent `FireboltInstance` status (`accountId`, `metadataEndpoint`) and engine identity fields. The `multi_engine_endpoint` can be overridden per-engine via `spec.metadataEndpointOverride`.
 
 ### 4. Engine Service
 
@@ -402,75 +442,57 @@ The operator uses the `fb` CLI (available in the Core container) to check if a p
 
 The drain check is executed via `kubectl exec` on the `core` container of each pod in the draining generation.
 
-## Config Snapshotting and Pending Mutations
+## Spec Change Handling
 
-When the operator starts a transition, it **snapshots** the target configuration into `status.lastAppliedConfig`. This snapshot is used for the entire transition, regardless of subsequent changes to the engine spec.
+The operator reads the live `.spec` on every reconcile and compares it against the current cluster state. There is no snapshotting or pending mutation queue.
 
-### Behavior During Transitions
+### During `stable`
 
-```
-Current state:
-  - g0 active (3 nodes)
-  - phase: stable
-  - lastAppliedConfig: {replicas: 3, ...}
+A spec change is detected by comparing the live spec against the resources of the active generation. If the spec differs, the reconciler writes a status intent (`Phase=creating`, bumped `currentGeneration`) and requeues. No resources are created in this pass.
 
-User changes: replicas 3 → 5
+### During `creating`
 
-Operator logic:
-  1. Detect change (live spec differs from lastAppliedConfig)
-  2. Snapshot new config: lastAppliedConfig = {replicas: 5, ...}
-  3. Start transition: phase = creating, create g1 resources with 5 replicas
-  4. Continue transition using snapshotted config
-```
+Spec changes are **absorbed into the current generation**. The `ensure` calls for ConfigMap, StatefulSet, and headless Service are idempotent updates, so changing the spec mid-creation simply updates the in-progress resources. No new generation is created.
 
-### Handling Changes During Transition
+### During `switching`, `draining`, `cleaning`
 
-If the spec changes while a transition is in progress, the new spec is saved as `status.pendingMutation`. Only **one** pending mutation is kept (the most recent).
-
-```
-Current state:
-  - g0 active (3 nodes)
-  - g1 creating (5 nodes)
-  - phase: creating
-  - lastAppliedConfig: {replicas: 5, ...}  (snapshotted)
-
-User changes: replicas 5 → 7
-
-Operator logic:
-  1. Detect change (live spec differs from lastAppliedConfig)
-  2. Save as pending: pendingMutation = {replicas: 7, ...}
-  3. Continue current transition with snapshotted config (5 replicas)
-  4. After g1 transition completes → phase = stable
-  5. Immediately apply pendingMutation → start new transition to g2 (7 replicas)
-```
+Spec changes are **not acted on** until the current transition completes and the engine returns to `stable`. This prevents unbounded resource accumulation.
 
 ### Rapid Successive Changes
 
 ```
-During g0 → g1 transition:
+g0 active (3 nodes), phase: stable
   - User changes: 5 → 3 → 7 → 4 → 6 → 2 (rapid succession)
   
 Operator behavior:
-  - Each change overwrites pendingMutation
-  - Only the last value (2) is kept
-  - After g1 completes, g2 is created with 2 replicas
+  - Each reconcile sees the latest spec value
+  - Only one generation transition occurs (g0 → g1)
+  - The final g1 uses the last observed spec (2 replicas)
 ```
 
 This ensures:
-- Current transition completes cleanly with its snapshotted config
-- Rapid successive changes result in at most one additional transition
-- Only the final desired state matters
-- Operator can resume correctly after restart (state is persisted in status subresource)
+- At most one transition is in progress at any time
+- The final desired state is always what gets applied
+- All state is persisted in the status subresource for crash recovery
 
 ## Traffic Flow
+
+Queries flow through the gateway, which discovers engine services by naming convention:
 
 ```
 Client
    │
    ▼
 ┌──────────────────────────────────────────────┐
+│            Gateway Service                   │
+│    firebolt-production-gateway:80            │
+│    (routes by engine name)                   │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
 │            Engine Service                    │
-│    core-engine-production-service            │
+│    core-engine-production-service:3473       │
 │    selector: firebolt.io/generation=1        │
 └──────────────────────┬───────────────────────┘
                        │
@@ -487,9 +509,11 @@ During transition, g0 continues serving existing connections
 until drain check confirms 0 active queries on all pods.
 ```
 
+The gateway uses `internal_service_suffix: "-service"` and `internal_service_port: 3473` to discover engine endpoints by convention. It routes queries to the correct engine based on the engine name provided in the request.
+
 ## Operator RBAC
 
-The operator requires the following permissions (generated from kubebuilder markers):
+The operator requires the following permissions (generated from kubebuilder markers) for both the engine and instance controllers:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -497,18 +521,13 @@ kind: ClusterRole
 metadata:
   name: manager-role
 rules:
+  # Engine controller
   - apiGroups: ["compute.firebolt.io"]
     resources: ["fireboltengines"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["compute.firebolt.io"]
-    resources: ["fireboltengines/status"]
+    resources: ["fireboltengines/status", "fireboltengines/finalizers"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["compute.firebolt.io"]
-    resources: ["fireboltengines/finalizers"]
-    verbs: ["update"]
-  - apiGroups: [""]
-    resources: ["configmaps", "services"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -518,6 +537,31 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+
+  # Instance controller
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltinstances"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltinstances/status", "fireboltinstances/finalizers"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Shared
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ```
 
 The operator supports both namespace-scoped and cluster-scoped operation. Use `--namespace` to restrict to a single namespace.
@@ -529,6 +573,9 @@ The operator supports both namespace-scoped and cluster-scoped operation. Use `-
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--namespace` | (optional) | Namespace to watch. Watches all namespaces if empty. |
+| `--metrics-bind-address` | `0` | Address for the metrics endpoint (`:8443` for HTTPS, `:8080` for HTTP, `0` to disable). |
+| `--health-probe-bind-address` | `:8081` | Address for the health probe endpoint. |
+| `--leader-elect` | `false` | Enable leader election for HA deployments. |
 
 ### Startup Behavior
 
@@ -558,13 +605,12 @@ For the complete list of configurable fields in the engine spec, see the [README
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `currentGeneration` | int | Latest generation number (starts at 0) |
+| `currentGeneration` | int | Latest generation number (`activeGeneration` starts at `-1`; first deploy creates generation `0`) |
 | `activeGeneration` | int | Generation currently receiving traffic |
 | `drainingGeneration` | int/null | Generation being drained (if any) |
 | `phase` | string | Current phase (stable/creating/switching/draining/cleaning) |
-| `lastReconciled` | string | Timestamp of last reconciliation |
-| `pendingMutation` | object/null | Queued mutation waiting to be processed |
-| `lastAppliedConfig` | object/null | Spec used to create the current/active generation |
+| `observedGeneration` | int | Kubernetes metadata generation last reconciled |
+| `conditions` | list | Status conditions (e.g. `InstanceReady`) |
 
 ## Concurrency and Race Conditions
 
@@ -574,7 +620,8 @@ The operator uses Kubernetes optimistic concurrency control (ResourceVersion) to
 |----------|----------|
 | Two reconciles read same status | Second update fails with conflict error, controller-runtime requeues |
 | Resource created between Get and Create | Create returns AlreadyExists, requeue handles it |
-| Rapid spec changes during transition | Only the latest change is kept as PendingMutation |
+| Spec changes during `creating` | Absorbed into current generation via idempotent updates |
+| Spec changes during `draining`/`cleaning` | Deferred until transition completes and engine returns to `stable` |
 | Operator crash mid-transition | Restarts and resumes from persisted phase in status subresource |
 
 **Key principle:** All state is persisted in the status subresource before taking action. If an update fails due to conflict, the reconcile is retried with fresh state.
