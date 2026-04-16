@@ -15,9 +15,20 @@ When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the o
 
 ### 1. Deploy the Operator
 
+**Production / CI:**
+
 ```bash
 make docker-build docker-push IMG=<your-registry>/firebolt-kubernetes-operator:latest
-make deploy IMG=<your-registry>/firebolt-kubernetes-operator:latest
+helm upgrade --install firebolt-operator helm/firebolt-kubernetes-operator \
+  --set image.repository=<your-registry>/firebolt-kubernetes-operator \
+  --set image.tag=latest
+```
+
+**Local development (Kind):**
+
+```bash
+make prepare-test-e2e   # one-time: creates Kind cluster + loads test images
+make local-deploy       # builds operator, loads into Kind, deploys via Helm
 ```
 
 ### 2. Create a FireboltInstance
@@ -348,6 +359,37 @@ kubectl logs <pod-name> -n firebolt
 Old pods still have running queries. This is normal for long-running queries. To force the transition, set `rollout: recreate` in the engine spec.
 
 ## Development
+
+### Local Deployment (Kind)
+
+To deploy the operator into a local Kind cluster for manual testing:
+
+```bash
+make prepare-test-e2e   # one-time: creates Kind cluster + loads test images
+make local-deploy       # builds binary, packages Docker image, loads into Kind, deploys via Helm
+```
+
+Then create resources:
+
+```bash
+kubectl apply -f examples/local-instance.yaml
+```
+
+To redeploy after code changes, just re-run `make local-deploy` — it rebuilds everything.
+
+To tear down:
+
+```bash
+make undeploy-local
+```
+
+**Resetting CRDs:** If you previously installed CRDs via `kubectl apply` (outside of Helm), you must remove them before `make local-deploy` can manage them. CRD deletion can hang if custom resources still exist and no operator is running to handle finalizers. In that case, patch the finalizers away first:
+
+```bash
+kubectl patch crd fireboltengines.compute.firebolt.io -p '{"metadata":{"finalizers":[]}}' --type=merge
+kubectl patch crd fireboltinstances.compute.firebolt.io -p '{"metadata":{"finalizers":[]}}' --type=merge
+kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute.firebolt.io
+```
 
 ### Running Tests
 

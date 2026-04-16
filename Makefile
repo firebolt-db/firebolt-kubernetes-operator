@@ -107,70 +107,52 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	CGO_ENABLED=0 go build -o bin/manager cmd/main.go
 
-.PHONY: run
-run: manifests generate ## Run a controller from your host.
-	go run ./cmd/main.go
-
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --secret id=gitconfig,src=$(HOME)/.gitconfig -t ${IMG} .
+docker-build: ## Build CI/production docker image (multi-stage Go build inside Docker).
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --secret id=gitconfig,src=$(HOME)/.gitconfig -f Dockerfile.ci -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
-# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-.PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name operator-builder
-	$(CONTAINER_TOOL) buildx use operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm operator-builder
-	rm Dockerfile.cross
+LOCAL_IMG_REPO ?= firebolt-operator
+LOCAL_IMG_TAG ?= local
+LOCAL_IMG ?= $(LOCAL_IMG_REPO):$(LOCAL_IMG_TAG)
 
-.PHONY: build-installer
-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
-	mkdir -p dist
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build config/default > dist/install.yaml
+.PHONY: docker-build-local
+docker-build-local: build ## Build a local Docker image from pre-built binary.
+	$(CONTAINER_TOOL) build -t $(LOCAL_IMG) .
+
+.PHONY: kind-load-operator
+kind-load-operator: ## Load the operator image into the Kind cluster.
+	$(KIND) load docker-image $(LOCAL_IMG) --name $(KIND_CLUSTER)
+
+.PHONY: local-deploy
+local-deploy: docker-build-local kind-load-operator deploy-local ## Build, load, and deploy operator to Kind (one command).
 
 ##@ Deployment
-
-ifndef ignore-not-found
-  ignore-not-found = false
-endif
 
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
 	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" apply -f -; else echo "No CRDs to install; skipping."; fi
 
-.PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -; else echo "No CRDs to delete; skipping."; fi
+.PHONY: deploy-local
+deploy-local: manifests ## Deploy operator into Kind via Helm (includes CRDs).
+	helm upgrade --install firebolt-operator $(HELM_CHART_DIR) \
+		--set fullnameOverride=firebolt-kubernetes-operator \
+		--set image.repository=$(LOCAL_IMG_REPO) \
+		--set image.tag=$(LOCAL_IMG_TAG) \
+		--set image.pullPolicy=Never \
+		--set metrics.secure=false \
+		--set leaderElection.enabled=false \
+		--set additionalArgs='{--enable-webhooks=false}'
 
-.PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
-
-.PHONY: undeploy
-undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+.PHONY: undeploy-local
+undeploy-local: ## Remove the operator Helm release.
+	helm uninstall firebolt-operator
 
 ##@ Helm
 

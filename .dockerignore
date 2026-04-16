@@ -9,3 +9,6 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include pre-built binary (used by local Dockerfile)
+!bin/manager
