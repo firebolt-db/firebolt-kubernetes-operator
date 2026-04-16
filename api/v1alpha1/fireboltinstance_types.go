@@ -120,6 +120,12 @@ type AuthSpec struct {
 
 // FireboltInstanceSpec defines the desired state of a Firebolt Instance.
 type FireboltInstanceSpec struct {
+	// ID is a stable unique identifier for this instance, used as the metadata
+	// account ID. If empty on creation, a ULID is generated automatically by
+	// the defaulting webhook. Once set, this field is immutable.
+	// +optional
+	ID string `json:"id,omitempty"`
+
 	// Metadata configures the metadata service.
 	Metadata MetadataSpec `json:"metadata"`
 
@@ -137,11 +143,6 @@ type FireboltInstanceStatus struct {
 	// Phase is the current lifecycle phase of the Instance.
 	// +optional
 	Phase InstancePhase `json:"phase,omitempty"`
-
-	// AccountID is the metadata account identifier, resolved during first
-	// reconciliation and reused thereafter.
-	// +optional
-	AccountID string `json:"accountId,omitempty"`
 
 	// MetadataReady indicates whether the metadata service is healthy.
 	// +optional

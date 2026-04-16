@@ -37,7 +37,7 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 │  status:                                                    │
 │    phase: Ready                                             │
 │    metadataEndpoint: ...-metadata.ns.svc:7000               │
-│    accountId: 01KP98J0...                                   │
+│    id: 01KP98J0...                                          │
 │    gatewayEndpoint: ...-gateway.ns.svc.cluster.local        │
 └─────────────────────────────────────────────────────────────┘
         │
@@ -297,7 +297,7 @@ data:
     }
 ```
 
-The `config` section is populated from the parent `FireboltInstance` status (`accountId`, `metadataEndpoint`) and engine identity fields. The `multi_engine_endpoint` can be overridden per-engine via `spec.metadataEndpointOverride`.
+The `config` section is populated from the parent `FireboltInstance` (`spec.id` as account ID, `status.metadataEndpoint`) and engine identity fields. The `multi_engine_endpoint` can be overridden per-engine via `spec.metadataEndpointOverride`.
 
 ### 4. Engine Service
 

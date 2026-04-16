@@ -110,6 +110,7 @@ All associated resources are cleaned up automatically.
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
+| `spec.id` | No | (auto-generated ULID) | Stable unique identifier for the instance, used as the metadata account ID. Immutable once set. |
 | `spec.metadata` | **Yes** | - | Metadata service configuration (can be empty `{}` for defaults) |
 | `spec.metadata.postgres` | No | (internal) | External PostgreSQL connection. If omitted, the operator deploys an internal PostgreSQL StatefulSet |
 | `spec.metadata.postgres.host` | Yes* | - | PostgreSQL hostname |
@@ -157,7 +158,7 @@ Inspect details:
 kubectl get fi production -n firebolt -o yaml
 ```
 
-Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `accountId`.
+Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`.
 
 ### Full Example
 

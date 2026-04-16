@@ -102,6 +102,14 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                 http_filters:
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
                   - name: envoy.filters.http.lua
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
@@ -260,6 +268,28 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
 						},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.FromString("http"),
+								},
+							},
+							InitialDelaySeconds: 1,
+							PeriodSeconds:       15,
+							TimeoutSeconds:      3,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								HTTPGet: &corev1.HTTPGetAction{
+									Path: "/healthz",
+									Port: intstr.FromString("http"),
+								},
+							},
+							InitialDelaySeconds: 1,
+							PeriodSeconds:       3,
+							TimeoutSeconds:      3,
+						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser:                &runAsUser,
 							RunAsNonRoot:             boolPtr(true),
@@ -275,6 +305,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 								MountPath: "/etc/envoy",
 								ReadOnly:  true,
 							},
+							{
+								Name:      "tmp",
+								MountPath: "/tmp",
+							},
 						},
 					}},
 					Volumes: []corev1.Volume{
@@ -288,6 +322,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 									},
 								},
 							},
+						},
+						{
+							Name:         "tmp",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 					},
 				},

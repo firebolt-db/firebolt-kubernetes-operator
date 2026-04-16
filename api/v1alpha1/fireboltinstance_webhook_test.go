@@ -24,6 +24,85 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func TestDefaulter_GeneratesULID(t *testing.T) {
+	d := &FireboltInstanceDefaulter{}
+	inst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec:       FireboltInstanceSpec{},
+	}
+
+	if err := d.Default(context.Background(), inst); err != nil {
+		t.Fatalf("Default: unexpected error: %v", err)
+	}
+
+	if inst.Spec.ID == "" {
+		t.Fatal("Default: expected spec.id to be set, got empty string")
+	}
+	if len(inst.Spec.ID) != 26 {
+		t.Errorf("Default: expected 26-char ULID, got %d chars: %q", len(inst.Spec.ID), inst.Spec.ID)
+	}
+}
+
+func TestDefaulter_PreservesExistingID(t *testing.T) {
+	d := &FireboltInstanceDefaulter{}
+	inst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: FireboltInstanceSpec{
+			ID: "my-custom-id",
+		},
+	}
+
+	if err := d.Default(context.Background(), inst); err != nil {
+		t.Fatalf("Default: unexpected error: %v", err)
+	}
+
+	if inst.Spec.ID != "my-custom-id" {
+		t.Errorf("Default: expected spec.id to remain %q, got %q", "my-custom-id", inst.Spec.ID)
+	}
+}
+
+func TestValidateUpdate_RejectsIDMutation(t *testing.T) {
+	v := &FireboltInstanceCustomValidator{}
+	oldInst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: FireboltInstanceSpec{
+			ID: "original-id",
+		},
+	}
+	newInst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: FireboltInstanceSpec{
+			ID: "changed-id",
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
+	if err == nil {
+		t.Error("ValidateUpdate: expected error when changing spec.id, got nil")
+	}
+}
+
+func TestValidateUpdate_AllowsSameID(t *testing.T) {
+	v := &FireboltInstanceCustomValidator{}
+	oldInst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: FireboltInstanceSpec{
+			ID: "same-id",
+		},
+	}
+	newInst := &FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: FireboltInstanceSpec{
+			ID: "same-id",
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
+	if err != nil {
+		t.Errorf("ValidateUpdate: unexpected error: %v", err)
+	}
+}
+
 func TestValidateMetadataReplicas(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -67,7 +146,6 @@ func TestValidateMetadataReplicas(t *testing.T) {
 				},
 			}
 
-			// ValidateCreate
 			_, err := v.ValidateCreate(context.Background(), inst)
 			if tc.wantError && err == nil {
 				t.Error("ValidateCreate: expected error, got nil")
@@ -76,7 +154,6 @@ func TestValidateMetadataReplicas(t *testing.T) {
 				t.Errorf("ValidateCreate: unexpected error: %v", err)
 			}
 
-			// ValidateUpdate
 			_, err = v.ValidateUpdate(context.Background(), inst, inst)
 			if tc.wantError && err == nil {
 				t.Error("ValidateUpdate: expected error, got nil")

@@ -271,13 +271,13 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 	if inst.Status.MetadataEndpoint == "" {
 		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no metadata endpoint yet", inst.Name)
 	}
-	if inst.Status.AccountID == "" {
-		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no account ID yet", inst.Name)
+	if inst.Spec.ID == "" {
+		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no instance ID yet", inst.Name)
 	}
 
 	return InstanceInfo{
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
-		AccountID:        inst.Status.AccountID,
+		AccountID:        inst.Spec.ID,
 	}, nil
 }
 

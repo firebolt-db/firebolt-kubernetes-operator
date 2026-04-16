@@ -17,15 +17,15 @@ The operator enforces a hierarchical dependency between instances and engines:
 │ - Account init   │         │ Blocked until     │
 │                  │         │ instance has:     │
 │ status:          │         │ - metadataEndpoint│
-│   metadataEndpoint│        │ - accountId       │
-│   accountId      │         │                  │
+│   metadataEndpoint│        │ - spec.id         │
+│                  │         │                  │
 └──────────────────┘         └──────────────────┘
 ```
 
 **Rules:**
 
 - Each `FireboltEngine` declares its parent via `spec.instanceRef` (the name of a `FireboltInstance` in the same namespace).
-- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `accountId`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable** and **creating** phases (which build ConfigMaps referencing instance data). Phases that operate on already-created resources — **switching**, **draining**, **cleaning** — proceed without blocking on instance readiness.
+- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `spec.id`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable** and **creating** phases (which build ConfigMaps referencing instance data). Phases that operate on already-created resources — **switching**, **draining**, **cleaning** — proceed without blocking on instance readiness.
 - The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
 - The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
 - The instance reconciler is independent and has no dependency on engines.
@@ -271,7 +271,7 @@ Each `Reconcile` call runs through five sequential steps. If any step fails, the
 | 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
 | 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
-| 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures exactly one active account exists. If the account exists but is not active (e.g. a previous activation was interrupted), the operator retries activation. Multiple accounts trigger a terminal `Failed` phase. Persists the `accountId` in instance status. | `instance_account_init.go` |
+| 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures an account matching `spec.id` exists and is active. Uses `CreateAccountWithID` so the instance ID is the account ID. If the account exists but is not active, the operator retries activation. Multiple accounts or an ID mismatch trigger a terminal `Failed` phase. | `instance_account_init.go` |
 | 5. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
 ### Instance lifecycle phases
@@ -302,7 +302,7 @@ When the metadata service or gateway becomes not-ready, the operator clears the 
 Each `FireboltEngine` declares its parent instance via `spec.instanceRef`. During reconciliation, the engine controller resolves this reference and reads two fields from the instance's status:
 
 - `metadataEndpoint` — the in-cluster address of the metadata gRPC service
-- `accountId` — the metadata account identifier
+- `spec.id` — the instance identifier, used as the metadata account ID
 
 These are written to the engine ConfigMap. The resolution is only required during the **stable** and **creating** phases (which build ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
 

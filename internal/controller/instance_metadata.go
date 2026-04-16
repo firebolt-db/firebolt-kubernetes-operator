@@ -227,8 +227,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 									Port: intstr.FromInt32(int32(MetadataServicePort)),
 								},
 							},
-							InitialDelaySeconds: 10,
-							PeriodSeconds:       15,
+							InitialDelaySeconds: 2,
+							PeriodSeconds:       10,
 							FailureThreshold:    3,
 						},
 						ReadinessProbe: &corev1.Probe{
@@ -238,8 +238,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 									Service: strPtr(""),
 								},
 							},
-							InitialDelaySeconds: 5,
-							PeriodSeconds:       10,
+							InitialDelaySeconds: 2,
+							PeriodSeconds:       5,
 							FailureThreshold:    3,
 						},
 						Env: []corev1.EnvVar{

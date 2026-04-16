@@ -32,19 +32,17 @@ import (
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// ensureAccountInitialized checks that the metadata service has exactly one
-// active account. If zero accounts exist it creates and activates one. The
-// resolved account ID is persisted in the instance status.
-func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
+// ensureAccountInitialized ensures that the metadata service has an active
+// account whose ID matches instance.Spec.ID. If no accounts exist it creates
+// one using CreateAccountWithID. If the account already exists (e.g. from a
+// previous reconcile) it is activated if necessary.
+func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
-
-	if instance.Status.AccountID != "" {
-		return instance.Status.AccountID, nil
-	}
+	instanceID := instance.Spec.ID
 
 	conn, cleanup, err := r.dialMetadataService(ctx, instance)
 	if err != nil {
-		return "", fmt.Errorf("dial metadata service: %w", err)
+		return fmt.Errorf("dial metadata service: %w", err)
 	}
 	defer cleanup()
 
@@ -53,44 +51,50 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 
 	roResp, err := txClient.StartReadOnlyAdminTransaction(ctx, &transactionv1.StartReadOnlyAdminTransactionRequest{})
 	if err != nil {
-		return "", fmt.Errorf("StartReadOnlyAdminTransaction: %w", err)
+		return fmt.Errorf("StartReadOnlyAdminTransaction: %w", err)
 	}
 	roTxID := roResp.GetAdminTransactionId()
 
 	accounts, states, err := listAllAccounts(ctx, adminClient, roTxID)
 	if err != nil {
-		return "", fmt.Errorf("GetAccounts: %w", err)
+		return fmt.Errorf("GetAccounts: %w", err)
 	}
 
 	switch len(accounts) {
 	case 1:
+		if accounts[0] != instanceID {
+			instance.Status.Phase = computev1alpha1.InstancePhaseFailed
+			if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
+				log.Error(updateErr, "Failed to update instance status to Failed")
+			}
+			return fmt.Errorf("metadata account %q does not match instance ID %q; manual intervention required", accounts[0], instanceID)
+		}
 		if states[0] == adminv2.AccountState_ACCOUNT_STATE_ACTIVE {
 			log.Info("Metadata service account already active", "accountId", accounts[0])
-			return accounts[0], nil
+			return nil
 		}
 		log.Info("Metadata service account exists but is not active, attempting activation",
 			"accountId", accounts[0], "state", states[0])
 		if err := activateAccount(ctx, txClient, adminClient, accounts[0]); err != nil {
-			return "", fmt.Errorf("activating existing account %s: %w", accounts[0], err)
+			return fmt.Errorf("activating existing account %s: %w", accounts[0], err)
 		}
 		log.Info("Metadata service account activated", "accountId", accounts[0])
-		return accounts[0], nil
+		return nil
 
 	case 0:
-		log.Info("No accounts found in metadata service, creating initial account")
-		accountID, err := createAndProvisionAccount(ctx, txClient, adminClient)
-		if err != nil {
-			return "", fmt.Errorf("failed to create initial account: %w", err)
+		log.Info("No accounts found in metadata service, creating initial account", "accountId", instanceID)
+		if err := createAndProvisionAccount(ctx, txClient, adminClient, instanceID); err != nil {
+			return fmt.Errorf("failed to create initial account: %w", err)
 		}
-		log.Info("Initial metadata service account created and activated", "accountId", accountID)
-		return accountID, nil
+		log.Info("Initial metadata service account created and activated", "accountId", instanceID)
+		return nil
 
 	default:
 		instance.Status.Phase = computev1alpha1.InstancePhaseFailed
 		if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
 			log.Error(updateErr, "Failed to update instance status to Failed")
 		}
-		return "", fmt.Errorf("metadata service has %d accounts; expected exactly 1; manual intervention required", len(accounts))
+		return fmt.Errorf("metadata service has %d accounts; expected exactly 1; manual intervention required", len(accounts))
 	}
 }
 
@@ -142,36 +146,37 @@ func createAndProvisionAccount(
 	ctx context.Context,
 	txClient transactionv1.TransactionServiceClient,
 	adminClient adminv2.AdminServiceClient,
-) (string, error) {
+	accountID string,
+) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	tx1, err := txClient.StartAdminTransaction(ctx, &transactionv1.StartAdminTransactionRequest{})
 	if err != nil {
-		return "", fmt.Errorf("StartAdminTransaction (create): %w", err)
+		return fmt.Errorf("StartAdminTransaction (create): %w", err)
 	}
 
-	createResp, err := adminClient.CreateAccount(ctx, &adminv2.CreateAccountRequest{
+	_, err = adminClient.CreateAccountWithID(ctx, &adminv2.CreateAccountWithIDRequest{
 		AdminTransactionId: tx1.GetAdminTransactionId(),
+		Id:                 accountID,
 		Blob:               []byte("{}"),
 	})
 	if err != nil {
-		return "", fmt.Errorf("CreateAccount: %w", err)
+		return fmt.Errorf("CreateAccountWithID: %w", err)
 	}
-	accountID := createResp.GetAccountId()
 
 	_, err = txClient.CommitAdminTransaction(ctx, &transactionv1.CommitAdminTransactionRequest{
 		AdminTransactionId: tx1.GetAdminTransactionId(),
 	})
 	if err != nil {
-		return "", fmt.Errorf("CommitAdminTransaction (create): %w", err)
+		return fmt.Errorf("CommitAdminTransaction (create): %w", err)
 	}
 
 	if err := activateAccount(ctx, txClient, adminClient, accountID); err != nil {
-		return "", err
+		return err
 	}
 
-	return accountID, nil
+	return nil
 }
 
 // activateAccount activates an existing account in a dedicated transaction.

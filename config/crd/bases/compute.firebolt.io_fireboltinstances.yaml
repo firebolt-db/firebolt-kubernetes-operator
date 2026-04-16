@@ -1188,6 +1188,12 @@ spec:
                       type: object
                     type: array
                 type: object
+              id:
+                description: |-
+                  ID is a stable unique identifier for this instance, used as the metadata
+                  account ID. If empty on creation, a ULID is generated automatically by
+                  the defaulting webhook. Once set, this field is immutable.
+                type: string
               metadata:
                 description: Metadata configures the metadata service.
                 properties:
@@ -2316,11 +2322,6 @@ spec:
             description: FireboltInstanceStatus defines the observed state of a Firebolt
               Instance.
             properties:
-              accountId:
-                description: |-
-                  AccountID is the metadata account identifier, resolved during first
-                  reconciliation and reused thereafter.
-                type: string
               conditions:
                 description: Conditions represent the latest available observations
                   of the Instance's state.

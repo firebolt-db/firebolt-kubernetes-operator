@@ -22,6 +22,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -930,6 +932,7 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltInstanceSpec{
+			ID: ulid.MustNew(ulid.Now(), rand.Reader).String(),
 			Metadata: computev1alpha1.MetadataSpec{
 				ComponentSpec: computev1alpha1.ComponentSpec{
 					Replicas:  &replicas,
@@ -983,7 +986,7 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 		}
 
 		fmt.Fprintf(GinkgoWriter, "Instance %s: phase=%s metadata=%t gateway=%t account=%q\n",
-			name, inst.Status.Phase, inst.Status.MetadataReady, inst.Status.GatewayReady, inst.Status.AccountID)
+			name, inst.Status.Phase, inst.Status.MetadataReady, inst.Status.GatewayReady, inst.Spec.ID)
 		time.Sleep(5 * time.Second)
 	}
 
@@ -992,7 +995,7 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 		diag += fmt.Sprintf("\n  Phase: %s", lastInst.Status.Phase)
 		diag += fmt.Sprintf("\n  MetadataReady: %t", lastInst.Status.MetadataReady)
 		diag += fmt.Sprintf("\n  GatewayReady: %t", lastInst.Status.GatewayReady)
-		diag += fmt.Sprintf("\n  AccountID: %q", lastInst.Status.AccountID)
+		diag += fmt.Sprintf("\n  InstanceID: %q", lastInst.Spec.ID)
 		diag += fmt.Sprintf("\n  MetadataEndpoint: %q", lastInst.Status.MetadataEndpoint)
 		diag += fmt.Sprintf("\n  GatewayEndpoint: %q", lastInst.Status.GatewayEndpoint)
 		for _, c := range lastInst.Status.Conditions {

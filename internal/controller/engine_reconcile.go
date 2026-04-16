@@ -425,8 +425,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								},
 							},
 							ReadinessProbe: &corev1.Probe{
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       5,
+								InitialDelaySeconds: 1,
+								PeriodSeconds:       3,
 								TimeoutSeconds:      3,
 								FailureThreshold:    6,
 								ProbeHandler: corev1.ProbeHandler{
@@ -437,7 +437,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								},
 							},
 							LivenessProbe: &corev1.Probe{
-								InitialDelaySeconds: 5,
+								InitialDelaySeconds: 2,
 								PeriodSeconds:       5,
 								TimeoutSeconds:      3,
 								FailureThreshold:    6,

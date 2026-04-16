@@ -141,12 +141,10 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	instance.Status.MetadataEndpoint = metadataServiceEndpoint(instance.Name, instance.Namespace)
 
 	// Step 4: Account initialization
-	accountID, err := r.ensureAccountInitialized(ctx, instance)
-	if err != nil {
+	if err := r.ensureAccountInitialized(ctx, instance); err != nil {
 		log.Error(err, "Failed to ensure account initialization")
 		return r.writeStatusAndRequeue(ctx, instance)
 	}
-	instance.Status.AccountID = accountID
 
 	// Step 5: Ensure gateway (native Go resources)
 	if err := r.ensureGatewayResources(ctx, instance); err != nil {

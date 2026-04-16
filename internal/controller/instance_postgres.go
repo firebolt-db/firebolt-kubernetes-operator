@@ -149,8 +149,8 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 									Port: intstr.FromInt32(PostgresPort),
 								},
 							},
-							InitialDelaySeconds: 5,
-							PeriodSeconds:       10,
+							InitialDelaySeconds: 1,
+							PeriodSeconds:       5,
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
@@ -158,7 +158,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 									Command: []string{"pg_isready", "-U", PostgresUser},
 								},
 							},
-							InitialDelaySeconds: 30,
+							InitialDelaySeconds: 5,
 							PeriodSeconds:       10,
 						},
 					}},
