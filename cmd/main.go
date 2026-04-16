@@ -207,6 +207,10 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)
 	}
+	if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
