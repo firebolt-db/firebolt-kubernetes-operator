@@ -452,7 +452,7 @@ A spec change is detected by comparing the live spec against the resources of th
 
 ### During `creating`
 
-Spec changes are **absorbed into the current generation**. The `ensure` calls for ConfigMap, StatefulSet, and headless Service are idempotent updates, so changing the spec mid-creation simply updates the in-progress resources. No new generation is created.
+If the spec changes while a generation is being created, the in-progress generation is **abandoned**: its StatefulSet, headless Service, and ConfigMap are deleted, `currentGeneration` is bumped, and the next reconcile creates fresh resources for the new generation. This avoids patching a live STS whose pods have already read a stale config (e.g. an outdated node list), which would cause a permanent readiness deadlock.
 
 ### During `switching`, `draining`, `cleaning`
 
@@ -620,7 +620,7 @@ The operator uses Kubernetes optimistic concurrency control (ResourceVersion) to
 |----------|----------|
 | Two reconciles read same status | Second update fails with conflict error, controller-runtime requeues |
 | Resource created between Get and Create | Create returns AlreadyExists, requeue handles it |
-| Spec changes during `creating` | Absorbed into current generation via idempotent updates |
+| Spec changes during `creating` | In-progress generation abandoned, resources deleted, new generation created |
 | Spec changes during `draining`/`cleaning` | Deferred until transition completes and engine returns to `stable` |
 | Operator crash mid-transition | Restarts and resumes from persisted phase in status subresource |
 

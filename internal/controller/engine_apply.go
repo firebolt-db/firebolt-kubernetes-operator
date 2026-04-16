@@ -271,5 +271,9 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	if a.Annotations[AnnotationMetadataOverride] != b.Annotations[AnnotationMetadataOverride] {
+		return false
+	}
+
 	return true
 }

@@ -687,7 +687,67 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 	})
 
-	// Test 8: Recreate rollout strategy - no drain wait
+	// Test 8: Scale down restarts pods with updated config (config hash)
+	Describe("Scale Down Config Restart", Ordered, func() {
+		var (
+			engineName = "test-cfghash" + queryConfig.Suffix + "-engine"
+			clientPod  = "client-cfghash" + queryConfig.Suffix
+			operator   *OperatorInstance
+		)
+
+		BeforeAll(func() {
+			By("Starting operator for config hash test")
+			var err error
+			operator, err = StartOperator(engineName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			By("Cleaning up config hash test")
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			if operator != nil {
+				operator.Stop()
+			}
+		})
+
+		It("should restart pods when replica count changes so engine reads correct node list", func() {
+			By("Creating engine with 3 replicas")
+			err := CreateEngine(ctx, engineName, 3)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Immediately scaling down to 1 replica before pods are ready")
+			time.Sleep(2 * time.Second)
+			err = UpdateEngineReplicas(ctx, engineName, 1)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for engine to become ready with 1 replica")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Running query to verify the single-node engine is functional")
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
+			Expect(err).NotTo(HaveOccurred())
+			result, err := ParseQueryResult(output)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(queryConfig.Validator(result)).To(BeTrue(), "Post-scale-down query validation failed")
+
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for all resources to be deleted")
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	// Test 9: Recreate rollout strategy - no drain wait
 	Describe("Recreate Rollout Strategy", Ordered, func() {
 		var (
 			engineName = "test-recreate" + queryConfig.Suffix + "-engine"

@@ -448,15 +448,16 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 	}
 }
 
-func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
+func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 	spec := testSpec()
+	override := "new-metadata.default.svc.cluster.local:7000"
+	spec.MetadataEndpointOverride = &override
 	status := stableStatus()
-	driftedCM := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
-	driftedCM.Data["config.json"] = `{"nodes": []}`
+	// The existing STS was built without an override annotation.
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        driftedCM,
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
@@ -465,11 +466,11 @@ func TestComputeEngineReconcile_S5_ConfigMapDrift(t *testing.T) {
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
-	if result.Status.Phase != computev1alpha1.PhaseStable {
-		t.Errorf("expected to stay Stable (in-place fix), got %s", result.Status.Phase)
+	if result.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Errorf("expected Creating (new generation for metadata override drift), got %s", result.Status.Phase)
 	}
-	if result.EnsureConfigMap == nil {
-		t.Error("expected ConfigMap to be updated in-place")
+	if result.Status.CurrentGeneration != 1 {
+		t.Errorf("expected generation bumped to 1, got %d", result.Status.CurrentGeneration)
 	}
 }
 
@@ -602,9 +603,13 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
+	sts := makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0")
+	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0"),
-		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentSTS:              sts,
+		CurrentHeadlessSvc:      hlSvc,
+		CurrentConfigMap:        cm,
 		CurrentPodsReady:        false,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
@@ -615,15 +620,14 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected to stay in Creating, got %s", result.Status.Phase)
 	}
-	if result.EnsureStatefulSet == nil {
-		t.Fatal("expected STS to be updated with new spec")
+	if result.Status.CurrentGeneration != 2 {
+		t.Errorf("expected generation to be bumped to 2, got %d", result.Status.CurrentGeneration)
 	}
-	expectedImage := "firebolt/core:v3.0"
-	if result.EnsureStatefulSet.Spec.Template.Spec.Containers[0].Image != expectedImage {
-		t.Errorf("expected image %s, got %s", expectedImage, result.EnsureStatefulSet.Spec.Template.Spec.Containers[0].Image)
+	if len(result.DeleteResources) != 3 {
+		t.Errorf("expected 3 resources to delete (STS, headless svc, configmap), got %d", len(result.DeleteResources))
 	}
-	if result.Status.CurrentGeneration != 1 {
-		t.Errorf("should not increment generation during creating, got %d", result.Status.CurrentGeneration)
+	if !result.Requeue {
+		t.Error("expected Requeue to be true")
 	}
 }
 
@@ -757,9 +761,13 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
+	sts := makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0")
+	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0"),
-		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentSTS:              sts,
+		CurrentHeadlessSvc:      hlSvc,
+		CurrentConfigMap:        cm,
 		CurrentPodsReady:        true,
 		CurrentPodCount:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
@@ -769,10 +777,16 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
-		t.Errorf("expected to stay Creating (STS stale, waiting for roll), got %s", result.Status.Phase)
+		t.Errorf("expected to stay Creating, got %s", result.Status.Phase)
 	}
-	if result.RequeueAfter != 5*time.Second {
-		t.Errorf("expected RequeueAfter 5s, got %v", result.RequeueAfter)
+	if result.Status.CurrentGeneration != 2 {
+		t.Errorf("expected generation bumped to 2, got %d", result.Status.CurrentGeneration)
+	}
+	if len(result.DeleteResources) != 3 {
+		t.Errorf("expected 3 resources to delete, got %d", len(result.DeleteResources))
+	}
+	if !result.Requeue {
+		t.Error("expected Requeue to be true")
 	}
 }
 

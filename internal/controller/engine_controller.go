@@ -94,7 +94,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if engine.Status.Phase == "" {
 		log.Info("Initializing engine status", "activeGeneration", -1)
-		engine.Status.Phase = computev1alpha1.PhaseStable
+		engine.Status.Phase = computev1alpha1.PhaseCreating
 		engine.Status.ActiveGeneration = -1
 		if err := r.updateStatus(ctx, engine); err != nil {
 			return ctrl.Result{}, err

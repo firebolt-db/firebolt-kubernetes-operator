@@ -35,6 +35,11 @@ const (
 	// LabelComponent identifies the component type (metadata, gateway, etc.).
 	LabelComponent = "firebolt.io/component"
 
+	// AnnotationMetadataOverride records the MetadataEndpointOverride used
+	// to build the engine ConfigMap. stsMatchesSpec compares against this to
+	// detect changes that require a new generation.
+	AnnotationMetadataOverride = "firebolt.io/metadata-override"
+
 	// SuffixService is appended to form the cluster Service name.
 	SuffixService = "-service"
 	// SuffixGen is appended to form generation-scoped resource names.

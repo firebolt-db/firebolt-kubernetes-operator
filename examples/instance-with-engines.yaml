@@ -9,10 +9,10 @@ spec:
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: analytics
+  name: engine-analytics
 spec:
   instanceRef: demo2
-  replicas: 2
+  replicas: 1
   resources:
     cpu: "1"
     memory: "4Gi"
@@ -20,10 +20,10 @@ spec:
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: ingest
+  name: engine-ingest
 spec:
   instanceRef: demo2
-  replicas: 2
+  replicas: 1
   resources:
     cpu: "1"
     memory: "4Gi"

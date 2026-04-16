@@ -108,6 +108,10 @@ func computeStable(
 
 	gen := status.ActiveGeneration
 
+	// ConfigMap drift is not checked independently here. All mutable fields
+	// that affect the ConfigMap (replicas, MetadataEndpointOverride) are
+	// covered by stsMatchesSpec, which triggers a new generation. The
+	// remaining ConfigMap inputs (instanceInfo) are effectively immutable.
 	needsNewGen := current.CurrentSTS == nil ||
 		!stsMatchesSpec(current.CurrentSTS, spec) ||
 		current.CurrentHeadlessSvc == nil
@@ -118,11 +122,6 @@ func computeStable(
 		status.Phase = computev1alpha1.PhaseCreating
 		r.Requeue = true
 		return
-	}
-
-	wantCM := buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
-	if current.CurrentConfigMap == nil || current.CurrentConfigMap.Data["config.json"] != wantCM.Data["config.json"] {
-		r.EnsureConfigMap = wantCM
 	}
 
 	if current.ClusterService == nil {
@@ -143,6 +142,11 @@ func computeStable(
 
 // computeCreating ensures all resources for the new generation exist and
 // waits for pods to become ready before transitioning to switching.
+//
+// If the spec changed since the current generation was created (e.g. replica
+// count changed), we abandon the in-progress generation and start a fresh
+// one. Patching a live STS doesn't restart pods, leaving them with a stale
+// config (wrong node list) that causes a permanent readiness deadlock.
 func computeCreating(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -154,6 +158,21 @@ func computeCreating(
 	status := &r.Status
 	gen := status.CurrentGeneration
 
+	if current.CurrentSTS != nil && !stsMatchesSpec(current.CurrentSTS, spec) {
+		if current.CurrentSTS != nil {
+			r.DeleteResources = append(r.DeleteResources, current.CurrentSTS)
+		}
+		if current.CurrentHeadlessSvc != nil {
+			r.DeleteResources = append(r.DeleteResources, current.CurrentHeadlessSvc)
+		}
+		if current.CurrentConfigMap != nil {
+			r.DeleteResources = append(r.DeleteResources, current.CurrentConfigMap)
+		}
+		status.CurrentGeneration++
+		r.Requeue = true
+		return
+	}
+
 	buildGenResources(spec, r, engineName, engineNamespace, gen, instanceInfo)
 
 	if current.ClusterService == nil {
@@ -161,14 +180,6 @@ func computeCreating(
 	}
 
 	if !current.CurrentPodsReady {
-		r.RequeueAfter = 5 * time.Second
-		return
-	}
-
-	// If the spec changed while we were creating, the apply layer will update
-	// the STS (triggering a pod roll). Wait for the rolled pods to become ready
-	// before transitioning — otherwise we'd switch traffic to unready pods.
-	if current.CurrentSTS != nil && !stsMatchesSpec(current.CurrentSTS, spec) {
 		r.RequeueAfter = 5 * time.Second
 		return
 	}
@@ -377,6 +388,11 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		LabelGeneration: strconv.Itoa(gen),
 	}
 
+	annotations := map[string]string{}
+	if spec.MetadataEndpointOverride != nil {
+		annotations[AnnotationMetadataOverride] = *spec.MetadataEndpointOverride
+	}
+
 	image := DefaultEngineImage
 	pullPolicy := corev1.PullIfNotPresent
 	if spec.Image != nil {
@@ -388,9 +404,10 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    labels,
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Spec: appsv1.StatefulSetSpec{
 			ServiceName:         headlessSvcName,
@@ -548,6 +565,15 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Tolerations, spec.Tolerations) {
+		return false
+	}
+
+	stsOverride := sts.Annotations[AnnotationMetadataOverride]
+	specOverride := ""
+	if spec.MetadataEndpointOverride != nil {
+		specOverride = *spec.MetadataEndpointOverride
+	}
+	if stsOverride != specOverride {
 		return false
 	}
 
