@@ -35,6 +35,8 @@ jobs:
         with:
           client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
+          permission-packages: write
+          owner: firebolt-db
 
       - name: Determine chart version
         id: chart
