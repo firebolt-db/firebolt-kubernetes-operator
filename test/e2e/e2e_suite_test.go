@@ -57,15 +57,17 @@ const (
 )
 
 var (
-	testImage      string
-	testTag        string
-	newImageTag    string
-	pensieveImage  string
-	pensieveTag    string
-	postgresImage  string
-	gatewayImage   string
-	gatewayTag     string
-	instanceOp     *InstanceOperator
+	testImage       string
+	testTag         string
+	newImageTag     string
+	pensieveImage   string
+	pensieveTag     string
+	newPensieveTag  string
+	postgresImage   string
+	gatewayImage    string
+	gatewayTag      string
+	newGatewayTag   string
+	instanceOp      *InstanceOperator
 )
 
 func init() {
@@ -75,9 +77,11 @@ func init() {
 	newImageTag = defaults["TEST_ENGINE_NEW_TAG"]
 	pensieveImage = defaults["TEST_PENSIEVE_IMAGE"]
 	pensieveTag = defaults["TEST_PENSIEVE_TAG"]
+	newPensieveTag = defaults["TEST_PENSIEVE_NEW_TAG"]
 	postgresImage = defaults["TEST_POSTGRES_IMAGE"]
 	gatewayImage = defaults["TEST_GATEWAY_IMAGE"]
 	gatewayTag = defaults["TEST_GATEWAY_TAG"]
+	newGatewayTag = defaults["TEST_GATEWAY_NEW_TAG"]
 }
 
 // loadDefaults reads key=value pairs from defaults.env next to this source file.
@@ -231,8 +235,10 @@ var _ = BeforeSuite(func() {
 		testImage + ":" + testTag,
 		testImage + ":" + newImageTag,
 		pensieveImage + ":" + pensieveTag,
+		pensieveImage + ":" + newPensieveTag,
 		postgresImage,
 		gatewayImage + ":" + gatewayTag,
+		gatewayImage + ":" + newGatewayTag,
 	}
 	for _, img := range requiredImages {
 		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()

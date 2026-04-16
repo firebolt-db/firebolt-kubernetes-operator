@@ -629,7 +629,7 @@ func (r *BackgroundQueryRunner) runQuery(ctx context.Context) {
 func (r *BackgroundQueryRunner) recordFailure(category, detail string) {
 	r.failureCount.Add(1)
 
-	reason := category + ": " + r.categorizeError(detail)
+	reason := category + ": " + categorizeQueryError(detail)
 
 	r.mu.Lock()
 	r.failureReasons[reason]++
@@ -638,8 +638,8 @@ func (r *BackgroundQueryRunner) recordFailure(category, detail string) {
 	fmt.Fprintf(GinkgoWriter, "Background query failed [%s]: %s\n", category, detail)
 }
 
-// categorizeError extracts a short category from the error detail
-func (r *BackgroundQueryRunner) categorizeError(detail string) string {
+// categorizeQueryError extracts a short category from an error detail string.
+func categorizeQueryError(detail string) string {
 	switch {
 	case strings.Contains(detail, "connection refused"):
 		return "connection refused"
@@ -995,6 +995,325 @@ func DeleteInstance(ctx context.Context, name string) error {
 		return nil
 	}
 	return err
+}
+
+// --- Instance mutation helpers ---
+
+// UpdateInstanceMetadataImage updates the metadata image tag on the FireboltInstance (with retry on conflict).
+func UpdateInstanceMetadataImage(ctx context.Context, name, tag string) error {
+	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
+		if inst.Spec.Metadata.Image == nil {
+			inst.Spec.Metadata.Image = &computev1alpha1.ImageSpec{}
+		}
+		inst.Spec.Metadata.Image.Tag = tag
+	})
+}
+
+// UpdateInstanceGatewayImage updates the gateway image tag on the FireboltInstance (with retry on conflict).
+func UpdateInstanceGatewayImage(ctx context.Context, name, tag string) error {
+	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
+		if inst.Spec.Gateway.Image == nil {
+			inst.Spec.Gateway.Image = &computev1alpha1.ImageSpec{}
+		}
+		inst.Spec.Gateway.Image.Tag = tag
+	})
+}
+
+// UpdateInstanceGatewayReplicas updates the gateway replica count on the FireboltInstance (with retry on conflict).
+func UpdateInstanceGatewayReplicas(ctx context.Context, name string, replicas int32) error {
+	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
+		inst.Spec.Gateway.Replicas = &replicas
+	})
+}
+
+// retryOnInstanceConflict retries an update on conflict errors for FireboltInstance resources.
+func retryOnInstanceConflict(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltInstance)) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < 10; i++ {
+		inst := &computev1alpha1.FireboltInstance{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, inst); err != nil {
+			return err
+		}
+		mutate(inst)
+		err := cl.Update(ctx, inst)
+		if err == nil {
+			return nil
+		}
+		if !errors.IsConflict(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("too many conflict retries updating instance %s", name)
+}
+
+// WaitForInstanceMetadataImage polls until the metadata deployment uses the expected image tag.
+func WaitForInstanceMetadataImage(ctx context.Context, instanceName, expectedTag string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	deployName := instanceName + controller.SuffixMetadataService
+
+	for time.Now().Before(deadline) {
+		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
+		if err == nil {
+			for _, c := range dep.Spec.Template.Spec.Containers {
+				if strings.Contains(c.Image, expectedTag) {
+					if dep.Status.ReadyReplicas == *dep.Spec.Replicas && dep.Status.UpdatedReplicas == *dep.Spec.Replicas {
+						return nil
+					}
+				}
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for metadata deployment %s to use tag %s", deployName, expectedTag)
+}
+
+// WaitForInstanceGatewayImage polls until the gateway deployment uses the expected image tag.
+func WaitForInstanceGatewayImage(ctx context.Context, instanceName, expectedTag string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	deployName := instanceName + controller.SuffixGateway
+
+	for time.Now().Before(deadline) {
+		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
+		if err == nil {
+			for _, c := range dep.Spec.Template.Spec.Containers {
+				if strings.Contains(c.Image, expectedTag) {
+					if dep.Status.ReadyReplicas == *dep.Spec.Replicas && dep.Status.UpdatedReplicas == *dep.Spec.Replicas {
+						return nil
+					}
+				}
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for gateway deployment %s to use tag %s", deployName, expectedTag)
+}
+
+// WaitForGatewayReplicas polls until the gateway deployment has the expected number of ready replicas.
+func WaitForGatewayReplicas(ctx context.Context, instanceName string, expected int32, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	deployName := instanceName + controller.SuffixGateway
+
+	for time.Now().Before(deadline) {
+		dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
+		if err == nil && dep.Status.ReadyReplicas == expected {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for gateway %s to reach %d ready replicas", deployName, expected)
+}
+
+// --- Gateway query helpers ---
+
+// RunQueryViaGateway executes a SQL query through the gateway service.
+// The gateway routes the query to the specified engine.
+func RunQueryViaGateway(ctx context.Context, instanceName, engineName, query string) (string, error) {
+	serviceName := instanceName + controller.SuffixGateway
+	return executeQueryViaGateway(ctx, serviceName, engineName, query)
+}
+
+// executeQueryViaGateway port-forwards to the gateway service and executes an HTTP query
+// targeting a specific engine via the X-Firebolt-Engine header.
+func executeQueryViaGateway(ctx context.Context, serviceName, engineName, query string) (string, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf("failed to find free port: %w", err)
+	}
+	localPort := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	args := []string{"port-forward", "-n", testNamespace, "svc/" + serviceName, fmt.Sprintf("%d:80", localPort)}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		args = append([]string{"--context", "kind-" + kindCluster}, args...)
+	}
+	cmd := exec.Command("kubectl", args...)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start port-forward: %w", err)
+	}
+
+	defer func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait() //nolint:errcheck
+		}
+	}()
+
+	var connected bool
+	for i := 0; i < 100; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			connected = true
+			break
+		}
+		if cmd.ProcessState != nil {
+			return "", fmt.Errorf("port-forward exited early: %s", strings.TrimSpace(stderrBuf.String()))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !connected {
+		return "", fmt.Errorf("timeout waiting for gateway port-forward to be ready: %s", strings.TrimSpace(stderrBuf.String()))
+	}
+
+	queryURL := fmt.Sprintf("http://127.0.0.1:%d/?query_label=e2e-gateway-test&output_format=JSON_Compact", localPort)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, queryURL, strings.NewReader(query))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("X-Firebolt-Engine", engineName)
+
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return string(body), nil
+}
+
+// GatewayBackgroundQueryRunner runs queries through the gateway in the background.
+type GatewayBackgroundQueryRunner struct {
+	instanceName   string
+	engineName     string
+	query          string
+	validator      QueryValidator
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	failureCount   atomic.Int32
+	successCount   atomic.Int32
+	mu             sync.Mutex
+	failureReasons map[string]int
+}
+
+// NewGatewayBackgroundQueryRunner creates a background query runner that routes queries through the gateway.
+func NewGatewayBackgroundQueryRunner(instanceName, engineName, query string) *GatewayBackgroundQueryRunner {
+	validator := LightQueryValidator
+	if strings.Contains(query, "array_agg") {
+		validator = HeavyQueryValidator
+	}
+	return &GatewayBackgroundQueryRunner{
+		instanceName:   instanceName,
+		engineName:     engineName,
+		query:          query,
+		validator:      validator,
+		stopCh:         make(chan struct{}),
+		failureReasons: make(map[string]int),
+	}
+}
+
+// Start starts running queries in the background through the gateway.
+func (r *GatewayBackgroundQueryRunner) Start(ctx context.Context) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		defer GinkgoRecover()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-r.stopCh:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				r.runQuery(ctx)
+			}
+		}
+	}()
+}
+
+func (r *GatewayBackgroundQueryRunner) runQuery(ctx context.Context) {
+	output, err := RunQueryViaGateway(ctx, r.instanceName, r.engineName, r.query)
+	if err != nil {
+		r.recordFailure("query_error", err.Error())
+		return
+	}
+
+	result, err := ParseQueryResult(output)
+	if err != nil {
+		r.recordFailure("parse_error", err.Error())
+		return
+	}
+
+	if !r.validator(result) {
+		r.recordFailure("validation_error", fmt.Sprintf("validation failed for result: %v", result))
+		return
+	}
+
+	r.successCount.Add(1)
+}
+
+func (r *GatewayBackgroundQueryRunner) recordFailure(category, detail string) {
+	r.failureCount.Add(1)
+
+	reason := category + ": " + categorizeQueryError(detail)
+
+	r.mu.Lock()
+	r.failureReasons[reason]++
+	r.mu.Unlock()
+
+	fmt.Fprintf(GinkgoWriter, "Gateway background query failed [%s]: %s\n", category, detail)
+}
+
+// Stop stops the gateway background query runner.
+func (r *GatewayBackgroundQueryRunner) Stop() {
+	close(r.stopCh)
+	r.wg.Wait()
+}
+
+// GetStats returns the success and failure counts.
+func (r *GatewayBackgroundQueryRunner) GetStats() (successes, failures int32) {
+	return r.successCount.Load(), r.failureCount.Load()
+}
+
+// GetFailureReasons returns a summary of failure reasons.
+func (r *GatewayBackgroundQueryRunner) GetFailureReasons() map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result := make(map[string]int)
+	for k, v := range r.failureReasons {
+		result[k] = v
+	}
+	return result
+}
+
+// PrintFailureSummary prints a summary of all failure reasons.
+func (r *GatewayBackgroundQueryRunner) PrintFailureSummary() {
+	reasons := r.GetFailureReasons()
+	if len(reasons) == 0 {
+		return
+	}
+
+	fmt.Fprintf(GinkgoWriter, "\n=== Gateway Background Query Failure Summary ===\n")
+	for reason, count := range reasons {
+		fmt.Fprintf(GinkgoWriter, "  %s: %d\n", reason, count)
+	}
+	fmt.Fprintf(GinkgoWriter, "=================================================\n")
 }
 
 // getCRDClient returns a controller-runtime client that knows about the CRD types
