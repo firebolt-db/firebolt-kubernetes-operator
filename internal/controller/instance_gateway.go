@@ -23,7 +23,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,36 +34,25 @@ import (
 )
 
 const (
-	gatewayContainerPort = 5050
-	gatewayServicePort   = 80
-	gatewayContainerName = "core-gateway"
-	gatewayConfigKey     = "core-gateway.yaml"
+	gatewayContainerPort int32 = 8080
+	gatewayAdminPort     int32 = 9901
+	gatewayServicePort   int32 = 80
+	gatewayContainerName       = "envoy"
+	gatewayConfigKey           = "envoy.yaml"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
-// ServiceAccount, Role, RoleBinding, and PDB for the gateway.
+// and PDB for the Envoy gateway proxy.
 func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	gatewayYAML := buildGatewayConfigYAML(instance)
+	envoyYAML := buildEnvoyConfigYAML(instance)
 
-	if err := r.ensureGatewayConfigMap(ctx, instance, gatewayYAML); err != nil {
+	if err := r.ensureGatewayConfigMap(ctx, instance, envoyYAML); err != nil {
 		return fmt.Errorf("ensuring gateway configmap: %w", err)
 	}
 
-	if err := r.ensureGatewayServiceAccount(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway service account: %w", err)
-	}
-
-	if err := r.ensureGatewayRole(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway role: %w", err)
-	}
-
-	if err := r.ensureGatewayRoleBinding(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway role binding: %w", err)
-	}
-
-	if err := r.ensureGatewayDeployment(ctx, instance, gatewayYAML); err != nil {
+	if err := r.ensureGatewayDeployment(ctx, instance, envoyYAML); err != nil {
 		return fmt.Errorf("ensuring gateway deployment: %w", err)
 	}
 
@@ -92,35 +80,84 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
-func buildGatewayConfigYAML(instance *computev1alpha1.FireboltInstance) string {
-	return fmt.Sprintf(`organization:
-  account_id: %q
-  namespace: %q
-  internal_service_suffix: "-service"
-  internal_service_port: 3473
-  deployment_suffix: "-g"
-http_server:
-  address: ":%d"
-  shutdown_delay: 5s
-  shutdown_timeout: 30s
-auth:
-  enabled: false
-telemetry:
-  log_level: "info"
-  log_all_requests: false
-transport_config:
-  max_idle_conns_per_host: 100
-  idle_conn_timeout: 60s
-  flush_interval: -1
-filter_headers: true
+// buildEnvoyConfigYAML generates an Envoy static config that routes requests
+// based on the X-Firebolt-Engine header to the corresponding engine ClusterIP
+// Service ({engine}-service:3473) via the dynamic forward proxy.
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	return fmt.Sprintf(`static_resources:
+  listeners:
+    - name: listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: gateway
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                http_filters:
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      default_source_code:
+                        inline_string: |
+                          function envoy_on_request(handle)
+                            local engine = handle:headers():get("x-firebolt-engine")
+                            if engine == nil or engine == "" then
+                              handle:respond({[":status"] = "400"}, "missing X-Firebolt-Engine header")
+                              return
+                            end
+                            handle:headers():replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
+                          end
+                  - name: envoy.filters.http.dynamic_forward_proxy
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                      dns_cache_config:
+                        name: dynamic_forward_proxy_cache
+                        dns_lookup_family: V4_ONLY
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: default
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: dynamic_forward_proxy
+                            timeout: 0s
+  clusters:
+    - name: dynamic_forward_proxy
+      lb_policy: CLUSTER_PROVIDED
+      cluster_type:
+        name: envoy.clusters.dynamic_forward_proxy
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
+          dns_cache_config:
+            name: dynamic_forward_proxy_cache
+            dns_lookup_family: V4_ONLY
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: %d
 `,
-		instance.Status.AccountID,
-		instance.Namespace,
 		gatewayContainerPort,
+		instance.Namespace,
+		gatewayAdminPort,
 	)
 }
 
-func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, gatewayYAML string) error {
+func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway + "-config"
 	labels := instanceLabels(instance.Name, "gateway")
 
@@ -131,7 +168,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 			Labels:    labels,
 		},
 		Data: map[string]string{
-			gatewayConfigKey: gatewayYAML,
+			gatewayConfigKey: envoyYAML,
 		},
 	}
 
@@ -153,24 +190,19 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	return r.Update(ctx, existing)
 }
 
-func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, gatewayYAML string) error {
+func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
 	labels := instanceLabels(instance.Name, "gateway")
 
 	spec := &instance.Spec.Gateway.ComponentSpec
 
-	saName := instance.Name + SuffixGateway + "-sa"
-	if spec.ServiceAccountName != "" {
-		saName = spec.ServiceAccountName
-	}
-
 	var replicas int32 = 2
 	if spec.Replicas != nil {
 		replicas = *spec.Replicas
 	}
 
-	image := "core-gateway:latest"
+	image := "envoyproxy/envoy:v1.33-latest"
 	pullPolicy := corev1.PullIfNotPresent
 	if spec.Image != nil {
 		image = spec.Image.Repository + ":" + spec.Image.Tag
@@ -180,11 +212,11 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		}
 	}
 
-	configHash := contentHash(gatewayYAML)
+	configHash := contentHash(envoyYAML)
 
 	maxSurge := intstr.FromString("25%")
 	maxUnavailable := intstr.FromInt32(0)
-	var runAsUser int64 = 65534
+	var runAsUser int64 = 101 // Envoy default UID
 
 	podLabels := mergeMaps(labels, spec.Labels)
 	podAnnotations := mergeMaps(map[string]string{
@@ -213,30 +245,20 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: saName,
 					Containers: []corev1.Container{{
 						Name:            gatewayContainerName,
 						Image:           image,
 						ImagePullPolicy: pullPolicy,
-						Args:            []string{"serve", "--config=/etc/core-gateway.yaml"},
-						Env: []corev1.EnvVar{
-							{
-								Name: "FIREBOLT_ORGANIZATION_NAMESPACE",
-								ValueFrom: &corev1.EnvVarSource{
-									FieldRef: &corev1.ObjectFieldSelector{
-										FieldPath: "metadata.namespace",
-									},
-								},
-							},
-						},
+						Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
+							{Name: "admin", ContainerPort: gatewayAdminPort, Protocol: corev1.ProtocolTCP},
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/health/live",
-									Port: intstr.FromString("http"),
+									Path: "/ready",
+									Port: intstr.FromString("admin"),
 								},
 							},
 							InitialDelaySeconds: 1,
@@ -246,18 +268,17 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/health/ready",
-									Port: intstr.FromString("http"),
+									Path: "/ready",
+									Port: intstr.FromString("admin"),
 								},
 							},
-							InitialDelaySeconds: 5,
+							InitialDelaySeconds: 2,
 							PeriodSeconds:       3,
 							TimeoutSeconds:      5,
 						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser:                &runAsUser,
 							RunAsNonRoot:             boolPtr(true),
-							ReadOnlyRootFilesystem:   boolPtr(true),
 							AllowPrivilegeEscalation: boolPtr(false),
 							Capabilities: &corev1.Capabilities{
 								Drop: []corev1.Capability{"ALL"},
@@ -266,8 +287,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 						VolumeMounts: []corev1.VolumeMount{
 							{
 								Name:      "config-volume",
-								MountPath: "/etc/core-gateway.yaml",
-								SubPath:   gatewayConfigKey,
+								MountPath: "/etc/envoy",
 								ReadOnly:  true,
 							},
 						},
@@ -356,119 +376,6 @@ func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, i
 
 	existing.Spec.Ports = desired.Spec.Ports
 	existing.Spec.Selector = desired.Spec.Selector
-	return r.Update(ctx, existing)
-}
-
-// TODO: ServiceAccount, Role, and RoleBinding will be removed in the future.
-// The features they support (autoscaler, autochaos, query_buffering, etc.)
-// will be moved to the operator.
-func (r *FireboltInstanceReconciler) ensureGatewayServiceAccount(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	name := instance.Name + SuffixGateway + "-sa"
-	labels := instanceLabels(instance.Name, "gateway")
-
-	desired := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: instance.Namespace,
-			Labels:    labels,
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-
-	existing := &corev1.ServiceAccount{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	return err
-}
-
-// TODO: Role will be removed in the future; the related features will be
-// moved to the operator.
-func (r *FireboltInstanceReconciler) ensureGatewayRole(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	name := instance.Name + SuffixGateway + "-role"
-	labels := instanceLabels(instance.Name, "gateway")
-
-	desired := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: instance.Namespace,
-			Labels:    labels,
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: []string{"apps"},
-				Resources: []string{"deployments"},
-				Verbs:     []string{"get", "list", "update"},
-			},
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-
-	existing := &rbacv1.Role{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Rules = desired.Rules
-	existing.Labels = desired.Labels
-	return r.Update(ctx, existing)
-}
-
-// TODO: RoleBinding will be removed in the future; the related features will
-// be moved to the operator.
-func (r *FireboltInstanceReconciler) ensureGatewayRoleBinding(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	name := instance.Name + SuffixGateway + "-binding"
-	roleName := instance.Name + SuffixGateway + "-role"
-	saName := instance.Name + SuffixGateway + "-sa"
-	labels := instanceLabels(instance.Name, "gateway")
-
-	desired := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: instance.Namespace,
-			Labels:    labels,
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     roleName,
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      saName,
-				Namespace: instance.Namespace,
-			},
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-
-	existing := &rbacv1.RoleBinding{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	// roleRef is immutable; only update subjects and labels
-	existing.Subjects = desired.Subjects
-	existing.Labels = desired.Labels
 	return r.Update(ctx, existing)
 }
 
