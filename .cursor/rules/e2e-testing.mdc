@@ -1,0 +1,8 @@
+---
+description: Guidelines for E2E testing
+alwaysApply: true
+---
+# E2E tests
+
+If a test is testing for 0-downtime operations, no transient failures are allowed for that test.
+Do not twist it around.
