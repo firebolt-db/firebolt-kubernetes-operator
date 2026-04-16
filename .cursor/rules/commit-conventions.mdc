@@ -2,11 +2,14 @@
 description: Commit message format for the firebolt-kubernetes-operator repo
 alwaysApply: true
 ---
+# Commits
+
+Do not perform commits or amend commits without asking user first.
+
 # Commit Message Convention
 
 Commits must follow conventional commit format with a Linear ticket reference.
 The ticket reference can usually be found in current branch name, or in the last commit.
-Do not commit or amend commits without asking user first.
 
 ```
 <type>(<scope>): <description> (FB-<ticket>)

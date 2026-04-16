@@ -1,0 +1,18 @@
+---
+description: Build and lint instructions for the project
+alwaysApply: true
+---
+
+# Build and Lint
+
+After every code change, run both build and lint:
+
+```bash
+make build
+make lint
+```
+
+- `make build` compiles the binary and validates test compilation.
+- `make lint` runs `golangci-lint` to check for issues.
+- If lint errors are found, fix them before considering the task complete.
+- Use `make lint-fix` to auto-fix lint issues when appropriate.
