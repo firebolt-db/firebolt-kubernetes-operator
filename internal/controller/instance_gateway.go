@@ -113,6 +113,13 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                               handle:respond({[":status"] = "400"}, "missing X-Firebolt-Engine header")
                               return
                             end
+                            -- TODO: remove advanced_mode once Core supports x-request-id
+                            local path = handle:headers():get(":path")
+                            if path:find("?") then
+                              handle:headers():replace(":path", path .. "&advanced_mode=true")
+                            else
+                              handle:headers():replace(":path", path .. "?advanced_mode=true")
+                            end
                             handle:headers():replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
                           end
                   - name: envoy.filters.http.dynamic_forward_proxy
