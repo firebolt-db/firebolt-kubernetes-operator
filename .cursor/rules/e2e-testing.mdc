@@ -10,3 +10,5 @@ Do not twist it around.
 Use ginkgo to run individual E2E tests or "make test-e2e" to run the whole test suite.
 
 E2E tests are not deploying the operator in the cluster but they run it in-process.
+
+Instead of waiting for 120 seconds to verify some test behaviour, prefer using a small script that checks every few seconds in a loop and exits when test is done running.

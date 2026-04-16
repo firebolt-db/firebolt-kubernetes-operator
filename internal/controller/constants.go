@@ -110,10 +110,18 @@ const DrainCheckSQL = `SELECT count(*) as num_running_queries FROM (
   LIMIT 1
 )`
 
-// EngineStartupScript is the script used to start the engine process
+// EngineStartupScript is the script used to start the engine process.
+// POD_INDEX is injected via the downward API in buildStatefulSet, sourced
+// from the apps.kubernetes.io/pod-index label that the StatefulSet
+// controller sets on each pod (GA in Kubernetes 1.28). On older clusters
+// the label is absent and POD_INDEX will be empty; in that case we fall
+// back to extracting the ordinal from HOSTNAME (<sts-name>-<ordinal>).
 const EngineStartupScript = `
-NODE_ORDINAL=${HOSTNAME##*-}
-exec /firebolt-core/firebolt-core --node $NODE_ORDINAL
+set -euo pipefail
+if [ -z "${POD_INDEX:-}" ]; then
+  POD_INDEX="${HOSTNAME##*-}"
+fi
+exec /firebolt-core/firebolt-core --node "$POD_INDEX"
 `
 
 // GetServicePorts returns the standard service ports for a Firebolt engine

@@ -599,6 +599,11 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up multi-engine test")
+			for _, runner := range bgRunners {
+				if runner != nil {
+					runner.Stop()
+				}
+			}
 			DeleteClientPod(ctx, clientPod)
 			for _, name := range engineNames {
 				_ = DeleteEngine(ctx, name)

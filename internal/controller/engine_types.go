@@ -42,6 +42,12 @@ type EngineState struct {
 
 	ClusterService          *corev1.Service
 	ClusterServiceTargetGen int
+
+	// ClusterServiceEndpointsReady is true when the cluster service's Endpoints
+	// object has at least one ready address. This lags behind a selector update
+	// by one endpoints-controller cycle; computeSwitching gates on it to avoid
+	// a brief window where the service has no backends.
+	ClusterServiceEndpointsReady bool
 }
 
 // EngineReconcileResult describes the resources to create, update, or delete

@@ -69,7 +69,11 @@ func (v *FireboltInstanceCustomValidator) ValidateCreate(_ context.Context, obj 
 	if !ok {
 		return nil, fmt.Errorf("expected FireboltInstance, got %T", obj)
 	}
-	return nil, validateMetadataReplicas(inst)
+	var errs field.ErrorList
+	if err := validateMetadataReplicas(inst); err != nil {
+		errs = append(errs, err)
+	}
+	return nil, errs.ToAggregate()
 }
 
 // ValidateUpdate validates a FireboltInstance on update.
@@ -94,7 +98,7 @@ func (v *FireboltInstanceCustomValidator) ValidateUpdate(_ context.Context, oldO
 	}
 
 	if err := validateMetadataReplicas(newInst); err != nil {
-		errs = append(errs, field.InternalError(field.NewPath("spec", "metadata", "replicas"), err))
+		errs = append(errs, err)
 	}
 
 	return nil, errs.ToAggregate()
@@ -105,7 +109,11 @@ func (v *FireboltInstanceCustomValidator) ValidateDelete(_ context.Context, _ ru
 	return nil, nil
 }
 
-func validateMetadataReplicas(inst *FireboltInstance) error {
+// validateMetadataReplicas returns a *field.Error (not a plain error) so
+// callers can append it directly into a field.ErrorList and preserve the
+// "Invalid" error type; wrapping it as field.InternalError would surface
+// to users as a 500-style internal error instead of a validation failure.
+func validateMetadataReplicas(inst *FireboltInstance) *field.Error {
 	r := inst.Spec.Metadata.Replicas
 	if r != nil && *r != 1 {
 		return field.Invalid(

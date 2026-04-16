@@ -122,12 +122,19 @@ func makeClusterSvc(engineName string, gen int) *corev1.Service { //nolint:unpar
 }
 
 // --- S1: Initial creation ---
+//
+// The controller's top-level Reconcile initializes Phase=Creating and
+// ActiveGeneration=-1 on first sight of an engine, then requeues. So the
+// first invocation of computeEngineReconcile that actually sees real state
+// always lands in computeCreating with CurrentGeneration=0 and no existing
+// resources. This test mirrors that entry condition.
 
 func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 	spec := testSpec()
 	status := &computev1alpha1.FireboltEngineStatus{
-		Phase:            computev1alpha1.PhaseStable,
-		ActiveGeneration: -1,
+		Phase:             computev1alpha1.PhaseCreating,
+		CurrentGeneration: 0,
+		ActiveGeneration:  -1,
 	}
 	current := EngineState{ClusterServiceTargetGen: -1}
 
@@ -139,12 +146,38 @@ func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 	if result.Status.CurrentGeneration != 0 {
 		t.Errorf("expected generation 0, got %d", result.Status.CurrentGeneration)
 	}
-	if result.EnsureStatefulSet != nil {
-		t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
+	if result.EnsureStatefulSet == nil {
+		t.Error("expected StatefulSet to be built on first Creating visit")
 	}
-	if !result.Requeue {
-		t.Error("expected Requeue=true")
+	if result.EnsureConfigMap == nil {
+		t.Error("expected ConfigMap to be built on first Creating visit")
 	}
+	if result.EnsureHeadlessSvc == nil {
+		t.Error("expected headless Service to be built on first Creating visit")
+	}
+	if result.EnsureClusterSvc == nil {
+		t.Error("expected cluster Service to be built on first Creating visit")
+	}
+}
+
+// TestComputeStable_PanicsOnNegativeActiveGeneration documents the
+// ActiveGeneration>=0 invariant of computeStable: reaching it with a
+// negative generation indicates a bug in the state machine (the controller
+// top-level is supposed to route Phase="" through Creating first).
+func TestComputeStable_PanicsOnNegativeActiveGeneration(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic when computeStable is entered with ActiveGeneration=-1")
+		}
+	}()
+
+	spec := testSpec()
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:            computev1alpha1.PhaseStable,
+		ActiveGeneration: -1,
+	}
+	current := EngineState{ClusterServiceTargetGen: -1}
+	_ = computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 }
 
 // --- S2: Blue-green upgrade ---
@@ -256,6 +289,29 @@ func TestComputeEngineReconcile_S3_SwitchingUpdateSelector(t *testing.T) {
 	}
 }
 
+func TestComputeEngineReconcile_S3_SwitchingWaitsForEndpoints(t *testing.T) {
+	spec := testSpec()
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseSwitching,
+		CurrentGeneration: 1,
+		ActiveGeneration:  0,
+	}
+	current := EngineState{
+		ClusterService:               makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen:      1,
+		ClusterServiceEndpointsReady: false,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseSwitching {
+		t.Errorf("expected to stay in Switching while endpoints propagate, got %s", result.Status.Phase)
+	}
+	if result.RequeueAfter != 500*time.Millisecond {
+		t.Errorf("expected RequeueAfter 500ms, got %v", result.RequeueAfter)
+	}
+}
+
 func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 	spec := testSpec()
 	status := &computev1alpha1.FireboltEngineStatus{
@@ -264,8 +320,9 @@ func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		ClusterService:          makeClusterSvc(testEngineName, 1),
-		ClusterServiceTargetGen: 1,
+		ClusterService:               makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen:      1,
+		ClusterServiceEndpointsReady: true,
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
@@ -289,8 +346,9 @@ func TestComputeEngineReconcile_S3_SwitchingToStable_InitialDeploy(t *testing.T)
 		ActiveGeneration:  -1,
 	}
 	current := EngineState{
-		ClusterService:          makeClusterSvc(testEngineName, 0),
-		ClusterServiceTargetGen: 0,
+		ClusterService:               makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen:      0,
+		ClusterServiceEndpointsReady: true,
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())

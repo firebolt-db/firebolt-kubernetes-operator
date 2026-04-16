@@ -608,6 +608,7 @@ type BackgroundQueryRunner struct {
 	successCount   atomic.Int32
 	mu             sync.Mutex
 	failureReasons map[string]int
+	stopped        atomic.Bool
 }
 
 // NewBackgroundQueryRunner creates a new background query runner with automatic validator selection
@@ -708,9 +709,11 @@ func categorizeQueryError(detail string) string {
 	}
 }
 
-// Stop stops the background query runner
+// Stop stops the background query runner. Safe to call multiple times.
 func (r *BackgroundQueryRunner) Stop() {
-	close(r.stopCh)
+	if r.stopped.CompareAndSwap(false, true) {
+		close(r.stopCh)
+	}
 	r.wg.Wait()
 }
 
@@ -1148,6 +1151,7 @@ type GatewayBackgroundQueryRunner struct {
 	wg             sync.WaitGroup
 	failureCount   atomic.Int32
 	successCount   atomic.Int32
+	stopped        atomic.Bool
 	mu             sync.Mutex
 	failureReasons map[string]int
 }
@@ -1225,9 +1229,11 @@ func (r *GatewayBackgroundQueryRunner) recordFailure(category, detail string) {
 	fmt.Fprintf(GinkgoWriter, "Gateway background query failed [%s]: %s\n", category, detail)
 }
 
-// Stop stops the gateway background query runner.
+// Stop stops the gateway background query runner. Safe to call multiple times.
 func (r *GatewayBackgroundQueryRunner) Stop() {
-	close(r.stopCh)
+	if r.stopped.CompareAndSwap(false, true) {
+		close(r.stopCh)
+	}
 	r.wg.Wait()
 }
 

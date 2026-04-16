@@ -54,6 +54,11 @@ type PostgresSpec struct {
 }
 
 // MetadataSpec configures the metadata service.
+// Only replicas=1 is currently supported; multi-replica metadata is not yet
+// available. The CEL rule below enforces this at admission time, in addition
+// to the Go-level check in the validating webhook (kept for defense-in-depth
+// and to surface a clearer error message when the webhook is in the request path).
+// +kubebuilder:validation:XValidation:rule="!has(self.replicas) || self.replicas == 1",message="metadata replicas must be 1"
 type MetadataSpec struct {
 	ComponentSpec `json:",inline"`
 

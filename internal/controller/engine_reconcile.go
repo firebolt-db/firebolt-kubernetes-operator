@@ -59,7 +59,7 @@ func computeEngineReconcile(
 
 	switch status.Phase {
 	case "", computev1alpha1.PhaseStable:
-		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration, instanceInfo)
+		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration)
 	case computev1alpha1.PhaseCreating:
 		computeCreating(spec, &result, current, engineName, engineNamespace, instanceInfo)
 	case computev1alpha1.PhaseSwitching:
@@ -88,6 +88,12 @@ func computeEngineReconcile(
 // This ensures the status update is persisted before any resources are
 // created, preventing leaked resources if the operator crashes between
 // resource creation and the status write.
+//
+// Invariant: Phase=Stable implies ActiveGeneration >= 0. The controller's
+// top-level Reconcile initializes Phase=Creating and ActiveGeneration=-1
+// on first sight of the engine, so computeStable never runs with a
+// negative ActiveGeneration. Violating this invariant is a programming
+// error elsewhere in the state machine, not a recoverable state.
 func computeStable(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -95,15 +101,14 @@ func computeStable(
 	engineName string,
 	engineNamespace string,
 	metadataGeneration int64,
-	instanceInfo InstanceInfo,
 ) {
 	status := &r.Status
 
-	if status.ActiveGeneration == -1 {
-		status.Phase = computev1alpha1.PhaseCreating
-		status.CurrentGeneration = 0
-		r.Requeue = true
-		return
+	if status.ActiveGeneration < 0 {
+		panic(fmt.Sprintf(
+			"BUG: computeStable reached with ActiveGeneration=%d; Phase=Stable invariant violated",
+			status.ActiveGeneration,
+		))
 	}
 
 	gen := status.ActiveGeneration
@@ -147,6 +152,24 @@ func computeStable(
 // count changed), we abandon the in-progress generation and start a fresh
 // one. Patching a live STS doesn't restart pods, leaving them with a stale
 // config (wrong node list) that causes a permanent readiness deadlock.
+//
+// Ordering invariant: the spec-drift check MUST run before consulting
+// current.CurrentPodsReady. getEngineState reads pod readiness against the
+// latest engine.Spec.Replicas (see checkPodsReady) while the observed STS
+// may still reflect the old replica count; if drift is not handled first,
+// a stale CurrentPodsReady=false would block us on a generation that is
+// already doomed to be abandoned, deadlocking the rollout until the next
+// spec mutation.
+//
+// Double-bump case: when the user mutates the spec multiple times while a
+// generation is still being created, this branch can fire repeatedly and
+// increment CurrentGeneration twice (or more) without ever reaching
+// PhaseSwitching. This is intentional — each bump creates a clean
+// generation rather than patching in-place — but it means CurrentGeneration
+// can grow faster than the number of successful rollouts. ObservedGeneration
+// is only advanced once computeStable accepts a generation as stable, so
+// external observers relying on ObservedGeneration (not CurrentGeneration)
+// see a consistent view.
 func computeCreating(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -158,10 +181,9 @@ func computeCreating(
 	status := &r.Status
 	gen := status.CurrentGeneration
 
+	// Must be checked before CurrentPodsReady; see "Ordering invariant" above.
 	if current.CurrentSTS != nil && !stsMatchesSpec(current.CurrentSTS, spec) {
-		if current.CurrentSTS != nil {
-			r.DeleteResources = append(r.DeleteResources, current.CurrentSTS)
-		}
+		r.DeleteResources = append(r.DeleteResources, current.CurrentSTS)
 		if current.CurrentHeadlessSvc != nil {
 			r.DeleteResources = append(r.DeleteResources, current.CurrentHeadlessSvc)
 		}
@@ -189,8 +211,14 @@ func computeCreating(
 }
 
 // computeSwitching updates the cluster service selector to point to the new
-// generation, then transitions to draining (if there's an old generation)
-// or stable (if this is the initial deployment).
+// generation, waits for the endpoints controller to propagate ready addresses,
+// then transitions to draining (if there's an old generation) or stable (if
+// this is the initial deployment).
+//
+// The endpoint readiness gate prevents a brief window where the service
+// selector already points to the new generation but the Endpoints object
+// still lists the old generation's pods (or is empty), causing connection
+// refused errors for in-flight queries.
 func computeSwitching(
 	r *EngineReconcileResult,
 	current EngineState,
@@ -212,6 +240,11 @@ func computeSwitching(
 			r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
 		}
 		r.Requeue = true
+		return
+	}
+
+	if !current.ClusterServiceEndpointsReady {
+		r.RequeueAfter = 500 * time.Millisecond
 		return
 	}
 
@@ -432,6 +465,16 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    spec.Resources.CPU,
 									corev1.ResourceMemory: spec.Resources.Memory,
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "POD_INDEX",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.labels['apps.kubernetes.io/pod-index']",
+										},
+									},
 								},
 							},
 							Ports:   GetContainerPorts(),

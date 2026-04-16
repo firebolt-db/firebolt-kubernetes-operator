@@ -2314,6 +2314,9 @@ spec:
                       type: object
                     type: array
                 type: object
+                x-kubernetes-validations:
+                - message: metadata replicas must be 1
+                  rule: '!has(self.replicas) || self.replicas == 1'
             required:
             - gateway
             - metadata
