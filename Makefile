@@ -3,7 +3,7 @@ IMG ?= controller:latest
 
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
-HELM_REGISTRY ?= oci://000000000000.dkr.ecr.us-east-1.amazonaws.com
+HELM_REGISTRY ?= oci://ghcr.io/firebolt-db/helm-charts
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -190,7 +190,7 @@ helm-package: ## Package the Helm chart into dist/.
 	helm package $(HELM_CHART_DIR) --destination dist/
 
 .PHONY: helm-push
-helm-push: helm-package ## Package and push the Helm chart to ECR.
+helm-push: helm-package ## Package and push the Helm chart to GHCR.
 	helm push dist/firebolt-kubernetes-operator-*.tgz $(HELM_REGISTRY)
 
 ##@ Dependencies
