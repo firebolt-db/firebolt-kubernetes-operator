@@ -61,6 +61,56 @@ spec:
             description: FireboltInstanceSpec defines the desired state of a Firebolt
               Instance.
             properties:
+              auth:
+                description: Auth configures authentication for engine nodes.
+                properties:
+                  mode:
+                    description: Mode is the authentication mode.
+                    enum:
+                    - disabled
+                    - native
+                    - openid
+                    type: string
+                  oidc:
+                    description: OIDC configures OpenID Connect. Required when mode
+                      is "openid".
+                    properties:
+                      claimMappings:
+                        additionalProperties:
+                          type: string
+                        description: 'ClaimMappings maps OIDC claims to Firebolt user
+                          attributes (e.g. {"username": "email"}).'
+                        type: object
+                      clientID:
+                        description: ClientID is the OIDC client identifier.
+                        minLength: 1
+                        type: string
+                      clientSecretRef:
+                        description: ClientSecretRef references a Secret containing
+                          the OIDC client secret.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      issuerURL:
+                        description: IssuerURL is the OIDC provider's issuer URL.
+                        minLength: 1
+                        type: string
+                    required:
+                    - clientID
+                    - issuerURL
+                    type: object
+                required:
+                - mode
+                type: object
               gateway:
                 description: Gateway configures the query routing gateway (Envoy proxy).
                 properties:

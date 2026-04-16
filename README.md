@@ -125,6 +125,9 @@ All associated resources are cleaned up automatically.
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods |
 | `spec.gateway.resources` | No | (operator default) | CPU/memory for gateway pods |
 | `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |
+| `spec.auth` | No | disabled | Authentication configuration (not enforced yet; reserved for future engine-level auth) |
+| `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
+| `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |
 
 \* Required when the parent field is set.
 
@@ -193,6 +196,17 @@ spec:
         memory: "256Mi"
     nodeSelector:
       firebolt.dev/pool: system
+
+  # Auth is not enforced yet; reserved for future engine-level auth.
+  auth:
+    mode: openid
+    oidc:
+      issuerURL: "https://company.okta.com/oauth2/default"
+      clientID: "firebolt"
+      clientSecretRef:
+        name: oidc-client-secret
+      claimMappings:
+        username: "email"
 ```
 
 ---

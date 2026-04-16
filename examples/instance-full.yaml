@@ -33,3 +33,14 @@ spec:
         memory: "256Mi"
     nodeSelector:
       firebolt.dev/pool: system
+
+  # Auth is not enforced yet; reserved for future engine-level auth.
+  auth:
+    mode: openid
+    oidc:
+      issuerURL: "https://company.okta.com/oauth2/default"
+      clientID: "firebolt"
+      clientSecretRef:
+        name: oidc-client-secret
+      claimMappings:
+        username: "email"
