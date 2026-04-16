@@ -47,7 +47,7 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 	return &computev1alpha1.FireboltEngineSpec{
 		InstanceRef: "test-instance",
 		Replicas:    3,
-		Image: computev1alpha1.ImageSpec{
+		Image: &computev1alpha1.ImageSpec{
 			Repository: "firebolt/core",
 			Tag:        "v1.0",
 		},

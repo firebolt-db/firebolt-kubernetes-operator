@@ -65,7 +65,9 @@ type FireboltEngineSpec struct {
 	Replicas int32 `json:"replicas"`
 
 	// Image defines the container image to use.
-	Image ImageSpec `json:"image"`
+	// If not specified, defaults to the engine image embedded in the operator binary.
+	// +optional
+	Image *ImageSpec `json:"image,omitempty"`
 
 	// Resources defines the CPU and memory for engine pods.
 	Resources ResourceRequirements `json:"resources"`

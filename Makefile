@@ -151,6 +151,7 @@ deploy-local: manifests ## Deploy operator into Kind via Helm (includes CRDs).
 		--set metrics.secure=false \
 		--set leaderElection.enabled=false \
 		--set additionalArgs='{--enable-webhooks=false}'
+	$(KUBECTL) rollout restart deployment/firebolt-kubernetes-operator 2>/dev/null || true
 
 .PHONY: undeploy-local
 undeploy-local: ## Remove the operator Helm release.

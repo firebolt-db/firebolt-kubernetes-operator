@@ -377,9 +377,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		LabelGeneration: strconv.Itoa(gen),
 	}
 
-	pullPolicy := spec.Image.PullPolicy
-	if pullPolicy == "" {
-		pullPolicy = corev1.PullIfNotPresent
+	image := DefaultEngineImage
+	pullPolicy := corev1.PullIfNotPresent
+	if spec.Image != nil {
+		image = fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
+		if spec.Image.PullPolicy != "" {
+			pullPolicy = spec.Image.PullPolicy
+		}
 	}
 
 	return &appsv1.StatefulSet{
@@ -401,7 +405,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					Containers: []corev1.Container{
 						{
 							Name:            ContainerNameEngine,
-							Image:           fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag),
+							Image:           image,
 							ImagePullPolicy: pullPolicy,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
@@ -519,14 +523,16 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 	container := podSpec.Containers[0]
 
-	expectedImage := fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
+	expectedImage := DefaultEngineImage
+	expectedPullPolicy := corev1.PullIfNotPresent
+	if spec.Image != nil {
+		expectedImage = fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
+		if spec.Image.PullPolicy != "" {
+			expectedPullPolicy = spec.Image.PullPolicy
+		}
+	}
 	if container.Image != expectedImage {
 		return false
-	}
-
-	expectedPullPolicy := spec.Image.PullPolicy
-	if expectedPullPolicy == "" {
-		expectedPullPolicy = corev1.PullIfNotPresent
 	}
 	if container.ImagePullPolicy != expectedPullPolicy {
 		return false

@@ -85,6 +85,7 @@ var (
 	PostgresImage        = images.PostgresImage
 	DefaultMetadataImage = images.DefaultMetadata()
 	DefaultEnvoyImage    = images.DefaultEnvoy()
+	DefaultEngineImage   = images.DefaultEngine()
 )
 
 // DrainCheckSQL is the SQL query used to check if a node has finished serving queries.

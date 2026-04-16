@@ -70,7 +70,9 @@ spec:
                   Only used when drainCheckEnabled is true.
                 type: string
               image:
-                description: Image defines the container image to use.
+                description: |-
+                  Image defines the container image to use.
+                  If not specified, defaults to the engine image embedded in the operator binary.
                 properties:
                   pullPolicy:
                     default: IfNotPresent
@@ -191,7 +193,6 @@ spec:
                   type: object
                 type: array
             required:
-            - image
             - instanceRef
             - replicas
             - resources

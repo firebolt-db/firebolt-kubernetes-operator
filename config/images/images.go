@@ -62,6 +62,8 @@ var (
 	MetadataTag   = defaults["PENSIEVE_TAG"]
 	EnvoyImage    = defaults["ENVOY_IMAGE"]
 	EnvoyTag      = defaults["ENVOY_TAG"]
+	EngineImage   = defaults["ENGINE_IMAGE"]
+	EngineTag     = defaults["ENGINE_TAG"]
 )
 
 // DefaultMetadata returns "repo:tag" for the metadata (pensieve) image.
@@ -69,3 +71,6 @@ func DefaultMetadata() string { return MetadataImage + ":" + MetadataTag }
 
 // DefaultEnvoy returns "repo:tag" for the Envoy proxy image.
 func DefaultEnvoy() string { return EnvoyImage + ":" + EnvoyTag }
+
+// DefaultEngine returns "repo:tag" for the engine (firebolt-core) image.
+func DefaultEngine() string { return EngineImage + ":" + EngineTag }

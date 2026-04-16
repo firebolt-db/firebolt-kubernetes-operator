@@ -18,9 +18,11 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"time"
 
+	"github.com/oklog/ulid/v2"
 	"google.golang.org/grpc"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -77,6 +79,18 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	if !controllerutil.ContainsFinalizer(instance, instanceFinalizerName) {
 		controllerutil.AddFinalizer(instance, instanceFinalizerName)
+		if err := r.Update(ctx, instance); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Fallback for when the mutating webhook is disabled (local dev, E2E).
+	// In production the webhook sets spec.id atomically at admission time and
+	// enforces immutability; this branch never fires in that case.
+	if instance.Spec.ID == "" {
+		instance.Spec.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		log.Info("Generated instance ID", "id", instance.Spec.ID)
 		if err := r.Update(ctx, instance); err != nil {
 			return ctrl.Result{}, err
 		}

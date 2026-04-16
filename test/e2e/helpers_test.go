@@ -223,7 +223,7 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 		Spec: computev1alpha1.FireboltEngineSpec{
 			InstanceRef: testInstance,
 			Replicas:    int32(replicas),
-			Image: computev1alpha1.ImageSpec{
+			Image: &computev1alpha1.ImageSpec{
 				Repository: testImage,
 				Tag:        testTag,
 				PullPolicy: corev1.PullIfNotPresent,
