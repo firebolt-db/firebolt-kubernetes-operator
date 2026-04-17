@@ -379,7 +379,7 @@ To redeploy after code changes, just re-run `make local-deploy` — it rebuilds 
 To tear down:
 
 ```bash
-make undeploy-local
+make local-undeploy
 ```
 
 **Resetting CRDs and stuck resources:** If CRD deletion hangs (e.g., custom resources exist but no operator is running to handle finalizers), use the cleanup script:

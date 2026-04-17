@@ -273,7 +273,7 @@ func ensureNoOperatorDeployed(ctx context.Context, cs *kubernetes.Clientset) {
 		Fail(fmt.Sprintf(
 			"Refusing to run E2E tests: found operator deployment(s) in the cluster [%s]. "+
 				"The suite runs its own in-process operators; uninstall any externally-deployed "+
-				"operator first (e.g. `make undeploy-local` or `helm uninstall firebolt-operator`).",
+				"operator first (e.g. `make local-undeploy` or `helm uninstall firebolt-operator`).",
 			strings.Join(found, ", "),
 		))
 	}

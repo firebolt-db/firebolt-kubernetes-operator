@@ -141,17 +141,7 @@ kind-load-operator: ## Load the operator image into the Kind cluster.
 	$(KIND) load docker-image $(LOCAL_IMG) --name $(KIND_CLUSTER)
 
 .PHONY: local-deploy
-local-deploy: docker-build-local kind-load-operator deploy-local ## Build, load, and deploy operator to Kind (one command).
-
-##@ Deployment
-
-.PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" apply -f -; else echo "No CRDs to install; skipping."; fi
-
-.PHONY: deploy-local
-deploy-local: manifests ## Deploy operator into Kind via Helm (includes CRDs).
+local-deploy: docker-build-local kind-load-operator manifests ## Build, load, and deploy operator to Kind (one command).
 	helm upgrade --install firebolt-operator $(HELM_CHART_DIR) \
 		--set fullnameOverride=firebolt-kubernetes-operator \
 		--set image.repository=$(LOCAL_IMG_REPO) \
@@ -159,12 +149,19 @@ deploy-local: manifests ## Deploy operator into Kind via Helm (includes CRDs).
 		--set image.pullPolicy=Never \
 		--set metrics.secure=false \
 		--set leaderElection.enabled=false \
-		--set additionalArgs='{--enable-webhooks=false}'
-	$(KUBECTL) rollout restart deployment/firebolt-kubernetes-operator 2>/dev/null || true
+		--set additionalArgs='{--enable-webhooks=false}' \
+		--set podAnnotations.deploy-timestamp="$(shell date +%s)"
 
-.PHONY: undeploy-local
-undeploy-local: ## Remove the operator Helm release.
+.PHONY: local-undeploy
+local-undeploy: ## Remove the operator Helm release.
 	helm uninstall firebolt-operator
+
+##@ Deployment
+
+.PHONY: install
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
+	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" apply -f -; else echo "No CRDs to install; skipping."; fi
 
 ##@ Helm
 
