@@ -247,8 +247,19 @@ func envFromSecret(envName, secretName, secretKey string) corev1.EnvVar {
 	}
 }
 
+// generatePassword returns a hex-encoded random string of exactly `length`
+// characters. Each output character is backed by a fresh random byte:
+// hex encoding produces 2 characters per byte, so (length+1)/2 bytes yield
+// at least `length` hex characters, which we then truncate to `length`.
+// This gives callers the entropy they implicitly expect from a string of
+// N hex characters (~4 bits per character), rather than the 2-bits-per-char
+// effective entropy that would result from allocating exactly `length`
+// bytes and then discarding half of their hex encoding.
 func generatePassword(length int) (string, error) {
-	b := make([]byte, length)
+	if length <= 0 {
+		return "", fmt.Errorf("generatePassword: length must be > 0, got %d", length)
+	}
+	b := make([]byte, (length+1)/2)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
