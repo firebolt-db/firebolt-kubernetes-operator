@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 )
@@ -236,6 +237,62 @@ func TestValidateReservedKeys(t *testing.T) {
 			}
 			if !tc.wantError && err != nil {
 				t.Errorf("ValidateUpdate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateExternalPostgres(t *testing.T) {
+	tests := []struct {
+		name      string
+		postgres  *PostgresSpec
+		wantError bool
+	}{
+		{
+			name:      "nil postgres (internal) is valid",
+			postgres:  nil,
+			wantError: false,
+		},
+		{
+			name: "external postgres with secret name is valid",
+			postgres: &PostgresSpec{
+				Host:     "pg.example.com",
+				Database: "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{
+					Name: "pg-creds",
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "external postgres with empty secret name is rejected",
+			postgres: &PostgresSpec{
+				Host:     "pg.example.com",
+				Database: "firebolt",
+			},
+			wantError: true,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					Metadata: MetadataSpec{
+						Postgres: tc.postgres,
+					},
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
 			}
 		})
 	}

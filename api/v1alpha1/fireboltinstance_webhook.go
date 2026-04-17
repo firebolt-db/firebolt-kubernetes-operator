@@ -120,7 +120,32 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 	errs = append(errs, validateReservedKeys(
 		field.NewPath("spec", "gateway"), inst.Spec.Gateway.ComponentSpec)...)
 
+	if err := validateExternalPostgres(inst); err != nil {
+		errs = append(errs, err)
+	}
+
 	return errs
+}
+
+// validateExternalPostgres enforces that any user configuring an external
+// PostgreSQL also provides a non-empty Secret reference for credentials.
+// Without this check the metadata Deployment is still scheduled; kubelet
+// then fails to mount a Secret volume with an empty name and the pod sits
+// in ContainerCreating with only a kubelet event explaining why, which is
+// invisible from the FireboltInstance CR. Catching it at admission time
+// keeps the error close to the offending apply.
+func validateExternalPostgres(inst *FireboltInstance) *field.Error {
+	pg := inst.Spec.Metadata.Postgres
+	if pg == nil {
+		return nil
+	}
+	if pg.CredentialsSecretRef.Name == "" {
+		return field.Required(
+			field.NewPath("spec", "metadata", "postgres", "credentialsSecretRef", "name"),
+			"must be set when spec.metadata.postgres is configured",
+		)
+	}
+	return nil
 }
 
 func validateMetadataReplicas(inst *FireboltInstance) *field.Error {
