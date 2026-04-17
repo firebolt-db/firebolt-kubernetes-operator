@@ -55,9 +55,16 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	}
 
 	if currentGen >= 0 {
-		state.CurrentSTS = r.getStatefulSet(ctx, engineName, ns, currentGen)
-		state.CurrentConfigMap = r.getConfigMap(ctx, engineName, ns, currentGen)
-		state.CurrentHeadlessSvc = r.getHeadlessService(ctx, engineName, ns, currentGen)
+		var err error
+		if state.CurrentSTS, err = r.getStatefulSet(ctx, engineName, ns, currentGen); err != nil {
+			return state, err
+		}
+		if state.CurrentConfigMap, err = r.getConfigMap(ctx, engineName, ns, currentGen); err != nil {
+			return state, err
+		}
+		if state.CurrentHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, currentGen); err != nil {
+			return state, err
+		}
 
 		if state.CurrentSTS != nil {
 			ready, count, err := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
@@ -70,9 +77,16 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	}
 
 	if drainingGen >= 0 && drainingGen != currentGen {
-		state.DrainingSTS = r.getStatefulSet(ctx, engineName, ns, drainingGen)
-		state.DrainingConfigMap = r.getConfigMap(ctx, engineName, ns, drainingGen)
-		state.DrainingHeadlessSvc = r.getHeadlessService(ctx, engineName, ns, drainingGen)
+		var err error
+		if state.DrainingSTS, err = r.getStatefulSet(ctx, engineName, ns, drainingGen); err != nil {
+			return state, err
+		}
+		if state.DrainingConfigMap, err = r.getConfigMap(ctx, engineName, ns, drainingGen); err != nil {
+			return state, err
+		}
+		if state.DrainingHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, drainingGen); err != nil {
+			return state, err
+		}
 
 		drainCheckDisabled := engine.Spec.DrainCheckEnabled != nil && !*engine.Spec.DrainCheckEnabled
 		skipDrain := state.DrainingSTS == nil ||
@@ -116,31 +130,48 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	return state, nil
 }
 
-func (r *FireboltEngineReconciler) getStatefulSet(ctx context.Context, engineName, ns string, gen int) *appsv1.StatefulSet {
+// These three getters differentiate between "resource absent" and "lookup
+// failed for some other reason". Returning nil for any error would let a
+// transient API failure (RBAC, connection reset, stale cache miss) be
+// indistinguishable from NotFound, which in turn would cause computeStable
+// to spuriously kick off a new blue-green generation because it interprets
+// a nil STS/ConfigMap/HeadlessSvc as "missing — needs a fresh generation".
+// We therefore return (obj, nil) on success, (nil, nil) only on NotFound,
+// and propagate any other error to the caller so reconciliation retries.
+func (r *FireboltEngineReconciler) getStatefulSet(ctx context.Context, engineName, ns string, gen int) (*appsv1.StatefulSet, error) {
 	name := genResourceName(engineName, gen, "")
 	sts := &appsv1.StatefulSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, sts); err != nil {
-		return nil
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get StatefulSet %s/%s: %w", ns, name, err)
 	}
-	return sts
+	return sts, nil
 }
 
-func (r *FireboltEngineReconciler) getConfigMap(ctx context.Context, engineName, ns string, gen int) *corev1.ConfigMap {
+func (r *FireboltEngineReconciler) getConfigMap(ctx context.Context, engineName, ns string, gen int) (*corev1.ConfigMap, error) {
 	name := genResourceName(engineName, gen, SuffixConfig)
 	cm := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, cm); err != nil {
-		return nil
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get ConfigMap %s/%s: %w", ns, name, err)
 	}
-	return cm
+	return cm, nil
 }
 
-func (r *FireboltEngineReconciler) getHeadlessService(ctx context.Context, engineName, ns string, gen int) *corev1.Service {
+func (r *FireboltEngineReconciler) getHeadlessService(ctx context.Context, engineName, ns string, gen int) (*corev1.Service, error) {
 	name := genResourceName(engineName, gen, SuffixHL)
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, svc); err != nil {
-		return nil
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get headless Service %s/%s: %w", ns, name, err)
 	}
-	return svc
+	return svc, nil
 }
 
 func (r *FireboltEngineReconciler) checkPodsReady(ctx context.Context, engine *computev1alpha1.FireboltEngine, gen int, expectedReplicas int) (bool, int, error) {
