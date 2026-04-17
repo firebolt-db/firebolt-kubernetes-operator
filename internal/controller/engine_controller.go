@@ -138,9 +138,11 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// build ConfigMaps with multi_engine_endpoint / account_id). Switching,
 	// draining, and cleaning operate on existing resources and must not be
 	// blocked by a transient instance issue.
+	//
+	// Phase == "" is handled by the early-return above (line ~116) which
+	// initializes status and requeues, so it cannot reach this point.
 	var instanceInfo InstanceInfo
-	needsInstance := engine.Status.Phase == "" ||
-		engine.Status.Phase == computev1alpha1.PhaseStable ||
+	needsInstance := engine.Status.Phase == computev1alpha1.PhaseStable ||
 		engine.Status.Phase == computev1alpha1.PhaseCreating
 
 	if needsInstance {
