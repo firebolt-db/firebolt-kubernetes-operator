@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -98,13 +99,18 @@ func buildAdvancedEnginesLua(advancedEngines map[string]bool) string {
 	if len(advancedEngines) == 0 {
 		return "{}"
 	}
-	var entries []string
-	for name, adv := range advancedEngines {
+	names := make([]string, 0, len(advancedEngines))
+	for name := range advancedEngines {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	entries := make([]string, 0, len(names))
+	for _, name := range names {
 		val := "false"
-		if adv {
+		if advancedEngines[name] {
 			val = "true"
 		}
-		entries = append(entries, fmt.Sprintf(`["%s"] = %s`, name, val))
+		entries = append(entries, fmt.Sprintf("[%q] = %s", name, val))
 	}
 	return "{" + strings.Join(entries, ", ") + "}"
 }
