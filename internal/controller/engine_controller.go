@@ -304,6 +304,34 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	return ctrl.Result{}, nil
 }
 
+// updateStatus writes engine.Status back to the cluster with a one-shot
+// conflict recovery: on 409 Conflict, re-GET the latest object and force
+// the in-memory Status onto it.
+//
+// IMPORTANT invariant: the FireboltEngine /status subresource has a single
+// writer, namely this reconciler. Controller-runtime's leader election
+// ensures only one instance is active at a time, and the per-object
+// work queue serializes all reconciles for the same engine, so the
+// only legitimate source of 409 here is stale ResourceVersion caused
+// by the cache lagging behind a previous status write we ourselves
+// just made. In that case the in-memory Status is by definition the
+// most recent intended state, and stomping it over the fresh object
+// is safe.
+//
+// Adding a second writer to /status (a sidecar, a human running
+// kubectl edit engine/... --subresource=status, a different
+// controller) would break this assumption: we'd silently clobber
+// their fields on every conflict. If that ever becomes a real use
+// case, switch to a strategic-merge patch against the specific
+// fields this reconciler owns rather than a whole-status Update.
+//
+// Scope: this invariant covers the /status subresource only. The
+// reconciler also writes the main object (e.g. adding the finalizer
+// in Reconcile and the delete path removing it), and those writes
+// race with humans and other controllers that legitimately mutate
+// spec/metadata. Conflicts on the main object are handled by
+// returning the error and letting controller-runtime requeue - do
+// NOT copy the force-overwrite pattern below to non-status writes.
 func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *computev1alpha1.FireboltEngine) error {
 	now := metav1.Now()
 	engine.Status.LastReconciled = &now
