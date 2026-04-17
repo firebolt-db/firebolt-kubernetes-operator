@@ -158,6 +158,7 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 		RestConfig:     config,
 		Clientset:      clientset,
 		InstanceFilter: instanceName,
+		DisableGC:      true,
 	}
 
 	controllerName := fmt.Sprintf("fireboltengine-%d", operatorInstanceCounter.Add(1))

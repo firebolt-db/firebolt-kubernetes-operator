@@ -59,6 +59,13 @@ type FireboltEngineReconciler struct {
 	// instances in the same namespace; in production this is left empty so
 	// the reconciler processes every FireboltEngine it watches.
 	InstanceFilter string
+
+	// DisableGC disables the orphaned-generation garbage collector. When
+	// true, the reconciler will not sweep resources from abandoned
+	// generations. E2E tests set this to verify that the happy path never
+	// produces orphans; only tests that explicitly exercise mid-flight
+	// spec changes should enable GC.
+	DisableGC bool
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch
@@ -176,6 +183,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if err := r.applyEngineState(ctx, engine, &result); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
+	}
+
+	if !r.DisableGC && engine.Status.Phase == computev1alpha1.PhaseStable {
+		r.gcOrphanedResources(ctx, engine)
 	}
 
 	return ctrl.Result{
