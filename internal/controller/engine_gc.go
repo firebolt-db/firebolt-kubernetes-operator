@@ -62,8 +62,19 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		log.Error(err, "GC: failed to list StatefulSets")
 		return
 	}
+	// GC scope invariant: we only sweep resources that explicitly claim a
+	// generation via LabelGeneration. Engine-tagged resources without a
+	// generation label (the cluster Service today, potentially future
+	// per-engine shared resources, or anything a human/other controller
+	// labeled by mistake) are out of scope. Treating a missing label as
+	// "some non-matching generation" would make an empty gen key fail the
+	// keepGens lookup and delete the object, which is a strictly larger
+	// blast radius than this safety-net is meant to have.
 	for i := range stsList.Items {
 		gen := stsList.Items[i].Labels[LabelGeneration]
+		if gen == "" {
+			continue
+		}
 		if !keepGens[gen] {
 			log.Info("GC: deleting orphaned StatefulSet", "name", stsList.Items[i].Name, "generation", gen)
 			if err := r.deleteIfExists(ctx, &stsList.Items[i]); err != nil {
@@ -80,7 +91,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	for i := range svcList.Items {
 		gen := svcList.Items[i].Labels[LabelGeneration]
 		if gen == "" {
-			continue // cluster service has no generation label
+			continue
 		}
 		if !keepGens[gen] {
 			log.Info("GC: deleting orphaned Service", "name", svcList.Items[i].Name, "generation", gen)
@@ -97,6 +108,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	}
 	for i := range cmList.Items {
 		gen := cmList.Items[i].Labels[LabelGeneration]
+		if gen == "" {
+			continue
+		}
 		if !keepGens[gen] {
 			log.Info("GC: deleting orphaned ConfigMap", "name", cmList.Items[i].Name, "generation", gen)
 			if err := r.deleteIfExists(ctx, &cmList.Items[i]); err != nil {
