@@ -8,10 +8,16 @@ import sys
 import xml.etree.ElementTree as ET
 
 # Keep reasons short for the Actions UI.
-MAX_REASON_LEN = 220
+MAX_REASON_LEN = 280
 
 REPORT_PATH = sys.argv[1] if len(sys.argv) > 1 else "e2e-report.xml"
 MATRIX_NAME = os.environ.get("E2E_MATRIX_NAME", "")
+
+# Ginkgo often puts only a label in the failure @message; the real assertion text is in the element body.
+_GENERIC_FAILURE_OPENERS = (
+    "unexpected error:",
+    "expected success, but got an error:",
+)
 
 
 def _truncate(s: str, max_len: int) -> str:
@@ -24,12 +30,48 @@ def _truncate(s: str, max_len: int) -> str:
     return cut.rstrip() + "..."
 
 
-def _first_line_reason(msg: str) -> str:
-    if not msg:
+def _failure_body_text(elem: ET.Element) -> str:
+    """Full failure/error text: attribute + body (Ginkgo duplicates the label in body sometimes)."""
+    msg = elem.get("message")
+    body = "".join(elem.itertext()).strip()
+    msg_d = html.unescape(msg.strip()) if msg else ""
+    body_d = html.unescape(body)
+    if not body_d:
+        return msg_d
+    if msg_d and body_d.startswith(msg_d.rstrip()):
+        return body_d
+    if msg_d:
+        return msg_d + "\n" + body_d
+    return body_d
+
+
+def _reason_from_failure_text(text: str) -> str:
+    """Drop Ginkgo location line; prefer substance after generic one-line openers."""
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("In [") and " at:" in line:
+            break
+        if line.startswith("Full Stack Trace"):
+            break
+        lines.append(line)
+
+    if not lines:
         return "(no message)"
-    text = html.unescape(msg)
-    line = text.split("\n", 1)[0].strip()
-    return _truncate(line, MAX_REASON_LEN)
+
+    def is_generic_opener(s: str) -> bool:
+        low = s.lower()
+        return any(low.startswith(p) for p in _GENERIC_FAILURE_OPENERS)
+
+    # If the first line is only a generic label and more detail follows, skip it.
+    if len(lines) >= 2 and is_generic_opener(lines[0]):
+        lines = lines[1:]
+
+    # Join a few lines (Gomega matchers often span multiple lines).
+    condensed = " ".join(lines[:6]).strip()
+    return _truncate(condensed, MAX_REASON_LEN)
 
 
 def main() -> int:
@@ -56,8 +98,8 @@ def main() -> int:
         name = tc.get("name", "?")
         for child in tc:
             if child.tag in ("failure", "error"):
-                raw = child.get("message") or (child.text or "").strip()
-                failures.append((name, _first_line_reason(raw)))
+                raw = _failure_body_text(child)
+                failures.append((name, _reason_from_failure_text(raw)))
 
     print(title)
     print()

@@ -505,7 +505,7 @@ Linter configuration is in `.golangci.yml`.
 
 ## License
 
-Copyright 2025.
+Copyright 2026 Firebolt Analytics.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
