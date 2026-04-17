@@ -17,11 +17,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../config/images/defaults.env
 source "${SCRIPT_DIR}/../config/images/defaults.env"
 
+# `kind load docker-image` creates multi-GB tarballs via `docker save` under
+# $TMPDIR. The default /tmp is tmpfs on many Linux distros (notably Ubuntu
+# 24.04+) and fills up quickly with concurrent loads. Redirect to a
+# workspace-local disk-backed directory so we don't compete for tmpfs.
+KIND_LOAD_TMPDIR="${KIND_LOAD_TMPDIR:-/var/tmp}"
+mkdir -p "${KIND_LOAD_TMPDIR}"
+KIND_LOAD_TMPDIR="$(cd "${KIND_LOAD_TMPDIR}" && pwd)"
+export TMPDIR="${KIND_LOAD_TMPDIR}"
+trap 'rm -rf "${KIND_LOAD_TMPDIR:?}"/images-tar* 2>/dev/null || true' EXIT
+
 OPERATOR_IMAGE="controller:latest"
 
 echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} (parallelism=${LOAD_PARALLELISM}) ==="
 
-if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+if ! kind get nodes --name "${CLUSTER_NAME}" &>/dev/null; then
     echo "Error: Kind cluster '${CLUSTER_NAME}' does not exist."
     echo "Run 'make setup-kind' first."
     exit 1
@@ -33,18 +43,13 @@ fi
 
 declare -a IMAGES=(
     "${ENGINE_IMAGE}:${ENGINE_TAG}"
+    "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}"
     "${PENSIEVE_IMAGE}:${PENSIEVE_TAG}"
+    "${PENSIEVE_IMAGE}:${PENSIEVE_NEW_TAG}"
     "${POSTGRES_IMAGE}"
     "${ENVOY_IMAGE}:${ENVOY_TAG}"
     "${CURL_IMAGE}"
 )
-
-if [[ "${ENGINE_NEW_TAG}" != "${ENGINE_TAG}" ]]; then
-    IMAGES+=("${ENGINE_IMAGE}:${ENGINE_NEW_TAG}")
-fi
-if [[ "${PENSIEVE_NEW_TAG}" != "${PENSIEVE_TAG}" ]]; then
-    IMAGES+=("${PENSIEVE_IMAGE}:${PENSIEVE_NEW_TAG}")
-fi
 
 if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
     IMAGES+=("${OPERATOR_IMAGE}")

@@ -62,6 +62,7 @@ if ! docker exec "${CONTROL_PLANE}" kubectl --kubeconfig=/etc/kubernetes/admin.c
     exit 1
 fi
 
+function extra_setup() {
 # Export kubeconfig
 echo "Exporting kubeconfig..."
 kind export kubeconfig --name "${CLUSTER_NAME}"
@@ -87,6 +88,8 @@ docker exec "${CONTROL_PLANE}" cat /kind/manifests/default-storage.yaml | \
 echo "Removing control-plane taint..."
 docker exec "${CONTROL_PLANE}" kubectl --kubeconfig=/etc/kubernetes/admin.conf \
     taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || true
+}
+
 
 # Wait for node to be Ready
 echo "Waiting for node to be Ready..."
