@@ -541,10 +541,12 @@ func DeleteClientPod(ctx context.Context, podName string) {
 //     exit code carries a human-readable reason (e.g. "Operation timeout").
 //   - --connect-timeout 2: fail fast if TCP connect stalls (e.g. kube-proxy
 //     race during endpoint churn).
-//   - --max-time 5: cap the entire request so a hung upstream doesn't block
+//   - --max-time 33: cap the entire request so a hung upstream doesn't block
 //     the background runner indefinitely. The zero-downtime tests tolerate
-//     no failures, so this budget exists only to surface bugs as failures
-//     quickly rather than to hide transient latency.
+//     no failures, so this budget exists only to surface real bugs as
+//     failures rather than to hide transient latency. It's sized larger
+//     than the worst-case DFP DNS-refresh window plus a handful of retry
+//     back-offs, so a healthy scale/blue-green event can never exhaust it.
 //   - -w "%{stderr}...": append a timing breakdown to stderr after transfer
 //     so failures carry DNS/connect/response timings that pinpoint the phase
 //     that stalled.
@@ -555,7 +557,7 @@ func execCurlQuery(ctx context.Context, podName, url, query string, extraHeaders
 	curlArgs := []string{
 		"-sSf",
 		"--connect-timeout", "2",
-		"--max-time", "5",
+		"--max-time", "33",
 		"-w", curlTimingFmt,
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",

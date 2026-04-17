@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,40 +33,31 @@ import (
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// dnsCacheConfigYAML is the single source of truth for the dynamic
-// forward proxy's DNS cache. It is spliced into the Envoy config at
-// two sites — the HTTP filter (envoy.filters.http.dynamic_forward_proxy)
-// and the cluster (envoy.clusters.dynamic_forward_proxy) — both of
-// which reference the same cache by its "name" field. Envoy requires
-// the two config bodies to be identical in that case; keeping a single
-// constant rather than two inline YAML blocks guarantees they cannot
-// drift across future edits.
+// The dynamic forward proxy is configured in "sub cluster" mode rather
+// than the simpler (default) DNS cache mode. In DNS cache mode Envoy
+// keeps ONE host entry per authority, even when the authority's DNS
+// name resolves to N A-records: every request for that authority is
+// pinned to the same IP until the cache entry is refreshed, so a
+// headless Kubernetes Service backing N pods effectively collapses to
+// a single-pod LB target, with all load funneled at one pod. Worse,
+// retries inside such a cluster have no alternative host to pick, so
+// the "previous_hosts" retry predicate is a no-op.
 //
-// The constant is written at indent depth zero; indentBlock prefixes
-// each line at the call site with the right number of spaces for its
-// surrounding context.
-const dnsCacheConfigYAML = `dns_cache_config:
-  name: dynamic_forward_proxy_cache
-  dns_lookup_family: V4_ONLY
-  dns_refresh_rate: 1s
-  dns_failure_refresh_rate:
-    base_interval: 1s
-    max_interval: 5s
-  host_ttl: 5s`
-
-// indentBlock prefixes every non-empty line of block with indent. Used
-// to splice a shared YAML sub-document into a larger template at an
-// arbitrary indentation depth without maintaining two copies.
-func indentBlock(block, indent string) string {
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		lines[i] = indent + line
-	}
-	return strings.Join(lines, "\n")
-}
+// In sub-cluster mode, Envoy synthesizes a full-featured STRICT_DNS
+// cluster per authority on first use. STRICT_DNS resolves the name to
+// the complete set of A-records and creates one host per IP, so the
+// normal load-balancer, outlier-detection and retry-host-predicate
+// machinery all work as expected: requests round-robin across the pod
+// set and retries actually land on a different pod than the failing
+// one. This also dissolves the DNS-cache-vs-pod-teardown race that
+// previously hid behind the cache's host_ttl: a stale IP is just one
+// entry in a load-balanced pool now, not the only target.
+//
+// The HTTP filter and the cluster share the same dynamic-forward-proxy
+// mode (sub-clusters) but their configs live in different protobufs
+// and use slightly different field names (sub_cluster_config on the
+// filter, sub_clusters_config on the cluster), so each is inlined at
+// its use site rather than shared through a constant.
 
 const (
 	gatewayContainerPort int32 = 8080
@@ -165,6 +155,21 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                   - name: envoy.access_loggers.stdout
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      # Explicit format: we care about the *why* behind 5xx, not just
+                      # the code. RESPONSE_FLAGS gives the broad category (UH/UF/UC/UT
+                      # /NR/LR/DPE/...), RESPONSE_CODE_DETAILS narrows it to the exact
+                      # code path that produced the status, and
+                      # UPSTREAM_TRANSPORT_FAILURE_REASON surfaces the TLS/TCP-level
+                      # error string when the connection itself failed. Together they
+                      # let us decide whether a 5xx was synthesized by Envoy before the
+                      # request could have reached the engine (safe to retry) or was
+                      # returned by the engine itself (unsafe - side effects may have
+                      # executed).
+                      log_format:
+                        text_format_source:
+                          inline_string: |
+                            [%%START_TIME%%] "%%REQ(:METHOD)%% %%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%% %%PROTOCOL%%" %%RESPONSE_CODE%% flags=%%RESPONSE_FLAGS%% details=%%RESPONSE_CODE_DETAILS%% tx_fail=%%UPSTREAM_TRANSPORT_FAILURE_REASON%% upstream=%%UPSTREAM_HOST%% cluster=%%UPSTREAM_CLUSTER%% duration=%%DURATION%%ms rx=%%BYTES_RECEIVED%% tx=%%BYTES_SENT%% authority=%%REQ(:AUTHORITY)%% engine=%%REQ(X-FIREBOLT-ENGINE)%%
+
                 http_filters:
                   - name: envoy.filters.http.health_check
                     typed_config:
@@ -214,7 +219,14 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
-%s
+                      sub_cluster_config:
+                        # Wait up to this long for the on-demand sub-cluster
+                        # (per authority) to initialize on the very first
+                        # request to a given engine. Steady-state requests
+                        # don't pay this cost. 5s matches Envoy's own default
+                        # and is generous enough for DNS resolution against
+                        # kube-dns on a cold start.
+                        cluster_init_timeout: 5s
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -228,32 +240,94 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             prefix: "/"
                           route:
                             cluster: dynamic_forward_proxy
+                            # No route-level timeout: the caller's own deadline
+                            # (HTTP client timeout) is the only overall cap. This
+                            # lets the retry loop below ride out an arbitrary
+                            # DNS-refresh window without having to match it to a
+                            # magic constant here.
                             timeout: 0s
-                            # Retry only on transport-level failures where the
-                            # upstream could not have observed the request as
-                            # accepted work:
-                            #   - connect-failure: TCP connect failed.
-                            #   - refused-stream:  HTTP/2 REFUSED_STREAM (idempotent to retry).
-                            #   - reset:           TCP reset before any response bytes.
-                            # We deliberately do NOT retry on 5xx: once the
-                            # upstream returned a 5xx it may have already
+                            # Retry strategy.
+                            #
+                            # We retry ONLY on transport-level failures where the
+                            # engine could not have observed the request as
+                            # accepted work, and therefore retrying cannot
+                            # duplicate any side effect:
+                            #   - connect-failure: TCP connect failed (SYN RST,
+                            #     timeout, etc.) - no bytes ever reached the
+                            #     engine.
+                            #   - refused-stream:  HTTP/2 REFUSED_STREAM - the
+                            #     peer explicitly told us the stream was not
+                            #     processed.
+                            #   - reset:           stream reset before any
+                            #     response bytes - same guarantee as
+                            #     connect-failure.
+                            #
+                            # We deliberately do NOT list "5xx" or
+                            # "gateway-error" here: those match 5xx responses
+                            # RETURNED BY THE ENGINE, which may have already
                             # executed side effects (e.g. a DML statement that
-                            # partially mutated state), so retrying could
-                            # duplicate the work. Retries here exist purely to
-                            # hide the brief endpoint-propagation window after a
-                            # pod becomes not-ready, where DNS may still point
-                            # at an endpoint that refuses the connection.
+                            # partially mutated state). "5xx" returned by
+                            # Envoy itself (flags=UF/URX, zero upstream bytes)
+                            # falls under connect-failure/reset and is already
+                            # covered.
+                            #
+                            # num_retries is set well above the steady-state
+                            # replica count of any one engine. Combined with
+                            # the previous_hosts retry predicate, this means
+                            # each successive retry is directed to a pod we
+                            # have not tried yet, until every pod in the
+                            # sub-cluster's load-balanced set has been tried
+                            # or the client-side deadline expires. Short
+                            # exponential back-off lets the sub-cluster's
+                            # own STRICT_DNS refresh tick (and any outlier
+                            # ejection) take effect between attempts without
+                            # needing to match its timer to a magic constant
+                            # here. Each per-try attempt is bounded only by
+                            # the cluster's connect_timeout, not by
+                            # per_try_timeout, so legitimate long-running
+                            # queries are never cut off mid-flight.
                             retry_policy:
                               retry_on: connect-failure,refused-stream,reset
-                              num_retries: 2
+                              num_retries: 50
+                              retry_back_off:
+                                base_interval: 0.025s
+                                max_interval: 0.25s
+                              retry_host_predicate:
+                                - name: envoy.retry_host_predicates.previous_hosts
+                                  typed_config:
+                                    "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
+                              host_selection_retry_max_attempts: 5
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
+      # Short per-attempt TCP connect budget. "Connection refused" fails in
+      # <1ms, but if the route to a stale pod IP is silently black-holed
+      # (e.g. iptables DROP instead of REJECT) the connect can otherwise
+      # hang for the kernel default (~130s) before the retry loop gets to
+      # try another host / a freshly resolved address. 250ms is long enough
+      # for a healthy intra-cluster connect (sub-millisecond in practice)
+      # but short enough that the retry policy above can iterate many
+      # times within a single client-side deadline.
+      connect_timeout: 0.25s
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
-%s
+          # sub_clusters_config replaces dns_cache_config. The DFP cluster
+          # becomes a factory for per-authority sub-clusters; each one is a
+          # full STRICT_DNS cluster that resolves the authority to all of
+          # its A-records and load-balances across them. See the file-level
+          # comment above for why this beats the default DNS-cache mode.
+          sub_clusters_config:
+            # ROUND_ROBIN across the pod IPs behind a headless engine
+            # service. Any LB policy other than CLUSTER_PROVIDED is valid
+            # here; ROUND_ROBIN is the simplest fair choice for a stateless
+            # query fan-out.
+            lb_policy: ROUND_ROBIN
+            # Garbage-collect sub-clusters for engines that have not seen
+            # traffic recently so a long-lived gateway doesn't accumulate
+            # one cluster per ever-deleted engine over time.
+            sub_cluster_ttl: 300s
 admin:
   address:
     socket_address:
@@ -262,8 +336,6 @@ admin:
 `,
 		gatewayContainerPort,
 		instance.Namespace,
-		indentBlock(dnsCacheConfigYAML, "                      "),
-		indentBlock(dnsCacheConfigYAML, "          "),
 		gatewayAdminPort,
 	)
 }
