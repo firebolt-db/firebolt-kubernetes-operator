@@ -3,6 +3,16 @@ name: E2E Tests
 on:
   pull_request:
 
+# Cancel any in-flight run of this workflow for the same PR/branch as soon
+# as a new commit is pushed. E2E runs are long and expensive; keeping the
+# superseded run going just burns a runner on a result that nobody is
+# going to look at. `github.ref` is the PR's merge ref (refs/pull/<n>/merge)
+# on pull_request events, so each PR gets its own concurrency group and
+# parallel PRs don't cancel each other.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   plan:
     name: Plan E2E matrix
