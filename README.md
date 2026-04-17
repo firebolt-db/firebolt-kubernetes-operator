@@ -82,11 +82,54 @@ spec:
     memory: "8Gi"
 ```
 
-The engine will not start until the referenced instance has a populated metadata endpoint and account ID. Connect via:
+The engine will not start until the referenced instance has a populated metadata endpoint and account ID.
+
+### Connecting to Engines
+
+There are two supported entry points. Both are first-class; pick based on
+whether you want the operator to absorb transient failures for you or to do
+your own load balancing.
+
+**1. Through the instance gateway (recommended default).**
+This is the only entry point on which the operator promises to keep queries
+succeeding across engine scaling and blue-green rollouts. The gateway is a
+per-instance Envoy proxy that routes requests to a specific engine based on
+the `X-Firebolt-Engine` request header.
 
 ```
-my-engine-service.firebolt.svc:3473
+POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
+Headers:
+  X-Firebolt-Engine: my-engine
+  Content-Type: text/plain
+Body: <SQL>
 ```
+
+The gateway resolves the engine hostname at request time, follows pod
+readiness automatically, and retries transport-level failures
+(connect refused / TCP reset) so callers do not have to.
+
+**2. Directly against the per-engine Service.**
+Each engine exposes a headless Service at
+`<engine>-service.<namespace>.svc.cluster.local:3473`. Because the Service is
+headless (`ClusterIP: None`), DNS returns the set of ready pod IPs directly;
+there is no virtual IP and kube-proxy is not in the data path.
+
+This entry point is intended for clients that implement their own
+connection-level load balancing - for example, a client library that
+resolves the Service hostname, maintains a pool of connections to the
+returned pod IPs, observes connection-level failures, and re-resolves DNS
+on failure. Single-connection callers that want the operator to handle
+transient failures should use the gateway instead.
+
+With this entry point the caller is responsible for:
+- periodically re-resolving the Service hostname (Kubernetes TTL on the
+  in-cluster DNS response is typically 5s) so that newly-ready pods are
+  picked up and draining pods are dropped;
+- treating a request on a single endpoint that fails with a transport
+  error as "pick another endpoint", not "retry this request";
+- explicitly setting `advanced_mode=true` as a query parameter when needed
+  (the gateway appends it automatically; direct callers do not go through
+  that filter).
 
 ### 4. Scale or Update
 
@@ -270,7 +313,7 @@ my-engine   5          stable   2            24h
 
 | Resource | Name Pattern | Purpose |
 |----------|--------------|---------|
-| **Engine Service** | `my-engine-service` | Stable endpoint for clients |
+| **Engine Service** | `my-engine-service` | Headless Service exposing the current generation's pod IPs. See "Connecting to Engines". |
 | **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
 | **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
 | **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
