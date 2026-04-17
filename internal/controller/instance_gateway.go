@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -46,7 +48,17 @@ const (
 func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	envoyYAML := buildEnvoyConfigYAML(instance)
+	advancedEngines := map[string]bool{}
+	var engineList computev1alpha1.FireboltEngineList
+	if err := r.List(ctx, &engineList, client.InNamespace(instance.Namespace)); err == nil {
+		for i := range engineList.Items {
+			if engineList.Items[i].Spec.InstanceRef == instance.Name {
+				advancedEngines[engineList.Items[i].Name] = engineList.Items[i].Spec.AdvancedMode
+			}
+		}
+	}
+
+	envoyYAML := buildEnvoyConfigYAML(instance, advancedEngines)
 
 	if err := r.ensureGatewayConfigMap(ctx, instance, envoyYAML); err != nil {
 		return fmt.Errorf("ensuring gateway configmap: %w", err)
@@ -80,10 +92,32 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
+// buildAdvancedEnginesLua returns a Lua table literal mapping engine names to
+// their advanced_mode setting, e.g. `{["my-engine"] = true}`.
+func buildAdvancedEnginesLua(advancedEngines map[string]bool) string {
+	if len(advancedEngines) == 0 {
+		return "{}"
+	}
+	var entries []string
+	for name, adv := range advancedEngines {
+		val := "false"
+		if adv {
+			val = "true"
+		}
+		entries = append(entries, fmt.Sprintf(`["%s"] = %s`, name, val))
+	}
+	return "{" + strings.Join(entries, ", ") + "}"
+}
+
 // buildEnvoyConfigYAML generates an Envoy static config that routes requests
 // based on the X-Firebolt-Engine header to the corresponding engine ClusterIP
 // Service ({engine}-service:3473) via the dynamic forward proxy.
-func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+//
+// advancedEngines maps engine names to their AdvancedMode setting. When true,
+// the Lua filter appends advanced_mode=true to the query string. When false,
+// it strips the X-Request-Id header.
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEngines map[string]bool) string {
+	luaTable := buildAdvancedEnginesLua(advancedEngines)
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
@@ -115,18 +149,23 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       default_source_code:
                         inline_string: |
+                          local advanced_engines = %s
                           function envoy_on_request(handle)
                             local engine = handle:headers():get("x-firebolt-engine")
                             if engine == nil or engine == "" then
                               handle:respond({[":status"] = "400"}, "missing X-Firebolt-Engine header")
                               return
                             end
-                            -- TODO: remove advanced_mode once Core supports x-request-id
-                            local path = handle:headers():get(":path")
-                            if path:find("?", 1, true) then
-                              handle:headers():replace(":path", path .. "&advanced_mode=true")
+                            if advanced_engines[engine] then
+                              local path = handle:headers():get(":path")
+                              if path:find("?", 1, true) then
+                                handle:headers():replace(":path", path .. "&advanced_mode=true")
+                              else
+                                handle:headers():replace(":path", path .. "?advanced_mode=true")
+                              end
                             else
-                              handle:headers():replace(":path", path .. "?advanced_mode=true")
+                              -- TODO: remove once Firebolt Core accepts x-request-id without advanced mode
+                              handle:headers():remove("x-request-id")
                             end
                             handle:headers():replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
                           end
@@ -167,6 +206,7 @@ admin:
       port_value: %d
 `,
 		gatewayContainerPort,
+		luaTable,
 		instance.Namespace,
 		gatewayAdminPort,
 	)

@@ -55,6 +55,13 @@ spec:
             description: FireboltEngineSpec defines the desired state of a Firebolt
               engine.
             properties:
+              advancedMode:
+                default: false
+                description: |-
+                  AdvancedMode enables Firebolt advanced query mode for this engine.
+                  When true, the gateway appends advanced_mode=true to the query string.
+                  When false, the gateway strips the X-Request-Id header from proxied requests.
+                type: boolean
               drainCheckEnabled:
                 default: true
                 description: |-
