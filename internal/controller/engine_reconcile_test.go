@@ -193,7 +193,8 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -228,7 +229,8 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -254,7 +256,8 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
-		CurrentPodCount:         1,
+		CurrentPodTotal:         1,
+		CurrentPodReady:         0,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -494,7 +497,8 @@ func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -517,7 +521,8 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 99),
 		ClusterServiceTargetGen: 99,
 	}
@@ -545,7 +550,8 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -582,7 +588,8 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -679,7 +686,8 @@ func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
 		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
-		CurrentPodCount:         1,
+		CurrentPodTotal:         1,
+		CurrentPodReady:         0,
 		ClusterService:          nil,
 		ClusterServiceTargetGen: -1,
 	}
@@ -724,7 +732,8 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          nil,
 		ClusterServiceTargetGen: -1,
 	}
@@ -754,7 +763,8 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 		CurrentHeadlessSvc:      nil,
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -800,7 +810,8 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        nil,
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -875,7 +886,8 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 		CurrentHeadlessSvc:      hlSvc,
 		CurrentConfigMap:        cm,
 		CurrentPodsReady:        true,
-		CurrentPodCount:         3,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}

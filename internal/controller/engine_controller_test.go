@@ -38,11 +38,12 @@ func instanceReadyCond(s metav1.ConditionStatus) metav1.Condition {
 
 func TestSetReadyCondition(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     computev1alpha1.FireboltEngineStatus
-		current    EngineState
-		wantStatus metav1.ConditionStatus
-		wantReason string
+		name        string
+		status      computev1alpha1.FireboltEngineStatus
+		current     EngineState
+		wantStatus  metav1.ConditionStatus
+		wantReason  string
+		wantMessage string
 	}{
 		{
 			name: "Stable + instance ready + pods ready => True",
@@ -51,7 +52,7 @@ func TestSetReadyCondition(t *testing.T) {
 				ActiveGeneration: 3,
 				Conditions:       []metav1.Condition{instanceReadyCond(metav1.ConditionTrue)},
 			},
-			current:    EngineState{CurrentPodsReady: true, CurrentPodCount: 3},
+			current:    EngineState{CurrentPodsReady: true, CurrentPodTotal: 3, CurrentPodReady: 3},
 			wantStatus: metav1.ConditionTrue,
 			wantReason: "EngineReady",
 		},
@@ -99,9 +100,10 @@ func TestSetReadyCondition(t *testing.T) {
 				ActiveGeneration: 2,
 				Conditions:       []metav1.Condition{instanceReadyCond(metav1.ConditionTrue)},
 			},
-			current:    EngineState{CurrentPodsReady: false, CurrentPodCount: 1},
-			wantStatus: metav1.ConditionFalse,
-			wantReason: "PodsNotReady",
+			current:     EngineState{CurrentPodsReady: false, CurrentPodTotal: 3, CurrentPodReady: 1},
+			wantStatus:  metav1.ConditionFalse,
+			wantReason:  "PodsNotReady",
+			wantMessage: "generation 2 has 1 of 3 pod(s) ready",
 		},
 	}
 
@@ -120,6 +122,9 @@ func TestSetReadyCondition(t *testing.T) {
 			}
 			if got.ObservedGeneration != 7 {
 				t.Errorf("observedGeneration: got %d, want 7", got.ObservedGeneration)
+			}
+			if tc.wantMessage != "" && got.Message != tc.wantMessage {
+				t.Errorf("message: got %q, want %q", got.Message, tc.wantMessage)
 			}
 		})
 	}
