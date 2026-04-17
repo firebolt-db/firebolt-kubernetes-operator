@@ -432,6 +432,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		}
 	}
 
+	gracePeriod := getTerminationGracePeriod(spec)
+	preStopScript := BuildEnginePreStopScript(gracePeriod)
+
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
@@ -447,8 +450,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					NodeSelector: spec.NodeSelector,
-					Tolerations:  spec.Tolerations,
+					NodeSelector:                  spec.NodeSelector,
+					Tolerations:                   spec.Tolerations,
+					TerminationGracePeriodSeconds: &gracePeriod,
 					Containers: []corev1.Container{
 						{
 							Name:            ContainerNameEngine,
@@ -483,6 +487,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									MountPath: ConfigMountPath,
 									SubPath:   "config.json",
 									ReadOnly:  true,
+								},
+							},
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.LifecycleHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", preStopScript},
+									},
 								},
 							},
 							ReadinessProbe: &corev1.Probe{
@@ -598,6 +609,18 @@ func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec) time.Durati
 	return DefaultDrainCheckInterval
 }
 
+// getTerminationGracePeriod returns the TGPS value to stamp on the engine
+// StatefulSet's pod template: the spec override when set, otherwise the
+// operator's default. Defaulting is done here (not relying on the kubebuilder
+// default alone) so unit tests that construct a FireboltEngineSpec literal
+// get the same value as the cluster-loaded CRs.
+func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
+	if spec.TerminationGracePeriodSeconds != nil {
+		return *spec.TerminationGracePeriodSeconds
+	}
+	return DefaultTerminationGracePeriodSeconds
+}
+
 // stsMatchesSpec returns true if the StatefulSet matches all mutable fields
 // in the engine spec. A mismatch triggers a new blue-green generation.
 func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
@@ -635,6 +658,12 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Tolerations, spec.Tolerations) {
+		return false
+	}
+
+	expectedGracePeriod := getTerminationGracePeriod(spec)
+	if podSpec.TerminationGracePeriodSeconds == nil ||
+		*podSpec.TerminationGracePeriodSeconds != expectedGracePeriod {
 		return false
 	}
 

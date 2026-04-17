@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -80,9 +81,33 @@ const (
 	HealthLivePath = "/health/live"
 	// HealthPort is the port exposing health endpoints on engine pods.
 	HealthPort = 8122
+	// MetricsPort is the port exposing Prometheus metrics on engine pods.
+	// The operator scrapes firebolt_running_queries and firebolt_suspended_queries
+	// here via the Kubernetes pod-proxy subresource to drive the drain check,
+	// and the engine container's preStop hook reads the same metrics locally
+	// on 127.0.0.1:MetricsPort to gate termination.
+	MetricsPort = 9090
+	// MetricsPath is the HTTP path exposing Prometheus metrics on engine pods.
+	MetricsPath = "/metrics"
+	// MetricRunningQueries is the Prometheus metric name for in-flight queries.
+	MetricRunningQueries = "firebolt_running_queries"
+	// MetricSuspendedQueries is the Prometheus metric name for suspended queries.
+	MetricSuspendedQueries = "firebolt_suspended_queries"
 
 	// ConfigMountPath is where the engine config.json is mounted in the container.
 	ConfigMountPath = "/firebolt-core/config.json"
+
+	// DefaultTerminationGracePeriodSeconds is the default value applied to the
+	// engine pod's terminationGracePeriodSeconds when FireboltEngine.spec leaves
+	// it unset. 60s is enough for the preStop hook to poll metrics at 1-second
+	// cadence for most workloads while not leaving pods in Terminating state for
+	// an unreasonably long time if the scrape itself hangs.
+	DefaultTerminationGracePeriodSeconds = 60
+	// PreStopGraceMarginSeconds is the headroom the preStop loop leaves between
+	// its own deadline and the pod's terminationGracePeriodSeconds. The scrape
+	// loop exits by (TGPS - this) so the kubelet still has time to send SIGTERM
+	// and Core still has its own shutdown_wait_unfinished window before SIGKILL.
+	PreStopGraceMarginSeconds = 10
 )
 
 // Default container images, sourced from config/images/defaults.env.
@@ -92,23 +117,6 @@ var (
 	DefaultEnvoyImage    = images.DefaultEnvoy()
 	DefaultEngineImage   = images.DefaultEngine()
 )
-
-// DrainCheckSQL is the SQL query used to check if a node has finished serving queries.
-// Returns "0" if drained (no running queries), "1" if still serving queries.
-const DrainCheckSQL = `SELECT count(*) as num_running_queries FROM (
-  SELECT is_initial_query,
-    coalesce(settings_values[index_of(settings_names, 'auto_start_stop_control')], 'ignore') == 'reset' as auto_start_stop_control_reset,
-    coalesce(settings_values[index_of(settings_names, 'force_auto_stop_reset')], 'false') == 'true' as force_auto_stop_reset,
-    coalesce(settings_values[index_of(settings_names, 'hidden_query')],'false') == 'true' as hidden_query,
-    coalesce(settings_values[index_of(settings_names, 'is_internal_query')],'false') == 'true' as is_internal_query
-  FROM account_db.information_schema.internal_running_queries
-  WHERE is_initial_query
-    AND coalesce(settings_values[index_of(settings_names, 'auto_start_stop_control')], 'ignore') == 'reset'
-    AND ((coalesce(settings_values[index_of(settings_names, 'hidden_query')],'false') != 'true'
-          AND coalesce(settings_values[index_of(settings_names, 'is_internal_query')],'false') != 'true')
-         OR coalesce(settings_values[index_of(settings_names, 'force_auto_stop_reset')], 'false') == 'true')
-  LIMIT 1
-)`
 
 // EngineStartupScript is the script used to start the engine process.
 // POD_INDEX is injected via the downward API in buildStatefulSet, sourced
@@ -136,6 +144,53 @@ func GetServicePorts() []corev1.ServicePort {
 		{Name: "metadata", Port: 6500, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(6500)},
 		{Name: "metrics", Port: 9090, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(9090)},
 	}
+}
+
+// BuildEnginePreStopScript returns the bash script installed as the preStop
+// hook on the engine container. It scrapes the local Prometheus endpoint
+// and blocks termination until firebolt_running_queries and
+// firebolt_suspended_queries are both zero, giving in-flight queries a
+// chance to finish before the kubelet sends SIGTERM.
+//
+// The script uses bash's /dev/tcp pseudo-device for the scrape because the
+// firebolt-core image does not ship curl or wget. It never exits non-zero
+// on scrape failure or missing metrics: the only reason to fail out of the
+// loop early is "drain confirmed complete", any other state just means
+// "poll again next tick" until the deadline is reached. On deadline it
+// exits 0 as well - a preStop return code is purely advisory, so any exit
+// path leads to the kubelet sending SIGTERM right after.
+//
+// The deadline is set to (TGPS - PreStopGraceMarginSeconds) so that the
+// kubelet still has PreStopGraceMarginSeconds of TGPS budget to deliver
+// SIGTERM and let Core run its own shutdown_wait_unfinished window.
+//
+// Default values on parse failure (":-1" below) are deliberately non-zero:
+// if a metric line is missing from the response we want to treat the pod
+// as "not yet drained", not falsely report drained.
+func BuildEnginePreStopScript(gracePeriodSeconds int64) string {
+	deadline := gracePeriodSeconds - PreStopGraceMarginSeconds
+	if deadline < 1 {
+		deadline = 1
+	}
+	return fmt.Sprintf(`set -u
+DEADLINE=$(($(date +%%s) + %d))
+scrape() {
+  exec 3<>/dev/tcp/127.0.0.1/%d 2>/dev/null || return 1
+  printf 'GET %s HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+  cat <&3
+  exec 3<&- 3>&-
+}
+while [ "$(date +%%s)" -lt "$DEADLINE" ]; do
+  body=$(scrape) || { sleep 1; continue; }
+  r=$(printf '%%s\n' "$body" | awk '/^%s / {print $2; exit}')
+  s=$(printf '%%s\n' "$body" | awk '/^%s / {print $2; exit}')
+  if [ "${r:-1}" = "0" ] && [ "${s:-1}" = "0" ]; then
+    exit 0
+  fi
+  sleep 1
+done
+exit 0
+`, deadline, MetricsPort, MetricsPath, MetricRunningQueries, MetricSuspendedQueries)
 }
 
 // GetContainerPorts returns the container ports for the engine container

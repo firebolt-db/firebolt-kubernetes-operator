@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -46,10 +45,11 @@ const finalizerName = "compute.firebolt.io/engine-cleanup"
 // blue-green generational deployments of Firebolt engine StatefulSets.
 type FireboltEngineReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Namespace  string
-	RestConfig *rest.Config
-	Clientset  *kubernetes.Clientset
+	Scheme    *runtime.Scheme
+	Namespace string
+	// Clientset is used for the drain-check pod-proxy scrape
+	// (Pods/proxy subresource). Populated in SetupWithManager if nil.
+	Clientset *kubernetes.Clientset
 
 	// InstanceFilter, when non-empty, restricts this reconciler to engines
 	// referencing a single FireboltInstance (by spec.instanceRef). Requests
@@ -76,7 +76,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
+// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get
 // +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
 
 // Reconcile reads the current engine state from the cluster, computes the
@@ -317,11 +317,8 @@ func (r *FireboltEngineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // SetupWithManagerNamed sets up the controller with the Manager using a custom controller name.
 func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name string) error {
-	if r.RestConfig == nil {
-		r.RestConfig = mgr.GetConfig()
-	}
 	if r.Clientset == nil {
-		clientset, err := kubernetes.NewForConfig(r.RestConfig)
+		clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
 		if err != nil {
 			return fmt.Errorf("failed to create clientset: %w", err)
 		}

@@ -69,6 +69,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 
 func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	spec := testSpec()
+	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      genResourceName(engineName, gen, ""),
@@ -82,8 +83,9 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 			Replicas: &replicas,
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					NodeSelector: spec.NodeSelector,
-					Tolerations:  spec.Tolerations,
+					NodeSelector:                  spec.NodeSelector,
+					Tolerations:                   spec.Tolerations,
+					TerminationGracePeriodSeconds: &defaultTGPS,
 					Containers: []corev1.Container{
 						{
 							Image:           image,
@@ -853,6 +855,13 @@ func TestStsMatchesSpec(t *testing.T) {
 		}), false},
 		{"toleration mismatch", mutate(func(s *appsv1.StatefulSet) {
 			s.Spec.Template.Spec.Tolerations = []corev1.Toleration{{Key: "special", Operator: corev1.TolerationOpExists}}
+		}), false},
+		{"termination grace period mismatch", mutate(func(s *appsv1.StatefulSet) {
+			other := int64(30)
+			s.Spec.Template.Spec.TerminationGracePeriodSeconds = &other
+		}), false},
+		{"nil termination grace period", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.TerminationGracePeriodSeconds = nil
 		}), false},
 		{"nil replicas", mutate(func(s *appsv1.StatefulSet) { s.Spec.Replicas = nil }), false},
 		{"no containers", mutate(func(s *appsv1.StatefulSet) { s.Spec.Template.Spec.Containers = nil }), false},

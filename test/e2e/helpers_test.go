@@ -155,7 +155,6 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		Namespace:      testNamespace,
-		RestConfig:     config,
 		Clientset:      clientset,
 		InstanceFilter: instanceName,
 		DisableGC:      true,
