@@ -157,6 +157,18 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 	return r.Update(ctx, existing)
 }
 
+// ensureMetadataDeployment creates or updates the metadata Deployment for a
+// FireboltInstance.
+//
+// NOTE: no PodDisruptionBudget is created for this Deployment, on purpose.
+// Metadata is currently pinned to replicas=1 at the CRD level (CEL rule
+// on MetadataSpec + webhook defense-in-depth). Any PDB we could write in
+// that configuration is either a no-op (maxUnavailable=1) or actively
+// harmful (minAvailable=1 blocks `kubectl drain` on the node hosting the
+// metadata pod, forcing an operator to manually delete the PDB for
+// routine node maintenance with no availability gain, because there's no
+// peer to fail over to). The time to add a PDB is when metadata grows a
+// genuine multi-replica HA story (quorum, leader election); revisit then.
 func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
 	name := instance.Name + SuffixMetadataService
 	configMapName := metadataConfigMapName(instance.Name)
