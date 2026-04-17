@@ -101,6 +101,16 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 //
 // This config is deliberately engine-set agnostic so the ConfigMap never has to
 // be regenerated in response to engine create/delete/scale events.
+//
+// WARNING: the port number "3473" in the :authority rewrite below is
+// hardcoded and MUST be kept in sync with the "http-query" service port
+// exposed by FireboltEngine (see GetServicePorts / GetContainerPorts in
+// constants.go). Changing the engine query port without also updating
+// this Lua string will silently break gateway -> engine routing: Envoy
+// will try to connect to an arbitrary, unused port and every request
+// will fail with a 503 from the dynamic_forward_proxy cluster. There is
+// no compile-time link between the two today; consider extracting a
+// shared constant if you need to change this port.
 func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 	return fmt.Sprintf(`static_resources:
   listeners:
