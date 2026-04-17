@@ -102,7 +102,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-scaleup" + queryConfig.Suffix + "-engine"
 			clientPod    = "client-scaleup" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -143,7 +143,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling up to 4 replicas")
@@ -194,7 +194,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-scaledown" + queryConfig.Suffix + "-engine"
 			clientPod    = "client-scaledown" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -235,7 +235,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Scaling down to 1 replica")
@@ -286,7 +286,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-rapid" + queryConfig.Suffix + "-engine"
 			clientPod    = "client-rapid" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -322,7 +322,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Triggering scale up to 4 replicas")
@@ -390,7 +390,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-harmonic" + queryConfig.Suffix + "-engine"
 			clientPod    = "client-harmonic" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -424,7 +424,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			for replicas := 2; replicas <= 3; replicas++ {
@@ -487,7 +487,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-image" + queryConfig.Suffix + "-engine"
 			clientPod    = "client-image" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -528,7 +528,7 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
 
 			By("Starting background query runner")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			By("Switching to new image tag")
@@ -584,7 +584,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineSizes = []int{1, 2, 3}
 			clientPod   = "client-multi" + queryConfig.Suffix
 			lc          *TestInstanceLifecycle
-			bgRunners   []*BackgroundQueryRunner
+			bgRunners   []*GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -627,9 +627,9 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			By("Starting background query runner for each engine")
-			bgRunners = make([]*BackgroundQueryRunner, len(engineNames))
+			bgRunners = make([]*GatewayBackgroundQueryRunner, len(engineNames))
 			for i, name := range engineNames {
-				bgRunners[i] = NewBackgroundQueryRunnerWithValidator(clientPod, name, queryConfig.Query, queryConfig.Validator)
+				bgRunners[i] = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, name, queryConfig.Query, queryConfig.Validator)
 				bgRunners[i].Start(ctx)
 			}
 

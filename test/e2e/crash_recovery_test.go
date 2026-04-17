@@ -535,7 +535,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			engineName   = "test-crash-avail" + queryConfig.Suffix + "-engine"
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
-			bgRunner     *BackgroundQueryRunner
+			bgRunner     *GatewayBackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
@@ -584,7 +584,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Starting background queries")
-			bgRunner = NewBackgroundQueryRunnerWithValidator(clientPod, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
 			time.Sleep(3 * time.Second)

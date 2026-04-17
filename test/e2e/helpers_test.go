@@ -535,9 +535,28 @@ func DeleteClientPod(ctx context.Context, podName string) {
 
 // execCurlQuery runs a curl command inside the given client pod and returns
 // the response body. It targets the given in-cluster URL and POSTs the query.
+//
+// curl flags:
+//   - -sS: silent progress, but still print errors to stderr so a non-zero
+//     exit code carries a human-readable reason (e.g. "Operation timeout").
+//   - --connect-timeout 2: fail fast if TCP connect stalls (e.g. kube-proxy
+//     race during endpoint churn).
+//   - --max-time 5: cap the entire request so a hung upstream doesn't block
+//     the background runner indefinitely. The zero-downtime tests tolerate
+//     no failures, so this budget exists only to surface bugs as failures
+//     quickly rather than to hide transient latency.
+//   - -w "%{stderr}...": append a timing breakdown to stderr after transfer
+//     so failures carry DNS/connect/response timings that pinpoint the phase
+//     that stalled.
 func execCurlQuery(ctx context.Context, podName, url, query string, extraHeaders ...string) (string, error) {
+	const curlTimingFmt = "%{stderr}timings: code=%{http_code} dns=%{time_namelookup}s " +
+		"connect=%{time_connect}s starttransfer=%{time_starttransfer}s total=%{time_total}s\n"
+
 	curlArgs := []string{
-		"-sf", "--max-time", "30",
+		"-sSf",
+		"--connect-timeout", "2",
+		"--max-time", "5",
+		"-w", curlTimingFmt,
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",
 	}
@@ -596,92 +615,6 @@ func ParseQueryResult(output string) (interface{}, error) {
 	return resp.Data[0][0], nil
 }
 
-// BackgroundQueryRunner runs queries in the background and tracks failures
-type BackgroundQueryRunner struct {
-	podName        string
-	engineName     string
-	query          string
-	validator      QueryValidator
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	failureCount   atomic.Int32
-	successCount   atomic.Int32
-	mu             sync.Mutex
-	failureReasons map[string]int
-	stopped        atomic.Bool
-}
-
-// NewBackgroundQueryRunner creates a new background query runner with automatic validator selection
-// NewBackgroundQueryRunnerWithValidator creates a background query runner with custom validator
-func NewBackgroundQueryRunnerWithValidator(podName, engineName, query string, validator QueryValidator) *BackgroundQueryRunner {
-	return &BackgroundQueryRunner{
-		podName:        podName,
-		engineName:     engineName,
-		query:          query,
-		validator:      validator,
-		stopCh:         make(chan struct{}),
-		failureReasons: make(map[string]int),
-	}
-}
-
-// Start starts running queries in the background
-func (r *BackgroundQueryRunner) Start(ctx context.Context) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		defer GinkgoRecover()
-
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-r.stopCh:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				r.runQuery(ctx)
-			}
-		}
-	}()
-}
-
-// runQuery executes a single query and records the result
-func (r *BackgroundQueryRunner) runQuery(ctx context.Context) {
-	output, err := RunQuery(ctx, r.podName, r.engineName, r.query)
-	if err != nil {
-		r.recordFailure("query_error", err.Error())
-		return
-	}
-
-	result, err := ParseQueryResult(output)
-	if err != nil {
-		r.recordFailure("parse_error", err.Error())
-		return
-	}
-
-	if !r.validator(result) {
-		r.recordFailure("validation_error", fmt.Sprintf("validation failed for result: %v", result))
-		return
-	}
-
-	r.successCount.Add(1)
-}
-
-// recordFailure records a failure with its reason
-func (r *BackgroundQueryRunner) recordFailure(category, detail string) {
-	r.failureCount.Add(1)
-
-	reason := category + ": " + categorizeQueryError(detail)
-
-	r.mu.Lock()
-	r.failureReasons[reason]++
-	r.mu.Unlock()
-
-	fmt.Fprintf(GinkgoWriter, "Background query failed [%s]: %s\n", category, detail)
-}
-
 // categorizeQueryError extracts a short category from an error detail string.
 func categorizeQueryError(detail string) string {
 	switch {
@@ -707,45 +640,6 @@ func categorizeQueryError(detail string) string {
 		}
 		return detail
 	}
-}
-
-// Stop stops the background query runner. Safe to call multiple times.
-func (r *BackgroundQueryRunner) Stop() {
-	if r.stopped.CompareAndSwap(false, true) {
-		close(r.stopCh)
-	}
-	r.wg.Wait()
-}
-
-// GetStats returns the success and failure counts
-func (r *BackgroundQueryRunner) GetStats() (successes, failures int32) {
-	return r.successCount.Load(), r.failureCount.Load()
-}
-
-// GetFailureReasons returns a summary of failure reasons
-func (r *BackgroundQueryRunner) GetFailureReasons() map[string]int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	result := make(map[string]int)
-	for k, v := range r.failureReasons {
-		result[k] = v
-	}
-	return result
-}
-
-// PrintFailureSummary prints a summary of all failure reasons
-func (r *BackgroundQueryRunner) PrintFailureSummary() {
-	reasons := r.GetFailureReasons()
-	if len(reasons) == 0 {
-		return
-	}
-
-	fmt.Fprintf(GinkgoWriter, "\n=== Background Query Failure Summary ===\n")
-	for reason, count := range reasons {
-		fmt.Fprintf(GinkgoWriter, "  %s: %d\n", reason, count)
-	}
-	fmt.Fprintf(GinkgoWriter, "=========================================\n")
 }
 
 // dialMetadataViaPortForward establishes a gRPC connection to the metadata
@@ -1217,6 +1111,16 @@ func NewGatewayBackgroundQueryRunner(podName, instanceName, engineName, query st
 	if strings.Contains(query, "array_agg") {
 		validator = HeavyQueryValidator
 	}
+	return NewGatewayBackgroundQueryRunnerWithValidator(podName, instanceName, engineName, query, validator)
+}
+
+// NewGatewayBackgroundQueryRunnerWithValidator creates a gateway-routed
+// background query runner with a caller-supplied validator. Zero-downtime
+// tests must use this variant (directly or via NewGatewayBackgroundQueryRunner)
+// because the gateway is the only entry point on which we promise zero
+// downtime - direct engine-service clients are responsible for their own
+// retry / endpoint-selection semantics.
+func NewGatewayBackgroundQueryRunnerWithValidator(podName, instanceName, engineName, query string, validator QueryValidator) *GatewayBackgroundQueryRunner {
 	return &GatewayBackgroundQueryRunner{
 		podName:        podName,
 		instanceName:   instanceName,
