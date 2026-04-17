@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -138,6 +139,20 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	current, err := r.getEngineState(ctx, engine)
 	if err != nil {
+		// Surface a drain-probe failure as a user-facing condition
+		// BEFORE returning the error. Without this the reconciler
+		// would back off silently and the only signal a cluster
+		// admin would see is a PhaseDraining that never completes.
+		// Non-drain errors (API unavailability, RBAC, cache misses)
+		// are left alone: they are either transient and self-heal
+		// on the next retry, or they affect every getter and a
+		// bespoke condition would not help triage them.
+		if setDrainCheckFailingCondition(&engine.Status, err, engine.Generation) {
+			if updErr := r.updateStatus(ctx, engine); updErr != nil {
+				log.Info("Failed to persist DrainCheckFailing condition; controller-runtime will retry the reconcile",
+					"error", updErr)
+			}
+		}
 		return ctrl.Result{}, fmt.Errorf("getEngineState failed: %w", err)
 	}
 
@@ -408,6 +423,35 @@ func setReadyCondition(
 		)
 	}
 	apimeta.SetStatusCondition(&status.Conditions, cond)
+}
+
+// setDrainCheckFailingCondition flips ConditionReady to False with
+// Reason=DrainCheckFailing when err is (or wraps) a *DrainProbeError.
+// Returns true if the condition was updated so the caller knows to
+// persist status; returns false on any other error (or on nil), leaving
+// conditions untouched.
+//
+// Why this is a separate branch from setReadyCondition: setReadyCondition
+// only runs on the happy path, after getEngineState succeeded. A broken
+// drain probe by definition makes getEngineState fail, so without this
+// helper the most recent Ready reason (typically "Rolling") would stay
+// pinned and a user would have no signal that the probe is stuck. Once
+// the probe recovers, the next successful reconcile calls
+// setReadyCondition and overwrites DrainCheckFailing with the
+// appropriate Rolling/EngineReady reason - no explicit clear needed.
+func setDrainCheckFailingCondition(status *computev1alpha1.FireboltEngineStatus, err error, generation int64) bool {
+	var drainErr *DrainProbeError
+	if !stderrors.As(err, &drainErr) {
+		return false
+	}
+	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             "DrainCheckFailing",
+		Message:            drainErr.Error(),
+		ObservedGeneration: generation,
+	})
+	return true
 }
 
 // isInstanceConditionTrue reports whether ConditionInstanceReady is
