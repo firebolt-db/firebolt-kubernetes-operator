@@ -129,6 +129,23 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// InstancePhaseFailed is terminal. The only sites that set it
+	// (instance_account_init.go when the metadata service holds an account
+	// that does not match spec.id, or more than one account) both record
+	// "manual intervention required": either the metadata DB is corrupted
+	// or two FireboltInstances were pointed at it. Neither can be
+	// self-healed by the reconciler, so we stop running the rest of the
+	// loop — most importantly, we stop the every-10s gRPC dial into the
+	// metadata service and the repeated GetAccounts/StartReadOnlyAdminTransaction
+	// round-trips that would otherwise continue forever.
+	//
+	// The long RequeueAfter is a safety net: owned-object events will also
+	// re-enqueue, so this poll only matters if the human edits the status
+	// (e.g. kubectl patch) without touching any watched resource.
+	if instance.Status.Phase == computev1alpha1.InstancePhaseFailed {
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+
 	// Step 1: Ensure PostgreSQL (native, when no external PG is configured)
 	if instance.Spec.Metadata.Postgres == nil {
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
