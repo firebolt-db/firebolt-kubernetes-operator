@@ -145,6 +145,9 @@ var _ = SynchronizedBeforeSuite(func() {
 	k8sClient, err = newK8sClient()
 	Expect(err).NotTo(HaveOccurred())
 
+	By("Checking minimum Kubernetes version")
+	ensureMinK8sVersion(k8sClient, 1, 28)
+
 	By("Verifying no operator deployments are installed in the cluster")
 	ensureNoOperatorDeployed(ctx, k8sClient)
 
@@ -296,6 +299,30 @@ func newK8sClient() (*kubernetes.Clientset, error) {
 		config = ctrl.GetConfigOrDie()
 	}
 	return kubernetes.NewForConfig(config)
+}
+
+// ensureMinK8sVersion aborts the suite if the cluster's Kubernetes version is
+// below the required minimum. CEL transition rules (oldSelf) require 1.28+.
+func ensureMinK8sVersion(cs *kubernetes.Clientset, minMajor, minMinor int) {
+	info, err := cs.Discovery().ServerVersion()
+	Expect(err).NotTo(HaveOccurred(), "Failed to fetch server version")
+
+	var major, minor int
+	_, _ = fmt.Sscanf(info.Major, "%d", &major)
+	// Minor may contain trailing characters like "+" (e.g. "28+").
+	_, _ = fmt.Sscanf(info.Minor, "%d", &minor)
+
+	if major < minMajor || (major == minMajor && minor < minMinor) {
+		Fail(fmt.Sprintf(
+			"Kubernetes %s.%s is below the minimum required version %d.%d. "+
+				"The operator CRDs use CEL transition rules (oldSelf) which require Kubernetes 1.28+. "+
+				"Upgrade your cluster before running E2E tests.",
+			info.Major, info.Minor, minMajor, minMinor,
+		))
+	}
+
+	fmt.Fprintf(GinkgoWriter, "Kubernetes version %s.%s meets minimum requirement %d.%d\n",
+		info.Major, info.Minor, minMajor, minMinor)
 }
 
 // cleanupStaleResources strips finalizers from CRDs left by a previous test

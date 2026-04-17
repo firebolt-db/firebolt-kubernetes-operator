@@ -61,26 +61,11 @@ func TestDefaulter_PreservesExistingID(t *testing.T) {
 	}
 }
 
-func TestValidateUpdate_RejectsIDMutation(t *testing.T) {
-	v := &FireboltInstanceCustomValidator{}
-	oldInst := &FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-		Spec: FireboltInstanceSpec{
-			ID: "original-id",
-		},
-	}
-	newInst := &FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-		Spec: FireboltInstanceSpec{
-			ID: "changed-id",
-		},
-	}
-
-	_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
-	if err == nil {
-		t.Error("ValidateUpdate: expected error when changing spec.id, got nil")
-	}
-}
+// spec.id immutability is enforced by CEL
+// (XValidation rule="oldSelf == '' || self == oldSelf") on the CRD, not by
+// the webhook. No webhook-level test is needed; the rule explicitly allows
+// the one-time empty->value transition used by the controller fallback
+// when the mutating webhook is disabled.
 
 func TestValidateUpdate_AllowsSameID(t *testing.T) {
 	v := &FireboltInstanceCustomValidator{}

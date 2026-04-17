@@ -128,7 +128,16 @@ type FireboltInstanceSpec struct {
 	// ID is a stable unique identifier for this instance, used as the metadata
 	// account ID. If empty on creation, a ULID is generated automatically by
 	// the defaulting webhook. Once set, this field is immutable.
+	//
+	// The CEL rule allows the one-time "" -> <ulid> transition because when
+	// the mutating webhook is disabled (local dev, kind, some E2E setups),
+	// the controller Reconcile has a fallback that generates an ID and
+	// Updates the CR. A plain `self == oldSelf` would reject that Update at
+	// admission time and leave the instance permanently stuck without an ID.
+	// Once ID is non-empty, subsequent Updates are still blocked from
+	// changing it.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="spec.id is immutable once set"
 	ID string `json:"id,omitempty"`
 
 	// Metadata configures the metadata service.
