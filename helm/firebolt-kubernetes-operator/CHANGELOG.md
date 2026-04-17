@@ -1,3 +1,37 @@
+# 0.1.2
+
+appVersion: v1.1.0
+
+## [1.1.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.0.0...v1.1.0) (2026-04-17)
+
+
+### Features
+
+* **api:** add immutable spec.id with ULID defaulting webhook (FB-557) ([afcd2c3](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/afcd2c34f1dd5856a90507d6561d844452a1fbf7))
+* **api:** make engine image optional with operator defaults (FB-557) ([ad596a9](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/ad596a99c09c8762e95598c97722748a3d2b70a9))
+* **api:** restore auth spec on FireboltInstance CRD (FB-661) ([09fc1da](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/09fc1da314634c36468f7c6f4e42935042e83576))
+* **controller:** replace core-gateway with Envoy proxy (FB-661) ([9f96fb7](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/9f96fb74bac18d1ed72ba64f65dda8ee9417b157))
+* expose advanced mode (FB-557) ([5e1c851](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/5e1c85106fed19e5da2554af7d6e31b7268e28b9))
+* parallelize kind image load (FB-557) ([6e32726](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/6e32726f387b1cbaf4d139bc3eb45995ebfc8317))
+
+
+### Maintenance
+
+* **cursor:** add e2e rule for zero-downtime tests (FB-557) ([c061f9a](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/c061f9aabe476d389ecab0af95eedfc7835bdfd9))
+* **examples:** remove outdated engine example manifests (FB-557) ([926dc24](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/926dc24ca89fb8c157ad744e6bd92b126a979fdb))
+* **helm:** bump chart to 0.1.1 (appVersion v1.0.0) ([9059920](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/90599206884abf85e3f835275d1e54d218f9e274))
+
+
+### Bug fixes
+
+* **controller:** abandon in-progress engine generation on spec drift (FB-557) ([ceda111](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/ceda111b5a283f3ef8787e3f961990500fedf647))
+* **controller:** add advanced_mode query param for Core compatibility (FB-661) ([2419d20](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2419d2016ea3c1d883dc520d73b8faa7ba2643b7))
+* **controller:** address review feedback across webhook and reconciler (FB-557) ([d059d1f](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/d059d1f9eeb49c90319f07f1911efd3c8b053f98))
+* **controller:** fail fast on missing instance id and cache AccountReady (FB-557) ([97add03](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/97add038447b763156be478f60cf19b3e174363e))
+* missing RBAC role (FB-557) ([863cef1](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/863cef1080e4cc6a594bc127741e28243d705959))
+
+
+
 # 0.1.1
 
 appVersion: v1.0.0
