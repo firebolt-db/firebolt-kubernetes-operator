@@ -741,6 +741,11 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 
 // --- Headless service missing (without STS missing) ---
 
+// If the headless Service for the active generation is deleted (manual
+// kubectl, runaway script, stale GC logic, etc.), computeStable must
+// re-materialize it in place — not bump to a new generation. The Service
+// is name/selector-deterministic from (engine, gen) and its resurrection
+// immediately restores intra-pod DNS without disrupting running pods.
 func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
@@ -756,11 +761,77 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
-	if result.Status.Phase != computev1alpha1.PhaseCreating {
-		t.Errorf("expected new transition (Creating), got %s", result.Status.Phase)
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Errorf("expected phase Stable (in-place re-ensure), got %s", result.Status.Phase)
 	}
-	if result.Status.CurrentGeneration != 1 {
-		t.Errorf("expected new generation 1, got %d", result.Status.CurrentGeneration)
+	if result.Status.CurrentGeneration != 0 {
+		t.Errorf("expected unchanged generation 0, got %d", result.Status.CurrentGeneration)
+	}
+	if result.EnsureHeadlessSvc == nil {
+		t.Fatal("expected headless Service to be re-ensured in place")
+	}
+	wantName := genResourceName(testEngineName, 0, SuffixHL)
+	if result.EnsureHeadlessSvc.Name != wantName {
+		t.Errorf("expected headless svc name %q, got %q", wantName, result.EnsureHeadlessSvc.Name)
+	}
+	if result.EnsureStatefulSet != nil {
+		t.Error("expected no StatefulSet rebuild on HL-svc recovery")
+	}
+	if !result.Requeue {
+		t.Error("expected Requeue=true after re-ensure")
+	}
+}
+
+// --- ConfigMap missing (without STS missing) ---
+
+// If the ConfigMap for the currently-active generation is accidentally
+// deleted (manual kubectl, backup tool, etc.), computeStable must
+// re-materialize it in place at the current generation. Engine pods only
+// read the ConfigMap at startup, so re-creating it has no effect on
+// running pods but unblocks any future pod restart that would otherwise
+// get stuck Pending on the projected-volume mount. No new generation and
+// no full rollout are needed — the rebuilt content is byte-identical to
+// what the original generation was created with.
+func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
+	spec := testSpec()
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        nil,
+		CurrentPodsReady:        true,
+		CurrentPodCount:         3,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Errorf("expected phase Stable (in-place re-ensure), got %s", result.Status.Phase)
+	}
+	if result.Status.CurrentGeneration != 0 {
+		t.Errorf("expected unchanged generation 0, got %d", result.Status.CurrentGeneration)
+	}
+	if result.EnsureConfigMap == nil {
+		t.Fatal("expected ConfigMap to be re-ensured in place")
+	}
+	wantName := genResourceName(testEngineName, 0, SuffixConfig)
+	if result.EnsureConfigMap.Name != wantName {
+		t.Errorf("expected ConfigMap name %q, got %q", wantName, result.EnsureConfigMap.Name)
+	}
+	// Re-materialized content must equal the canonical generator output so
+	// that ensureConfigMap's content-based update path treats a subsequent
+	// reconcile (CM now present) as a no-op rather than a drift-driven write.
+	want := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	if result.EnsureConfigMap.Data["config.json"] != want.Data["config.json"] {
+		t.Error("rebuilt ConfigMap content diverged from buildConfigMap output")
+	}
+	if result.EnsureStatefulSet != nil {
+		t.Error("expected no StatefulSet rebuild on ConfigMap recovery")
+	}
+	if !result.Requeue {
+		t.Error("expected Requeue=true after re-ensure")
 	}
 }
 
