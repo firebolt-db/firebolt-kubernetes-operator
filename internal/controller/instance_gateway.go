@@ -298,29 +298,41 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	// terminationGracePeriodSeconds budget for graceful shutdown:
 	//   - preStop POSTs /healthcheck/fail to the Envoy admin (bash /dev/tcp
 	//     because the stock envoyproxy/envoy image ships without curl/wget),
-	//     then sleeps 3s so kube-proxy can drop this pod from Service
-	//     endpoints before SIGTERM.
+	//     then sleeps 8s so kube-proxy can drop this pod from Service
+	//     endpoints before SIGTERM. The readiness probe below is tuned so
+	//     that the flip is visible to kubelet within that window without
+	//     being so tight that it causes steady-state flapping.
 	//   - After preStop returns, kubelet sends SIGTERM and Envoy has the
-	//     remaining ~2s to drain and exit. Short requests finish; a hang in
-	//     Envoy gets SIGKILLed at the grace deadline rather than stalling
-	//     the whole rollout.
-	var gracePeriod int64 = 5
+	//     remaining ~7s to drain in-flight HTTP/2 streams and exit. Short
+	//     requests finish; a hang in Envoy gets SIGKILLed at the grace
+	//     deadline rather than stalling the whole rollout.
+	//
+	// The 15s / 8s split is a trade-off: lower it and Envoy loses drain
+	// time; raise it and the rollout wall-clock grows. 15s keeps pod-level
+	// shutdown well under the default pod-deletion timeout most schedulers
+	// expect while still giving a proxy enough room to drain gracefully.
+	var gracePeriod int64 = 15
 
 	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
 	// admin API without requiring curl/wget in the image. The POST flips
 	// the envoy.filters.http.health_check filter (pass_through_mode=false
 	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
-	// the kubelet readiness probe hits. Readiness immediately goes false,
-	// the EndpointSlice is updated, and kube-proxy removes this pod from
-	// the Service's iptables rules - eliminating the terminating-endpoint
-	// race where new SYNs are DNAT'd to a pod whose listener is already
-	// shutting down. The following sleep gives the propagation time to
-	// complete before SIGTERM.
+	// the kubelet readiness probe hits.
+	//
+	// Timing chain after the flip:
+	//   - next probe tick:              up to 2s (PeriodSeconds=2)
+	//   - FailureThreshold=2:           up to 2s more
+	//   - EndpointSlice fanout:         ~1s
+	//   - kube-proxy iptables rewrite:  ~1s
+	// Worst case ~6s, which fits inside the 8s sleep with ~2s of margin.
+	// By the time SIGTERM arrives, new client SYNs are no longer being
+	// DNAT'd to this pod - eliminating the terminating-endpoint race where
+	// new connections would hit a listener that is already shutting down.
 	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
 printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
 cat <&3 >/dev/null
 exec 3<&- 3>&-
-sleep 3
+sleep 8
 `, gatewayAdminPort)
 
 	podLabels := mergeMaps(labels, spec.Labels)
@@ -377,6 +389,28 @@ sleep 3
 							PeriodSeconds:       15,
 							TimeoutSeconds:      3,
 						},
+						// Readiness tuning balances two opposing requirements:
+						//
+						//   1. At shutdown, the preStop /healthcheck/fail flip must
+						//      propagate to kube-proxy before SIGTERM. With the
+						//      preStop sleep of 8s and terminationGracePeriodSeconds
+						//      of 15s, we have budget for Period+Failure probe
+						//      latency plus EndpointSlice/kube-proxy fanout.
+						//   2. At steady state, a single probe hiccup (network
+						//      blip, brief CPU throttle, transient listener stall)
+						//      must not flap the pod out of the Service and cause
+						//      cascading load onto the other replica.
+						//
+						// PeriodSeconds=2, TimeoutSeconds=2, FailureThreshold=2
+						// gives worst-case ~4s detection - comfortably inside the
+						// 8s preStop - while still requiring two consecutive bad
+						// probes to mark NotReady, absorbing single-sample noise.
+						//
+						// The previous setting (default FailureThreshold=3 with
+						// PeriodSeconds=3) gave ~9s worst-case detection, which is
+						// past SIGKILL even with the old 5s TGPS; the preStop
+						// script's comment claiming "readiness immediately goes
+						// false" did not actually hold.
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{
@@ -385,8 +419,9 @@ sleep 3
 								},
 							},
 							InitialDelaySeconds: 1,
-							PeriodSeconds:       3,
-							TimeoutSeconds:      3,
+							PeriodSeconds:       2,
+							TimeoutSeconds:      2,
+							FailureThreshold:    2,
 						},
 						SecurityContext: &corev1.SecurityContext{
 							RunAsUser:                &runAsUser,
