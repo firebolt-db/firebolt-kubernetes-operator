@@ -323,6 +323,15 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 // engine's post-reconcile status and the observed cluster state, and
 // writes it onto status.Conditions (idempotent via SetStatusCondition).
 //
+// Precondition: status.Phase is non-empty. The very first reconcile of
+// a fresh FireboltEngine hits an early-return in Reconcile that seeds
+// Phase=Creating and writes an "Initializing" ConditionReady inline
+// (see the Phase == "" branch near the top of Reconcile), so by the
+// time setReadyCondition runs the phase is always one of the declared
+// EnginePhase values. Keeping the Initializing write out of here means
+// there is exactly one place that emits it, which avoids silent drift
+// between two copies of the same message.
+//
 // The precedence below is intentional: a higher-priority Reason masks
 // every lower one, so the single condition users read gives them the
 // most actionable signal. In particular:
@@ -351,14 +360,10 @@ func setReadyCondition(
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "InstanceNotReady"
 		cond.Message = "Referenced FireboltInstance is not ready"
-	case status.Phase != computev1alpha1.PhaseStable && status.Phase != "":
+	case status.Phase != computev1alpha1.PhaseStable:
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "Rolling"
 		cond.Message = fmt.Sprintf("Engine is in %s phase", status.Phase)
-	case status.Phase == "":
-		cond.Status = metav1.ConditionFalse
-		cond.Reason = "Initializing"
-		cond.Message = "Engine status has not yet been populated"
 	case !current.CurrentPodsReady:
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "PodsNotReady"
