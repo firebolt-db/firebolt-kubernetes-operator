@@ -289,29 +289,6 @@ func TestComputeEngineReconcile_S3_SwitchingUpdateSelector(t *testing.T) {
 	}
 }
 
-func TestComputeEngineReconcile_S3_SwitchingWaitsForEndpoints(t *testing.T) {
-	spec := testSpec()
-	status := &computev1alpha1.FireboltEngineStatus{
-		Phase:             computev1alpha1.PhaseSwitching,
-		CurrentGeneration: 1,
-		ActiveGeneration:  0,
-	}
-	current := EngineState{
-		ClusterService:               makeClusterSvc(testEngineName, 1),
-		ClusterServiceTargetGen:      1,
-		ClusterServiceEndpointsReady: false,
-	}
-
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
-
-	if result.Status.Phase != computev1alpha1.PhaseSwitching {
-		t.Errorf("expected to stay in Switching while endpoints propagate, got %s", result.Status.Phase)
-	}
-	if result.RequeueAfter != 500*time.Millisecond {
-		t.Errorf("expected RequeueAfter 500ms, got %v", result.RequeueAfter)
-	}
-}
-
 func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 	spec := testSpec()
 	status := &computev1alpha1.FireboltEngineStatus{
@@ -320,9 +297,8 @@ func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		ClusterService:               makeClusterSvc(testEngineName, 1),
-		ClusterServiceTargetGen:      1,
-		ClusterServiceEndpointsReady: true,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
@@ -346,9 +322,8 @@ func TestComputeEngineReconcile_S3_SwitchingToStable_InitialDeploy(t *testing.T)
 		ActiveGeneration:  -1,
 	}
 	current := EngineState{
-		ClusterService:               makeClusterSvc(testEngineName, 0),
-		ClusterServiceTargetGen:      0,
-		ClusterServiceEndpointsReady: true,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
