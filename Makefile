@@ -70,7 +70,7 @@ load-test-images: ## Load required Docker images into the Kind cluster
 	./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
-prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster, load images
+prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, load images
 
 GINKGO_FOCUS ?=
 
@@ -81,7 +81,6 @@ GINKGO_PROCS ?= $(shell n=$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/d
 
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
-	@EXIT_CODE=0; \
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
 		"$(GINKGO)" run \
 		--tags=e2e \
@@ -94,9 +93,7 @@ test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-
 		--timeout=30m \
 		$(if $(GINKGO_FOCUS),--focus="$(GINKGO_FOCUS)") \
 		./test/e2e/ \
-		2>&1 | tee test.log || EXIT_CODE=$$?; \
-	$(MAKE) cleanup-test-e2e; \
-	exit $$EXIT_CODE
+		2>&1 | tee test.log
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests

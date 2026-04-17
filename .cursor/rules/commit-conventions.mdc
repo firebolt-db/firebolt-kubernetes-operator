@@ -4,7 +4,7 @@ alwaysApply: true
 ---
 # Commits
 
-Do not perform commits or amend commits without asking user first.
+Ask user before creating or amending commits.
 
 # Commit Message Convention
 
