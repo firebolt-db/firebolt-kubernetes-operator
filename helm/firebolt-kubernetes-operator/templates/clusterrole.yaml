@@ -1,3 +1,11 @@
+{{- /*
+HAND-MAINTAINED. This ClusterRole must stay in sync with
+config/rbac/role.yaml, which is generated from +kubebuilder:rbac:
+markers on the controllers. When those markers change, update this
+file too. Historical drift has bitten us twice (pods/proxy missing
+after b284983, endpointslices dead since e538444); keep the rule
+set minimal and matching the generated role exactly.
+*/ -}}
 {{- if .Values.rbac.create -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -14,7 +22,6 @@ rules:
       - ""
     resources:
       - configmaps
-      - serviceaccounts
       - services
     verbs:
       - create
@@ -44,9 +51,9 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - pods/exec
+      - pods/proxy
     verbs:
-      - create
+      - get
   - apiGroups:
       - ""
     resources:
@@ -100,30 +107,9 @@ rules:
       - patch
       - update
   - apiGroups:
-      - discovery.k8s.io
-    resources:
-      - endpointslices
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
       - policy
     resources:
       - poddisruptionbudgets
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - rbac.authorization.k8s.io
-    resources:
-      - rolebindings
-      - roles
     verbs:
       - create
       - delete
