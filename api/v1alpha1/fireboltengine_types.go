@@ -106,6 +106,26 @@ type FireboltEngineSpec struct {
 	// connects to a metadata service in a different cluster via private link.
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
+
+	// TerminationGracePeriodSeconds is the grace period given to engine pods
+	// between SIGTERM and SIGKILL during termination.
+	//
+	// The operator installs a preStop hook on the engine container that
+	// polls Prometheus metrics on 127.0.0.1:9090 (firebolt_running_queries +
+	// firebolt_suspended_queries) and blocks termination until the engine
+	// reports zero in-flight queries. The hook caps its own wait below this
+	// grace period, so an engine with long-running queries will be drained
+	// cleanly up to the configured ceiling and then SIGKILLed if queries
+	// still have not finished.
+	//
+	// Defaults to 60 seconds. Raise it for workloads with analytical
+	// queries that routinely exceed a minute; lower it for latency-bounded
+	// workloads where quicker rollouts are preferable to query survival at
+	// the tail.
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
