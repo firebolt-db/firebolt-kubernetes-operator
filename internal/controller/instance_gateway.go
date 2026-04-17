@@ -19,8 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -29,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -46,21 +43,17 @@ const (
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
 // and PDB for the Envoy gateway proxy.
+//
+// The gateway configuration is a pure function of the FireboltInstance - it does
+// not depend on the engine set. Engines are discovered at request time via the
+// X-Firebolt-Engine header and resolved through the (headless) engine Service's
+// DNS. This keeps the ConfigMap (and therefore the gateway pod template) stable
+// across engine create/delete/scale/blue-green events, eliminating gateway
+// rollouts on engine lifecycle changes.
 func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	advancedEngines := map[string]bool{}
-	var engineList computev1alpha1.FireboltEngineList
-	if err := r.List(ctx, &engineList, client.InNamespace(instance.Namespace)); err != nil {
-		return fmt.Errorf("listing engines for instance %s: %w", instance.Name, err)
-	}
-	for i := range engineList.Items {
-		if engineList.Items[i].Spec.InstanceRef == instance.Name {
-			advancedEngines[engineList.Items[i].Name] = engineList.Items[i].Spec.AdvancedMode
-		}
-	}
-
-	envoyYAML := buildEnvoyConfigYAML(instance, advancedEngines)
+	envoyYAML := buildEnvoyConfigYAML(instance)
 
 	if err := r.ensureGatewayConfigMap(ctx, instance, envoyYAML); err != nil {
 		return fmt.Errorf("ensuring gateway configmap: %w", err)
@@ -94,37 +87,21 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
-// buildAdvancedEnginesLua returns a Lua table literal mapping engine names to
-// their advanced_mode setting, e.g. `{["my-engine"] = true}`.
-func buildAdvancedEnginesLua(advancedEngines map[string]bool) string {
-	if len(advancedEngines) == 0 {
-		return "{}"
-	}
-	names := make([]string, 0, len(advancedEngines))
-	for name := range advancedEngines {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	entries := make([]string, 0, len(names))
-	for _, name := range names {
-		val := "false"
-		if advancedEngines[name] {
-			val = "true"
-		}
-		entries = append(entries, fmt.Sprintf("[%q] = %s", name, val))
-	}
-	return "{" + strings.Join(entries, ", ") + "}"
-}
-
-// buildEnvoyConfigYAML generates an Envoy static config that routes requests
-// based on the X-Firebolt-Engine header to the corresponding engine ClusterIP
-// Service ({engine}-service:3473) via the dynamic forward proxy.
+// buildEnvoyConfigYAML generates the Envoy static config for the gateway.
 //
-// advancedEngines maps engine names to their AdvancedMode setting. When true,
-// the Lua filter appends advanced_mode=true to the query string. When false,
-// it strips the X-Request-Id header.
-func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEngines map[string]bool) string {
-	luaTable := buildAdvancedEnginesLua(advancedEngines)
+// Routing model:
+//   - The gateway requires an X-Firebolt-Engine header on every request.
+//   - The Lua filter validates the header value matches an RFC 1123 DNS label
+//     (so it cannot inject a path into :authority, cross namespaces, etc.),
+//     unconditionally appends advanced_mode=true to the query string, and
+//     rewrites :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
+//   - The dynamic_forward_proxy cluster resolves that hostname at request time.
+//     With the engine Service being headless, DNS returns the set of ready pod
+//     IPs directly, bypassing kube-proxy and its endpoint-propagation lag.
+//
+// This config is deliberately engine-set agnostic so the ConfigMap never has to
+// be regenerated in response to engine create/delete/scale events.
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
@@ -156,24 +133,36 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEn
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
                       default_source_code:
                         inline_string: |
-                          local advanced_engines = %s
+                          -- Validates the engine name is a single RFC 1123 DNS
+                          -- label: only lowercase alphanumerics and hyphens,
+                          -- no dots (so the caller cannot reach across
+                          -- namespaces or inject path separators into the
+                          -- rewritten :authority), max 63 chars, no leading or
+                          -- trailing hyphen.
+                          local function is_valid_engine(s)
+                            if s == nil or #s == 0 or #s > 63 then return false end
+                            if not string.match(s, "^[%%l%%d][-%%l%%d]*$") then return false end
+                            if string.sub(s, -1) == "-" then return false end
+                            return true
+                          end
+
                           function envoy_on_request(handle)
                             local engine = handle:headers():get("x-firebolt-engine")
-                            if engine == nil or engine == "" then
-                              handle:respond({[":status"] = "400"}, "missing X-Firebolt-Engine header")
+                            if not is_valid_engine(engine) then
+                              handle:respond({[":status"] = "400"}, "invalid or missing X-Firebolt-Engine header")
                               return
                             end
-                            if advanced_engines[engine] then
-                              local path = handle:headers():get(":path")
-                              if path:find("?", 1, true) then
-                                handle:headers():replace(":path", path .. "&advanced_mode=true")
-                              else
-                                handle:headers():replace(":path", path .. "?advanced_mode=true")
-                              end
+
+                            -- Unconditionally append advanced_mode=true. The
+                            -- engine accepts the flag regardless of how it is
+                            -- configured; clients don't need to know or set it.
+                            local path = handle:headers():get(":path")
+                            if path:find("?", 1, true) then
+                              handle:headers():replace(":path", path .. "&advanced_mode=true")
                             else
-                              -- TODO: remove once Firebolt Core accepts x-request-id without advanced mode
-                              handle:headers():remove("x-request-id")
+                              handle:headers():replace(":path", path .. "?advanced_mode=true")
                             end
+
                             handle:headers():replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
                           end
                   - name: envoy.filters.http.dynamic_forward_proxy
@@ -182,6 +171,11 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEn
                       dns_cache_config:
                         name: dynamic_forward_proxy_cache
                         dns_lookup_family: V4_ONLY
+                        dns_refresh_rate: 1s
+                        dns_failure_refresh_rate:
+                          base_interval: 1s
+                          max_interval: 5s
+                        host_ttl: 5s
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -196,6 +190,23 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEn
                           route:
                             cluster: dynamic_forward_proxy
                             timeout: 0s
+                            # Retry only on transport-level failures where the
+                            # upstream could not have observed the request as
+                            # accepted work:
+                            #   - connect-failure: TCP connect failed.
+                            #   - refused-stream:  HTTP/2 REFUSED_STREAM (idempotent to retry).
+                            #   - reset:           TCP reset before any response bytes.
+                            # We deliberately do NOT retry on 5xx: once the
+                            # upstream returned a 5xx it may have already
+                            # executed side effects (e.g. a DML statement that
+                            # partially mutated state), so retrying could
+                            # duplicate the work. Retries here exist purely to
+                            # hide the brief endpoint-propagation window after a
+                            # pod becomes not-ready, where DNS may still point
+                            # at an endpoint that refuses the connection.
+                            retry_policy:
+                              retry_on: connect-failure,refused-stream,reset
+                              num_retries: 2
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
@@ -206,6 +217,11 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, advancedEn
           dns_cache_config:
             name: dynamic_forward_proxy_cache
             dns_lookup_family: V4_ONLY
+            dns_refresh_rate: 1s
+            dns_failure_refresh_rate:
+              base_interval: 1s
+              max_interval: 5s
+            host_ttl: 5s
 admin:
   address:
     socket_address:
@@ -213,7 +229,6 @@ admin:
       port_value: %d
 `,
 		gatewayContainerPort,
-		luaTable,
 		instance.Namespace,
 		gatewayAdminPort,
 	)
@@ -280,6 +295,34 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	maxUnavailable := intstr.FromInt32(0)
 	var runAsUser int64 = 101 // Envoy default UID
 
+	// terminationGracePeriodSeconds budget for graceful shutdown:
+	//   - preStop POSTs /healthcheck/fail to the Envoy admin (bash /dev/tcp
+	//     because the stock envoyproxy/envoy image ships without curl/wget),
+	//     then sleeps 3s so kube-proxy can drop this pod from Service
+	//     endpoints before SIGTERM.
+	//   - After preStop returns, kubelet sends SIGTERM and Envoy has the
+	//     remaining ~2s to drain and exit. Short requests finish; a hang in
+	//     Envoy gets SIGKILLed at the grace deadline rather than stalling
+	//     the whole rollout.
+	var gracePeriod int64 = 5
+
+	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
+	// admin API without requiring curl/wget in the image. The POST flips
+	// the envoy.filters.http.health_check filter (pass_through_mode=false
+	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
+	// the kubelet readiness probe hits. Readiness immediately goes false,
+	// the EndpointSlice is updated, and kube-proxy removes this pod from
+	// the Service's iptables rules - eliminating the terminating-endpoint
+	// race where new SYNs are DNAT'd to a pod whose listener is already
+	// shutting down. The following sleep gives the propagation time to
+	// complete before SIGTERM.
+	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
+printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
+cat <&3 >/dev/null
+exec 3<&- 3>&-
+sleep 3
+`, gatewayAdminPort)
+
 	podLabels := mergeMaps(labels, spec.Labels)
 	podAnnotations := mergeMaps(map[string]string{
 		"firebolt.io/config-hash": configHash,
@@ -307,6 +350,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: &gracePeriod,
 					Containers: []corev1.Container{{
 						Name:            gatewayContainerName,
 						Image:           image,
@@ -314,6 +358,13 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 						Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
+						},
+						Lifecycle: &corev1.Lifecycle{
+							PreStop: &corev1.LifecycleHandler{
+								Exec: &corev1.ExecAction{
+									Command: []string{"bash", "-c", preStopScript},
+								},
+							},
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
