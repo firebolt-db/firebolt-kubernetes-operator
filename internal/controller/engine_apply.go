@@ -271,6 +271,12 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	aTGPS := a.Spec.Template.Spec.TerminationGracePeriodSeconds
+	bTGPS := b.Spec.Template.Spec.TerminationGracePeriodSeconds
+	if (aTGPS == nil) != (bTGPS == nil) || (aTGPS != nil && *aTGPS != *bTGPS) {
+		return false
+	}
+
 	if a.Annotations[AnnotationMetadataOverride] != b.Annotations[AnnotationMetadataOverride] {
 		return false
 	}
