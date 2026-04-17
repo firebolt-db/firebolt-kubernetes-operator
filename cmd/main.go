@@ -97,7 +97,7 @@ func main() {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Println(version)
+		_, _ = fmt.Println(version)
 		os.Exit(0)
 	}
 
