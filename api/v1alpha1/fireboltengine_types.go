@@ -56,8 +56,9 @@ type FireboltEngineSpec struct {
 	// InstanceRef is the name of the FireboltInstance in the same namespace
 	// that this engine depends on. The engine reconciler will not proceed
 	// until the referenced instance has a populated metadata endpoint and
-	// account ID.
+	// account ID. This field is immutable after creation.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="instanceRef is immutable"
 	InstanceRef string `json:"instanceRef"`
 
 	// Replicas is the number of engine nodes.

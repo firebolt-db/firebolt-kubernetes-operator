@@ -11,6 +11,10 @@ The operator manages two custom resources:
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it.
 
+## Prerequisites
+
+- **Kubernetes 1.28+** — The CRDs use CEL transition rules (`oldSelf`) for field immutability, which require Kubernetes 1.28 or later.
+
 ## Quick Start
 
 ### 1. Deploy the Operator

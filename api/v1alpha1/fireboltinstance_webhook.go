@@ -77,25 +77,20 @@ func (v *FireboltInstanceCustomValidator) ValidateCreate(_ context.Context, obj 
 }
 
 // ValidateUpdate validates a FireboltInstance on update.
-func (v *FireboltInstanceCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	oldInst, ok := oldObj.(*FireboltInstance)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltInstance, got %T", oldObj)
-	}
+func (v *FireboltInstanceCustomValidator) ValidateUpdate(
+	_ context.Context, _, newObj runtime.Object,
+) (admission.Warnings, error) {
+	// spec.id immutability is enforced by CEL on the CRD itself
+	// (XValidation rule="oldSelf == '' || self == oldSelf"), so it works
+	// even when webhooks are disabled. The empty->value transition is
+	// explicitly allowed so the controller fallback can generate and
+	// persist an ID when the defaulting webhook is not active.
 	newInst, ok := newObj.(*FireboltInstance)
 	if !ok {
 		return nil, fmt.Errorf("expected FireboltInstance, got %T", newObj)
 	}
 
 	var errs field.ErrorList
-
-	if oldInst.Spec.ID != "" && newInst.Spec.ID != oldInst.Spec.ID {
-		errs = append(errs, field.Invalid(
-			field.NewPath("spec", "id"),
-			newInst.Spec.ID,
-			"spec.id is immutable once set",
-		))
-	}
 
 	if err := validateMetadataReplicas(newInst); err != nil {
 		errs = append(errs, err)
