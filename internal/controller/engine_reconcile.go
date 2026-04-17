@@ -59,7 +59,7 @@ func computeEngineReconcile(
 
 	switch status.Phase {
 	case "", computev1alpha1.PhaseStable:
-		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration)
+		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration, instanceInfo)
 	case computev1alpha1.PhaseCreating:
 		computeCreating(spec, &result, current, engineName, engineNamespace, instanceInfo)
 	case computev1alpha1.PhaseSwitching:
@@ -79,8 +79,9 @@ func computeEngineReconcile(
 }
 
 // computeStable handles the stable phase: detects spec drift or missing
-// resources and starts a new blue-green transition if needed, or fixes
-// in-place drift for ConfigMaps and service selectors.
+// resources. A missing or drifted StatefulSet starts a new blue-green
+// transition; a missing ConfigMap or headless Service is re-materialized
+// in place at the current generation (see comments inside).
 //
 // When a new generation is needed, computeStable only writes the intent
 // to status (Phase=Creating, bumped CurrentGeneration) and requeues.
@@ -101,6 +102,7 @@ func computeStable(
 	engineName string,
 	engineNamespace string,
 	metadataGeneration int64,
+	instanceInfo InstanceInfo,
 ) {
 	status := &r.Status
 
@@ -113,20 +115,41 @@ func computeStable(
 
 	gen := status.ActiveGeneration
 
-	// ConfigMap drift is not checked independently here. All mutable fields
-	// that affect the ConfigMap (replicas, MetadataEndpointOverride) are
-	// covered by stsMatchesSpec, which triggers a new generation. The
-	// remaining ConfigMap inputs (instanceInfo) are effectively immutable.
-	needsNewGen := current.CurrentSTS == nil ||
-		!stsMatchesSpec(current.CurrentSTS, spec) ||
-		current.CurrentHeadlessSvc == nil
-
-	if needsNewGen {
+	// A missing or spec-drifted StatefulSet is handled by bumping to a new
+	// generation and starting a clean blue-green rollout. Patching a live
+	// STS in-place to match spec drift doesn't restart pods, leaving them
+	// with stale configuration, so we always roll forward via a new gen.
+	//
+	// ConfigMap content drift is not checked independently: all mutable
+	// spec fields that affect the ConfigMap (replicas, MetadataEndpointOverride)
+	// are covered by stsMatchesSpec, which triggers a new generation. The
+	// remaining ConfigMap inputs (instanceInfo, engineName, namespace, gen)
+	// are effectively immutable once the generation has been created.
+	if current.CurrentSTS == nil || !stsMatchesSpec(current.CurrentSTS, spec) {
 		newGen := status.CurrentGeneration + 1
 		status.CurrentGeneration = newGen
 		status.Phase = computev1alpha1.PhaseCreating
 		r.Requeue = true
 		return
+	}
+
+	// Missing ConfigMap / headless service are recoverable in-place: both
+	// are deterministic from (engineName, namespace, gen) plus the
+	// already-verified stable spec, so rebuilding at the current generation
+	// produces byte-identical content. Engine pods only read the ConfigMap
+	// at startup, so re-materializing it has no effect on running pods but
+	// unblocks any future restart (node drain, OOMKill, eviction) that
+	// would otherwise get stuck in Pending on the projected-volume mount.
+	// The headless service is likewise name/selector-deterministic and
+	// its resurrection immediately restores intra-cluster pod DNS. No new
+	// generation, no full rollout, no traffic switch.
+	if current.CurrentConfigMap == nil {
+		r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
+		r.Requeue = true
+	}
+	if current.CurrentHeadlessSvc == nil {
+		r.EnsureHeadlessSvc = buildHeadlessService(engineName, engineNamespace, gen)
+		r.Requeue = true
 	}
 
 	if current.ClusterService == nil {
