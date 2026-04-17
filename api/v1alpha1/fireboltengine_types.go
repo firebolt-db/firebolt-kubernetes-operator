@@ -106,13 +106,6 @@ type FireboltEngineSpec struct {
 	// connects to a metadata service in a different cluster via private link.
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
-
-	// AdvancedMode enables Firebolt advanced query mode for this engine.
-	// When true, the gateway appends advanced_mode=true to the query string.
-	// When false, the gateway strips the X-Request-Id header from proxied requests.
-	// +kubebuilder:default=false
-	// +optional
-	AdvancedMode bool `json:"advancedMode,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
