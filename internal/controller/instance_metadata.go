@@ -353,8 +353,16 @@ func contentHash(content string) string {
 func int64Ptr(v int64) *int64 { return &v }
 func strPtr(v string) *string { return &v }
 
-// mergeMaps returns a new map containing all entries from base, with overrides
-// merged on top. Nil-safe: returns base if overrides is empty and vice versa.
+// mergeMaps returns a map containing all entries from base, with overrides
+// merged on top. Nil-safe: treats either argument being empty as a no-op.
+//
+// WARNING: when overrides is empty this returns base BY REFERENCE, not a
+// copy. A caller that subsequently mutates the returned map will mutate
+// the base map as well. All current call sites pass a freshly constructed
+// base (e.g. a map literal, or the output of an `instanceLabels`-style
+// helper) so the aliasing is harmless today. If you add a caller that
+// threads a shared/cached map through `base`, either hand in a copy or
+// change this helper to always allocate.
 func mergeMaps(base, overrides map[string]string) map[string]string {
 	if len(overrides) == 0 {
 		return base

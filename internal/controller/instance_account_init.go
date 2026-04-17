@@ -44,6 +44,27 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 		return fmt.Errorf("FireboltInstance %q has no spec.id; defaulting webhook may not be running", instance.Name)
 	}
 
+	// Bound the whole account-init flow with a single deadline. Without this,
+	// a dial that hangs (metadata pod NotReady, network partition, DNS stall)
+	// or a server-side RPC that never returns would park the reconciler on
+	// this object indefinitely, starving other FireboltInstances that share
+	// the controller worker pool. 30s is comfortably longer than a healthy
+	// end-to-end create+activate (6 serial RPCs over localhost-scale gRPC)
+	// while short enough to retry on the next requeue if something is stuck.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// AccountReady is a one-way latch. Once the operator has observed the
+	// metadata account in ACTIVE state (or just created + activated it), we
+	// never re-check. This trades reactivity for cost: each reconcile would
+	// otherwise dial metadata, open a read-only admin tx, and stream all
+	// accounts — work that buys nothing once the account is known active.
+	//
+	// The trade-off is that we will NOT auto-recover if an out-of-band
+	// actor (e.g. a human admin, a migration tool) deactivates the account
+	// after the latch has flipped. Recovery in that case requires flipping
+	// Status.AccountReady back to false (kubectl patch, or delete+recreate
+	// the FireboltInstance) to force a re-evaluation of the switch below.
 	if instance.Status.AccountReady {
 		return nil
 	}
@@ -159,8 +180,9 @@ func createAndProvisionAccount(
 	adminClient adminv2.AdminServiceClient,
 	accountID string,
 ) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	// The caller (ensureAccountInitialized) wraps ctx with a 30s deadline
+	// that covers this whole flow plus the dial and the preceding listAll;
+	// no additional timeout is needed here.
 
 	tx1, err := txClient.StartAdminTransaction(ctx, &transactionv1.StartAdminTransactionRequest{})
 	if err != nil {
