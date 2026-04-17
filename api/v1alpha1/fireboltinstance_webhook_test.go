@@ -150,6 +150,97 @@ func TestValidateMetadataReplicas(t *testing.T) {
 	}
 }
 
+func TestValidateReservedKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		metadataLabels map[string]string
+		metadataAnns   map[string]string
+		gatewayLabels  map[string]string
+		gatewayAnns    map[string]string
+		wantError      bool
+	}{
+		{
+			name:      "no reserved keys is valid",
+			wantError: false,
+		},
+		{
+			name:           "user keys on metadata are valid",
+			metadataLabels: map[string]string{"team": "data"},
+			metadataAnns:   map[string]string{"owner": "sre"},
+			wantError:      false,
+		},
+		{
+			name:           "reserved key in metadata labels is rejected",
+			metadataLabels: map[string]string{"firebolt.io/config-hash": "fake"},
+			wantError:      true,
+		},
+		{
+			name:         "reserved key in metadata annotations is rejected",
+			metadataAnns: map[string]string{"firebolt.io/config-hash": "fake"},
+			wantError:    true,
+		},
+		{
+			name:          "reserved key in gateway labels is rejected",
+			gatewayLabels: map[string]string{"firebolt.io/generation": "5"},
+			wantError:     true,
+		},
+		{
+			name:        "reserved key in gateway annotations is rejected",
+			gatewayAnns: map[string]string{"firebolt.io/generation": "5"},
+			wantError:   true,
+		},
+		{
+			name: "mixed user + reserved keys still fail",
+			metadataLabels: map[string]string{
+				"team":                    "data",
+				"firebolt.io/managed-by":  "other",
+				"firebolt.io/config-hash": "fake",
+			},
+			wantError: true,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					Metadata: MetadataSpec{
+						ComponentSpec: ComponentSpec{
+							Labels:      tc.metadataLabels,
+							Annotations: tc.metadataAnns,
+						},
+					},
+					Gateway: GatewaySpec{
+						ComponentSpec: ComponentSpec{
+							Labels:      tc.gatewayLabels,
+							Annotations: tc.gatewayAnns,
+						},
+					},
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+
+			_, err = v.ValidateUpdate(context.Background(), inst, inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateUpdate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateUpdate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateDelete_AlwaysAllowed(t *testing.T) {
 	v := &FireboltInstanceCustomValidator{}
 	inst := &FireboltInstance{
