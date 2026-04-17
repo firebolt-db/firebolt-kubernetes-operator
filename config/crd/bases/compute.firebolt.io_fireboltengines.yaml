@@ -55,8 +55,21 @@ spec:
           metadata:
             type: object
           spec:
-            description: FireboltEngineSpec defines the desired state of a Firebolt
-              engine.
+            description: |-
+              FireboltEngineSpec defines the desired state of a Firebolt engine.
+
+              The CEL rule freezes spec.metadataEndpointOverride once it has been set
+              (or unset) at creation time. The field selects the cross-cluster metadata
+              topology the engine's nodes bake into their on-disk configuration; letting
+              users mutate it later would silently force a full blue-green rollout (it
+              participates in stsMatchesSpec via AnnotationMetadataOverride) and would
+              break the instanceInfo-drift invariant computeStable relies on to allow
+              in-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces
+              byte-identical content only when all ConfigMap inputs are frozen).
+              The wording mirrors the existing "oldSelf == '' || self == oldSelf"
+              pattern on FireboltInstanceSpec.ID, adapted for an optional pointer
+              field using has(): absent-on-create may still transition to set, but
+              any set value may not subsequently be changed or cleared.
             properties:
               drainCheckEnabled:
                 default: true
@@ -114,6 +127,8 @@ spec:
                   If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
                   topology-aware routing). Set this for cross-cluster scenarios where the engine
                   connects to a metadata service in a different cluster via private link.
+
+                  Immutable once set: see the struct-level CEL rule on FireboltEngineSpec.
                 type: string
               nodeSelector:
                 additionalProperties:
@@ -224,6 +239,10 @@ spec:
             - replicas
             - resources
             type: object
+            x-kubernetes-validations:
+            - message: spec.metadataEndpointOverride is immutable once set
+              rule: '!has(oldSelf.metadataEndpointOverride) || (has(self.metadataEndpointOverride)
+                && self.metadataEndpointOverride == oldSelf.metadataEndpointOverride)'
           status:
             description: FireboltEngineStatus defines the observed state of a Firebolt
               engine.

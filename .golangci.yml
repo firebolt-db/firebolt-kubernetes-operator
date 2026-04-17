@@ -155,6 +155,12 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # kubebuilder validation markers (XValidation CEL rules, complex
+      # enum lists, etc.) live on a single comment line by design and
+      # routinely exceed the lll limit. The rule bodies cannot be split.
+      - linters:
+          - lll
+        source: "kubebuilder:validation:"
       - path: _test\.go
         text: "is deprecated:"
       - path: (.+)\.go$

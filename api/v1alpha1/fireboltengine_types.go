@@ -68,6 +68,20 @@ const (
 )
 
 // FireboltEngineSpec defines the desired state of a Firebolt engine.
+//
+// The CEL rule freezes spec.metadataEndpointOverride once it has been set
+// (or unset) at creation time. The field selects the cross-cluster metadata
+// topology the engine's nodes bake into their on-disk configuration; letting
+// users mutate it later would silently force a full blue-green rollout (it
+// participates in stsMatchesSpec via AnnotationMetadataOverride) and would
+// break the instanceInfo-drift invariant computeStable relies on to allow
+// in-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces
+// byte-identical content only when all ConfigMap inputs are frozen).
+// The wording mirrors the set-once pattern on FireboltInstanceSpec.ID,
+// adapted for an optional pointer field via has(): absent-on-create may
+// still transition to set, but any set value may not subsequently be
+// changed or cleared.
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.metadataEndpointOverride) || (has(self.metadataEndpointOverride) && self.metadataEndpointOverride == oldSelf.metadataEndpointOverride)",message="spec.metadataEndpointOverride is immutable once set"
 type FireboltEngineSpec struct {
 	// InstanceRef is the name of the FireboltInstance in the same namespace
 	// that this engine depends on. The engine reconciler will not proceed
@@ -120,6 +134,8 @@ type FireboltEngineSpec struct {
 	// If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
 	// topology-aware routing). Set this for cross-cluster scenarios where the engine
 	// connects to a metadata service in a different cluster via private link.
+	//
+	// Immutable once set: see the struct-level CEL rule on FireboltEngineSpec.
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
 
