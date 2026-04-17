@@ -30,3 +30,8 @@ The ticket reference can usually be found in current branch name, or in the last
 - `refactor(api): extract shared types to common_types.go (FB-550)`
 - `fix(controller): handle nil pointer in drain check (FB-512)`
 - `test(e2e): add blue-green upgrade scenario (FB-530)`
+
+# Documentation
+
+Keep the documents under docs/ up to date as changes are made.
+If the document is about something not implemented or historical, then it does not need to be updated.

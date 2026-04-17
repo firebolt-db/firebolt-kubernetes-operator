@@ -326,22 +326,23 @@ All resources created by the instance reconciler have:
 
 ## Gateway query routing
 
-The Envoy gateway proxy acts as the entry point for client queries. It uses a Lua filter to extract the engine name from the `X-Firebolt-Engine` request header and a dynamic forward proxy to resolve the engine's ClusterIP Service via DNS.
+The Envoy gateway proxy acts as the entry point for client queries and is the only entry point on which the operator promises zero downtime across engine lifecycle events. It uses a Lua filter to pick the target engine from the `X-Firebolt-Engine` request header and a dynamic forward proxy (DFP) to resolve the per-engine headless Service at request time.
 
 ### Configuration
 
-The gateway ConfigMap (`{instance}-gateway-config`) contains a static Envoy configuration (`envoy.yaml`) with:
+The gateway ConfigMap (`{instance}-gateway-config`) is a **pure function of the FireboltInstance** — it does not depend on the set of engines. The operator does not regenerate it on engine create/delete/scale/blue-green events, so those events never trigger a gateway rollout. The configuration contains:
 
-- A Lua HTTP filter that reads `X-Firebolt-Engine` and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`
-- A dynamic forward proxy cluster that resolves the rewritten hostname via DNS
-- An admin listener on port 9901 for health checks
+- A Lua HTTP filter that validates `X-Firebolt-Engine` as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 chars, no leading or trailing hyphen, no dots), unconditionally appends `advanced_mode=true` to the request path's query string, and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`.
+- A dynamic forward proxy cluster with `dns_refresh_rate: 1s` and `host_ttl: 5s`, so newly-ready pods enter the gateway's pool quickly and draining pods fall out without a long stale-entry window.
+- A route-level retry policy that retries only transport-level failures (`connect-failure`, `refused-stream`, `reset`) with `num_retries: 2`. 5xx responses are **not** retried, because once an engine has returned a 5xx it may have already executed side effects and a retry could duplicate work. The retries exist purely to hide the brief endpoint-propagation window after a pod becomes not-ready.
+- An admin listener on port 9901 used by the gateway container's `preStop` hook (`POST /healthcheck/fail`) to gracefully fail readiness before SIGTERM.
 
-The gateway resolves engine endpoints as `{engine-name}-service:3473` within the same namespace.
+Because the per-engine routing Service is headless (`ClusterIP: None`), the `:authority` hostname resolves directly to the set of ready pod IPs. kube-proxy is not in the data path, so there is no terminating-endpoint race where a SYN would be DNAT'd to a pod whose listener has already closed.
 
 ### Traffic path
 
 ```
-Client (X-Firebolt-Engine: my-engine) → Gateway Service (:80) → Envoy (:8080) → my-engine-service:3473 → Engine Pod
+Client (X-Firebolt-Engine: my-engine) → Gateway Service (:80) → Envoy (:8080) → headless {engine}-service (pod IPs) → Engine Pod
 ```
 
 The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `maxUnavailable: 0`, ensuring zero downtime during gateway upgrades.
