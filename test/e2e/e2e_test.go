@@ -29,6 +29,10 @@ import (
 
 // queryConfig is defined in query_config_light_test.go or query_config_heavy_test.go
 // based on build tags. Run with -tags=e2e for light queries, -tags=e2e,heavy for heavy queries.
+//
+// Every second-level Describe below owns its own FireboltInstance (via
+// SetupTestInstance/TeardownTestInstance) so specs stay isolated and can run
+// in parallel under --ginkgo.procs.
 
 var _ = Describe("Firebolt Engine", func() {
 	BeforeEach(func() {
@@ -37,15 +41,16 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 1: Single node engine lifecycle
 	Describe("Single Node Engine", Ordered, func() {
 		var (
-			engineName = "test-single" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-single" + queryConfig.Suffix
-			operator   *OperatorInstance
+			instanceName = "inst-single" + queryConfig.Suffix
+			engineName   = "test-single" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-single" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for single node test")
+			By("Setting up FireboltInstance for single node test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -56,14 +61,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should create a single node engine, run queries, and clean up", func() {
 			By("Creating engine with 1 replica")
-			err := CreateEngine(ctx, engineName, 1)
+			err := CreateEngine(ctx, instanceName, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for engine to become ready")
@@ -95,16 +98,17 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 2: Scale up from 2 to 4 nodes with continuous queries
 	Describe("Scale Up 2 to 4 Nodes", Ordered, func() {
 		var (
-			engineName = "test-scaleup" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-scaleup" + queryConfig.Suffix
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-scaleup" + queryConfig.Suffix
+			engineName   = "test-scaleup" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-scaleup" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for scale up test")
+			By("Setting up FireboltInstance for scale up test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -115,14 +119,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale up while maintaining query availability", func() {
 			By("Creating engine with 2 replicas")
-			err := CreateEngine(ctx, engineName, 2)
+			err := CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -188,16 +190,17 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 3: Scale down from 3 to 1 node with continuous queries
 	Describe("Scale Down 3 to 1 Node", Ordered, func() {
 		var (
-			engineName = "test-scaledown" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-scaledown" + queryConfig.Suffix
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-scaledown" + queryConfig.Suffix
+			engineName   = "test-scaledown" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-scaledown" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for scale down test")
+			By("Setting up FireboltInstance for scale down test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -208,14 +211,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale down while maintaining query availability", func() {
 			By("Creating engine with 3 replicas")
-			err := CreateEngine(ctx, engineName, 3)
+			err := CreateEngine(ctx, instanceName, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -281,16 +282,17 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 4: Rapid config changes - only the last change should be applied
 	Describe("Rapid Config Changes", Ordered, func() {
 		var (
-			engineName = "test-rapid" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-rapid" + queryConfig.Suffix
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-rapid" + queryConfig.Suffix
+			engineName   = "test-rapid" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-rapid" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for rapid changes test")
+			By("Setting up FireboltInstance for rapid changes test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -301,16 +303,14 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should only apply the last config change when multiple rapid changes occur", func() {
 			rapidTimeout := 120 * time.Second
 
 			By("Creating engine with 2 replicas")
-			err := CreateEngine(ctx, engineName, 2)
+			err := CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -386,16 +386,17 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 5: Harmonic minor scale - 1->2->3->2->1
 	Describe("Harmonic Minor Scale", Ordered, func() {
 		var (
-			engineName = "test-harmonic" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-harmonic" + queryConfig.Suffix
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-harmonic" + queryConfig.Suffix
+			engineName   = "test-harmonic" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-harmonic" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for harmonic scale test")
+			By("Setting up FireboltInstance for harmonic scale test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -406,14 +407,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale up and down through 1->2->3->2->1 without downtime", func() {
 			By("Creating engine with 1 replica")
-			err := CreateEngine(ctx, engineName, 1)
+			err := CreateEngine(ctx, instanceName, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -484,16 +483,17 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 6: Image switching
 	Describe("Image Switching", Ordered, func() {
 		var (
-			engineName = "test-image" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-image" + queryConfig.Suffix
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-image" + queryConfig.Suffix
+			engineName   = "test-image" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-image" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for image switching test")
+			By("Setting up FireboltInstance for image switching test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -504,14 +504,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should switch image without downtime", func() {
 			By("Creating engine with 3 replicas")
-			err := CreateEngine(ctx, engineName, 3)
+			err := CreateEngine(ctx, instanceName, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -577,21 +575,22 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 7: Multiple engines managed by same operator
 	Describe("Multi Engine Management", Ordered, func() {
 		var (
-			engineNames = []string{
+			instanceName = "inst-multi" + queryConfig.Suffix
+			engineNames  = []string{
 				"test-multi" + queryConfig.Suffix + "-engine1",
 				"test-multi" + queryConfig.Suffix + "-engine2",
 				"test-multi" + queryConfig.Suffix + "-engine3",
 			}
 			engineSizes = []int{1, 2, 3}
 			clientPod   = "client-multi" + queryConfig.Suffix
-			operator    *OperatorInstance
+			lc          *TestInstanceLifecycle
 			bgRunners   []*BackgroundQueryRunner
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for multi-engine test")
+			By("Setting up FireboltInstance for multi-engine test")
 			var err error
-			operator, err = StartOperator("test-multi" + queryConfig.Suffix)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -609,15 +608,13 @@ var _ = Describe("Firebolt Engine", func() {
 				_ = DeleteEngine(ctx, name)
 				_ = WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)
 			}
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should manage multiple engines independently", func() {
 			By("Creating 3 engines of sizes 1, 2, 3")
 			for i, name := range engineNames {
-				err := CreateEngine(ctx, name, engineSizes[i])
+				err := CreateEngine(ctx, instanceName, name, engineSizes[i])
 				Expect(err).NotTo(HaveOccurred())
 			}
 
@@ -695,15 +692,16 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 8: Scale down restarts pods with updated config (config hash)
 	Describe("Scale Down Config Restart", Ordered, func() {
 		var (
-			engineName = "test-cfghash" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-cfghash" + queryConfig.Suffix
-			operator   *OperatorInstance
+			instanceName = "inst-cfghash" + queryConfig.Suffix
+			engineName   = "test-cfghash" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-cfghash" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for config hash test")
+			By("Setting up FireboltInstance for config hash test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -714,14 +712,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should restart pods when replica count changes so engine reads correct node list", func() {
 			By("Creating engine with 3 replicas")
-			err := CreateEngine(ctx, engineName, 3)
+			err := CreateEngine(ctx, instanceName, engineName, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Immediately scaling down to 1 replica before pods are ready")
@@ -755,15 +751,16 @@ var _ = Describe("Firebolt Engine", func() {
 	// Test 9: Recreate rollout strategy - no drain wait
 	Describe("Recreate Rollout Strategy", Ordered, func() {
 		var (
-			engineName = "test-recreate" + queryConfig.Suffix + "-engine"
-			clientPod  = "client-recreate" + queryConfig.Suffix
-			operator   *OperatorInstance
+			instanceName = "inst-recreate" + queryConfig.Suffix
+			engineName   = "test-recreate" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-recreate" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
 		)
 
 		BeforeAll(func() {
-			By("Starting operator for recreate rollout test")
+			By("Setting up FireboltInstance for recreate rollout test")
 			var err error
-			operator, err = StartOperator(engineName)
+			lc, err = SetupTestInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
@@ -774,14 +771,12 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			if operator != nil {
-				operator.Stop()
-			}
+			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should transition without waiting for drain when rollout is 'recreate'", func() {
 			By("Creating engine with 2 replicas and recreate rollout")
-			err := CreateEngineWithRollout(ctx, engineName, 2, "recreate")
+			err := CreateEngineWithRollout(ctx, instanceName, engineName, 2, "recreate")
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for engine to become ready")

@@ -31,51 +31,44 @@ import (
 	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 )
 
-var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
-	var (
-		engineName = "test-infra-engine"
-		clientPod  = "client-infra"
-		operator   *OperatorInstance
-	)
+// Each second-level Describe owns its own FireboltInstance so parallel
+// infrastructure specs don't mutate a shared instance.
 
-	BeforeAll(func() {
-		By("Starting engine operator for infrastructure tests")
-		var err error
-		operator, err = StartOperator(engineName)
-		Expect(err).NotTo(HaveOccurred())
+var _ = Describe("FireboltInstance Infrastructure", func() {
+	Describe("Instance Resource Verification", Ordered, func() {
+		var (
+			instanceName = "inst-infra-verify"
+			engineName   = "test-infra-verify-engine"
+			clientPod    = "client-infra-verify"
+			lc           *TestInstanceLifecycle
+		)
 
-		By("Creating client pod")
-		Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+		BeforeAll(func() {
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
 
-		By("Creating a test engine for query validation")
-		err = CreateEngine(ctx, engineName, 1)
-		Expect(err).NotTo(HaveOccurred())
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 
-		By("Waiting for engine to be ready and stable")
-		err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
-		Expect(err).NotTo(HaveOccurred())
-		err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
-		Expect(err).NotTo(HaveOccurred())
-	})
+			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
+			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+			Expect(WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)).To(Succeed())
+		})
 
-	AfterAll(func() {
-		By("Cleaning up infrastructure test engine")
-		DeleteClientPod(ctx, clientPod)
-		_ = DeleteEngine(ctx, engineName)
-		_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-		if operator != nil {
-			operator.Stop()
-		}
-	})
+		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
 
-	Describe("Instance Resource Verification", func() {
 		It("should create all expected sub-resources", func() {
 			By("Verifying PostgreSQL StatefulSet")
-			pgName := testInstance + controller.SuffixMetadataPG
+			pgName := instanceName + controller.SuffixMetadataPG
 			ss, err := k8sClient.AppsV1().StatefulSets(testNamespace).Get(ctx, pgName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ss.Status.ReadyReplicas).To(Equal(int32(1)))
-			Expect(ss.Labels[controller.LabelInstance]).To(Equal(testInstance))
+			Expect(ss.Labels[controller.LabelInstance]).To(Equal(instanceName))
 			Expect(ss.Labels[controller.LabelComponent]).To(Equal("postgres"))
 
 			By("Verifying PostgreSQL Service")
@@ -83,15 +76,15 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying PostgreSQL credentials Secret")
-			_, err = k8sClient.CoreV1().Secrets(testNamespace).Get(ctx, testInstance+controller.SuffixMetadataPostgresCreds, metav1.GetOptions{})
+			_, err = k8sClient.CoreV1().Secrets(testNamespace).Get(ctx, instanceName+controller.SuffixMetadataPostgresCreds, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying Metadata Deployment")
-			mdName := testInstance + controller.SuffixMetadataService
+			mdName := instanceName + controller.SuffixMetadataService
 			mdDep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, mdName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mdDep.Status.ReadyReplicas).To(Equal(int32(1)))
-			Expect(mdDep.Labels[controller.LabelInstance]).To(Equal(testInstance))
+			Expect(mdDep.Labels[controller.LabelInstance]).To(Equal(instanceName))
 			Expect(mdDep.Labels[controller.LabelComponent]).To(Equal("metadata"))
 
 			By("Verifying Metadata ConfigMap")
@@ -103,11 +96,11 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying Gateway Deployment")
-			gwName := testInstance + controller.SuffixGateway
+			gwName := instanceName + controller.SuffixGateway
 			gwDep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gwDep.Status.ReadyReplicas).To(BeNumerically(">=", int32(1)))
-			Expect(gwDep.Labels[controller.LabelInstance]).To(Equal(testInstance))
+			Expect(gwDep.Labels[controller.LabelInstance]).To(Equal(instanceName))
 			Expect(gwDep.Labels[controller.LabelComponent]).To(Equal("gateway"))
 
 			By("Verifying Gateway ConfigMap")
@@ -124,13 +117,39 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		})
 	})
 
-	Describe("PostgreSQL Crash Recovery", func() {
+	Describe("PostgreSQL Crash Recovery", Ordered, func() {
+		var (
+			instanceName = "inst-pg-crash"
+			engineName   = "test-pg-crash-engine"
+			clientPod    = "client-pg-crash"
+			lc           *TestInstanceLifecycle
+		)
+
+		BeforeAll(func() {
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+
+			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
+			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+			Expect(WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
+
 		It("should recover when PG pod is deleted", func() {
-			pgName := testInstance + controller.SuffixMetadataPG
+			pgName := instanceName + controller.SuffixMetadataPG
 
 			By("Deleting the PostgreSQL pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=postgres", controller.LabelInstance, testInstance, controller.LabelComponent),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=postgres", controller.LabelInstance, instanceName, controller.LabelComponent),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
@@ -156,12 +175,12 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			}, clusterReadyTimeout, pollInterval).Should(BeTrue())
 
 			By("Waiting for instance to return to Ready")
-			err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
+			err = WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine still responds via gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, instanceName, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
@@ -177,13 +196,39 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		})
 	})
 
-	Describe("Metadata Crash Recovery", func() {
+	Describe("Metadata Crash Recovery", Ordered, func() {
+		var (
+			instanceName = "inst-md-crash"
+			engineName   = "test-md-crash-engine"
+			clientPod    = "client-md-crash"
+			lc           *TestInstanceLifecycle
+		)
+
+		BeforeAll(func() {
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+
+			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
+			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+			Expect(WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
+
 		It("should recover when metadata pod is deleted", func() {
-			mdName := testInstance + controller.SuffixMetadataService
+			mdName := instanceName + controller.SuffixMetadataService
 
 			By("Deleting the metadata pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=metadata", controller.LabelInstance, testInstance, controller.LabelComponent),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=metadata", controller.LabelInstance, instanceName, controller.LabelComponent),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
@@ -209,12 +254,12 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			}, clusterReadyTimeout, pollInterval).Should(BeTrue())
 
 			By("Waiting for instance to return to Ready")
-			err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
+			err = WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying engine still responds via gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, instanceName, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
@@ -230,13 +275,39 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		})
 	})
 
-	Describe("Gateway Crash Recovery", func() {
+	Describe("Gateway Crash Recovery", Ordered, func() {
+		var (
+			instanceName = "inst-gw-crash"
+			engineName   = "test-gw-crash-engine"
+			clientPod    = "client-gw-crash"
+			lc           *TestInstanceLifecycle
+		)
+
+		BeforeAll(func() {
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+
+			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
+			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+			Expect(WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
+
 		It("should recover when gateway pod is deleted", func() {
-			gwName := testInstance + controller.SuffixGateway
+			gwName := instanceName + controller.SuffixGateway
 
 			By("Deleting the gateway pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=gateway", controller.LabelInstance, testInstance, controller.LabelComponent),
+				LabelSelector: fmt.Sprintf("%s=%s,%s=gateway", controller.LabelInstance, instanceName, controller.LabelComponent),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
@@ -262,12 +333,12 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 			}, clusterReadyTimeout, pollInterval).Should(BeTrue())
 
 			By("Waiting for instance to return to Ready")
-			err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
+			err = WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying queries still route through gateway")
 			Eventually(func() error {
-				output, err := RunQueryViaGateway(ctx, clientPod, testInstance, engineName, LightQuery)
+				output, err := RunQueryViaGateway(ctx, clientPod, instanceName, engineName, LightQuery)
 				if err != nil {
 					return err
 				}
@@ -283,24 +354,45 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		})
 	})
 
-	Describe("Instance Deletion Cleanup", func() {
+	Describe("Instance Deletion Cleanup", Ordered, func() {
+		// This Describe creates and destroys a FireboltInstance inside the It
+		// itself, so its BeforeAll only starts the instance operator (scoped
+		// to the target instance name) and AfterAll stops it.
+		var (
+			instanceName = "inst-del-cleanup"
+			instanceOp   *InstanceOperator
+		)
+
+		BeforeAll(func() {
+			By("Starting instance operator for deletion-cleanup test")
+			var err error
+			instanceOp, err = StartInstanceOperator(instanceName)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterAll(func() {
+			// Best-effort cleanup in case the test failed before deletion.
+			_ = DeleteInstance(ctx, instanceName)
+			if instanceOp != nil {
+				instanceOp.Stop()
+			}
+		})
+
 		It("should garbage-collect all child resources", func() {
-			sepInstance := "test-deletion-cleanup"
-
-			By("Creating a separate instance")
-			err := CreateInstance(ctx, sepInstance, pensieveImage, pensieveTag)
+			By("Creating the instance under test")
+			err := CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for the separate instance to become Ready")
-			err = WaitForInstanceReady(ctx, sepInstance, instanceReadyTimeout)
+			By("Waiting for the instance to become Ready")
+			err = WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting the separate instance")
-			err = DeleteInstance(ctx, sepInstance)
+			By("Deleting the instance")
+			err = DeleteInstance(ctx, instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all child resources to be garbage-collected")
-			selector := fmt.Sprintf("%s=%s", controller.LabelInstance, sepInstance)
+			selector := fmt.Sprintf("%s=%s", controller.LabelInstance, instanceName)
 			Eventually(func() int {
 				total := 0
 				if deps, err := k8sClient.AppsV1().Deployments(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector}); err == nil {
@@ -323,9 +415,24 @@ var _ = Describe("FireboltInstance Infrastructure", Ordered, func() {
 		})
 	})
 
-	Describe("Config Drift Reconciliation", func() {
+	Describe("Config Drift Reconciliation", Ordered, func() {
+		var (
+			instanceName = "inst-cfg-drift"
+			lc           *TestInstanceLifecycle
+		)
+
+		BeforeAll(func() {
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterAll(func() {
+			TeardownTestInstance(ctx, lc)
+		})
+
 		It("should revert manual gateway ConfigMap changes", func() {
-			gwConfigName := testInstance + controller.SuffixGateway + "-config"
+			gwConfigName := instanceName + controller.SuffixGateway + "-config"
 
 			By("Reading the original ConfigMap data")
 			original, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Get(ctx, gwConfigName, metav1.GetOptions{})

@@ -51,6 +51,13 @@ type FireboltInstanceReconciler struct {
 	// account initialization. This is used in E2E tests where the operator
 	// runs on the host and cannot resolve in-cluster DNS names.
 	DialMetadata func(ctx context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error)
+
+	// NameFilter, when non-empty, restricts this reconciler to a single
+	// FireboltInstance by name. Requests for any other instance are dropped.
+	// Intended for E2E tests that run multiple isolated operator instances
+	// in the same namespace; in production this is left empty so the
+	// reconciler processes every FireboltInstance it watches.
+	NameFilter string
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch;create;update;patch;delete
@@ -68,6 +75,10 @@ type FireboltInstanceReconciler struct {
 // Reconcile ensures the PostgreSQL, metadata service, account, and gateway
 // components described by a FireboltInstance are running and healthy.
 func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	if r.NameFilter != "" && req.Name != r.NameFilter {
+		return ctrl.Result{}, nil
+	}
+
 	log := logf.FromContext(ctx).WithValues("instance", req.Name)
 
 	instance := &computev1alpha1.FireboltInstance{}

@@ -74,17 +74,26 @@ prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: 
 
 GINKGO_FOCUS ?=
 
+# GINKGO_PROCS controls how many Ginkgo processes run specs in parallel.
+# Default: half of the host's online CPUs, with a floor of 1. Override on the
+# command line (e.g. GINKGO_PROCS=1 for serial debugging).
+GINKGO_PROCS ?= $(shell n=$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2); p=$$((n / 2)); [ $$p -lt 1 ] && p=1; echo $$p)
+
 .PHONY: test-e2e
-test-e2e: ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
+test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
 	@EXIT_CODE=0; \
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
-		go test -tags=e2e ./test/e2e/ -v -timeout 30m \
-		-ginkgo.v \
-		--ginkgo.no-color \
-		--ginkgo.junit-report=e2e-report.xml \
-		--ginkgo.poll-progress-after=30s \
-		--ginkgo.poll-progress-interval=30s \
-		$(if $(GINKGO_FOCUS),--ginkgo.focus="$(GINKGO_FOCUS)") \
+		"$(GINKGO)" run \
+		--tags=e2e \
+		-v \
+		--no-color \
+		--junit-report=e2e-report.xml \
+		--poll-progress-after=30s \
+		--poll-progress-interval=30s \
+		--procs=$(GINKGO_PROCS) \
+		--timeout=30m \
+		$(if $(GINKGO_FOCUS),--focus="$(GINKGO_FOCUS)") \
+		./test/e2e/ \
 		2>&1 | tee test.log || EXIT_CODE=$$?; \
 	$(MAKE) cleanup-test-e2e; \
 	exit $$EXIT_CODE
@@ -194,10 +203,14 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GINKGO ?= $(LOCALBIN)/ginkgo
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
 CONTROLLER_TOOLS_VERSION ?= v0.19.0
+GINKGO_VERSION ?= $(shell v='$(call gomodver,github.com/onsi/ginkgo/v2)'; \
+  [ -n "$$v" ] || { echo "Set GINKGO_VERSION manually (onsi/ginkgo/v2 not in go.mod)" >&2; exit 1; }; \
+  printf '%s\n' "$$v")
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -237,6 +250,11 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: ginkgo
+ginkgo: $(GINKGO) ## Download the ginkgo CLI locally if necessary.
+$(GINKGO): $(LOCALBIN)
+	$(call go-install-tool,$(GINKGO),github.com/onsi/ginkgo/v2/ginkgo,$(GINKGO_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

@@ -30,6 +30,12 @@ import (
 	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 )
 
+// Each second-level Describe in this file owns its own FireboltInstance so
+// specs can run in parallel. Unlike the engine-centric tests in e2e_test.go,
+// crash recovery specs stop and restart the engine operator within a single
+// It, so the instance operator is set up directly in BeforeAll (without an
+// engine operator) and the engine operator is managed per-It.
+
 var _ = Describe("Crash Recovery", Ordered, func() {
 	clientPod := "client-crash" + queryConfig.Suffix
 
@@ -45,9 +51,28 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Creating - Initial Deployment", Ordered, func() {
 		var (
-			engineName = "test-crash-create" + queryConfig.Suffix + "-engine"
-			operator   *OperatorInstance
+			instanceName = "inst-crash-create" + queryConfig.Suffix
+			engineName   = "test-crash-create" + queryConfig.Suffix + "-engine"
+			instanceOp   *InstanceOperator
+			operator     *OperatorInstance
 		)
+
+		BeforeAll(func() {
+			By("Starting instance operator for crash create tests")
+			var err error
+			instanceOp, err = StartInstanceOperator(instanceName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating FireboltInstance")
+			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
+			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			_ = DeleteInstance(ctx, instanceName)
+			if instanceOp != nil {
+				instanceOp.Stop()
+			}
+		})
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
@@ -68,11 +93,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -90,7 +115,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes ready")
@@ -116,11 +141,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -138,7 +163,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes ready")
@@ -164,11 +189,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 			By("Starting operator")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -186,7 +211,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes ready")
@@ -206,9 +231,28 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Switching - Scale Transition", Ordered, func() {
 		var (
-			engineName = "test-crash-switch" + queryConfig.Suffix + "-engine"
-			operator   *OperatorInstance
+			instanceName = "inst-crash-switch" + queryConfig.Suffix
+			engineName   = "test-crash-switch" + queryConfig.Suffix + "-engine"
+			instanceOp   *InstanceOperator
+			operator     *OperatorInstance
 		)
+
+		BeforeAll(func() {
+			By("Starting instance operator for crash switch tests")
+			var err error
+			instanceOp, err = StartInstanceOperator(instanceName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating FireboltInstance")
+			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
+			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			_ = DeleteInstance(ctx, instanceName)
+			if instanceOp != nil {
+				instanceOp.Stop()
+			}
+		})
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
@@ -223,10 +267,10 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		It("should recover from crash after service selector update (CRITICAL)", func() {
 			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
@@ -260,7 +304,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes ready with new size")
@@ -280,10 +324,10 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		It("should recover from crash before switching status update", func() {
 			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
@@ -317,7 +361,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes ready with new size")
@@ -337,9 +381,28 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Phase: Cleaning - After Drain", Ordered, func() {
 		var (
-			engineName = "test-crash-clean" + queryConfig.Suffix + "-engine"
-			operator   *OperatorInstance
+			instanceName = "inst-crash-clean" + queryConfig.Suffix
+			engineName   = "test-crash-clean" + queryConfig.Suffix + "-engine"
+			instanceOp   *InstanceOperator
+			operator     *OperatorInstance
 		)
+
+		BeforeAll(func() {
+			By("Starting instance operator for crash clean tests")
+			var err error
+			instanceOp, err = StartInstanceOperator(instanceName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating FireboltInstance")
+			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
+			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			_ = DeleteInstance(ctx, instanceName)
+			if instanceOp != nil {
+				instanceOp.Stop()
+			}
+		})
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
@@ -354,10 +417,10 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		It("should recover from crash after StatefulSet deleted", func() {
 			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
@@ -391,7 +454,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes stable")
@@ -411,10 +474,10 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		It("should recover from crash before status update to stable", func() {
 			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
@@ -448,7 +511,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Restarting operator")
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying recovery - engine becomes stable")
@@ -468,10 +531,29 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 	Describe("Availability During Crash", Ordered, func() {
 		var (
-			engineName = "test-crash-avail" + queryConfig.Suffix + "-engine"
-			operator   *OperatorInstance
-			bgRunner   *BackgroundQueryRunner
+			instanceName = "inst-crash-avail" + queryConfig.Suffix
+			engineName   = "test-crash-avail" + queryConfig.Suffix + "-engine"
+			instanceOp   *InstanceOperator
+			operator     *OperatorInstance
+			bgRunner     *BackgroundQueryRunner
 		)
+
+		BeforeAll(func() {
+			By("Starting instance operator for availability-during-crash test")
+			var err error
+			instanceOp, err = StartInstanceOperator(instanceName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating FireboltInstance")
+			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
+			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			_ = DeleteInstance(ctx, instanceName)
+			if instanceOp != nil {
+				instanceOp.Stop()
+			}
+		})
 
 		AfterEach(func() {
 			if bgRunner != nil {
@@ -490,10 +572,10 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		It("should maintain query availability when crash occurs after service selector update", func() {
 			By("Creating initial engine")
 			var err error
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateEngine(ctx, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
@@ -533,7 +615,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			close(restartCh)
 			time.Sleep(time.Second)
 
-			operator, err = StartOperator(engineName)
+			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for recovery")

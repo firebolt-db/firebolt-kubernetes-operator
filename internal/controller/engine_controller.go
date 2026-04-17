@@ -50,6 +50,15 @@ type FireboltEngineReconciler struct {
 	Namespace  string
 	RestConfig *rest.Config
 	Clientset  *kubernetes.Clientset
+
+	// InstanceFilter, when non-empty, restricts this reconciler to engines
+	// referencing a single FireboltInstance (by spec.instanceRef). Requests
+	// for engines bound to any other instance are dropped, and instance
+	// watches are short-circuited so unrelated instance events do not fan
+	// out. Intended for E2E tests that run multiple isolated operator
+	// instances in the same namespace; in production this is left empty so
+	// the reconciler processes every FireboltEngine it watches.
+	InstanceFilter string
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch
@@ -76,6 +85,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	if r.InstanceFilter != "" && engine.Spec.InstanceRef != r.InstanceFilter {
+		return ctrl.Result{}, nil
 	}
 
 	log = log.WithValues("engine", engine.Name)
@@ -318,6 +331,10 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 // instanceToEngines maps a FireboltInstance event to reconcile requests for
 // all engines in the same namespace that reference it via spec.instanceRef.
 func (r *FireboltEngineReconciler) instanceToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+	if r.InstanceFilter != "" && obj.GetName() != r.InstanceFilter {
+		return nil
+	}
+
 	engineList := &computev1alpha1.FireboltEngineList{}
 	if err := r.List(ctx, engineList, client.InNamespace(obj.GetNamespace())); err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list engines for instance watch")

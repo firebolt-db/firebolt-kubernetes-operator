@@ -113,9 +113,11 @@ type OperatorInstance struct {
 // operatorInstanceCounter is used to generate unique controller names
 var operatorInstanceCounter atomic.Int64
 
-// StartOperator starts an operator instance. The labelValue is used to scope the cache
-// so multiple operator instances in the same namespace don't interfere.
-func StartOperator(labelValue string) (*OperatorInstance, error) {
+// StartOperator starts an engine operator scoped to the given instance name.
+// The reconciler drops reconcile requests for any engine whose
+// spec.instanceRef does not match instanceName, so multiple operator instances
+// can coexist in the same namespace without stepping on each other.
+func StartOperator(instanceName string) (*OperatorInstance, error) {
 	config, err := getRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -154,11 +156,12 @@ func StartOperator(labelValue string) (*OperatorInstance, error) {
 	}
 
 	reconciler := &controller.FireboltEngineReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Namespace:  testNamespace,
-		RestConfig: config,
-		Clientset:  clientset,
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Namespace:      testNamespace,
+		RestConfig:     config,
+		Clientset:      clientset,
+		InstanceFilter: instanceName,
 	}
 
 	controllerName := fmt.Sprintf("fireboltengine-%d", operatorInstanceCounter.Add(1))
@@ -202,13 +205,14 @@ func (o *OperatorInstance) Stop() {
 	o.wg.Wait()
 }
 
-// CreateEngine creates a FireboltEngine CR
-func CreateEngine(ctx context.Context, name string, replicas int) error {
-	return CreateEngineWithRollout(ctx, name, replicas, "graceful")
+// CreateEngine creates a FireboltEngine CR bound to the given FireboltInstance.
+func CreateEngine(ctx context.Context, instanceName, name string, replicas int) error {
+	return CreateEngineWithRollout(ctx, instanceName, name, replicas, "graceful")
 }
 
-// CreateEngineWithRollout creates a FireboltEngine CR with a specific rollout strategy
-func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rollout string) error {
+// CreateEngineWithRollout creates a FireboltEngine CR bound to the given
+// FireboltInstance with a specific rollout strategy.
+func CreateEngineWithRollout(ctx context.Context, instanceName, name string, replicas int, rollout string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -221,17 +225,17 @@ func CreateEngineWithRollout(ctx context.Context, name string, replicas int, rol
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef: testInstance,
+			InstanceRef: instanceName,
 			Replicas:    int32(replicas),
 			Image: &computev1alpha1.ImageSpec{
 				Repository: testImage,
 				Tag:        testTag,
 				PullPolicy: corev1.PullIfNotPresent,
 			},
-		Resources: computev1alpha1.ResourceRequirements{
-			CPU:    resource.MustParse("50m"),
-			Memory: resource.MustParse("2Gi"),
-		},
+			Resources: computev1alpha1.ResourceRequirements{
+				CPU:    resource.MustParse("50m"),
+				Memory: resource.MustParse("2Gi"),
+			},
 			DrainCheckEnabled:  &drainCheckEnabled,
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
@@ -824,9 +828,11 @@ type InstanceOperator struct {
 	crdClient  client.Client
 }
 
-// StartInstanceOperator starts a FireboltInstanceReconciler in its own manager.
-// Only one should be running at a time per test suite.
-func StartInstanceOperator() (*InstanceOperator, error) {
+// StartInstanceOperator starts a FireboltInstanceReconciler in its own manager
+// scoped to the given instance name. The reconciler drops reconcile requests
+// for any other FireboltInstance, so multiple instance operators can coexist
+// in the same namespace.
+func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	config, err := getRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -864,6 +870,7 @@ func StartInstanceOperator() (*InstanceOperator, error) {
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
 		DialMetadata: dialMetadataViaPortForward,
+		NameFilter:   instanceName,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("failed to setup instance reconciler: %w", err)
@@ -1022,6 +1029,61 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 	}
 
 	return fmt.Errorf("%s", diag)
+}
+
+// TestInstanceLifecycle bundles everything a per-Describe FireboltInstance
+// needs: its name, the in-process instance operator, and the in-process engine
+// operator. Tests typically create one of these in BeforeAll and release it in
+// AfterAll so parallel Describes stay isolated from each other.
+type TestInstanceLifecycle struct {
+	Name        string
+	InstanceOp  *InstanceOperator
+	EngineOp    *OperatorInstance
+}
+
+// SetupTestInstance starts an isolated instance operator, creates a
+// FireboltInstance with the given name, waits for it to become Ready, and
+// starts an engine operator bound to that instance. Returns a lifecycle
+// handle that TeardownTestInstance consumes.
+func SetupTestInstance(ctx context.Context, name string) (*TestInstanceLifecycle, error) {
+	instanceOp, err := StartInstanceOperator(name)
+	if err != nil {
+		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
+	}
+	if err := CreateInstance(ctx, name, pensieveImage, pensieveTag); err != nil {
+		instanceOp.Stop()
+		return nil, fmt.Errorf("create instance %s: %w", name, err)
+	}
+	if err := WaitForInstanceReady(ctx, name, instanceReadyTimeout); err != nil {
+		_ = DeleteInstance(ctx, name)
+		instanceOp.Stop()
+		return nil, fmt.Errorf("wait instance %s ready: %w", name, err)
+	}
+	engineOp, err := StartOperator(name)
+	if err != nil {
+		_ = DeleteInstance(ctx, name)
+		instanceOp.Stop()
+		return nil, fmt.Errorf("start engine operator for %s: %w", name, err)
+	}
+	return &TestInstanceLifecycle{Name: name, InstanceOp: instanceOp, EngineOp: engineOp}, nil
+}
+
+// TeardownTestInstance stops both operators for the lifecycle and deletes its
+// FireboltInstance. Errors are reported via GinkgoWriter rather than returned
+// so cleanup stays idempotent in AfterAll blocks.
+func TeardownTestInstance(ctx context.Context, lc *TestInstanceLifecycle) {
+	if lc == nil {
+		return
+	}
+	if lc.EngineOp != nil {
+		lc.EngineOp.Stop()
+	}
+	if err := DeleteInstance(ctx, lc.Name); err != nil {
+		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete instance %s: %v\n", lc.Name, err)
+	}
+	if lc.InstanceOp != nil {
+		lc.InstanceOp.Stop()
+	}
 }
 
 // DeleteInstance deletes a FireboltInstance CR

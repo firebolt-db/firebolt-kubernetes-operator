@@ -48,7 +48,6 @@ import (
 
 const (
 	testNamespace = "firebolt-e2e"
-	testInstance  = "test-instance"
 
 	clusterReadyTimeout      = 120 * time.Second
 	clusterTransitionTimeout = 300 * time.Second
@@ -68,7 +67,6 @@ var (
 	envoyImage     string
 	envoyTag       string
 	curlImage      string
-	instanceOp     *InstanceOperator
 )
 
 func init() {
@@ -128,8 +126,13 @@ var _ = ReportAfterSuite("E2E Summary", func(report Report) {
 	fmt.Fprintf(os.Stdout, "==========================================================================\n\n")
 })
 
-var _ = BeforeSuite(func() {
-	// Setup controller-runtime logger
+// SynchronizedBeforeSuite runs the one-time environment setup (CRD install,
+// stale-resource cleanup, namespace (re)creation, image verification) on the
+// primary Ginkgo process only, then has every parallel process build its own
+// Kubernetes client. FireboltInstance/operator setup is intentionally NOT done
+// here: each second-level Describe owns its own instance so parallel specs
+// don't interfere with each other.
+var _ = SynchronizedBeforeSuite(func() {
 	log.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancelFunc = context.WithCancel(context.Background())
@@ -137,25 +140,13 @@ var _ = BeforeSuite(func() {
 	Expect(testTag).NotTo(Equal(newImageTag),
 		"TEST_ENGINE_TAG and TEST_ENGINE_NEW_TAG must differ; upgrade tests would be no-ops")
 
-	By("Setting up Kubernetes client")
-	overrides := &clientcmd.ConfigOverrides{}
-	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
-		overrides.CurrentContext = "kind-" + kindCluster
-		fmt.Fprintf(GinkgoWriter, "Forcing kubeconfig context to kind-%s\n", kindCluster)
-	}
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
-		overrides,
-	).ClientConfig()
+	By("Setting up Kubernetes client (proc 1)")
+	var err error
+	k8sClient, err = newK8sClient()
 	Expect(err).NotTo(HaveOccurred())
 
-	// Use the config from controller-runtime if available
-	if config == nil {
-		config = ctrl.GetConfigOrDie()
-	}
-
-	k8sClient, err = kubernetes.NewForConfig(config)
-	Expect(err).NotTo(HaveOccurred())
+	By("Verifying no operator deployments are installed in the cluster")
+	ensureNoOperatorDeployed(ctx, k8sClient)
 
 	By("Installing CRDs")
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -221,44 +212,91 @@ var _ = BeforeSuite(func() {
 		}
 		fmt.Fprintf(GinkgoWriter, "Verified image %s is available\n", img)
 	}
+}, func() {
+	// Runs on every parallel process (including proc 1). Build a client and
+	// context so specs can talk to the API server.
+	log.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
-	By("Starting instance operator")
-	instanceOp, err = StartInstanceOperator()
-	Expect(err).NotTo(HaveOccurred())
+	if ctx == nil {
+		ctx, cancelFunc = context.WithCancel(context.Background())
+	}
 
-	By("Creating shared FireboltInstance")
-	err = CreateInstance(ctx, testInstance, pensieveImage, pensieveTag)
-	Expect(err).NotTo(HaveOccurred())
+	if k8sClient != nil {
+		return
+	}
 
-	By("Waiting for instance to become Ready")
-	err = WaitForInstanceReady(ctx, testInstance, instanceReadyTimeout)
+	var err error
+	k8sClient, err = newK8sClient()
 	Expect(err).NotTo(HaveOccurred())
-	fmt.Fprintf(GinkgoWriter, "Instance %s is Ready\n", testInstance)
 })
 
-var _ = AfterSuite(func() {
-	By("Deleting shared FireboltInstance")
-	if err := DeleteInstance(ctx, testInstance); err != nil {
-		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete instance: %v\n", err)
+var _ = SynchronizedAfterSuite(func() {
+	// Runs on every process; cancel the process-local context so goroutines
+	// using it wind down.
+	if cancelFunc != nil {
+		cancelFunc()
 	}
-
-	By("Stopping instance operator")
-	if instanceOp != nil {
-		instanceOp.Stop()
-	}
-
+}, func() {
+	// Runs once on the primary process after every other process has finished.
+	// Use a fresh context because the suite-wide ctx was cancelled in the
+	// per-process function above.
 	By("Cleaning up test namespace")
 	if k8sClient != nil {
-		err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		err := k8sClient.CoreV1().Namespaces().Delete(cleanupCtx, testNamespace, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {
 			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
 		}
 	}
-
-	if cancelFunc != nil {
-		cancelFunc()
-	}
 })
+
+// ensureNoOperatorDeployed fails the suite if any firebolt operator Deployment
+// is already running in the cluster. The E2E suite runs its own in-process
+// operators per test, so an externally-deployed operator (e.g. left over from
+// `make local-deploy`) would fight with them over the same CRs and produce
+// confusing, non-deterministic failures.
+func ensureNoOperatorDeployed(ctx context.Context, cs *kubernetes.Clientset) {
+	const selector = "control-plane=controller-manager"
+
+	listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	deps, err := cs.AppsV1().Deployments(metav1.NamespaceAll).List(listCtx, metav1.ListOptions{LabelSelector: selector})
+	Expect(err).NotTo(HaveOccurred(), "Failed to list operator deployments")
+
+	if len(deps.Items) > 0 {
+		var found []string
+		for _, d := range deps.Items {
+			found = append(found, fmt.Sprintf("%s/%s", d.Namespace, d.Name))
+		}
+		Fail(fmt.Sprintf(
+			"Refusing to run E2E tests: found operator deployment(s) in the cluster [%s]. "+
+				"The suite runs its own in-process operators; uninstall any externally-deployed "+
+				"operator first (e.g. `make undeploy-local` or `helm uninstall firebolt-operator`).",
+			strings.Join(found, ", "),
+		))
+	}
+}
+
+// newK8sClient builds a Kubernetes clientset honoring KIND_CLUSTER.
+func newK8sClient() (*kubernetes.Clientset, error) {
+	overrides := &clientcmd.ConfigOverrides{}
+	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
+		overrides.CurrentContext = "kind-" + kindCluster
+	}
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		overrides,
+	).ClientConfig()
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = ctrl.GetConfigOrDie()
+	}
+	return kubernetes.NewForConfig(config)
+}
 
 // cleanupStaleResources strips finalizers from CRDs left by a previous test
 // run, then deletes the namespace. Without this, the namespace hangs in
