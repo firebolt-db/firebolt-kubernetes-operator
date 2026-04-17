@@ -1,3 +1,57 @@
+# 0.1.3
+
+appVersion: v1.2.0
+
+## [1.2.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.1.0...v1.2.0) (2026-04-17)
+
+
+### Features
+
+* add script to do emergency cleanup (FB-661) ([e4ca91b](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e4ca91b5d369a05dc8ae058795f95ae4c74836f1))
+* **api,controller:** add FireboltEngine ConditionReady roll-up (FB-661) ([2af74c7](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2af74c7fd13eafb5560faab1410fe85bc75b5c9a))
+* **api,controller:** validate external Postgres credentials Secret (FB-661) ([de9664f](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/de9664f4a57970db579d47b222f423c11ca22e49))
+* **api:** add spec.terminationGracePeriodSeconds to FireboltEngine (FB-661) ([e079947](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e0799472d81f1b2457ae9d38a0512cfb3b70b10d))
+* **api:** enforce immutability of instanceRef and instance ID via CEL (FB-661) ([fed5b84](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/fed5b84bb48ce286c0b408c7a606854ae146b4cc))
+* **api:** make FireboltEngine spec.metadataEndpointOverride immutable once set (FB-661) ([763334a](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/763334a1f24661b985fd7aa190e7b34db805102e))
+* **api:** reject reserved firebolt.io/ keys in webhook validation (FB-661) ([b634c20](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/b634c206225d4bba6f8c90835f2d23c252f4370c))
+* **controller:** add Conditions to FireboltInstance and propagate ensure errors (FB-661) ([2cb5959](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2cb5959045ba6faba0b8bc2d43c635cae7da81b2))
+* **controller:** add generation GC sweep for orphaned resources (FB-661) ([c75a4eb](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/c75a4ebed011a9cdcb015b46df50dcb695812ecb))
+* **controller:** drain via Prometheus metrics + engine preStop hook (FB-661) ([de495ce](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/de495ce23f1cf35fca7ec946e53e05a8d916b2f3))
+* **controller:** make engine cluster service headless and drop endpoint-ready gate (FB-661) ([da91dd8](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/da91dd80bd44a9bc9d15ccd6909891c65de9e4eb))
+* run gingkgo tests in parallel (FB-661) ([6b5bde7](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/6b5bde79c63489eec1135f2d531bf907243da840))
+* switch to operator-maintained headless service (FB-661) ([e1ee4df](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e1ee4df26aee1086fc5fbeffc8937aa3a5a80c82))
+
+
+### Maintenance
+
+* **api:** resync FireboltEngine CRD description after comment reflow (FB-661) ([ae7b261](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/ae7b2616065c6e77f228f348691d287415909755))
+* **cmd:** ignore fmt.Println error in --version branch (FB-661) ([4bcc3d0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/4bcc3d01649aeb0b1772b5f9b6559a9e7bd64401))
+* **helm:** bump chart to 0.1.2 (appVersion v1.1.0) ([0acd8df](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/0acd8df9ba7ad6738603a0eda112d27841b218a8))
+
+
+### Bug fixes
+
+* add missing RBAC permissions (FB-661) ([4b4d95d](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/4b4d95d114334917e17c6fa8865595e03c5b9d70))
+* avoid running multiple E2E test runs (FB-661) ([aecb257](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/aecb25772c51b2023c759b2b4bb11259902c2ab5))
+* **controller:** bound account-init flow with a 30s deadline (FB-661) ([1a6362c](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/1a6362c6c6e83b7aea374ac038423a8c67a3974e))
+* **controller:** load-balance gateway across engine pods via DFP sub-cluster mode (FB-661) ([dab80bd](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/dab80bd77c9480925488341f3b5a04b1fce23833))
+* **controller:** preserve full entropy in generatePassword (FB-661) ([046ce64](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/046ce64d4fa1ba4372a0f0ef515da1f28d1d53a1))
+* **controller:** report ready-vs-total pods in PodsNotReady message (FB-661) ([728a814](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/728a8147f57960a4a5eaaf58c2e997952a1ad6f4))
+* **controller:** self-heal missing engine ConfigMap and headless service in place (FB-661) ([3d5977c](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/3d5977c7576726d5f235b1c33f785d492d09f12b))
+* **controller:** skip generation-less resources in engine GC sweep (FB-661) ([9992570](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/9992570d382a10aed8cc21bbab2fba948e6aac26))
+* **controller:** stop reconciling FireboltInstances stuck in Failed (FB-661) ([537e3ef](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/537e3efadcbdd5d06df70ea86338e47218cc18d3))
+* **controller:** surface drain-probe failures via DrainCheckFailing condition (FB-661) ([e582815](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e582815b18f047f2c06ca23bc496dcf5f6ac6dea))
+* **controller:** surface non-NotFound errors from engine state getters (FB-661) ([c1e4365](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/c1e4365fea07ca2b8a3f8a76cd69be1f6ea6cbc5))
+* **controller:** widen gateway shutdown budget and calm readiness probe (FB-661) ([18cec03](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/18cec03f02f8dd8950ed8019f632edb66df8275c))
+* do not remove kind cluster (FB-661) ([500af04](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/500af0443d375ff4351f2fbbea860dd1b0967f98))
+* **helm:** align ClusterRole with actual operator RBAC needs (FB-661) ([4693610](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/46936101b6abac0cd25e761da0c22826b09f919a))
+* ignored errors (FB-661) ([80504f4](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/80504f4b32ff944f349001cb376fbfa80a7fe28a))
+* make sure TGPS is checked (FB-661) ([3b14dc0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/3b14dc0e5e4647b77ea118b9669d48c601908c93))
+* saner deployment target names (FB-661) ([b99e611](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/b99e6114da65d9805851c4ef1f4ce0335193032e))
+* set license year and company (FB-661) ([e48e866](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e48e86607a40ae3059decd4289eb2147d0ff9e2e))
+
+
+
 # 0.1.2
 
 appVersion: v1.1.0
