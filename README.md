@@ -382,13 +382,15 @@ To tear down:
 make undeploy-local
 ```
 
-**Resetting CRDs:** If you previously installed CRDs via `kubectl apply` (outside of Helm), you must remove them before `make local-deploy` can manage them. CRD deletion can hang if custom resources still exist and no operator is running to handle finalizers. In that case, patch the finalizers away first:
+**Resetting CRDs and stuck resources:** If CRD deletion hangs (e.g., custom resources exist but no operator is running to handle finalizers), use the cleanup script:
 
 ```bash
-kubectl patch crd fireboltengines.compute.firebolt.io -p '{"metadata":{"finalizers":[]}}' --type=merge
-kubectl patch crd fireboltinstances.compute.firebolt.io -p '{"metadata":{"finalizers":[]}}' --type=merge
-kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute.firebolt.io
+./scripts/cleanup-resources.sh                  # default namespace
+./scripts/cleanup-resources.sh -n firebolt      # specific namespace
+./scripts/cleanup-resources.sh --all-namespaces  # every namespace
 ```
+
+This strips finalizers from all `FireboltEngine` and `FireboltInstance` resources, deletes them, and removes the CRDs.
 
 ### Running Tests
 
