@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"crypto/rand"
+	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -40,6 +41,13 @@ import (
 )
 
 const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
+
+// errPostgresSecretRefEmpty is returned at runtime when the webhook is
+// bypassed and an instance still has an empty credentialsSecretRef.Name.
+// Normally the validating webhook rejects this at admission time.
+var errPostgresSecretRefEmpty = stderrors.New(
+	"spec.metadata.postgres.credentialsSecretRef.name is empty",
+)
 
 // FireboltInstanceReconciler reconciles FireboltInstance objects by deploying
 // PostgreSQL, the metadata service, and the gateway.
@@ -138,6 +146,19 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+	} else {
+		// External Postgres: make sure the user-referenced credentials
+		// Secret actually exists before we roll a Deployment that mounts
+		// it. Without this pre-flight the metadata pod gets scheduled,
+		// kubelet fails to mount a missing Secret, and the pod sits in
+		// ContainerCreating with the root cause visible only in the pod
+		// events — invisible from the FireboltInstance CR.
+		if err := r.checkExternalPostgresSecret(ctx, instance); err != nil {
+			log.Error(err, "External PostgreSQL credentials Secret not available")
+			instance.Status.MetadataReady = false
+			instance.Status.MetadataEndpoint = ""
+			return r.writeStatusAndRequeue(ctx, instance)
 		}
 	}
 
@@ -294,6 +315,37 @@ func extractItems(list client.ObjectList) []client.Object {
 	default:
 		return nil
 	}
+}
+
+// checkExternalPostgresSecret verifies the Secret referenced by
+// spec.metadata.postgres.credentialsSecretRef exists in the instance's
+// namespace. It does NOT inspect the Secret's data (key presence,
+// formatting, rotation): users who mis-key the Secret will still hit a
+// crash-loop on the metadata pod itself, but the far more common
+// mistakes — typoed Secret name, forgotten Secret creation, deleted
+// Secret — are caught here with a message that names the missing Secret.
+//
+// Admission-time webhook validation already rejects empty
+// credentialsSecretRef.Name; this function guards against the runtime
+// case where the Name is set but the Secret does not (yet) exist.
+func (r *FireboltInstanceReconciler) checkExternalPostgresSecret(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	pg := instance.Spec.Metadata.Postgres
+	if pg == nil {
+		return nil
+	}
+	name := pg.CredentialsSecretRef.Name
+	if name == "" {
+		return errPostgresSecretRefEmpty
+	}
+	var secret corev1.Secret
+	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret)
+	if err == nil {
+		return nil
+	}
+	if errors.IsNotFound(err) {
+		return fmt.Errorf("external postgres credentials secret %s/%s not found", instance.Namespace, name)
+	}
+	return fmt.Errorf("getting external postgres credentials secret %s/%s: %w", instance.Namespace, name, err)
 }
 
 // writeStatusAndRequeue persists the current in-memory status (including any
