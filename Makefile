@@ -92,8 +92,7 @@ test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-
 		--procs=$(GINKGO_PROCS) \
 		--timeout=30m \
 		$(if $(GINKGO_FOCUS),--focus="$(GINKGO_FOCUS)") \
-		./test/e2e/ \
-		2>&1 | tee test.log
+		./test/e2e/
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests

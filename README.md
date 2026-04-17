@@ -499,7 +499,9 @@ Linter configuration is in `.golangci.yml`.
 
 ## Design Documentation
 
-For detailed architecture and design decisions, see [docs/level-driven-reconciliation.md](docs/level-driven-reconciliation.md).
+- [docs/level-driven-reconciliation.md](docs/level-driven-reconciliation.md) — architecture and reconciliation model of the operator (current implementation).
+- [docs/operator-based-scaling.md](docs/operator-based-scaling.md) — zero-downtime blue-green scaling design.
+- [docs/option-b-per-engine-envoy-clusters.md](docs/option-b-per-engine-envoy-clusters.md) — forward-looking sketch of a per-engine Envoy cluster model; not implemented.
 
 ## License
 
