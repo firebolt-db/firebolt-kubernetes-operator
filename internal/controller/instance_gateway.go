@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,41 @@ import (
 
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// dnsCacheConfigYAML is the single source of truth for the dynamic
+// forward proxy's DNS cache. It is spliced into the Envoy config at
+// two sites — the HTTP filter (envoy.filters.http.dynamic_forward_proxy)
+// and the cluster (envoy.clusters.dynamic_forward_proxy) — both of
+// which reference the same cache by its "name" field. Envoy requires
+// the two config bodies to be identical in that case; keeping a single
+// constant rather than two inline YAML blocks guarantees they cannot
+// drift across future edits.
+//
+// The constant is written at indent depth zero; indentBlock prefixes
+// each line at the call site with the right number of spaces for its
+// surrounding context.
+const dnsCacheConfigYAML = `dns_cache_config:
+  name: dynamic_forward_proxy_cache
+  dns_lookup_family: V4_ONLY
+  dns_refresh_rate: 1s
+  dns_failure_refresh_rate:
+    base_interval: 1s
+    max_interval: 5s
+  host_ttl: 5s`
+
+// indentBlock prefixes every non-empty line of block with indent. Used
+// to splice a shared YAML sub-document into a larger template at an
+// arbitrary indentation depth without maintaining two copies.
+func indentBlock(block, indent string) string {
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
+}
 
 const (
 	gatewayContainerPort int32 = 8080
@@ -178,14 +214,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
-                      dns_cache_config:
-                        name: dynamic_forward_proxy_cache
-                        dns_lookup_family: V4_ONLY
-                        dns_refresh_rate: 1s
-                        dns_failure_refresh_rate:
-                          base_interval: 1s
-                          max_interval: 5s
-                        host_ttl: 5s
+%s
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -224,14 +253,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
-          dns_cache_config:
-            name: dynamic_forward_proxy_cache
-            dns_lookup_family: V4_ONLY
-            dns_refresh_rate: 1s
-            dns_failure_refresh_rate:
-              base_interval: 1s
-              max_interval: 5s
-            host_ttl: 5s
+%s
 admin:
   address:
     socket_address:
@@ -240,6 +262,8 @@ admin:
 `,
 		gatewayContainerPort,
 		instance.Namespace,
+		indentBlock(dnsCacheConfigYAML, "                      "),
+		indentBlock(dnsCacheConfigYAML, "          "),
 		gatewayAdminPort,
 	)
 }
