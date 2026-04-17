@@ -117,6 +117,13 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		log.Info("Initializing engine status", "activeGeneration", -1)
 		engine.Status.Phase = computev1alpha1.PhaseCreating
 		engine.Status.ActiveGeneration = -1
+		apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+			Type:               computev1alpha1.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: engine.Generation,
+			Reason:             "Initializing",
+			Message:            "Engine status has not yet been populated",
+		})
 		if err := r.updateStatus(ctx, engine); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -134,27 +141,55 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("getEngineState failed: %w", err)
 	}
 
-	// Resolve instance info. Only stable and creating phases need it (they
-	// build ConfigMaps with multi_engine_endpoint / account_id). Switching,
-	// draining, and cleaning operate on existing resources and must not be
-	// blocked by a transient instance issue.
+	// Only PhaseStable and PhaseCreating actually consume InstanceInfo
+	// (to render ConfigMaps with multi_engine_endpoint / account_id).
+	// Switching / Draining / Cleaning operate on already-rendered
+	// resources and are functionally independent of the FireboltInstance:
+	// draining an old-gen pod does not need a metadata endpoint, cleaning
+	// up our own resources does not need an account ID.
 	//
-	// Phase == "" is handled by the early-return above (line ~116) which
-	// initializes status and requeues, so it cannot reach this point.
-	var instanceInfo InstanceInfo
+	// We deliberately do NOT touch the FireboltInstance from those
+	// phases - not even to refresh ConditionInstanceReady. Reasons:
+	//
+	//   1. Determinism. The engine's ability to finish its own
+	//      lifecycle phases should not depend on a resource it does
+	//      not need. A transient cache miss, a mid-deletion race, or
+	//      a malformed spec.InstanceRef should not flip the engine's
+	//      Ready reason to InstanceNotReady while a drain is
+	//      progressing correctly - that is a triage red herring.
+	//
+	//   2. Freshness without polling. SetupWithManager registers a
+	//      Watch on FireboltInstance (see instanceToEngines); every
+	//      change to the referenced instance re-enqueues this engine.
+	//      So the condition is refreshed reactively the next time we
+	//      land in a needsInstance phase. The worst-case staleness
+	//      is bounded by the duration of a blue-green rollout, and
+	//      the condition only lies about a state the engine is not
+	//      currently consuming.
+	//
+	//   3. Consumers already have a truer signal. The FireboltInstance
+	//      itself carries Phase/Conditions; anyone asking "is the
+	//      instance healthy?" should read that, not a
+	//      mirrored-and-stale copy on the engine.
+	//
+	// Phase == "" is handled by the early-return above which initializes
+	// status and requeues, so it cannot reach this point.
 	needsInstance := engine.Status.Phase == computev1alpha1.PhaseStable ||
 		engine.Status.Phase == computev1alpha1.PhaseCreating
 
+	var instanceInfo InstanceInfo
 	if needsInstance {
-		instanceInfo, err = r.resolveInstanceInfo(ctx, engine)
-		if err != nil {
+		var instanceErr error
+		instanceInfo, instanceErr = r.resolveInstanceInfo(ctx, engine)
+		if instanceErr != nil {
 			apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: engine.Generation,
 				Reason:             "InstanceNotReady",
-				Message:            err.Error(),
+				Message:            instanceErr.Error(),
 			})
+			setReadyCondition(&engine.Status, current, engine.Generation)
 			if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
 				return ctrl.Result{}, updateErr
 			}
@@ -182,6 +217,8 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if result.Status.Phase != engine.Status.Phase {
 		log.Info("Phase transition", "from", engine.Status.Phase, "to", result.Status.Phase)
 	}
+
+	setReadyCondition(&result.Status, current, engine.Generation)
 
 	if err := r.applyEngineState(ctx, engine, &result); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
@@ -280,6 +317,73 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 	}
 	fresh.Status = engine.Status
 	return r.Status().Update(ctx, fresh)
+}
+
+// setReadyCondition derives the top-level ConditionReady from the
+// engine's post-reconcile status and the observed cluster state, and
+// writes it onto status.Conditions (idempotent via SetStatusCondition).
+//
+// The precedence below is intentional: a higher-priority Reason masks
+// every lower one, so the single condition users read gives them the
+// most actionable signal. In particular:
+//
+//  1. InstanceNotReady first: nothing downstream will work until the
+//     backing FireboltInstance is healthy, regardless of our phase.
+//  2. Rolling: any non-terminal, non-stable phase (Creating / Switching
+//     / Draining / Cleaning).
+//  3. PodsNotReady: phase is Stable but the active-generation pods
+//     haven't all reported Ready yet (e.g. image pull in progress on
+//     a freshly scheduled replica). This is what distinguishes
+//     ConditionReady from Phase==Stable: the latter can be true while
+//     pods are still coming up.
+//  4. Otherwise True: serving traffic, all replicas ready.
+func setReadyCondition(
+	status *computev1alpha1.FireboltEngineStatus,
+	current EngineState,
+	generation int64,
+) {
+	cond := metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		ObservedGeneration: generation,
+	}
+	switch {
+	case !isInstanceConditionTrue(status.Conditions):
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "InstanceNotReady"
+		cond.Message = "Referenced FireboltInstance is not ready"
+	case status.Phase != computev1alpha1.PhaseStable && status.Phase != "":
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "Rolling"
+		cond.Message = fmt.Sprintf("Engine is in %s phase", status.Phase)
+	case status.Phase == "":
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "Initializing"
+		cond.Message = "Engine status has not yet been populated"
+	case !current.CurrentPodsReady:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "PodsNotReady"
+		cond.Message = fmt.Sprintf(
+			"generation %d has %d ready pod(s); not all replicas are ready yet",
+			status.ActiveGeneration, current.CurrentPodCount,
+		)
+	default:
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = "EngineReady"
+		cond.Message = fmt.Sprintf(
+			"Engine is serving traffic on generation %d",
+			status.ActiveGeneration,
+		)
+	}
+	apimeta.SetStatusCondition(&status.Conditions, cond)
+}
+
+// isInstanceConditionTrue reports whether ConditionInstanceReady is
+// present AND True. A missing condition (no lookup yet this reconcile)
+// is treated as "not True" so Ready does not briefly flip to True in
+// the window between init and the first instance-resolve.
+func isInstanceConditionTrue(conds []metav1.Condition) bool {
+	c := apimeta.FindStatusCondition(conds, computev1alpha1.ConditionInstanceReady)
+	return c != nil && c.Status == metav1.ConditionTrue
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's

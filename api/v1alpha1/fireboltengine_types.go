@@ -46,6 +46,22 @@ const (
 
 // Condition types for FireboltEngine.
 const (
+	// ConditionReady is the top-level roll-up condition: True only when
+	// the engine is serving traffic on its active generation with all
+	// replicas ready, the backing FireboltInstance is healthy, and no
+	// transition is in progress. GitOps / ArgoCD-style tooling should
+	// key off this condition rather than Phase to decide whether a
+	// deployment has converged.
+	//
+	// Reasons for False:
+	//   - Initializing     : status has not been populated yet
+	//   - InstanceNotReady : ConditionInstanceReady is False
+	//   - Rolling          : phase is Creating / Switching / Draining / Cleaning
+	//   - PhaseFailed      : phase is Failed (terminal; human-gated recovery)
+	//   - PodsNotReady     : phase is Stable but active-generation pods
+	//                        have not yet reported Ready
+	ConditionReady = "Ready"
+
 	// ConditionInstanceReady indicates whether the referenced FireboltInstance
 	// has a populated metadata endpoint and account ID.
 	ConditionInstanceReady = "InstanceReady"
@@ -162,6 +178,7 @@ type FireboltEngineStatus struct {
 // +kubebuilder:resource:shortName=fireng
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.replicas`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Generation",type=integer,JSONPath=`.status.activeGeneration`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
