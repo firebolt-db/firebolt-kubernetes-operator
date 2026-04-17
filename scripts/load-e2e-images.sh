@@ -3,8 +3,15 @@ set -euo pipefail
 
 # Load required Docker images into Kind cluster for e2e testing.
 # All image values come from config/images/defaults.env (single source of truth).
+#
+# Images are pulled (if missing locally) and loaded into Kind in parallel.
+# Parallelism can be tuned via E2E_LOAD_PARALLELISM (default: 4). Each
+# `kind load docker-image` invocation streams `docker save` into containerd
+# on the control-plane node; these imports are independent and safe to run
+# concurrently.
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
+LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../config/images/defaults.env
@@ -12,9 +19,8 @@ source "${SCRIPT_DIR}/../config/images/defaults.env"
 
 OPERATOR_IMAGE="controller:latest"
 
-echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} ==="
+echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} (parallelism=${LOAD_PARALLELISM}) ==="
 
-# Check if Kind cluster exists
 if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
     echo "Error: Kind cluster '${CLUSTER_NAME}' does not exist."
     echo "Run 'make setup-kind' first."
@@ -25,7 +31,6 @@ fi
 # In CI, use firebolt-analytics/gha-workflows/.github/actions/ecr-login.
 # Locally, run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <registry>
 
-# Build list of images to load
 declare -a IMAGES=(
     "${ENGINE_IMAGE}:${ENGINE_TAG}"
     "${PENSIEVE_IMAGE}:${PENSIEVE_TAG}"
@@ -34,7 +39,6 @@ declare -a IMAGES=(
     "${CURL_IMAGE}"
 )
 
-# Add new tags if different from current tags (for upgrade/switch tests)
 if [[ "${ENGINE_NEW_TAG}" != "${ENGINE_TAG}" ]]; then
     IMAGES+=("${ENGINE_IMAGE}:${ENGINE_NEW_TAG}")
 fi
@@ -42,35 +46,36 @@ if [[ "${PENSIEVE_NEW_TAG}" != "${PENSIEVE_TAG}" ]]; then
     IMAGES+=("${PENSIEVE_IMAGE}:${PENSIEVE_NEW_TAG}")
 fi
 
-# Pull and load each image
-for IMAGE in "${IMAGES[@]}"; do
-    echo ""
-    echo "--- Processing: ${IMAGE} ---"
+if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
+    IMAGES+=("${OPERATOR_IMAGE}")
+else
+    echo "Note: operator image '${OPERATOR_IMAGE}' not found locally (build with 'make docker-build' if needed)."
+fi
 
-    # Check if image exists locally
-    if ! docker image inspect "${IMAGE}" &>/dev/null; then
-        echo "Pulling ${IMAGE}..."
-        docker pull "${IMAGE}"
+load_one() {
+    local image="$1"
+    local cluster="$2"
+
+    if ! docker image inspect "${image}" &>/dev/null; then
+        echo ">>> [${image}] pulling"
+        docker pull "${image}"
     else
-        echo "Image ${IMAGE} already exists locally."
+        echo ">>> [${image}] already present locally"
     fi
 
-    echo "Loading ${IMAGE} into Kind..."
-    kind load docker-image "${IMAGE}" --name "${CLUSTER_NAME}"
-    echo "Successfully loaded ${IMAGE}"
-done
+    echo ">>> [${image}] loading into Kind"
+    kind load docker-image "${image}" --name "${cluster}"
+    echo ">>> [${image}] done"
+}
+export -f load_one
 
-# Load the operator image if it exists
-echo ""
-echo "--- Processing operator image: ${OPERATOR_IMAGE} ---"
-if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
-    echo "Loading ${OPERATOR_IMAGE} into Kind..."
-    kind load docker-image "${OPERATOR_IMAGE}" --name "${CLUSTER_NAME}"
-    echo "Successfully loaded ${OPERATOR_IMAGE}"
-else
-    echo "Operator image '${OPERATOR_IMAGE}' not found locally."
-    echo "Build it with: make docker-build"
-fi
+# xargs -P runs up to N children concurrently; if any child exits non-zero,
+# xargs continues the rest but returns non-zero itself, which (combined with
+# `set -e` and `pipefail`) fails the script. Each child runs under
+# `bash -eo pipefail` so intra-child failures propagate correctly.
+printf '%s\n' "${IMAGES[@]}" \
+    | xargs -n1 -P "${LOAD_PARALLELISM}" -I{} \
+        bash -eo pipefail -c 'load_one "$1" "$2"' _ {} "${CLUSTER_NAME}"
 
 echo ""
 echo "=== Image loading complete ==="
