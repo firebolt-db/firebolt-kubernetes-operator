@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,6 +56,70 @@ func TestBuildEnvoyConfigYAMLParses(t *testing.T) {
 			t.Errorf("emitted config contains %q; the gateway must be engine-agnostic", forbidden)
 		}
 	}
+}
+
+// TestBuildEnvoyConfigYAMLDNSCacheConfigsMatch asserts that the two
+// dns_cache_config blocks emitted by buildEnvoyConfigYAML — one under
+// the dynamic_forward_proxy HTTP filter, one under the cluster — are
+// structurally identical. Envoy requires both configs to match when
+// they reference the same cache name ("dynamic_forward_proxy_cache");
+// silent drift between the two copies would produce a config that is
+// rejected at gateway startup. This test guards against a future edit
+// touching only one site of the shared DNS cache block.
+func TestBuildEnvoyConfigYAMLDNSCacheConfigsMatch(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+
+	filterDNS := dnsCacheConfigFromFilter(t, parsed)
+	clusterDNS := dnsCacheConfigFromCluster(t, parsed)
+
+	if !equalYAMLTrees(filterDNS, clusterDNS) {
+		t.Fatalf("filter and cluster dns_cache_config have drifted:\nfilter:  %v\ncluster: %v", filterDNS, clusterDNS)
+	}
+
+	// Sanity: both must claim the shared cache name; the "Envoy requires
+	// matching configs" constraint only bites when that name is shared.
+	name, _ := filterDNS["name"].(string)
+	if name != "dynamic_forward_proxy_cache" {
+		t.Errorf("expected dns_cache_config.name = dynamic_forward_proxy_cache, got %q", name)
+	}
+}
+
+func dnsCacheConfigFromFilter(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	filterChains := listeners[0].(map[string]any)["filter_chains"].([]any)
+	filters := filterChains[0].(map[string]any)["filters"].([]any)
+	httpFilters := filters[0].(map[string]any)["typed_config"].(map[string]any)["http_filters"].([]any)
+	for _, f := range httpFilters {
+		fm := f.(map[string]any)
+		if fm["name"] == "envoy.filters.http.dynamic_forward_proxy" {
+			return fm["typed_config"].(map[string]any)["dns_cache_config"].(map[string]any)
+		}
+	}
+	t.Fatal("dynamic_forward_proxy HTTP filter not found in emitted config")
+	return nil
+}
+
+func dnsCacheConfigFromCluster(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	clusters := parsed["static_resources"].(map[string]any)["clusters"].([]any)
+	typedCfg := clusters[0].(map[string]any)["cluster_type"].(map[string]any)["typed_config"].(map[string]any)
+	return typedCfg["dns_cache_config"].(map[string]any)
+}
+
+// equalYAMLTrees compares two maps parsed from YAML for structural equality.
+// reflect.DeepEqual works here because yaml.Unmarshal produces stable
+// map[string]any / []any / scalar trees; we wrap it so future edits (e.g.
+// normalising key order) have a single chokepoint.
+func equalYAMLTrees(a, b map[string]any) bool {
+	return reflect.DeepEqual(a, b)
 }
 
 // TestBuildEnvoyConfigYAMLStableAcrossInstances ensures two different
