@@ -33,7 +33,14 @@ type EngineState struct {
 	CurrentConfigMap   *corev1.ConfigMap
 	CurrentHeadlessSvc *corev1.Service
 	CurrentPodsReady   bool
-	CurrentPodCount    int
+	// CurrentPodTotal is the number of pods that currently exist for the
+	// active generation (including non-running and non-ready ones). It can
+	// be less than spec.replicas if the StatefulSet has not finished
+	// creating pods yet.
+	CurrentPodTotal int
+	// CurrentPodReady is the subset of CurrentPodTotal that is in
+	// PodRunning phase with PodReady=True. Always <= CurrentPodTotal.
+	CurrentPodReady int
 
 	DrainingSTS         *appsv1.StatefulSet
 	DrainingConfigMap   *corev1.ConfigMap

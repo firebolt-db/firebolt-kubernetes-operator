@@ -93,12 +93,13 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		}
 
 		if state.CurrentSTS != nil {
-			ready, count, err := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
+			allReady, total, ready, err := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
 			if err != nil {
 				return state, fmt.Errorf("checkPodsReady (gen %d): %w", currentGen, err)
 			}
-			state.CurrentPodsReady = ready
-			state.CurrentPodCount = count
+			state.CurrentPodsReady = allReady
+			state.CurrentPodTotal = total
+			state.CurrentPodReady = ready
 		}
 	}
 
@@ -200,49 +201,46 @@ func (r *FireboltEngineReconciler) getHeadlessService(ctx context.Context, engin
 	return svc, nil
 }
 
-func (r *FireboltEngineReconciler) checkPodsReady(ctx context.Context, engine *computev1alpha1.FireboltEngine, gen int, expectedReplicas int) (bool, int, error) {
+// checkPodsReady lists the pods for gen and returns (allReady, total, ready, err).
+// allReady is true only when total == expectedReplicas AND every pod is
+// PodRunning with PodReady=True. total is len(podList.Items) and ready is
+// the subset satisfying the running+ready predicate; ready <= total always.
+func (r *FireboltEngineReconciler) checkPodsReady(ctx context.Context, engine *computev1alpha1.FireboltEngine, gen int, expectedReplicas int) (allReady bool, total int, ready int, err error) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "generation", gen)
 
 	podList := &corev1.PodList{}
-	if err := r.List(ctx, podList, client.InNamespace(engine.Namespace), client.MatchingLabels{
+	if listErr := r.List(ctx, podList, client.InNamespace(engine.Namespace), client.MatchingLabels{
 		LabelEngine:     engine.Name,
 		LabelGeneration: strconv.Itoa(gen),
-	}); err != nil {
-		return false, 0, fmt.Errorf("failed to list pods: %w", err)
+	}); listErr != nil {
+		return false, 0, 0, fmt.Errorf("failed to list pods: %w", listErr)
 	}
 
-	count := len(podList.Items)
-	if count != expectedReplicas {
-		log.Info("Waiting for pods", "have", count, "want", expectedReplicas)
-		return false, count, nil
-	}
-
-	notReady := 0
+	total = len(podList.Items)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
-			notReady++
 			continue
 		}
-		ready := false
 		for _, cond := range pod.Status.Conditions {
 			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-				ready = true
+				ready++
 				break
 			}
 		}
-		if !ready {
-			notReady++
-		}
 	}
 
-	if notReady > 0 {
-		log.Info("Pods not ready", "notReady", notReady, "total", count)
-		return false, count, nil
+	switch {
+	case total != expectedReplicas:
+		log.Info("Waiting for pods", "have", total, "want", expectedReplicas, "ready", ready)
+		return false, total, ready, nil
+	case ready < total:
+		log.Info("Pods not ready", "ready", ready, "total", total)
+		return false, total, ready, nil
+	default:
+		log.Info("All pods ready", "count", total)
+		return true, total, ready, nil
 	}
-
-	log.Info("All pods ready", "count", count)
-	return true, count, nil
 }
 
 func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engine *computev1alpha1.FireboltEngine, gen int) (bool, error) {

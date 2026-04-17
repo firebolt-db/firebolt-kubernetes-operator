@@ -410,8 +410,8 @@ func setReadyCondition(
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "PodsNotReady"
 		cond.Message = fmt.Sprintf(
-			"generation %d has %d ready pod(s); not all replicas are ready yet",
-			status.ActiveGeneration, current.CurrentPodCount,
+			"generation %d has %d of %d pod(s) ready",
+			status.ActiveGeneration, current.CurrentPodReady, current.CurrentPodTotal,
 		)
 	default:
 		cond.Status = metav1.ConditionTrue
