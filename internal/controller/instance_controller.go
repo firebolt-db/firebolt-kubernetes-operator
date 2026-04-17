@@ -373,6 +373,13 @@ func instanceLabels(instanceName, component string) map[string]string {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return r.SetupWithManagerNamed(mgr, "fireboltinstance")
+}
+
+// SetupWithManagerNamed sets up the controller with the Manager using a
+// custom controller name. Useful for E2E tests that spin up multiple in-process
+// reconcilers per suite and need unique metric names across them.
+func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name string) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
 		Owns(&appsv1.StatefulSet{}).
@@ -380,6 +387,6 @@ func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
-		Named("fireboltinstance").
+		Named(name).
 		Complete(r)
 }

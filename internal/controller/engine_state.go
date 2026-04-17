@@ -101,9 +101,11 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	} else {
 		state.ClusterService = clusterSvc
 		if genStr, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
-			if g, err := strconv.Atoi(genStr); err == nil {
-				state.ClusterServiceTargetGen = g
+			g, err := strconv.Atoi(genStr)
+			if err != nil {
+				return state, fmt.Errorf("parsing %s label %q on service %s: %w", LabelGeneration, genStr, clusterSvcName, err)
 			}
+			state.ClusterServiceTargetGen = g
 		}
 		log.Info("Cluster service state",
 			"name", clusterSvcName,
@@ -114,17 +116,18 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 		epSlices := &discoveryv1.EndpointSliceList{}
 		if err := r.List(ctx, epSlices, client.InNamespace(ns), client.MatchingLabels{
 			discoveryv1.LabelServiceName: clusterSvcName,
-		}); err == nil {
-			for i := range epSlices.Items {
-				for _, ep := range epSlices.Items[i].Endpoints {
-					if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
-						state.ClusterServiceEndpointsReady = true
-						break
-					}
-				}
-				if state.ClusterServiceEndpointsReady {
+		}); err != nil {
+			return state, fmt.Errorf("listing endpoint slices for service %s: %w", clusterSvcName, err)
+		}
+		for i := range epSlices.Items {
+			for _, ep := range epSlices.Items[i].Endpoints {
+				if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
+					state.ClusterServiceEndpointsReady = true
 					break
 				}
+			}
+			if state.ClusterServiceEndpointsReady {
+				break
 			}
 		}
 	}

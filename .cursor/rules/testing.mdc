@@ -7,8 +7,9 @@ alwaysApply: true
 If a test is testing for 0-downtime operations, no transient failures are allowed for that test.
 Do not twist it around.
 
-Use ginkgo to run individual E2E tests or "make test-e2e" to run the whole test suite.
+Use "make test-e2e GINKGO_FOCUS..." to run specific tests, do not call ginkgo directly.
 
 E2E tests are not deploying the operator in the cluster but they run it in-process.
 
-Instead of waiting for 120 seconds to verify some test behaviour, prefer using a small script that checks every few seconds in a loop and exits when test is done running.
+Wait maximum 15 seconds in loops or when performing a kubectl operation.
+Prefer using a small script that checks every few seconds in a loop and exits when test is done running.

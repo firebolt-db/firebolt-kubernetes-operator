@@ -51,11 +51,12 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 
 	advancedEngines := map[string]bool{}
 	var engineList computev1alpha1.FireboltEngineList
-	if err := r.List(ctx, &engineList, client.InNamespace(instance.Namespace)); err == nil {
-		for i := range engineList.Items {
-			if engineList.Items[i].Spec.InstanceRef == instance.Name {
-				advancedEngines[engineList.Items[i].Name] = engineList.Items[i].Spec.AdvancedMode
-			}
+	if err := r.List(ctx, &engineList, client.InNamespace(instance.Namespace)); err != nil {
+		return fmt.Errorf("listing engines for instance %s: %w", instance.Name, err)
+	}
+	for i := range engineList.Items {
+		if engineList.Items[i].Spec.InstanceRef == instance.Name {
+			advancedEngines[engineList.Items[i].Name] = engineList.Items[i].Spec.AdvancedMode
 		}
 	}
 

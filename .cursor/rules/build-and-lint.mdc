@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Build and Lint
 
-After every code change, run both build and lint:
+After every code change, run goimports on the changed files, then run build and lint:
 
 ```bash
 make build

@@ -39,15 +39,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -124,11 +123,8 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 	}
 
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("failed to add corev1 to scheme: %w", err)
-	}
-	if err := appsv1.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("failed to add appsv1 to scheme: %w", err)
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add client-go scheme: %w", err)
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
@@ -839,15 +835,11 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	}
 
 	scheme := runtime.NewScheme()
-	for _, addFn := range []func(*runtime.Scheme) error{
-		corev1.AddToScheme,
-		appsv1.AddToScheme,
-		policyv1.AddToScheme,
-		computev1alpha1.AddToScheme,
-	} {
-		if err := addFn(scheme); err != nil {
-			return nil, fmt.Errorf("failed to add scheme: %w", err)
-		}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add client-go scheme: %w", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
@@ -872,7 +864,8 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 		DialMetadata: dialMetadataViaPortForward,
 		NameFilter:   instanceName,
 	}
-	if err := reconciler.SetupWithManager(mgr); err != nil {
+	controllerName := fmt.Sprintf("fireboltinstance-%d", operatorInstanceCounter.Add(1))
+	if err := reconciler.SetupWithManagerNamed(mgr, controllerName); err != nil {
 		return nil, fmt.Errorf("failed to setup instance reconciler: %w", err)
 	}
 
@@ -1338,10 +1331,7 @@ func getCRDClient() (client.Client, error) {
 	}
 
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return nil, err
-	}
-	if err := appsv1.AddToScheme(scheme); err != nil {
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
