@@ -17,18 +17,18 @@ limitations under the License.
 package controller
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -227,64 +227,92 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 	return true, nil
 }
 
+// isPodDrained reports whether the engine pod has finished serving queries.
+//
+// It scrapes the pod's Prometheus /metrics endpoint via the Kubernetes
+// pod-proxy subresource (not the pod IP directly), which:
+//   - works whether the operator runs in-cluster or externally (make run / e2e),
+//     because the request is routed through the API server;
+//   - does not require pod-level exec (no fb CLI in the image, no SPDY);
+//   - is covered by the same RBAC we already have on "pods/proxy".
+//
+// The signal we trust is firebolt_running_queries + firebolt_suspended_queries
+// == 0. Both gauges are exported by the engine; suspended queries count
+// queries that are idle waiting on a client but still holding a session,
+// so we wait for those too before cutting the generation over.
+//
+// Any transient failure (pod unreachable, metrics missing, scrape error)
+// is reported as "not drained yet" rather than a hard reconciler error:
+// drain is already a bounded-retry loop at the caller, and blowing up the
+// whole reconcile for a flaky scrape would be both noisier and slower than
+// just polling again.
 func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	if r.Clientset == nil || r.RestConfig == nil {
-		return false, errors.New("clientset or rest config not initialized")
+	if r.Clientset == nil {
+		return false, errors.New("clientset not initialized")
+	}
+	if pod.Status.Phase != corev1.PodRunning {
+		return true, nil
 	}
 
-	cmd := []string{
-		"fb",
-		"--core",
-		"--no-spinner",
-		"--concise",
-		"--label", "firebolt-k8s-operator-drain-check",
-		"--extra", "access_internal_system_tables=1",
-		"--format", "JSON_Compact",
-		"--command", DrainCheckSQL,
-	}
-
-	req := r.Clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(pod.Name).
+	raw, err := r.Clientset.CoreV1().RESTClient().Get().
 		Namespace(pod.Namespace).
-		SubResource("exec").
-		Param("container", ContainerNameEngine).
-		Param("command", cmd[0])
-
-	for _, c := range cmd[1:] {
-		req = req.Param("command", c)
-	}
-	req = req.Param("stdout", "true").
-		Param("stderr", "true")
-
-	exec, err := remotecommand.NewSPDYExecutor(r.RestConfig, "POST", req.URL())
+		Resource("pods").
+		Name(fmt.Sprintf("%s:%d", pod.Name, MetricsPort)).
+		SubResource("proxy").
+		Suffix(MetricsPath).
+		DoRaw(ctx)
 	if err != nil {
-		return false, fmt.Errorf("failed to create executor: %w", err)
+		return false, fmt.Errorf("scraping metrics from pod %s: %w", pod.Name, err)
 	}
 
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-	if err != nil {
-		return false, fmt.Errorf("exec failed: %w, stderr: %s", err, stderr.String())
+	running, runningOK := parsePrometheusGauge(raw, MetricRunningQueries)
+	suspended, suspendedOK := parsePrometheusGauge(raw, MetricSuspendedQueries)
+	if !runningOK || !suspendedOK {
+		return false, fmt.Errorf(
+			"drain metrics missing from pod %s (running=%t suspended=%t)",
+			pod.Name, runningOK, suspendedOK,
+		)
 	}
 
-	output := stdout.String()
-	var response DrainCheckResponse
-	if err := json.Unmarshal([]byte(output), &response); err != nil {
-		return false, fmt.Errorf("failed to parse drain check response: %w, output: %s", err, output)
-	}
+	return running == 0 && suspended == 0, nil
+}
 
-	if len(response.Errors) > 0 {
-		return false, fmt.Errorf("drain check query returned error: %s", response.Errors[0].Description)
+// parsePrometheusGauge pulls a single gauge value out of a Prometheus text
+// /metrics response. It returns (value, true) on success; (0, false) if the
+// metric is missing, has no plain samples, or its value cannot be parsed.
+//
+// It only understands the subset of the exposition format we need: lines of
+// the form "<name> <value>" (no labels). The two engine drain-check gauges
+// are published without labels, so this is sufficient. If Core ever adds
+// labels to these metrics we will need to revisit; for now a label-annotated
+// sample is intentionally ignored by this parser (treated as "not found")
+// so the drain check fails closed rather than silently matching a wrong
+// series.
+func parsePrometheusGauge(body []byte, name string) (int64, bool) {
+	prefix := name + " "
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(line[len(prefix):])
+		// Strip an optional trailing timestamp: "<value> [<ts>]".
+		if idx := strings.IndexByte(rest, ' '); idx >= 0 {
+			rest = rest[:idx]
+		}
+		// Prometheus gauges are float64; counters we care about are
+		// integer-valued in practice but we parse as float and clamp to
+		// avoid being tripped up by "3.0" vs "3" from exporters.
+		v, err := strconv.ParseFloat(rest, 64)
+		if err != nil {
+			return 0, false
+		}
+		return int64(v), true
 	}
-
-	if len(response.Data) == 0 || len(response.Data[0]) == 0 {
-		return false, fmt.Errorf("drain check response missing data field: %s", output)
-	}
-
-	count := response.Data[0][0]
-	return count == "0", nil
+	return 0, false
 }

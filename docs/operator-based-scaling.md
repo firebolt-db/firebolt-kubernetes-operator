@@ -412,8 +412,9 @@ Phase: stable (g0 active, 3 nodes)
 │                                                             │
 │    For each pod in g0:                                      │
 │      Loop:                                                  │
-│        Exec fb drain check on 'core' container              │
-│        Parse JSON: if data[0][0] == "0": pod is drained     │
+│        GET /metrics via Pods/proxy on the 'core' container  │
+│        If firebolt_running_queries +                        │
+│           firebolt_suspended_queries == 0: pod is drained   │
 │        Else: wait drainCheckInterval, retry                 │
 │                                                             │
 │    Wait until all pods report drained                       │
@@ -445,9 +446,13 @@ Phase: stable (g0 active, 3 nodes)
 
 ## Drain Check
 
-The operator uses the `fb` CLI (available in the Core container) to check if a pod has finished serving queries. The drain check query counts running queries that should block shutdown. If the count is `"0"`, the pod is considered drained and safe to delete. Otherwise, the operator retries after `drainCheckInterval`.
+The operator scrapes the engine's Prometheus `/metrics` endpoint on port `9090` and checks `firebolt_running_queries + firebolt_suspended_queries`. If both gauges read zero, the pod is considered drained and safe to delete. Otherwise, the operator retries after `drainCheckInterval`.
 
-The drain check is executed via `kubectl exec` on the `core` container of each pod in the draining generation.
+The scrape goes through the Kubernetes API server's `Pods/proxy` subresource (not pod IPs directly), so the operator works the same way in-cluster and out-of-cluster without needing reachability to pod networks. Required RBAC is `pods/proxy: get`.
+
+In parallel, each engine pod runs a `preStop` lifecycle hook that reads the same two metrics from `127.0.0.1:9090` in bash (via `/dev/tcp`, since the firebolt-core image ships without `curl`/`wget`) and delays SIGTERM until the pod reports zero in-flight queries or the pod's `terminationGracePeriodSeconds − 10s` deadline is reached. This matters because firebolt-core otherwise cancels in-flight queries on SIGTERM; the `preStop` hook is what gives them a chance to finish.
+
+See `docs/level-driven-reconciliation.md` for the full drain-check and preStop specification.
 
 ## Spec Change Handling
 
