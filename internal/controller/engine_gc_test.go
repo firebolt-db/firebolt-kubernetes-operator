@@ -176,6 +176,78 @@ func TestGCOrphanedResources_PreservesDrainingGeneration(t *testing.T) {
 	}
 }
 
+// TestGCOrphanedResources_PreservesUnlabeledResources verifies the GC
+// scope invariant: an engine-tagged resource without a LabelGeneration
+// is out of scope and must survive the sweep. Without this guard the
+// empty-string gen would fail the keepGens lookup and the resource
+// would be silently deleted — a strictly larger blast radius than a
+// "safety net" should have.
+func TestGCOrphanedResources_PreservesUnlabeledResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	engineLabelsOnly := map[string]string{LabelEngine: engineName}
+
+	unlabeledSTS := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + "-shared", Namespace: ns,
+			Labels: engineLabelsOnly,
+		},
+	}
+	unlabeledCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + "-shared-config", Namespace: ns,
+			Labels: engineLabelsOnly,
+		},
+	}
+	clusterSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + "-service", Namespace: ns,
+			Labels: engineLabelsOnly,
+		},
+	}
+	currentSTS := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + "-g1", Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: "1"},
+		},
+	}
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(unlabeledSTS, unlabeledCM, clusterSvc, currentSTS).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		Status: computev1alpha1.FireboltEngineStatus{
+			CurrentGeneration: 1,
+			ActiveGeneration:  1,
+		},
+	}
+
+	r.gcOrphanedResources(context.Background(), engine)
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: unlabeledSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("unlabeled StatefulSet should not have been deleted: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: unlabeledCM.Name, Namespace: ns}, &corev1.ConfigMap{}); err != nil {
+		t.Errorf("unlabeled ConfigMap should not have been deleted: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: clusterSvc.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("cluster Service should not have been deleted: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: currentSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("current-generation StatefulSet should not have been deleted: %v", err)
+	}
+}
+
 func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
