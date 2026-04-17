@@ -72,6 +72,12 @@ jobs:
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
 
+      - name: E2E failure summary (JUnit)
+        if: always()
+        env:
+          E2E_MATRIX_NAME: ${{ matrix.name }}
+        run: python3 scripts/summarize-e2e-junit.py e2e-report.xml >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
