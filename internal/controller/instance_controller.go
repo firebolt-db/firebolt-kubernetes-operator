@@ -30,6 +30,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -149,21 +151,24 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Step 1: Ensure PostgreSQL (native, when no external PG is configured)
 	if instance.Spec.Metadata.Postgres == nil {
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
-			log.Error(err, "Failed to ensure PostgreSQL")
-			return r.writeStatusAndRequeue(ctx, instance)
+			return r.failWithCondition(ctx, instance,
+				computev1alpha1.InstanceConditionPostgresReady, "EnsureFailed", err)
 		}
 		pgReady, err := r.isPostgresReady(ctx, instance)
 		if err != nil {
-			return ctrl.Result{}, err
+			return r.failWithCondition(ctx, instance,
+				computev1alpha1.InstanceConditionPostgresReady, "ProbeFailed", err)
 		}
 		if !pgReady {
 			log.Info("PostgreSQL not ready yet, requeueing", "instance", instance.Name)
-			instance.Status.Phase = r.computePhase(instance)
-			if err := r.Status().Update(ctx, instance); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			setInstanceCondition(instance,
+				computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionFalse,
+				"Provisioning", "PostgreSQL StatefulSet has no ready replicas yet")
+			return r.writeStatusAndPoll(ctx, instance, 5*time.Second)
 		}
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionTrue,
+			"Ready", "PostgreSQL StatefulSet has at least one ready replica")
 	} else {
 		// External Postgres: make sure the user-referenced credentials
 		// Secret actually exists before we roll a Deployment that mounts
@@ -172,62 +177,84 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// ContainerCreating with the root cause visible only in the pod
 		// events — invisible from the FireboltInstance CR.
 		if err := r.checkExternalPostgresSecret(ctx, instance); err != nil {
-			log.Error(err, "External PostgreSQL credentials Secret not available")
 			instance.Status.MetadataReady = false
 			instance.Status.MetadataEndpoint = ""
-			return r.writeStatusAndRequeue(ctx, instance)
+			return r.failWithCondition(ctx, instance,
+				computev1alpha1.InstanceConditionPostgresReady, "SecretPreflightFailed", err)
 		}
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionTrue,
+			"ExternalSecretPresent", "External PostgreSQL credentials Secret is present")
 	}
 
 	// Step 2: Ensure metadata service (native Go resources)
 	if err := r.ensureMetadataResources(ctx, instance); err != nil {
-		log.Error(err, "Failed to ensure metadata service")
-		return r.writeStatusAndRequeue(ctx, instance)
+		return r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionMetadataReady, "EnsureFailed", err)
 	}
 
 	// Step 3: Check metadata readiness
 	ready, err := r.isMetadataServiceReady(ctx, instance)
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionMetadataReady, "ProbeFailed", err)
 	}
 	if !ready {
 		log.Info("Metadata service not ready yet, requeueing")
 		instance.Status.MetadataReady = false
 		instance.Status.MetadataEndpoint = ""
-		instance.Status.Phase = r.computePhase(instance)
-		if err := r.Status().Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionMetadataReady, metav1.ConditionFalse,
+			"Provisioning", "metadata Deployment has no ready replicas yet")
+		return r.writeStatusAndPoll(ctx, instance, 5*time.Second)
 	}
 
 	instance.Status.MetadataReady = true
 	instance.Status.MetadataEndpoint = metadataServiceEndpoint(instance.Name, instance.Namespace)
+	setInstanceCondition(instance,
+		computev1alpha1.InstanceConditionMetadataReady, metav1.ConditionTrue,
+		"Ready", "metadata Deployment has at least one ready replica")
 
 	// Step 4: Account initialization
 	if err := r.ensureAccountInitialized(ctx, instance); err != nil {
-		log.Error(err, "Failed to ensure account initialization")
-		return r.writeStatusAndRequeue(ctx, instance)
+		// InstancePhaseFailed is set inside ensureAccountInitialized for the
+		// terminal cases (wrong account ID, multiple accounts); for
+		// recoverable RPC errors, failWithCondition below does NOT flip
+		// Phase, so the instance stays in Provisioning/Degraded and we
+		// back off via the returned error.
+		return r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionAccountReady, "InitializationFailed", err)
 	}
+	setInstanceCondition(instance,
+		computev1alpha1.InstanceConditionAccountReady, metav1.ConditionTrue,
+		"Ready", "metadata account is provisioned and active")
 
 	// Step 5: Ensure gateway (native Go resources)
 	if err := r.ensureGatewayResources(ctx, instance); err != nil {
-		log.Error(err, "Failed to ensure gateway")
-		return r.writeStatusAndRequeue(ctx, instance)
+		return r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionGatewayReady, "EnsureFailed", err)
 	}
 
 	gwReady, err := r.isGatewayReady(ctx, instance)
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionGatewayReady, "ProbeFailed", err)
 	}
 	instance.Status.GatewayReady = gwReady
 	if gwReady {
 		instance.Status.GatewayEndpoint = fmt.Sprintf("%s%s.%s.svc.cluster.local",
 			instance.Name, SuffixGateway, instance.Namespace)
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionGatewayReady, metav1.ConditionTrue,
+			"Ready", "gateway Deployment has at least one ready replica")
 	} else {
 		instance.Status.GatewayEndpoint = ""
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionGatewayReady, metav1.ConditionFalse,
+			"Provisioning", "gateway Deployment has no ready replicas yet")
 	}
 
+	setInstanceReadyRollup(instance)
 	instance.Status.Phase = r.computePhase(instance)
 
 	if err := r.Status().Update(ctx, instance); err != nil {
@@ -365,33 +392,176 @@ func (r *FireboltInstanceReconciler) checkExternalPostgresSecret(ctx context.Con
 	return fmt.Errorf("getting external postgres credentials secret %s/%s: %w", instance.Namespace, name, err)
 }
 
-// writeStatusAndRequeue persists the current in-memory status (including any
-// fields set earlier in the reconcile loop) and requeues. This ensures that
-// partial progress (e.g., MetadataReady becoming true) is visible to dependent
-// engines even when a later step fails.
-const statusRequeueInterval = 10 * time.Second
-
-func (r *FireboltInstanceReconciler) writeStatusAndRequeue(ctx context.Context, instance *computev1alpha1.FireboltInstance) (ctrl.Result, error) {
+// writeStatusAndPoll persists the current in-memory status and schedules a
+// fixed-interval poll. Use this for "condition is False but no error
+// occurred" transient states (e.g. waiting for pods to report Ready). An
+// exponential backoff would be wrong here: the polled signal becomes True
+// on an event that is NOT tied to reconcile retries (pod readiness
+// transition, external Secret creation), so the poll interval should stay
+// short regardless of how many times we have already looped.
+//
+// For actual errors, use failWithCondition instead; it returns the error to
+// controller-runtime so its work-queue rate-limiter applies exponential
+// backoff.
+func (r *FireboltInstanceReconciler) writeStatusAndPoll(
+	ctx context.Context,
+	instance *computev1alpha1.FireboltInstance,
+	every time.Duration,
+) (ctrl.Result, error) {
+	// Order matters: computePhase reads InstanceConditionReady, so the
+	// roll-up must be refreshed first. See computePhase godoc.
+	setInstanceReadyRollup(instance)
 	instance.Status.Phase = r.computePhase(instance)
 	if err := r.Status().Update(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: statusRequeueInterval}, nil
+	return ctrl.Result{RequeueAfter: every}, nil
 }
 
-// computePhase derives the instance phase from the current readiness signals.
-// Failed is terminal and is never overwritten by this function.
-// Provisioning → Ready once all components are healthy.
-// Ready → Degraded when any component becomes unhealthy.
-// Degraded → Ready when all components recover.
+// failWithCondition records a per-component condition as False, refreshes the
+// roll-up Ready condition, persists the status best-effort, and returns the
+// original error to controller-runtime so its exponential work-queue backoff
+// applies to retries. This replaces the previous "log.Error + requeue-after-
+// 10s with nil error" pattern, which silently capped retry frequency,
+// hid failures from controller-runtime metrics, and never populated any
+// user-visible condition explaining the failure.
+//
+// The status-write error is logged and deliberately NOT returned: we want
+// the caller to see the ORIGINAL root-cause error (that is what the user
+// needs to debug and what controller-runtime should back off on). A
+// subsequent reconcile will retry the status write; if status writes are
+// persistently failing, unrelated code paths that do `return ctrl.Result{},
+// err` for status updates will surface that failure mode directly. Joining
+// both errors would make the returned error message less focused and is
+// not worth the trade-off given this pattern is called only on the failure
+// path.
+func (r *FireboltInstanceReconciler) failWithCondition(
+	ctx context.Context,
+	instance *computev1alpha1.FireboltInstance,
+	condType, reason string,
+	err error,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+	setInstanceCondition(instance, condType, metav1.ConditionFalse, reason, err.Error())
+	// Order matters: computePhase reads InstanceConditionReady, so the
+	// roll-up must be refreshed first. See computePhase godoc.
+	setInstanceReadyRollup(instance)
+	instance.Status.Phase = r.computePhase(instance)
+	if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
+		log.Error(updateErr, "Failed to persist failure condition",
+			"condition", condType, "reason", reason, "originalError", err.Error())
+	}
+	return ctrl.Result{}, fmt.Errorf("%s (%s): %w", condType, reason, err)
+}
+
+// setInstanceCondition writes a condition on the instance's status.
+// apimeta.SetStatusCondition dedupes internally: when Type/Status/Reason/
+// Message all match, LastTransitionTime is not bumped, so repeated calls
+// with the same values do not generate /status churn or spam watchers.
+func setInstanceCondition(
+	instance *computev1alpha1.FireboltInstance,
+	condType string,
+	status metav1.ConditionStatus,
+	reason, message string,
+) {
+	apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: instance.Generation,
+	})
+}
+
+// setInstanceReadyRollup recomputes InstanceConditionReady from the
+// per-component conditions. Ready is True iff every required component
+// condition is present AND True; otherwise False with the Reason/Message
+// of the FIRST not-True component in pipeline order (Postgres → Metadata
+// → Account → Gateway). Propagating the first blocker's Reason makes
+// `kubectl describe fireboltinstance` surface the actual root cause on
+// the headline condition, so users do not have to scan every condition
+// to find the one that is False.
+func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
+	components := []string{
+		computev1alpha1.InstanceConditionPostgresReady,
+		computev1alpha1.InstanceConditionMetadataReady,
+		computev1alpha1.InstanceConditionAccountReady,
+		computev1alpha1.InstanceConditionGatewayReady,
+	}
+	for _, c := range components {
+		cond := apimeta.FindStatusCondition(instance.Status.Conditions, c)
+		if cond == nil {
+			setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
+				metav1.ConditionFalse, "Initializing",
+				fmt.Sprintf("%s has not been observed yet", c))
+			return
+		}
+		if cond.Status != metav1.ConditionTrue {
+			setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
+				metav1.ConditionFalse, cond.Reason,
+				fmt.Sprintf("%s: %s", c, cond.Message))
+			return
+		}
+	}
+	setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
+		metav1.ConditionTrue, "AllComponentsReady",
+		"Postgres, metadata, account, and gateway are all ready")
+}
+
+// computePhase derives the instance Phase from InstanceConditionReady,
+// which is itself the roll-up of the per-component conditions
+// (Postgres, Metadata, Account, Gateway) computed by
+// setInstanceReadyRollup. The invariant is:
+//
+//	Phase == Ready  ⇔  InstanceConditionReady.Status == True
+//
+// There is exactly one source of truth for "is this instance ready".
+// Callers MUST refresh the roll-up (via setInstanceReadyRollup) before
+// calling computePhase; otherwise a stale condition will produce a
+// stale Phase. The three call sites in this file observe that order.
+//
+// Historical note: this function used to compute Phase from the boolean
+// Status.MetadataReady && Status.GatewayReady, which diverged from
+// InstanceConditionReady in two ways:
+//
+//  1. PostgresReady was ignored, so an external-Postgres instance whose
+//     credentials Secret was deleted post-rollout kept Phase=Ready
+//     (mounted creds keep the metadata pod running) while
+//     InstanceConditionReady correctly flipped to False.
+//  2. The mid-reconcile booleans are not reset between passes, so a
+//     post-ready Account failure would leave MetadataReady=true,
+//     GatewayReady=true and re-assert Phase=Ready while
+//     InstanceConditionAccountReady was freshly set to False.
+//
+// Both cases were user-visible lies on the headline Phase field.
+// Deriving Phase from the same condition "Ready" that kubectl describe
+// shows eliminates them. The per-component booleans are preserved as a
+// lower-level signal (and for printcolumn display) but no longer feed
+// into Phase.
+//
+// Phase state machine:
+//
+//	Failed is terminal and is never overwritten by this function.
+//	Provisioning → Ready    when ConditionReady flips True.
+//	Ready       → Degraded  when ConditionReady flips back to False.
+//	Degraded    → Ready     when ConditionReady recovers to True.
+//
+// Scenario NOT fixed here: Status.AccountReady is a one-way latch
+// (see ensureAccountInitialized). If an out-of-band actor deactivates
+// the account after the latch flipped, both AccountReady the boolean
+// AND InstanceConditionAccountReady the condition stay True, so the
+// roll-up and therefore Phase also stay Ready. That is the documented
+// trade-off for skipping the gRPC re-check; recovery is manual.
 func (r *FireboltInstanceReconciler) computePhase(instance *computev1alpha1.FireboltInstance) computev1alpha1.InstancePhase {
 	if instance.Status.Phase == computev1alpha1.InstancePhaseFailed {
 		return computev1alpha1.InstancePhaseFailed
 	}
 
-	allReady := instance.Status.MetadataReady && instance.Status.GatewayReady
-
-	if allReady {
+	ready := apimeta.FindStatusCondition(
+		instance.Status.Conditions,
+		computev1alpha1.InstanceConditionReady,
+	)
+	if ready != nil && ready.Status == metav1.ConditionTrue {
 		return computev1alpha1.InstancePhaseReady
 	}
 

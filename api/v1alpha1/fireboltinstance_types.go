@@ -34,6 +34,56 @@ const (
 	InstancePhaseFailed       InstancePhase = "Failed"
 )
 
+// Condition types for FireboltInstance.
+//
+// The per-component conditions (PostgresReady, MetadataReady,
+// AccountReady, GatewayReady) surface the outcome of each ensure step
+// in Reconcile. They flip to False with a descriptive Reason whenever
+// the corresponding sub-reconciler returns an error, which replaces
+// the previous behavior of logging-and-requeueing-silently. The
+// roll-up InstanceConditionReady is False whenever any per-component
+// condition is not True, carrying the first blocker's Reason/Message
+// so `kubectl describe` shows the root cause without digging.
+//
+// These conditions are additive: the boolean Status.*Ready fields are
+// kept for backward compatibility and for printcolumn display. The
+// conditions carry the human-readable Reason/Message that booleans
+// cannot.
+const (
+	// InstanceConditionReady is the top-level roll-up: True iff every
+	// required per-component condition is True. GitOps tooling should
+	// key off this condition rather than Phase, because Phase is a
+	// summary enum derived from the same booleans and therefore
+	// cannot distinguish "stuck on Postgres" from "stuck on gateway".
+	InstanceConditionReady = "Ready"
+
+	// InstanceConditionPostgresReady reports whether the metadata
+	// PostgreSQL backend is reachable and has at least one ready
+	// replica. For external Postgres, this also covers the
+	// credential-secret preflight that checkExternalPostgresSecret
+	// performs before the metadata Deployment is rolled out.
+	InstanceConditionPostgresReady = "PostgresReady"
+
+	// InstanceConditionMetadataReady reports whether the metadata
+	// Deployment's resources were applied successfully and its pods
+	// are reporting Ready. A pod that fails readiness because
+	// Postgres is unreachable will flip THIS condition to False while
+	// PostgresReady remains True, because the metadata pod owns the
+	// DB connection error in its own status.
+	InstanceConditionMetadataReady = "MetadataReady"
+
+	// InstanceConditionAccountReady reports whether the one-time
+	// metadata service account bootstrap has completed. Once True,
+	// subsequent reconciles skip the gRPC account-check on the fast
+	// path (see instance_account_init.go).
+	InstanceConditionAccountReady = "AccountReady"
+
+	// InstanceConditionGatewayReady reports whether the Envoy gateway
+	// Deployment's resources were applied successfully and its pods
+	// are reporting Ready.
+	InstanceConditionGatewayReady = "GatewayReady"
+)
+
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
 type PostgresSpec struct {
 	// Host is the PostgreSQL server hostname or IP.

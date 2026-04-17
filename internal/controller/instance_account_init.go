@@ -92,6 +92,13 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 	switch len(accounts) {
 	case 1:
 		if accounts[0] != instanceID {
+			// Best-effort status write: the caller (Reconcile → failWithCondition)
+			// will also persist status with AccountReady=False on the returned
+			// error. If this write fails, the caller's write is the authoritative
+			// attempt; logging here preserves the signal for operator debugging
+			// without letting a status-write failure mask the real error (account
+			// mismatch, which is a permanent configuration problem that must
+			// surface to the user).
 			instance.Status.Phase = computev1alpha1.InstancePhaseFailed
 			if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
 				log.Error(updateErr, "Failed to update instance status to Failed")
@@ -122,6 +129,9 @@ func (r *FireboltInstanceReconciler) ensureAccountInitialized(ctx context.Contex
 		return nil
 
 	default:
+		// Same rationale as the mismatch branch above: best-effort status
+		// write; the caller re-persists status on the returned error and
+		// the error itself is the signal we must not lose.
 		instance.Status.Phase = computev1alpha1.InstancePhaseFailed
 		if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
 			log.Error(updateErr, "Failed to update instance status to Failed")
@@ -146,6 +156,11 @@ func (r *FireboltInstanceReconciler) dialMetadataService(ctx context.Context, in
 	if err != nil {
 		return nil, nil, fmt.Errorf("dialing metadata service at %s: %w", endpoint, err)
 	}
+	// conn.Close only fails if the connection is already closed, which
+	// cannot happen here: this cleanup is the single caller of Close on
+	// this *ClientConn and runs exactly once via defer. Ignoring the
+	// error is therefore safe and keeps the cleanup signature free of
+	// secondary error-handling noise.
 	return conn, func() { _ = conn.Close() }, nil
 }
 
