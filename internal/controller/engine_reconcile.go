@@ -215,10 +215,12 @@ func computeCreating(
 // then transitions to draining (if there's an old generation) or stable (if
 // this is the initial deployment).
 //
-// The endpoint readiness gate prevents a brief window where the service
-// selector already points to the new generation but the Endpoints object
-// still lists the old generation's pods (or is empty), causing connection
-// refused errors for in-flight queries.
+// Because the cluster Service is headless, flipping its selector to the new
+// generation immediately changes the set of A records returned for the
+// Service hostname. Kubernetes excludes not-ready pods from the headless
+// endpoint set automatically, and the new generation's pods only reach this
+// phase once their readiness probe already passes. No separate
+// endpoint-readiness gate is therefore required.
 func computeSwitching(
 	r *EngineReconcileResult,
 	current EngineState,
@@ -240,11 +242,6 @@ func computeSwitching(
 			r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
 		}
 		r.Requeue = true
-		return
-	}
-
-	if !current.ClusterServiceEndpointsReady {
-		r.RequeueAfter = 500 * time.Millisecond
 		return
 	}
 
@@ -543,6 +540,34 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 }
 
+// buildClusterService builds the per-engine routing Service. It is a
+// first-class entry point for engine traffic used by two kinds of callers:
+//
+//  1. The in-instance Envoy gateway, which resolves the Service hostname at
+//     request time (via the dynamic_forward_proxy filter).
+//  2. External clients that want to do their own connection-level load
+//     balancing — they resolve the Service's A records and pick an endpoint
+//     IP directly, without going through a VIP.
+//
+// To make both paths work correctly we expose this Service as headless
+// (ClusterIP=None). Kubernetes then serves the Service hostname as a set of
+// A records, one per endpoint pod IP. This has two consequences that are
+// central to the zero-downtime behavior the gateway depends on:
+//
+//   - kube-proxy is removed from the data path. Requests go client -> pod IP
+//     directly, avoiding the well-known terminating-endpoint race where a
+//     SYN is still DNAT'd to a pod that has already closed its listener.
+//
+//   - PublishNotReadyAddresses is false, so only endpoints whose pod-level
+//     readiness probe passes appear in DNS. A not-ready pod is excluded
+//     from the A-record set automatically; conversely a ready pod appears
+//     as soon as the readiness probe passes, without waiting for an
+//     endpoints-controller propagation we have to gate on.
+//
+// The selector keeps `LabelGeneration` so the blue-green cutover mechanism
+// is preserved: atomically flipping the selector from the draining
+// generation to the new generation swaps the DNS A-record set over to the
+// new pod IPs.
 func buildClusterService(engineName, namespace string, gen int) *corev1.Service {
 	name := engineName + SuffixService
 	return &corev1.Service{
@@ -554,7 +579,9 @@ func buildClusterService(engineName, namespace string, gen int) *corev1.Service 
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type: corev1.ServiceTypeClusterIP,
+			Type:                     corev1.ServiceTypeClusterIP,
+			ClusterIP:                corev1.ClusterIPNone,
+			PublishNotReadyAddresses: false,
 			Selector: map[string]string{
 				LabelEngine:     engineName,
 				LabelGeneration: strconv.Itoa(gen),

@@ -26,7 +26,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/remotecommand"
@@ -112,24 +111,6 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 			"targetGen", state.ClusterServiceTargetGen,
 			"selectorLabels", clusterSvc.Spec.Selector,
 		)
-
-		epSlices := &discoveryv1.EndpointSliceList{}
-		if err := r.List(ctx, epSlices, client.InNamespace(ns), client.MatchingLabels{
-			discoveryv1.LabelServiceName: clusterSvcName,
-		}); err != nil {
-			return state, fmt.Errorf("listing endpoint slices for service %s: %w", clusterSvcName, err)
-		}
-		for i := range epSlices.Items {
-			for _, ep := range epSlices.Items[i].Endpoints {
-				if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
-					state.ClusterServiceEndpointsReady = true
-					break
-				}
-			}
-			if state.ClusterServiceEndpointsReady {
-				break
-			}
-		}
 	}
 
 	return state, nil
