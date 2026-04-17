@@ -20,7 +20,7 @@ jobs:
   test-e2e:
     name: "E2E (${{ matrix.name }})"
     needs: plan
-    runs-on: ubuntu-22.04-14-cores-54gb-amd64
+    runs-on: ubuntu-22.04-16-cores-32gb-amd64
     permissions:
       id-token: write
       contents: read
