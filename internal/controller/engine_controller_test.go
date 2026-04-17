@@ -17,6 +17,9 @@ limitations under the License.
 package controller
 
 import (
+	stderrors "errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -119,5 +122,105 @@ func TestSetReadyCondition(t *testing.T) {
 				t.Errorf("observedGeneration: got %d, want 7", got.ObservedGeneration)
 			}
 		})
+	}
+}
+
+func TestSetDrainCheckFailingCondition(t *testing.T) {
+	drainErr := &DrainProbeError{
+		Generation: 5,
+		PodName:    "my-engine-g5-0",
+		Err:        stderrors.New("scraping metrics: connection refused"),
+	}
+
+	tests := []struct {
+		name    string
+		err     error
+		wantSet bool
+	}{
+		{
+			name:    "DrainProbeError is detected and condition is set",
+			err:     drainErr,
+			wantSet: true,
+		},
+		{
+			name:    "Wrapped DrainProbeError is detected via errors.As",
+			err:     fmt.Errorf("getEngineState failed: %w", fmt.Errorf("checkDrainComplete: %w", drainErr)),
+			wantSet: true,
+		},
+		{
+			name:    "Plain error leaves conditions untouched",
+			err:     stderrors.New("listing pods: forbidden"),
+			wantSet: false,
+		},
+		{
+			name:    "nil error leaves conditions untouched",
+			err:     nil,
+			wantSet: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &computev1alpha1.FireboltEngineStatus{}
+			gotSet := setDrainCheckFailingCondition(status, tc.err, 11)
+			if gotSet != tc.wantSet {
+				t.Fatalf("return: got %v, want %v", gotSet, tc.wantSet)
+			}
+			cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+			if !tc.wantSet {
+				if cond != nil {
+					t.Fatalf("did not expect a Ready condition; got %+v", cond)
+				}
+				return
+			}
+			if cond == nil {
+				t.Fatal("expected Ready condition to be set")
+			}
+			if cond.Status != metav1.ConditionFalse {
+				t.Errorf("status: got %s, want False", cond.Status)
+			}
+			if cond.Reason != "DrainCheckFailing" {
+				t.Errorf("reason: got %s, want DrainCheckFailing", cond.Reason)
+			}
+			if cond.ObservedGeneration != 11 {
+				t.Errorf("observedGeneration: got %d, want 11", cond.ObservedGeneration)
+			}
+			// The message should carry enough context to actually triage:
+			// pod name, generation, underlying cause.
+			if !strings.Contains(cond.Message, "my-engine-g5-0") ||
+				!strings.Contains(cond.Message, "gen 5") ||
+				!strings.Contains(cond.Message, "connection refused") {
+				t.Errorf("message missing diagnostic context: %q", cond.Message)
+			}
+		})
+	}
+}
+
+func TestSetDrainCheckFailingCondition_RecoversOnNextSetReady(t *testing.T) {
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:      computev1alpha1.PhaseDraining,
+		Conditions: []metav1.Condition{instanceReadyCond(metav1.ConditionTrue)},
+	}
+	drainErr := &DrainProbeError{Generation: 2, PodName: "p", Err: stderrors.New("nope")}
+	if !setDrainCheckFailingCondition(status, drainErr, 1) {
+		t.Fatal("expected condition to be set")
+	}
+	if cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady); cond == nil || cond.Reason != "DrainCheckFailing" {
+		t.Fatalf("expected DrainCheckFailing; got %+v", cond)
+	}
+
+	// Simulate the next successful reconcile: setReadyCondition runs
+	// and must overwrite the DrainCheckFailing reason without any
+	// explicit clear path. This is how the condition self-heals.
+	setReadyCondition(status, EngineState{}, 1)
+	cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+	if cond == nil {
+		t.Fatal("expected Ready condition")
+	}
+	if cond.Reason == "DrainCheckFailing" {
+		t.Errorf("expected DrainCheckFailing to be overwritten; got %+v", cond)
+	}
+	if cond.Reason != "Rolling" {
+		t.Errorf("phase is Draining; expected Rolling, got %s", cond.Reason)
 	}
 }

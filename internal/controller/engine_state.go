@@ -35,6 +35,32 @@ import (
 	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
+// DrainProbeError indicates that the drain-readiness probe (pod /metrics
+// scrape) could not tell the operator whether an old-generation pod has
+// finished serving queries. It does NOT mean the engine itself is
+// unhealthy: the active-generation pods may still be serving traffic
+// normally. What it does mean is that the blue-green cannot proceed
+// past PhaseDraining until the probe works again, because cutting over
+// without a clean drain could abort in-flight queries.
+//
+// Reconcile uses errors.As to detect this and surface it as a
+// user-facing ConditionReady=False with Reason=DrainCheckFailing, so a
+// broken drain does not look like a silent infinite loop. The original
+// error is still returned to controller-runtime so its exponential
+// backoff applies to retries; there is no hidden RequeueAfter racing
+// with the work-queue rate-limiter.
+type DrainProbeError struct {
+	Generation int
+	PodName    string
+	Err        error
+}
+
+func (e *DrainProbeError) Error() string {
+	return fmt.Sprintf("drain probe failed on pod %s (gen %d): %v", e.PodName, e.Generation, e.Err)
+}
+
+func (e *DrainProbeError) Unwrap() error { return e.Err }
+
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
 // Services, ConfigMaps, pod readiness, and drain status.
 func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
@@ -243,8 +269,10 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 
 		drained, err := r.isPodDrained(ctx, pod)
 		if err != nil {
-			log.Info("Drain check failed for pod", "pod", pod.Name, "error", err)
-			return false, nil
+			// Surface the probe failure. See DrainProbeError - the
+			// caller turns this into a ConditionReady=False with
+			// Reason=DrainCheckFailing instead of silently looping.
+			return false, &DrainProbeError{Generation: gen, PodName: pod.Name, Err: err}
 		}
 
 		if !drained {
@@ -272,11 +300,12 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 // queries that are idle waiting on a client but still holding a session,
 // so we wait for those too before cutting the generation over.
 //
-// Any transient failure (pod unreachable, metrics missing, scrape error)
-// is reported as "not drained yet" rather than a hard reconciler error:
-// drain is already a bounded-retry loop at the caller, and blowing up the
-// whole reconcile for a flaky scrape would be both noisier and slower than
-// just polling again.
+// Errors (pod unreachable, metrics missing, scrape failure) are returned
+// to the caller - checkDrainComplete wraps them as a DrainProbeError so
+// Reconcile can surface them as ConditionReady=False with
+// Reason=DrainCheckFailing. Returning (false, nil) here would make a
+// broken /metrics endpoint look like an engine that just happens to
+// still be busy, and the blue-green would stall silently forever.
 func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	if r.Clientset == nil {
 		return false, errors.New("clientset not initialized")
