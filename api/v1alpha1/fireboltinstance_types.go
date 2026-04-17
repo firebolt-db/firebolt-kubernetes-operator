@@ -181,14 +181,6 @@ type FireboltInstanceStatus struct {
 	// +optional
 	GatewayEndpoint string `json:"gatewayEndpoint,omitempty"`
 
-	// EngineCount is the total number of Engine CRs in this namespace.
-	// +optional
-	EngineCount int32 `json:"engineCount,omitempty"`
-
-	// ReadyEngines is the number of engines in a Ready state.
-	// +optional
-	ReadyEngines int32 `json:"readyEngines,omitempty"`
-
 	// Conditions represent the latest available observations of the Instance's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -200,8 +192,6 @@ type FireboltInstanceStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Gateway",type=boolean,JSONPath=`.status.gatewayReady`
 // +kubebuilder:printcolumn:name="Metadata",type=boolean,JSONPath=`.status.metadataReady`
-// +kubebuilder:printcolumn:name="Engines",type=integer,JSONPath=`.status.engineCount`
-// +kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyEngines`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // FireboltInstance is the Schema for the fireboltinstances API.

@@ -26,12 +26,6 @@ spec:
     - jsonPath: .status.metadataReady
       name: Metadata
       type: boolean
-    - jsonPath: .status.engineCount
-      name: Engines
-      type: integer
-    - jsonPath: .status.readyEngines
-      name: Ready
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -2400,11 +2394,6 @@ spec:
                   - type
                   type: object
                 type: array
-              engineCount:
-                description: EngineCount is the total number of Engine CRs in this
-                  namespace.
-                format: int32
-                type: integer
               gatewayEndpoint:
                 description: GatewayEndpoint is the resolved gateway Service address.
                 type: string
@@ -2428,10 +2417,6 @@ spec:
                 - Degraded
                 - Failed
                 type: string
-              readyEngines:
-                description: ReadyEngines is the number of engines in a Ready state.
-                format: int32
-                type: integer
             type: object
         required:
         - spec
