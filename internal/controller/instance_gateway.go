@@ -340,7 +340,30 @@ admin:
 	)
 }
 
+// Design note for the ensure* functions in this file (and their
+// siblings in instance_metadata.go): each one calls r.Update
+// unconditionally after Get, with no client-side equality check
+// against the stored Spec. We rely on the API server — and, for
+// Deployments, the built-in Deployment controller's own spec
+// comparison — to short-circuit no-op writes: an Update whose
+// post-defaulted object matches what is already stored does not
+// bump .metadata.generation, so no spurious rollout is triggered.
+// Pod-template changes do propagate through the AnnotationConfigHash
+// annotation (set from contentHash of the rendered config), which
+// means a real config change is always reflected in the stored spec
+// and picked up by the Deployment controller.
+//
+// A bespoke client-side equality helper here would duplicate that
+// logic and, worse, create a silent-drift hazard: any managed field
+// we forget to include in the helper would mask a real change on
+// every subsequent reconcile. The engine controller does keep
+// stsSpecEqual in engine_apply.go because (a) the rollout cost of a
+// false-positive update on a StatefulSet is much higher and (b) the
+// engine generation model relies on explicit in-place vs new-gen
+// decisions. The asymmetry is deliberate.
 func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	name := instance.Name + SuffixGateway + "-config"
 	labels := instanceLabels(instance.Name, "gateway")
 
@@ -362,6 +385,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	existing := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating gateway ConfigMap", "name", name)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -443,7 +467,7 @@ sleep 8
 
 	podLabels := mergeMaps(labels, spec.Labels)
 	podAnnotations := mergeMaps(map[string]string{
-		"firebolt.io/config-hash": configHash,
+		AnnotationConfigHash: configHash,
 	}, spec.Annotations)
 
 	desired := &appsv1.Deployment{
@@ -589,9 +613,12 @@ sleep 8
 		return err
 	}
 
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	existing := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating gateway Deployment", "name", name, "replicas", replicas, "image", image)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -627,9 +654,12 @@ func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, i
 		return err
 	}
 
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	existing := &corev1.Service{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating gateway Service", "name", name)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -662,9 +692,12 @@ func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, insta
 		return err
 	}
 
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	existing := &policyv1.PodDisruptionBudget{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating gateway PDB", "name", name)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {

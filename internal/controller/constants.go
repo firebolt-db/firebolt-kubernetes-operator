@@ -41,6 +41,14 @@ const (
 	// detect changes that require a new generation.
 	AnnotationMetadataOverride = "firebolt.io/metadata-override"
 
+	// AnnotationConfigHash carries a content-hash of the rendered config
+	// for the gateway and metadata Deployments. It is set on the pod
+	// template and serves two purposes: (1) any config change propagates
+	// here and triggers a rollout via the resulting template-spec diff,
+	// (2) deploymentSpecEqual uses it as the single pod-template equality
+	// signal, avoiding a DeepEqual on server-defaulted PodSpec fields.
+	AnnotationConfigHash = "firebolt.io/config-hash"
+
 	// SuffixService is appended to form the cluster Service name.
 	SuffixService = "-service"
 	// SuffixGen is appended to form generation-scoped resource names.
