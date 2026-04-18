@@ -124,7 +124,13 @@ func metadataConfigMapName(instanceName string) string {
 	return instanceName + SuffixMetadataService + "-config"
 }
 
+// See the design note above ensureGatewayConfigMap in instance_gateway.go
+// for why the metadata ensure* functions below also call r.Update
+// unconditionally and rely on server-side no-op short-circuiting
+// instead of a client-side equality helper.
 func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	name := metadataConfigMapName(instance.Name)
 	labels := instanceLabels(instance.Name, "metadata")
 
@@ -146,6 +152,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 	existing := &corev1.ConfigMap{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating metadata ConfigMap", "name", name)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -199,7 +206,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 
 	podLabels := mergeMaps(labels, spec.Labels)
 	podAnnotations := mergeMaps(map[string]string{
-		"firebolt.io/config-hash": configHash,
+		AnnotationConfigHash: configHash,
 	}, spec.Annotations)
 
 	desired := &appsv1.Deployment{
@@ -303,9 +310,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		return err
 	}
 
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	existing := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating metadata Deployment", "name", name, "replicas", replicas, "image", image)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -341,9 +351,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, 
 		return err
 	}
 
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
 	existing := &corev1.Service{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
+		log.Info("Creating metadata Service", "name", name)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
