@@ -1,0 +1,48 @@
+name: Formal Verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  tlc:
+    name: TLC model checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache TLA+ tools
+        id: cache-tla
+        uses: actions/cache@v4
+        with:
+          path: tla2tools.jar
+          key: tla2tools-v1.8.0
+
+      - name: Download TLA+ tools
+        if: steps.cache-tla.outputs.cache-hit != 'true'
+        run: |
+          wget -q -O tla2tools.jar \
+            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
+      - name: Run TLC — FireboltEngine
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/FireboltEngine.cfg \
+            formal/FireboltEngine.tla
+
+      - name: Run TLC — FireboltInstance
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/FireboltInstance.cfg \
+            formal/FireboltInstance.tla
