@@ -117,6 +117,18 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 	}
 
 	engine.Status = result.Status
+
+	// Invariant: Phase=Stable implies CurrentGeneration == ActiveGeneration.
+	// Modeled as Inv_StableConsistency in formal/FireboltEngine.tla.
+	// The analogous negative-ActiveGeneration guard lives in engine_reconcile.go.
+	if engine.Status.Phase == computev1alpha1.PhaseStable &&
+		engine.Status.CurrentGeneration != engine.Status.ActiveGeneration {
+		panic(fmt.Sprintf(
+			"BUG: Phase=Stable with CurrentGeneration=%d != ActiveGeneration=%d for engine %s",
+			engine.Status.CurrentGeneration, engine.Status.ActiveGeneration, engine.Name,
+		))
+	}
+
 	if err := r.updateStatus(ctx, engine); err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
