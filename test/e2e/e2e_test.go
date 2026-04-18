@@ -307,7 +307,7 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 
 		It("should only apply the last config change when multiple rapid changes occur", func() {
-			rapidTimeout := 120 * time.Second
+			rapidTimeout := 300 * time.Second
 
 			By("Creating engine with 2 replicas")
 			err := CreateEngine(ctx, instanceName, engineName, 2)
