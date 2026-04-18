@@ -62,9 +62,6 @@ vars == <<phase, currentGen, activeGen, drainingGen, specVer,
 StsExists(g)       == stsSpecVer[g] # -1
 StsMatchesSpec(g)  == StsExists(g) /\ stsSpecVer[g] = specVer
 
-\* NeedInstanceGate: phases where instance readiness is required before ticking
-NeedInstanceGate(p) == p \in {"uninitialized", "stable", "creating"}
-
 \* ---------------------------------------------------------------------------
 \* Initial state
 \* ---------------------------------------------------------------------------
@@ -311,10 +308,14 @@ TypeOK ==
 Inv_StableConsistency ==
     phase = "stable" => currentGen = activeGen
 
-\* The cluster Service always points to a generation whose STS exists.
-\* Violation would mean traffic is routed to pods that don't exist.
+\* The cluster Service always points to a generation whose STS exists,
+\* once traffic has been switched (activeGen != -1).
+\* During the first deployment the service is pre-populated while still in
+\* creating phase (activeGen=-1) so that a spec-drift bump does not require
+\* re-creating the service; no real traffic flows until activeGen is set.
+\* After the first switch this guard is always enforced.
 Inv_ServiceValid ==
-    svcTargetGen # -1 => StsExists(svcTargetGen)
+    activeGen # -1 => StsExists(svcTargetGen)
 
 \* In stable phase the current generation's STS must exist.
 Inv_StableHasSTS ==
@@ -368,15 +369,24 @@ Safety ==
 
 \* The engine eventually reaches stable phase.
 \*
-\* Requires weak fairness on all reconcile actions (operator keeps running)
-\* and a fairness assumption on the environment:
-\*   - instanceReady eventually stays true  (WF on EnvSetInstanceReady(TRUE))
-\*   - pods eventually become ready         (WF on EnvPodsReady)
-\*   - pods eventually finish draining      (WF on EnvPodsDrained)
+\* Requires:
+\*   - SF on instance-gated reconcile actions (ReconcileInit, ReconcileStable_Drift,
+\*     all ReconcileCreating_*): SF is required rather than WF because
+\*     EnvSetInstanceReady(FALSE) has no fairness constraint and can toggle
+\*     instanceReady back to FALSE immediately after every TRUE. With WF the
+\*     gate-disabled state satisfies "not continuously enabled", letting WF
+\*     fire vacuously forever. SF: if a gated action is enabled infinitely
+\*     often (because instanceReady becomes TRUE infinitely often), it fires
+\*     infinitely often -- progress is guaranteed.
+\*   - WF on non-gated reconcile actions (Switching/Draining/Cleaning): these
+\*     do not depend on instanceReady so WF is sufficient.
+\*   - WF on environment actions that unblock progress:
+\*       EnvSetInstanceReady(TRUE) -- instance will eventually become ready
+\*       EnvPodsReady              -- pods will eventually become ready
+\*       EnvPodsDrained            -- drain will eventually complete
 \*
-\* Without the environment fairness assumption the engine can be stuck forever
-\* on a permanently broken instance or pods that never start -- which is
-\* correct operator behavior, not a liveness bug.
+\* Without the environment fairness the engine can be stuck forever on a
+\* permanently unready instance or pods that never start -- correct behavior.
 
 EventuallyStable == <>(phase = "stable")
 
@@ -387,12 +397,14 @@ EventuallyStable == <>(phase = "stable")
 Spec ==
     /\ Init
     /\ [][Next]_vars
-    /\ WF_vars(ReconcileInit)
-    /\ WF_vars(ReconcileStable_Drift)
-    /\ WF_vars(ReconcileCreating_SpecDrift)
-    /\ WF_vars(ReconcileCreating_EnsureSTS)
-    /\ WF_vars(ReconcileCreating_EnsureService)
-    /\ WF_vars(ReconcileCreating_Advance)
+    \* Instance-gated actions: SF because instanceReady can toggle adversarially.
+    /\ SF_vars(ReconcileInit)
+    /\ SF_vars(ReconcileStable_Drift)
+    /\ SF_vars(ReconcileCreating_SpecDrift)
+    /\ SF_vars(ReconcileCreating_EnsureSTS)
+    /\ SF_vars(ReconcileCreating_EnsureService)
+    /\ SF_vars(ReconcileCreating_Advance)
+    \* Non-gated actions: WF is sufficient.
     /\ WF_vars(ReconcileSwitching_UpdateService)
     /\ WF_vars(ReconcileSwitching_Complete)
     /\ WF_vars(ReconcileDraining_Complete)
