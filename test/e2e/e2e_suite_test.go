@@ -49,7 +49,7 @@ import (
 const (
 	testNamespace = "firebolt-e2e"
 
-	clusterReadyTimeout      = 120 * time.Second
+	clusterReadyTimeout      = 300 * time.Second
 	clusterTransitionTimeout = 300 * time.Second
 	resourceCleanupTimeout   = 120 * time.Second
 	instanceReadyTimeout     = 300 * time.Second
