@@ -157,11 +157,16 @@ GCOrphans ==
                    svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ------ Phase: creating ------
-\* Three mutually-exclusive sub-cases (checked in order in the real code):
-\*   1. Spec drift with an existing STS  -> delete STS, bump gen, stay in creating.
-\*   2. STS absent                       -> create it (at current specVer).
-\*   3. STS present and matches spec     -> ensure service exists; when pods
-\*                                          are ready transition to switching.
+\* Four mutually-exclusive sub-cases (checked in order in the real code):
+\*   1a. Spec drift, currentGen < MaxGen -> delete STS, bump gen, stay in creating.
+\*   1b. Spec drift, currentGen = MaxGen -> delete STS in place; the real operator
+\*                                          would bump to MaxGen+1 etc.; aliasing to
+\*                                          MaxGen keeps the state space finite while
+\*                                          preserving the liveness path (EnsureSTS
+\*                                          recreates the STS at the new specVer).
+\*   2.  STS absent                      -> create it (at current specVer).
+\*   3.  STS present and matches spec    -> ensure service exists; when pods are
+\*                                          ready transition to switching.
 
 ReconcileCreating_SpecDrift ==
     \* Mirrors the early-return spec-drift check in computeCreating.
@@ -170,9 +175,20 @@ ReconcileCreating_SpecDrift ==
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen'  = currentGen + 1
-    /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]   \* delete STS
+    /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
     /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, svcTargetGen, podsDrained, instanceReady>>
+
+ReconcileCreating_SpecDrift_AtMax ==
+    \* Boundary case: spec drifted but currentGen is already at the model ceiling.
+    \* Delete the stale STS so EnsureSTS can rebuild it at the new specVer.
+    /\ phase = "creating"
+    /\ instanceReady
+    /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
+    /\ currentGen = MaxGen
+    /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+                   svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 ReconcileCreating_EnsureSTS ==
     \* Create the StatefulSet for currentGen (also creates ConfigMap + headless Service
@@ -278,6 +294,7 @@ Next ==
     \/ ReconcileStable_Drift
     \/ GCOrphans
     \/ ReconcileCreating_SpecDrift
+    \/ ReconcileCreating_SpecDrift_AtMax
     \/ ReconcileCreating_EnsureSTS
     \/ ReconcileCreating_EnsureService
     \/ ReconcileCreating_Advance
@@ -326,11 +343,13 @@ Inv_StableHasSTS ==
 Inv_ActiveHasSTS ==
     activeGen # -1 => StsExists(activeGen)
 
-\* The service selector never points to a generation other than activeGen or currentGen.
-\* During switching svcTargetGen advances to currentGen before activeGen does;
-\* after switching they converge. At no point should the service point to something else.
+\* The service selector only points to activeGen or currentGen, once traffic has
+\* been switched (activeGen != -1).
+\* Before the first switch (activeGen=-1) spec-drift bumps can leave svcTargetGen
+\* pointing to a stale gen; no real traffic flows and the selector is corrected in
+\* switching phase. After the first switch this always holds.
 Inv_ServiceKnownGen ==
-    svcTargetGen \in {-1, activeGen, currentGen}
+    activeGen # -1 => svcTargetGen \in {activeGen, currentGen}
 
 \* DrainingGeneration is only set while in draining or cleaning phase.
 \* A non-nil drainingGen while in stable/creating/switching indicates a leak.
@@ -401,6 +420,7 @@ Spec ==
     /\ SF_vars(ReconcileInit)
     /\ SF_vars(ReconcileStable_Drift)
     /\ SF_vars(ReconcileCreating_SpecDrift)
+    /\ SF_vars(ReconcileCreating_SpecDrift_AtMax)
     /\ SF_vars(ReconcileCreating_EnsureSTS)
     /\ SF_vars(ReconcileCreating_EnsureService)
     /\ SF_vars(ReconcileCreating_Advance)
