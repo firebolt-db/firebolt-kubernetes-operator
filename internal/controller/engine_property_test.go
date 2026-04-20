@@ -150,13 +150,31 @@ func stsLabelGen(labels map[string]string) int {
 
 // ---------- State machine actions ----------
 
+// gcStaleSTSes mirrors gcOrphanedResources, which runs after applyEngineState
+// in the real controller when phase=Stable.
+func (m *engineSim) gcStaleSTSes() {
+	keepGens := map[int]bool{m.status.CurrentGeneration: true}
+	if m.status.DrainingGeneration != nil {
+		keepGens[*m.status.DrainingGeneration] = true
+	}
+	for gen := range m.stses {
+		if !keepGens[gen] {
+			delete(m.stses, gen)
+		}
+	}
+}
+
 // Reconcile runs a full reconcile cycle and applies all results including status.
+// When the resulting phase is Stable it also runs GC, mirroring the real controller.
 func (m *engineSim) Reconcile(_ *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
 		propEngineName, propNamespace, 0, testInstanceInfo(),
 	)
 	m.applyResult(&result, true)
+	if m.status.Phase == computev1alpha1.PhaseStable {
+		m.gcStaleSTSes()
+	}
 }
 
 // CrashReconcile applies only the resource writes — not the status update.
@@ -192,6 +210,21 @@ func (m *engineSim) PodsBecomesReady(_ *rapid.T) {
 // DrainCompletes marks the draining generation's pods as fully drained.
 func (m *engineSim) DrainCompletes(_ *rapid.T) {
 	m.podsDrained = true
+}
+
+// DeleteEngine simulates the CR being deleted mid-flight: wipes all tracked
+// resources and resets status to initial, mirroring reconcileDelete removing
+// all generation-scoped objects before stripping the finalizer.
+func (m *engineSim) DeleteEngine(_ *rapid.T) {
+	m.stses = make(map[int]*appsv1.StatefulSet)
+	m.clusterSvc = nil
+	m.podsReady = false
+	m.podsDrained = true
+	m.status = computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseCreating,
+		CurrentGeneration: 0,
+		ActiveGeneration:  -1,
+	}
 }
 
 // ---------- Invariant checks (mirrors formal/FireboltEngine.tla Safety) ----------
@@ -237,6 +270,18 @@ func (m *engineSim) Check(t *rapid.T) {
 		}
 		if m.stses[targetGen] == nil {
 			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS in cluster", targetGen)
+		}
+	}
+
+	// Inv_NoOrphanedSTSes: Phase=Stable => only currentGen STS survives.
+	// GC runs as part of Reconcile when phase=Stable, so any stale gens still
+	// present after a Reconcile call indicate a GC gap.
+	if s.Phase == computev1alpha1.PhaseStable {
+		for gen := range m.stses {
+			if gen != s.CurrentGeneration {
+				t.Fatalf("Inv_NoOrphanedSTSes: phase=Stable but STS gen=%d survives (currentGen=%d)",
+					gen, s.CurrentGeneration)
+			}
 		}
 	}
 }
