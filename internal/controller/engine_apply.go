@@ -118,14 +118,18 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 
 	engine.Status = result.Status
 
-	// Invariant: Phase=Stable implies CurrentGeneration == ActiveGeneration.
-	// Modeled as Inv_StableConsistency in formal/FireboltEngine.tla.
+	// Invariant: a terminal phase (Stable or Stopped) implies
+	// CurrentGeneration == ActiveGeneration. Modeled as
+	// Inv_TerminalConsistency in formal/FireboltEngine.tla. Stable and
+	// Stopped are structurally identical terminals differing only in
+	// the surfaced name; the guard must catch a divergence in either.
 	// The analogous negative-ActiveGeneration guard lives in engine_reconcile.go.
-	if engine.Status.Phase == computev1alpha1.PhaseStable &&
+	if (engine.Status.Phase == computev1alpha1.PhaseStable ||
+		engine.Status.Phase == computev1alpha1.PhaseStopped) &&
 		engine.Status.CurrentGeneration != engine.Status.ActiveGeneration {
 		panic(fmt.Sprintf(
-			"BUG: Phase=Stable with CurrentGeneration=%d != ActiveGeneration=%d for engine %s",
-			engine.Status.CurrentGeneration, engine.Status.ActiveGeneration, engine.Name,
+			"BUG: Phase=%s with CurrentGeneration=%d != ActiveGeneration=%d for engine %s",
+			engine.Status.Phase, engine.Status.CurrentGeneration, engine.Status.ActiveGeneration, engine.Name,
 		))
 	}
 
