@@ -131,29 +131,30 @@ The `spec.instanceRef` field is required and references a `FireboltInstance` in 
 Generation numbering: `activeGeneration` starts at `-1` (no active generation). The first deployment creates generation `0`.
 
 **Phases:**
-- `stable` - Single active generation, no transition in progress
+- `stable` - Single active generation with `replicas > 0`, no transition in progress
 - `creating` - New generation being created
 - `switching` - Traffic being switched to new generation
 - `draining` - Running drain checks on old generation
 - `cleaning` - Deleting old generation resources
+- `stopped` - Terminal state when `spec.replicas == 0`. Structurally identical to `stable` (the active generation exists as an empty StatefulSet + headless Service + ConfigMap), but surfaced as a distinct phase so `kubectl get` and GitOps tooling can tell a running engine apart from an intentionally parked one. See [Stopping an Engine](#stopping-an-engine) below.
 
 ### State Machine
 
 ```
-                 ┌─────────────────────────────────────────────────┐
-                 │                   stable                        │
-                 │  (only active generation exists)                │
-                 └─────────────────────────────────────────────────┘
-                              │
-                              │ spec change detected
-                              ▼
+              ┌────────────────┐                 ┌────────────────┐
+              │     stable     │                 │    stopped     │
+              │ (replicas > 0) │                 │ (replicas == 0)│
+              └────────────────┘                 └────────────────┘
+                       │                                  │
+                       │ spec change detected             │ spec change detected
+                       ▼                                  ▼
                  ┌─────────────────────────────────────────────────┐
                  │                  creating                       │
                  │  (new generation resources being created)       │
                  │  (waiting for all pods to be Ready)             │
                  └─────────────────────────────────────────────────┘
                               │
-                              │ all pods Ready
+                              │ all pods Ready (trivially true at replicas=0)
                               ▼
                  ┌─────────────────────────────────────────────────┐
                  │                 switching                       │
@@ -181,16 +182,19 @@ Generation numbering: `activeGeneration` starts at `-1` (no active generation). 
                               │
                               │ old resources deleted
                               ▼
-                 ┌─────────────────────────────────────────────────┐
-                 │                   stable                        │
-                 │  (only new generation exists)                   │
-                 └─────────────────────────────────────────────────┘
+                       ┌──────────────┐      ┌──────────────┐
+                       │    stable    │  or  │   stopped    │
+                       │ replicas > 0 │      │ replicas == 0│
+                       └──────────────┘      └──────────────┘
 ```
 
+The terminal phase is chosen by `spec.replicas`: non-zero lands in `stable`, zero lands in `stopped`. Every other aspect of the transition is identical. Scaling an engine down to zero replicas follows the same blue-green path as any other spec change; the new generation's StatefulSet just has zero replicas.
+
 **Key Invariants:**
-- Traffic is switched only after new generation is fully Ready
+- Traffic is switched only after new generation is fully Ready (an empty StatefulSet is trivially Ready, so switching does not block for scale-to-zero)
 - Old generation is deleted only after all pods are drained
 - At most two generations exist simultaneously (active + draining)
+- `activeGeneration >= 0` in both `stable` and `stopped`; the zero-replica active generation keeps its StatefulSet, headless Service, and ConfigMap so drift detection and resume work identically to `stable`
 
 ### 3. Per-Generation Resources
 
@@ -444,6 +448,40 @@ Phase: stable (g0 active, 3 nodes)
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Stopping an Engine
+
+Setting `spec.replicas: 0` stops the engine without deleting the CR. This is the scale-to-zero path:
+
+```bash
+kubectl patch fireng/my-engine -p '{"spec":{"replicas":0}}' --type=merge
+```
+
+The operator runs the same blue-green transition as any other replica change:
+
+1. `creating`: a new generation is created with a zero-replica StatefulSet (plus its headless Service and ConfigMap).
+2. `switching`: the engine Service selector flips to the new generation. Because the new StatefulSet has zero Ready pods, the headless Service's endpoint set is empty.
+3. `draining`: old-generation pods are drained per `spec.rollout` (`graceful` waits for zero in-flight queries; `recreate` skips the wait and relies on per-pod preStop).
+4. `cleaning`: old-generation resources are deleted.
+5. Terminal phase is `stopped` instead of `stable`, because `spec.replicas == 0`.
+
+The active generation's StatefulSet, headless Service, and ConfigMap persist in the stopped state (the StatefulSet just has zero replicas). This is deliberate — they make drift detection and the resume transition work identically to any other spec change.
+
+Resuming is symmetric. Setting `spec.replicas` back to a non-zero value triggers a new blue-green generation: the zero-replica "active" STS is treated as the old generation, its drain is a trivial no-op, and the new generation brings up the requested pods before the selector flips.
+
+**Client-facing contract while stopped:**
+
+- The engine Service's headless DNS returns zero A-records (no ready endpoints).
+- Requests through the instance gateway with `X-Firebolt-Engine: <stopped-engine>` return HTTP 503, because Envoy's `dynamic_forward_proxy` resolves the engine Service and finds no upstream. The response is indistinguishable from a request to a non-existent engine. See `docs/option-b-per-engine-envoy-clusters.md` for the gateway resolution model.
+- No gateway reconfiguration happens on stop/resume — the gateway is engine-set agnostic and discovers engines at request time. Existing gateway retry semantics apply unchanged.
+- In-flight requests during the selector flip behave the same as during any other blue-green transition: pods entering termination run their `preStop` hook and continue serving until they report zero in-flight queries or hit `terminationGracePeriodSeconds`.
+
+**Status signal contract:**
+
+- `phase: stopped` identifies the terminal stopped state (as opposed to `stable`, which means running).
+- `Ready` condition becomes `Status=False, Reason=Stopped` with message `"Engine is stopped (spec.replicas is 0)"`. GitOps tools that gate on `Ready=True` will correctly treat a stopped engine as not-converged-to-serving without mistaking it for an in-progress rollout.
+
+**Stopped engines tolerate instance churn:** the stopped engine's ConfigMap is not re-checked against live `FireboltInstance` data until the engine resumes. If the backing instance is re-provisioned (metadata endpoint changes) while the engine is stopped, the engine remains in `stopped` with its now-stale ConfigMap. This is harmless because the engine has zero pods consuming that ConfigMap, and the next resume triggers a new generation whose ConfigMap is rebuilt against the current instance endpoint.
+
 ## Drain Check
 
 The operator scrapes the engine's Prometheus `/metrics` endpoint on port `9090` and checks `firebolt_running_queries + firebolt_suspended_queries`. If both gauges read zero, the pod is considered drained and safe to delete. Otherwise, the operator retries after `drainCheckInterval`.
@@ -620,7 +658,7 @@ For the complete list of configurable fields in the engine spec, see the [README
 | `currentGeneration` | int | Latest generation number (`activeGeneration` starts at `-1`; first deploy creates generation `0`) |
 | `activeGeneration` | int | Generation currently receiving traffic |
 | `drainingGeneration` | int/null | Generation being drained (if any) |
-| `phase` | string | Current phase (stable/creating/switching/draining/cleaning) |
+| `phase` | string | Current phase (stable/creating/switching/draining/cleaning/stopped) |
 | `observedGeneration` | int | Kubernetes metadata generation last reconciled |
 | `conditions` | list | Status conditions (e.g. `InstanceReady`) |
 
@@ -633,7 +671,7 @@ The operator uses Kubernetes optimistic concurrency control (ResourceVersion) to
 | Two reconciles read same status | Second update fails with conflict error, controller-runtime requeues |
 | Resource created between Get and Create | Create returns AlreadyExists, requeue handles it |
 | Spec changes during `creating` | In-progress generation abandoned, resources deleted, new generation created |
-| Spec changes during `draining`/`cleaning` | Deferred until transition completes and engine returns to `stable` |
+| Spec changes during `draining`/`cleaning` | Deferred until transition completes and engine returns to `stable` or `stopped` |
 | Operator crash mid-transition | Restarts and resumes from persisted phase in status subresource |
 
 **Key principle:** All state is persisted in the status subresource before taking action. If an update fails due to conflict, the reconcile is retried with fresh state.

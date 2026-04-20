@@ -140,7 +140,27 @@ kubectl patch fire my-engine -n firebolt \
 
 The operator handles the zero-downtime transition automatically.
 
-### 5. Delete
+### 5. Stop and Resume
+
+Set `spec.replicas` to `0` to stop the engine without deleting the CR. The operator tears down the active generation through the same blue-green path (honoring `spec.rollout` for drain behavior) and leaves the engine in the `stopped` phase:
+
+```bash
+kubectl patch fireng my-engine -n firebolt \
+  --type merge -p '{"spec":{"replicas":0}}'
+```
+
+A stopped engine keeps its CR, so `spec.image`, `spec.resources`, and everything else are preserved across stop/resume. The engine Service has zero endpoints while stopped, and requests through the gateway with `X-Firebolt-Engine: my-engine` return HTTP 503 until the engine is resumed.
+
+Resume by setting a non-zero replica count — the operator starts a new blue-green generation with the requested size:
+
+```bash
+kubectl patch fireng my-engine -n firebolt \
+  --type merge -p '{"spec":{"replicas":3}}'
+```
+
+See [Stopping an Engine](docs/operator-based-scaling.md#stopping-an-engine) in the design doc for the detailed transition flow and the client-facing contract.
+
+### 6. Delete
 
 ```bash
 kubectl delete fire my-engine -n firebolt
@@ -266,7 +286,7 @@ spec:
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
-| `spec.replicas` | **Yes** | - | Number of engine nodes (must be >= 1) |
+| `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine (the CR is preserved; see [Stop and Resume](#5-stop-and-resume)). |
 | `spec.image.repository` | **Yes** | - | Container image repository |
 | `spec.image.tag` | **Yes** | - | Container image tag |
 | `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy |
@@ -284,18 +304,24 @@ spec:
 
 | Phase | Meaning |
 |-------|---------|
-| `stable` | All resources match spec; no transition in progress |
-| `creating` | New generation being created; waiting for pods to be ready |
-| `switching` | Traffic being switched to the new generation |
-| `draining` | Waiting for old generation pods to finish serving queries |
-| `cleaning` | Deleting old generation resources |
+| `stable` | Terminal. All resources match spec, `replicas > 0`, engine is serving traffic. |
+| `creating` | New generation being created; waiting for pods to be ready. |
+| `switching` | Traffic being switched to the new generation. |
+| `draining` | Waiting for old generation pods to finish serving queries. |
+| `cleaning` | Deleting old generation resources. |
+| `stopped` | Terminal. `spec.replicas == 0`. Engine is intentionally parked; CR and active-generation resources are preserved but no pods are running. Set `spec.replicas` to a non-zero value to resume. |
 
 ### Conditions
 
 | Condition | Meaning |
 |-----------|---------|
-| `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata |
-| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / account ID |
+| `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata. |
+| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / account ID. |
+| `Ready=True, Reason=EngineReady` | Engine is serving traffic with all replicas ready. |
+| `Ready=False, Reason=Rolling` | A blue-green transition is in progress (`creating` / `switching` / `draining` / `cleaning`). |
+| `Ready=False, Reason=PodsNotReady` | Phase is `stable` but some pods are not yet ready (e.g., image pull in progress). |
+| `Ready=False, Reason=Stopped` | `spec.replicas == 0`. The engine is intentionally parked; not a transient failure. |
+| `Ready=False, Reason=InstanceNotReady` | The referenced `FireboltInstance` is not ready. |
 
 ### Monitoring
 
