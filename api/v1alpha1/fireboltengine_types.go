@@ -34,14 +34,22 @@ const (
 // EnginePhase represents the current phase of the engine transition.
 type EnginePhase string
 
-// PhaseStable through PhaseCleaning enumerate the lifecycle phases
+// PhaseStable through PhaseStopped enumerate the lifecycle phases
 // of a FireboltEngine during a blue-green rollout.
+//
+// PhaseStopped is a terminal phase reached when spec.replicas is 0.
+// It is structurally identical to PhaseStable: the active generation
+// exists (as an empty StatefulSet + headless Service + ConfigMap) and
+// any spec drift triggers a new blue-green generation. The distinct
+// name exists so kubectl get and GitOps tooling can tell a running
+// engine apart from an intentionally parked one.
 const (
 	PhaseStable    EnginePhase = "stable"
 	PhaseCreating  EnginePhase = "creating"
 	PhaseSwitching EnginePhase = "switching"
 	PhaseDraining  EnginePhase = "draining"
 	PhaseCleaning  EnginePhase = "cleaning"
+	PhaseStopped   EnginePhase = "stopped"
 )
 
 // Condition types for FireboltEngine.
@@ -60,6 +68,9 @@ const (
 	//   - PhaseFailed      : phase is Failed (terminal; human-gated recovery)
 	//   - PodsNotReady     : phase is Stable but active-generation pods
 	//                        have not yet reported Ready
+	//   - Stopped          : phase is Stopped (spec.replicas is 0);
+	//                        the engine is intentionally parked and
+	//                        cannot serve traffic until replicas > 0
 	ConditionReady = "Ready"
 
 	// ConditionInstanceReady indicates whether the referenced FireboltInstance
@@ -91,8 +102,12 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="instanceRef is immutable"
 	InstanceRef string `json:"instanceRef"`
 
-	// Replicas is the number of engine nodes.
-	// +kubebuilder:validation:Minimum=1
+	// Replicas is the number of engine nodes. Set to 0 to stop the
+	// engine: the operator tears down the active generation (honoring
+	// spec.rollout for drain behavior) and leaves the CR in the
+	// Stopped phase. Setting replicas back to a non-zero value resumes
+	// the engine via a new blue-green generation.
+	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
 	// Image defines the container image to use.
