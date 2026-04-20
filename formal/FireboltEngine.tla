@@ -1,12 +1,12 @@
 ---- MODULE FireboltEngine ----
 \* TLA+ specification of the FireboltEngine reconciler state machine.
 \*
-\* Models the five-phase blue-green lifecycle:
-\*   stable -> creating -> switching -> draining -> cleaning -> stable
+\* Models the six-phase blue-green lifecycle:
+\*   stable/stopped -> creating -> switching -> draining -> cleaning -> stable/stopped
 \*
 \* Verified properties:
 \*   Safety  - invariants that must hold in every reachable state
-\*   Liveness - engine always eventually reaches stable (with fairness)
+\*   Liveness - engine always eventually reaches a terminal phase (with fairness)
 \*
 \* To check with TLC:
 \*   1. Open FireboltEngine.cfg alongside this file
@@ -16,18 +16,26 @@
 \* Design decisions captured here:
 \*   - The instance gate is a SCHEDULING guard (outer Reconcile), not a
 \*     precondition on compute* functions. When instanceReady is false and
-\*     phase in {stable, creating}, the state machine does not tick -- only
-\*     conditions are updated. Switching/Draining/Cleaning bypass the gate.
+\*     phase in {stable, stopped, creating}, the state machine does not tick --
+\*     only conditions are updated. Switching/Draining/Cleaning bypass the gate.
 \*   - Each reconcile call is modeled as one atomic step. This is conservative
 \*     (the real code makes multiple K8s writes per reconcile) but correct:
 \*     safety violations found here are real; absence of violations holds in
 \*     the coarser implementation too.
 \*   - podsReady is a boolean abstraction of "all pods in currentGen are ready".
-\*     It is reset to FALSE whenever currentGen is bumped.
+\*     It is reset to FALSE whenever currentGen is bumped. For spec.replicas=0
+\*     the real code returns allReady=true vacuously; the model still requires
+\*     EnvPodsReady to fire, which is sound (a superset of real behaviors).
 \*   - podsDrained is a boolean abstraction of "draining gen has zero queries".
 \*     It is reset to FALSE whenever drainingGen is set.
 \*   - stsSpecVer[g] = -1 means no STS for generation g exists.
 \*     stsSpecVer[g] >= 0 means the STS exists and was built from spec version g.
+\*   - specWantsStop is a boolean abstraction of "current spec.replicas == 0".
+\*     It can toggle atomically with EnvChangeSpec (the user edits replicas).
+\*     The reconciler consults it only at terminal-phase writes, via
+\*     TerminalPhase: zero-replica specs land in "stopped", non-zero in
+\*     "stable". Drift detection and re-materialization treat "stopped"
+\*     identically to "stable".
 
 EXTENDS Integers, TLC
 
@@ -38,7 +46,8 @@ CONSTANTS
 Gens     == 0..MaxGen
 SpecVers == 0..MaxSpec
 
-Phases == {"uninitialized", "stable", "creating", "switching", "draining", "cleaning"}
+Phases == {"uninitialized", "stable", "creating", "switching", "draining", "cleaning", "stopped"}
+TerminalPhases == {"stable", "stopped"}
 
 VARIABLES
     phase,          \* current reconciler phase
@@ -46,13 +55,14 @@ VARIABLES
     activeGen,      \* generation currently serving traffic  (-1 = none)
     drainingGen,    \* generation being drained              (-1 = none)
     specVer,        \* current spec version (env-controlled; drives rollouts)
+    specWantsStop,  \* TRUE when spec.replicas == 0 for the current specVer
     stsSpecVer,     \* stsSpecVer[g]: spec version STS-g was built from, -1 if absent
     svcTargetGen,   \* generation the cluster Service selector points to (-1 = no service)
     podsReady,      \* TRUE when all pods in currentGen are Running+Ready
     podsDrained,    \* TRUE when draining gen has zero running/suspended queries
     instanceReady   \* TRUE when the referenced FireboltInstance is Ready (env-controlled)
 
-vars == <<phase, currentGen, activeGen, drainingGen, specVer,
+vars == <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
           stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ---------------------------------------------------------------------------
@@ -61,6 +71,12 @@ vars == <<phase, currentGen, activeGen, drainingGen, specVer,
 
 StsExists(g)       == stsSpecVer[g] # -1
 StsMatchesSpec(g)  == StsExists(g) /\ stsSpecVer[g] = specVer
+
+\* Terminal phase selector. Mirrors terminalPhase(spec) in engine_reconcile.go:
+\* replicas==0 -> stopped, otherwise stable. The single source of truth for the
+\* stable-vs-stopped distinction; every "reconcile is done" write funnels
+\* through this helper, so any drift between the two terminals is a bug.
+TerminalPhase == IF specWantsStop THEN "stopped" ELSE "stable"
 
 \* ---------------------------------------------------------------------------
 \* Initial state
@@ -72,6 +88,7 @@ Init ==
     /\ activeGen     = -1
     /\ drainingGen   = -1
     /\ specVer       = 0
+    /\ specWantsStop = FALSE
     /\ stsSpecVer    = [g \in Gens |-> -1]
     /\ svcTargetGen  = -1
     /\ podsReady     = FALSE
@@ -82,32 +99,39 @@ Init ==
 \* Environment actions  (non-deterministic; can fire at any time)
 \* ---------------------------------------------------------------------------
 
-\* User changes the engine spec (e.g. scales replicas, changes image)
+\* User changes the engine spec (e.g. scales replicas, changes image) and
+\* may also change whether the new spec wants stop (replicas == 0). The
+\* two dimensions are independent -- an image change keeps the previous
+\* specWantsStop; a scale-to-zero flips it; a scale-from-zero flips it
+\* back. A single non-deterministic action covers all combinations.
 EnvChangeSpec ==
     /\ specVer < MaxSpec
     /\ specVer' = specVer + 1
+    /\ specWantsStop' \in BOOLEAN
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
 
-\* Pods in currentGen become all-ready
+\* Pods in currentGen become all-ready. For spec.replicas=0 this fires
+\* trivially (0/0 pods ready) in the real code; here we require the env
+\* to fire EnvPodsReady regardless, which is a sound over-approximation.
 EnvPodsReady ==
     /\ ~podsReady
     /\ podsReady' = TRUE
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
 
 \* Pods in drainingGen finish draining (zero running/suspended queries)
 EnvPodsDrained ==
     /\ ~podsDrained
     /\ podsDrained' = TRUE
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, instanceReady>>
 
 \* Instance becomes ready or not-ready
 EnvSetInstanceReady(v) ==
     /\ instanceReady # v
     /\ instanceReady' = v
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained>>
 
 \* ---------------------------------------------------------------------------
@@ -125,35 +149,40 @@ ReconcileInit ==
     /\ currentGen' = 0
     /\ activeGen'  = -1
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<drainingGen, specVer, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
 
-\* ------ Phase: stable ------
+\* ------ Phase: stable / stopped (terminal) ------
 \* Detect spec drift or missing STS; start a new generation if needed.
 \* When everything is consistent, the reconciler does nothing (stutters).
+\*
+\* Both terminals share drift-detection and GC behavior; only the surfaced
+\* name differs. Mirrors the engine_reconcile.go switch: PhaseStopped is
+\* routed into computeStable alongside PhaseStable and "".
 
-ReconcileStable_Drift ==
+ReconcileTerminal_Drift ==
     \* Spec changed or STS missing -> bump currentGen, go to creating.
-    \* This is the only path out of stable.
-    /\ phase = "stable"
+    \* This is the only path out of a terminal phase.
+    /\ phase \in TerminalPhases
     /\ instanceReady
     /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen' = currentGen + 1
     /\ phase'      = "creating"
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<activeGen, drainingGen, specVer, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
 
 \* GC: delete STSes that belong neither to currentGen nor drainingGen.
-\* Runs opportunistically in stable phase; safe to repeat.
-\* Models gcOrphanedResources() in engine_gc.go.
+\* Runs opportunistically in either terminal phase; safe to repeat.
+\* Models gcOrphanedResources() in engine_gc.go, which is gated on
+\* phase \in {PhaseStable, PhaseStopped} in the top-level Reconcile.
 GCOrphans ==
-    /\ phase = "stable"
+    /\ phase \in TerminalPhases
     /\ \E g \in Gens :
            /\ StsExists(g)
            /\ g # currentGen
            /\ g # drainingGen   \* drainingGen=-1 never equals any gen in Gens
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ------ Phase: creating ------
@@ -177,7 +206,7 @@ ReconcileCreating_SpecDrift ==
     /\ currentGen'  = currentGen + 1
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
-    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, specWantsStop, svcTargetGen, podsDrained, instanceReady>>
 
 ReconcileCreating_SpecDrift_AtMax ==
     \* Boundary case: spec drifted but currentGen is already at the model ceiling.
@@ -189,7 +218,7 @@ ReconcileCreating_SpecDrift_AtMax ==
     /\ currentGen = MaxGen
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    svcTargetGen, podsDrained, instanceReady>>
 
 ReconcileCreating_EnsureSTS ==
@@ -200,7 +229,7 @@ ReconcileCreating_EnsureSTS ==
     /\ ~StsExists(currentGen)                                   \* STS absent
     /\ ~(StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)) \* no spec drift
     /\ stsSpecVer' = [stsSpecVer EXCEPT ![currentGen] = specVer]
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 ReconcileCreating_EnsureService ==
@@ -212,7 +241,7 @@ ReconcileCreating_EnsureService ==
     /\ StsMatchesSpec(currentGen)
     /\ svcTargetGen = -1
     /\ svcTargetGen' = currentGen
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, podsReady, podsDrained, instanceReady>>
 
 ReconcileCreating_Advance ==
@@ -223,7 +252,7 @@ ReconcileCreating_Advance ==
     /\ svcTargetGen # -1
     /\ podsReady
     /\ phase' = "switching"
-    /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ------ Phase: switching ------
@@ -236,19 +265,20 @@ ReconcileSwitching_UpdateService ==
     /\ phase = "switching"
     /\ svcTargetGen # currentGen
     /\ svcTargetGen' = currentGen
-    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, podsReady, podsDrained, instanceReady>>
 
 ReconcileSwitching_Complete ==
     \* Service already points to currentGen: finalise the switch.
     \* If there is an old generation to drain, go to draining; otherwise
-    \* (first deployment, activeGen = -1) go directly to stable.
+    \* (first deployment, activeGen = -1) go directly to a terminal phase
+    \* chosen by TerminalPhase (stable or stopped).
     /\ phase = "switching"
     /\ svcTargetGen = currentGen
     /\ activeGen' = currentGen
     /\ \/ \* First deployment: no old generation to drain.
           /\ activeGen = -1
-          /\ phase'       = "stable"
+          /\ phase'       = TerminalPhase
           /\ drainingGen' = drainingGen   \* unchanged (-1)
           /\ UNCHANGED podsDrained
        \/ \* Rollout: old generation must drain before cleanup.
@@ -256,7 +286,7 @@ ReconcileSwitching_Complete ==
           /\ phase'       = "draining"
           /\ drainingGen' = activeGen
           /\ podsDrained' = FALSE         \* reset; new draining target
-    /\ UNCHANGED <<currentGen, specVer, stsSpecVer, svcTargetGen, podsReady, instanceReady>>
+    /\ UNCHANGED <<currentGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsReady, instanceReady>>
 
 \* ------ Phase: draining ------
 \* Wait for drain completion, then go to cleaning.
@@ -267,19 +297,20 @@ ReconcileDraining_Complete ==
     /\ drainingGen # -1
     /\ podsDrained
     /\ phase' = "cleaning"
-    /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer,
+    /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ------ Phase: cleaning ------
-\* Delete old-generation resources and return to stable.
+\* Delete old-generation resources and return to a terminal phase (stable or
+\* stopped, chosen by TerminalPhase based on current spec.replicas).
 
 ReconcileCleaning ==
     /\ phase = "cleaning"
     /\ drainingGen # -1
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![drainingGen] = -1]
     /\ drainingGen' = -1
-    /\ phase'       = "stable"
-    /\ UNCHANGED <<currentGen, activeGen, specVer,
+    /\ phase'       = TerminalPhase
+    /\ UNCHANGED <<currentGen, activeGen, specVer, specWantsStop,
                    svcTargetGen, podsReady, podsDrained, instanceReady>>
 
 \* ---------------------------------------------------------------------------
@@ -293,7 +324,7 @@ Next ==
     \/ EnvSetInstanceReady(TRUE)
     \/ EnvSetInstanceReady(FALSE)
     \/ ReconcileInit
-    \/ ReconcileStable_Drift
+    \/ ReconcileTerminal_Drift
     \/ GCOrphans
     \/ ReconcileCreating_SpecDrift
     \/ ReconcileCreating_SpecDrift_AtMax
@@ -310,22 +341,25 @@ Next ==
 \* ---------------------------------------------------------------------------
 
 TypeOK ==
-    /\ phase        \in Phases
-    /\ currentGen   \in Gens
-    /\ activeGen    \in {-1} \cup Gens
-    /\ drainingGen  \in {-1} \cup Gens
-    /\ specVer      \in SpecVers
-    /\ stsSpecVer   \in [Gens -> {-1} \cup SpecVers]
-    /\ svcTargetGen \in {-1} \cup Gens
-    /\ podsReady    \in BOOLEAN
-    /\ podsDrained  \in BOOLEAN
+    /\ phase         \in Phases
+    /\ currentGen    \in Gens
+    /\ activeGen     \in {-1} \cup Gens
+    /\ drainingGen   \in {-1} \cup Gens
+    /\ specVer       \in SpecVers
+    /\ specWantsStop \in BOOLEAN
+    /\ stsSpecVer    \in [Gens -> {-1} \cup SpecVers]
+    /\ svcTargetGen  \in {-1} \cup Gens
+    /\ podsReady     \in BOOLEAN
+    /\ podsDrained   \in BOOLEAN
     /\ instanceReady \in BOOLEAN
 
 \* Matches user-confirmed invariant from code review:
-\* "Any persistent CurrentGeneration != ActiveGeneration while Phase=Stable
-\*  would indicate a state-machine bug."
-Inv_StableConsistency ==
-    phase = "stable" => currentGen = activeGen
+\* "Any persistent CurrentGeneration != ActiveGeneration while the engine is in
+\*  a terminal phase would indicate a state-machine bug."
+\* Applies to both terminal phases: stable and stopped are structurally
+\* identical, only the surfaced name differs.
+Inv_TerminalConsistency ==
+    phase \in TerminalPhases => currentGen = activeGen
 
 \* The cluster Service always points to a generation whose STS exists,
 \* once traffic has been switched (activeGen != -1).
@@ -336,9 +370,11 @@ Inv_StableConsistency ==
 Inv_ServiceValid ==
     activeGen # -1 => StsExists(svcTargetGen)
 
-\* In stable phase the current generation's STS must exist.
-Inv_StableHasSTS ==
-    phase = "stable" => StsExists(currentGen)
+\* In any terminal phase the current generation's STS must exist.
+\* A stopped engine keeps its zero-replica STS around (see operator-based-scaling.md);
+\* its absence would mean the terminal-phase invariants are violated.
+Inv_TerminalHasSTS ==
+    phase \in TerminalPhases => StsExists(currentGen)
 
 \* The active generation's STS must always exist (once set).
 \* Violation would mean serving traffic to a deleted StatefulSet.
@@ -354,13 +390,13 @@ Inv_ServiceKnownGen ==
     activeGen # -1 => svcTargetGen \in {activeGen, currentGen}
 
 \* DrainingGeneration is only set while in draining or cleaning phase.
-\* A non-nil drainingGen while in stable/creating/switching indicates a leak.
+\* A non-nil drainingGen in any terminal phase or in stable/creating/switching indicates a leak.
 Inv_DrainingPhase ==
     drainingGen # -1 => phase \in {"draining", "cleaning"}
 
-\* In stable phase there is no draining generation.
-Inv_StableNoDraining ==
-    phase = "stable" => drainingGen = -1
+\* In any terminal phase there is no draining generation.
+Inv_TerminalNoDraining ==
+    phase \in TerminalPhases => drainingGen = -1
 
 \* The draining generation is always strictly older than the current generation.
 \* Violation would mean the operator is draining something it is also creating.
@@ -371,27 +407,48 @@ Inv_DrainingOlderThanCurrent ==
 Inv_GenOrder ==
     activeGen # -1 => activeGen =< currentGen
 
+\* Once the reconciler has quiesced -- in a terminal phase with no pending
+\* spec drift -- the phase name matches the spec's replicas=0 intent.
+\* If the engine reached phase=stable while specWantsStop=TRUE (with the
+\* current STS matching the current spec), users would see "stable" on a
+\* spec that asked for zero replicas: a silent contract violation.
+\*
+\* The invariant is gated on StsMatchesSpec because mid-drift (after an
+\* EnvChangeSpec that bumped both specVer and specWantsStop but before
+\* ReconcileTerminal_Drift fires) the terminal phase legitimately lags
+\* behind the new spec. That lag is exactly what drift detection is for;
+\* the invariant applies only once reconciliation has caught up.
+Inv_QuiescedPhaseMatchesSpec ==
+    (phase \in TerminalPhases /\ StsMatchesSpec(currentGen)) =>
+        ((phase = "stopped") = specWantsStop)
+
 \* Combined safety predicate checked by TLC.
 Safety ==
     /\ TypeOK
-    /\ Inv_StableConsistency
+    /\ Inv_TerminalConsistency
     /\ Inv_ServiceValid
-    /\ Inv_StableHasSTS
+    /\ Inv_TerminalHasSTS
     /\ Inv_ActiveHasSTS
     /\ Inv_ServiceKnownGen
     /\ Inv_DrainingPhase
-    /\ Inv_StableNoDraining
+    /\ Inv_TerminalNoDraining
     /\ Inv_DrainingOlderThanCurrent
     /\ Inv_GenOrder
+    /\ Inv_QuiescedPhaseMatchesSpec
 
 \* ---------------------------------------------------------------------------
 \* Liveness
 \* ---------------------------------------------------------------------------
 
-\* The engine eventually reaches stable phase.
+\* The engine eventually reaches a terminal phase (stable or stopped).
+\*
+\* "Terminal" rather than "stable" because a zero-replica spec legitimately
+\* quiesces in "stopped"; asserting EventuallyStable would rule that out.
+\* Both terminals are fixed points of the state machine (no outgoing
+\* transitions except on fresh spec drift), so either is acceptable convergence.
 \*
 \* Requires:
-\*   - SF on instance-gated reconcile actions (ReconcileInit, ReconcileStable_Drift,
+\*   - SF on instance-gated reconcile actions (ReconcileInit, ReconcileTerminal_Drift,
 \*     all ReconcileCreating_*): SF is required rather than WF because
 \*     EnvSetInstanceReady(FALSE) has no fairness constraint and can toggle
 \*     instanceReady back to FALSE immediately after every TRUE. With WF the
@@ -409,7 +466,7 @@ Safety ==
 \* Without the environment fairness the engine can be stuck forever on a
 \* permanently unready instance or pods that never start -- correct behavior.
 
-EventuallyStable == <>(phase = "stable")
+EventuallyTerminal == <>(phase \in TerminalPhases)
 
 \* ---------------------------------------------------------------------------
 \* Temporal spec
@@ -420,7 +477,7 @@ Spec ==
     /\ [][Next]_vars
     \* Instance-gated actions: SF because instanceReady can toggle adversarially.
     /\ SF_vars(ReconcileInit)
-    /\ SF_vars(ReconcileStable_Drift)
+    /\ SF_vars(ReconcileTerminal_Drift)
     /\ SF_vars(ReconcileCreating_SpecDrift)
     /\ SF_vars(ReconcileCreating_SpecDrift_AtMax)
     /\ SF_vars(ReconcileCreating_EnsureSTS)
@@ -437,6 +494,6 @@ Spec ==
 
 \* Theorems (checked by TLC, provable by TLAPS for the infinite-state version)
 THEOREM Spec => []Safety
-THEOREM Spec => EventuallyStable
+THEOREM Spec => EventuallyTerminal
 
 ====
