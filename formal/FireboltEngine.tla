@@ -182,13 +182,15 @@ ReconcileCreating_SpecDrift ==
 ReconcileCreating_SpecDrift_AtMax ==
     \* Boundary case: spec drifted but currentGen is already at the model ceiling.
     \* Delete the stale STS so EnsureSTS can rebuild it at the new specVer.
+    \* podsReady is reset to FALSE: the old pods are gone with the deleted STS.
     /\ phase = "creating"
     /\ instanceReady
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen = MaxGen
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
+    /\ podsReady'   = FALSE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer,
-                   svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   svcTargetGen, podsDrained, instanceReady>>
 
 ReconcileCreating_EnsureSTS ==
     \* Create the StatefulSet for currentGen (also creates ConfigMap + headless Service
