@@ -959,3 +959,177 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 	}
 }
+
+// --- Scale to zero / Stopped phase ---
+
+// TestTerminalPhase verifies the single-point selector: replicas==0 ->
+// Stopped, replicas>0 -> Stable. Every terminal-phase write in the state
+// machine funnels through this helper.
+func TestTerminalPhase(t *testing.T) {
+	tests := []struct {
+		name     string
+		replicas int32
+		want     computev1alpha1.EnginePhase
+	}{
+		{"replicas=0 => Stopped", 0, computev1alpha1.PhaseStopped},
+		{"replicas=1 => Stable", 1, computev1alpha1.PhaseStable},
+		{"replicas=5 => Stable", 5, computev1alpha1.PhaseStable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := testSpec()
+			spec.Replicas = tt.replicas
+			if got := terminalPhase(spec); got != tt.want {
+				t.Errorf("terminalPhase(replicas=%d) = %s, want %s", tt.replicas, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestComputeEngineReconcile_Stop_StableToCreating verifies that scaling
+// a running engine down to 0 replicas goes through the normal blue-green
+// drift path: computeStable sees spec.Replicas change, bumps the
+// generation, and transitions to Creating. The zero-replica drop does not
+// take a shortcut around the state machine.
+func TestComputeEngineReconcile_Stop_StableToCreating(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 0
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentPodsReady:        true,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Errorf("expected phase Creating (drift to replicas=0), got %s", result.Status.Phase)
+	}
+	if result.Status.CurrentGeneration != 1 {
+		t.Errorf("expected generation 1, got %d", result.Status.CurrentGeneration)
+	}
+}
+
+// TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero
+// verifies that when the live STS already matches spec.Replicas==0
+// (i.e., the blue-green transition to zero has settled), the terminal
+// write picks Stopped rather than Stable.
+func TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 0
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseStable,
+		CurrentGeneration: 1,
+		ActiveGeneration:  1,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
+		CurrentPodsReady:        true,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseStopped {
+		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
+	}
+	if result.Status.CurrentGeneration != 1 {
+		t.Errorf("expected no generation bump, got %d", result.Status.CurrentGeneration)
+	}
+}
+
+// TestComputeEngineReconcile_Stop_SwitchingToStoppedInitialDeploy verifies
+// that a zero-replica initial deploy (no old generation to drain) lands
+// directly in Stopped after the selector flip.
+func TestComputeEngineReconcile_Stop_SwitchingToStoppedInitialDeploy(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 0
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseSwitching,
+		CurrentGeneration: 0,
+		ActiveGeneration:  -1,
+	}
+	current := EngineState{
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseStopped {
+		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
+	}
+	if result.Status.ActiveGeneration != 0 {
+		t.Errorf("expected active gen 0, got %d", result.Status.ActiveGeneration)
+	}
+}
+
+// TestComputeEngineReconcile_Stop_CleaningToStopped verifies that the
+// cleaning phase's terminal write picks Stopped when spec.Replicas==0.
+// This is the path taken when a running engine is scaled down to 0 and
+// the old generation has finished draining.
+func TestComputeEngineReconcile_Stop_CleaningToStopped(t *testing.T) {
+	drainingGen := 0
+	spec := testSpec()
+	spec.Replicas = 0
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:              computev1alpha1.PhaseCleaning,
+		CurrentGeneration:  1,
+		ActiveGeneration:   1,
+		DrainingGeneration: &drainingGen,
+	}
+	current := EngineState{
+		DrainingSTS: makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseStopped {
+		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
+	}
+	if result.Status.DrainingGeneration != nil {
+		t.Error("expected DrainingGeneration cleared")
+	}
+	if len(result.DeleteResources) == 0 {
+		t.Error("expected draining STS to be queued for deletion")
+	}
+}
+
+// TestComputeEngineReconcile_Stop_StoppedToCreating verifies that a
+// stopped engine resumes via a new blue-green generation when
+// spec.Replicas goes back to non-zero. The state machine routes Stopped
+// through computeStable, which detects the spec drift and bumps the
+// generation just like from Stable.
+func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 3
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseStopped,
+		CurrentGeneration: 1,
+		ActiveGeneration:  1,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/core:v1.0"),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
+		CurrentPodsReady:        true,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+
+	if result.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Errorf("expected phase Creating (resume from stopped), got %s", result.Status.Phase)
+	}
+	if result.Status.CurrentGeneration != 2 {
+		t.Errorf("expected generation 2, got %d", result.Status.CurrentGeneration)
+	}
+}
