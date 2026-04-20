@@ -137,9 +137,14 @@ spec:
                   be scheduled on.
                 type: object
               replicas:
-                description: Replicas is the number of engine nodes.
+                description: |-
+                  Replicas is the number of engine nodes. Set to 0 to stop the
+                  engine: the operator tears down the active generation (honoring
+                  spec.rollout for drain behavior) and leaves the CR in the
+                  Stopped phase. Setting replicas back to a non-zero value resumes
+                  the engine via a new blue-green generation.
                 format: int32
-                minimum: 1
+                minimum: 0
                 type: integer
               resources:
                 description: Resources defines the CPU and memory for engine pods.
