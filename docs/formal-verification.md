@@ -21,7 +21,7 @@ The existing crash-point tests cover (4) at specific predetermined checkpoints. 
 
 TLA+ is a mathematical specification language paired with TLC, an explicit-state model checker that exhaustively enumerates all reachable states up to a bound. AWS has used it since 2011 on S3, DynamoDB, and internal services (a TLC run found a 35-step S3 bug no other technique would have caught). MongoDB, Datadog, Kafka, and Azure Cosmos DB all publish experience reports.
 
-A 5-phase state machine with two CRDs maps almost directly to PlusCal (TLA+'s pseudocode front-end). The `FireboltEngine` reconciler translates to roughly 150–200 lines of PlusCal: one `phase` variable, `currentGeneration`, `activeGeneration`, `drainingGeneration`, transition actions for each phase, and invariants. TLC exhaustively explores every reachable sequence of reconcile steps within the model.
+A 6-phase state machine with two CRDs maps almost directly to PlusCal (TLA+'s pseudocode front-end). The `FireboltEngine` reconciler translates to roughly 150–200 lines of PlusCal: one `phase` variable, `currentGeneration`, `activeGeneration`, `drainingGeneration`, `specWantsStop`, transition actions for each phase, and invariants. TLC exhaustively explores every reachable sequence of reconcile steps within the model.
 
 **Harness potential** — two paths with production evidence:
 
@@ -68,16 +68,16 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 
 Write a PlusCal specification of the `FireboltEngine` reconciler:
 
-- Model the 5 phases (`stable`, `creating`, `switching`, `draining`, `cleaning`)
+- Model the 6 phases (`stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`)
 - Model generation counters (`currentGeneration`, `activeGeneration`, `drainingGeneration`)
-- Model spec changes arriving at any point (the abandon/defer rules)
+- Model spec changes arriving at any point (the abandon/defer rules), including scale-to-zero toggles via `specWantsStop`
 - Model operator crashes and restarts
-- Assert safety invariants (active generation always has resources; service selector is consistent)
-- Assert liveness (engine always eventually reaches `stable`)
+- Assert safety invariants (active generation always has resources; service selector is consistent; quiesced terminal phase matches `spec.replicas` intent)
+- Assert liveness (engine always eventually reaches a terminal phase — `stable` or `stopped`)
 
 Run TLC to exhaustively explore all reachable states. Fix any violations before they manifest in code.
 
-Deliverable: `formal/engine.tla` (checked into the repository).
+Deliverable: `formal/FireboltEngine.tla` (checked into the repository).
 
 ### Phase 2 — `rapid` stateful property tests in envtest
 
