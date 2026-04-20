@@ -105,6 +105,28 @@ func TestSetReadyCondition(t *testing.T) {
 			wantReason:  "PodsNotReady",
 			wantMessage: "generation 2 has 1 of 3 pod(s) ready",
 		},
+		{
+			name: "Stopped phase => Stopped (not Rolling, not EngineReady)",
+			status: computev1alpha1.FireboltEngineStatus{
+				Phase:            computev1alpha1.PhaseStopped,
+				ActiveGeneration: 4,
+				Conditions:       []metav1.Condition{instanceReadyCond(metav1.ConditionTrue)},
+			},
+			current:     EngineState{CurrentPodsReady: true, CurrentPodTotal: 0, CurrentPodReady: 0},
+			wantStatus:  metav1.ConditionFalse,
+			wantReason:  "Stopped",
+			wantMessage: "Engine is stopped (spec.replicas is 0)",
+		},
+		{
+			name: "InstanceNotReady beats Stopped",
+			status: computev1alpha1.FireboltEngineStatus{
+				Phase:      computev1alpha1.PhaseStopped,
+				Conditions: []metav1.Condition{instanceReadyCond(metav1.ConditionFalse)},
+			},
+			current:    EngineState{CurrentPodsReady: true},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: "InstanceNotReady",
+		},
 	}
 
 	for _, tc := range tests {
