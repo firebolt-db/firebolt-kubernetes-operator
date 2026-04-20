@@ -155,8 +155,11 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("getEngineState failed: %w", err)
 	}
 
-	// Only PhaseStable and PhaseCreating actually consume InstanceInfo
-	// (to render ConfigMaps with multi_engine_endpoint / account_id).
+	// Only PhaseStable, PhaseStopped, and PhaseCreating actually consume
+	// InstanceInfo (to render ConfigMaps with multi_engine_endpoint /
+	// account_id). Stopped is included because computeStable can
+	// re-materialize a missing ConfigMap in place at the current
+	// generation, which uses instanceInfo even when spec.Replicas is 0.
 	// Switching / Draining / Cleaning operate on already-rendered
 	// resources and are functionally independent of the FireboltInstance:
 	// draining an old-gen pod does not need a metadata endpoint, cleaning
@@ -189,6 +192,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Phase == "" is handled by the early-return above which initializes
 	// status and requeues, so it cannot reach this point.
 	needsInstance := engine.Status.Phase == computev1alpha1.PhaseStable ||
+		engine.Status.Phase == computev1alpha1.PhaseStopped ||
 		engine.Status.Phase == computev1alpha1.PhaseCreating
 
 	var instanceInfo InstanceInfo
@@ -238,7 +242,9 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
-	if !r.DisableGC && engine.Status.Phase == computev1alpha1.PhaseStable {
+	if !r.DisableGC &&
+		(engine.Status.Phase == computev1alpha1.PhaseStable ||
+			engine.Status.Phase == computev1alpha1.PhaseStopped) {
 		r.gcOrphanedResources(ctx, engine)
 	}
 
@@ -380,14 +386,17 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 //
 //  1. InstanceNotReady first: nothing downstream will work until the
 //     backing FireboltInstance is healthy, regardless of our phase.
-//  2. Rolling: any non-terminal, non-stable phase (Creating / Switching
-//     / Draining / Cleaning).
-//  3. PodsNotReady: phase is Stable but the active-generation pods
+//  2. Stopped: phase is Stopped (spec.replicas is 0). The engine is
+//     intentionally parked; distinguishing this from Rolling avoids
+//     GitOps tools treating a stopped engine as mid-transition.
+//  3. Rolling: any non-terminal phase (Creating / Switching / Draining /
+//     Cleaning).
+//  4. PodsNotReady: phase is Stable but the active-generation pods
 //     haven't all reported Ready yet (e.g. image pull in progress on
 //     a freshly scheduled replica). This is what distinguishes
 //     ConditionReady from Phase==Stable: the latter can be true while
 //     pods are still coming up.
-//  4. Otherwise True: serving traffic, all replicas ready.
+//  5. Otherwise True: serving traffic, all replicas ready.
 func setReadyCondition(
 	status *computev1alpha1.FireboltEngineStatus,
 	current EngineState,
@@ -402,6 +411,10 @@ func setReadyCondition(
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "InstanceNotReady"
 		cond.Message = "Referenced FireboltInstance is not ready"
+	case status.Phase == computev1alpha1.PhaseStopped:
+		cond.Status = metav1.ConditionFalse
+		cond.Reason = "Stopped"
+		cond.Message = "Engine is stopped (spec.replicas is 0)"
 	case status.Phase != computev1alpha1.PhaseStable:
 		cond.Status = metav1.ConditionFalse
 		cond.Reason = "Rolling"

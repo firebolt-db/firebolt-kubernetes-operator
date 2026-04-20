@@ -58,24 +58,37 @@ func computeEngineReconcile(
 	}
 
 	switch status.Phase {
-	case "", computev1alpha1.PhaseStable:
+	case "", computev1alpha1.PhaseStable, computev1alpha1.PhaseStopped:
 		computeStable(spec, &result, current, engineName, engineNamespace, metadataGeneration, instanceInfo)
 	case computev1alpha1.PhaseCreating:
 		computeCreating(spec, &result, current, engineName, engineNamespace, instanceInfo)
 	case computev1alpha1.PhaseSwitching:
-		computeSwitching(&result, current, engineName, engineNamespace)
+		computeSwitching(spec, &result, current, engineName, engineNamespace)
 	case computev1alpha1.PhaseDraining:
 		computeDraining(spec, &result, current)
 	case computev1alpha1.PhaseCleaning:
-		computeCleaning(&result, current)
+		computeCleaning(spec, &result, current)
 	default:
-		result.Status.Phase = computev1alpha1.PhaseStable
+		result.Status.Phase = terminalPhase(spec)
 		result.Requeue = true
 	}
 
 	now := metav1.Now()
 	result.Status.LastReconciled = &now
 	return result
+}
+
+// terminalPhase returns the phase a reconciled engine should rest in
+// once no transition is in progress. It is PhaseStopped when the spec
+// asks for zero replicas (the user has parked the engine), PhaseStable
+// otherwise. Every "I am done" write in the state machine funnels
+// through this helper so the running/stopped distinction is made in
+// exactly one place.
+func terminalPhase(spec *computev1alpha1.FireboltEngineSpec) computev1alpha1.EnginePhase {
+	if spec.Replicas == 0 {
+		return computev1alpha1.PhaseStopped
+	}
+	return computev1alpha1.PhaseStable
 }
 
 // computeStable handles the stable phase: detects spec drift or missing
@@ -90,11 +103,12 @@ func computeEngineReconcile(
 // created, preventing leaked resources if the operator crashes between
 // resource creation and the status write.
 //
-// Invariant: Phase=Stable implies ActiveGeneration >= 0. The controller's
-// top-level Reconcile initializes Phase=Creating and ActiveGeneration=-1
-// on first sight of the engine, so computeStable never runs with a
-// negative ActiveGeneration. Violating this invariant is a programming
-// error elsewhere in the state machine, not a recoverable state.
+// Invariant: Phase=Stable or Phase=Stopped implies ActiveGeneration >= 0.
+// The controller's top-level Reconcile initializes Phase=Creating and
+// ActiveGeneration=-1 on first sight of the engine, so computeStable
+// never runs with a negative ActiveGeneration. Violating this invariant
+// is a programming error elsewhere in the state machine, not a
+// recoverable state.
 func computeStable(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -108,7 +122,7 @@ func computeStable(
 
 	if status.ActiveGeneration < 0 {
 		panic(fmt.Sprintf(
-			"BUG: computeStable reached with ActiveGeneration=%d; Phase=Stable invariant violated",
+			"BUG: computeStable reached with ActiveGeneration=%d; terminal-phase invariant violated",
 			status.ActiveGeneration,
 		))
 	}
@@ -163,7 +177,7 @@ func computeStable(
 		r.EnsureClusterSvc = svcCopy
 	}
 
-	status.Phase = computev1alpha1.PhaseStable
+	status.Phase = terminalPhase(spec)
 	status.ObservedGeneration = metadataGeneration
 	r.RequeueAfter = 30 * time.Second
 }
@@ -245,6 +259,7 @@ func computeCreating(
 // phase once their readiness probe already passes. No separate
 // endpoint-readiness gate is therefore required.
 func computeSwitching(
+	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
 	current EngineState,
 	engineName string,
@@ -275,7 +290,7 @@ func computeSwitching(
 		status.DrainingGeneration = &oldGen
 		status.Phase = computev1alpha1.PhaseDraining
 	} else {
-		status.Phase = computev1alpha1.PhaseStable
+		status.Phase = terminalPhase(spec)
 	}
 	r.Requeue = true
 }
@@ -292,7 +307,7 @@ func computeDraining(
 	status := &r.Status
 
 	if status.DrainingGeneration == nil {
-		status.Phase = computev1alpha1.PhaseStable
+		status.Phase = terminalPhase(spec)
 		r.Requeue = true
 		return
 	}
@@ -307,15 +322,16 @@ func computeDraining(
 }
 
 // computeCleaning deletes the old generation's StatefulSet, headless service,
-// and ConfigMap, then transitions to stable.
+// and ConfigMap, then transitions to stable (or stopped, if spec.replicas is 0).
 func computeCleaning(
+	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
 	current EngineState,
 ) {
 	status := &r.Status
 
 	if status.DrainingGeneration == nil {
-		status.Phase = computev1alpha1.PhaseStable
+		status.Phase = terminalPhase(spec)
 		r.Requeue = true
 		return
 	}
@@ -336,7 +352,7 @@ func computeCleaning(
 	}
 
 	status.DrainingGeneration = nil
-	status.Phase = computev1alpha1.PhaseStable
+	status.Phase = terminalPhase(spec)
 	r.Requeue = true
 }
 
