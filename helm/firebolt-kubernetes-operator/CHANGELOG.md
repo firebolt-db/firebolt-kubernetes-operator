@@ -1,3 +1,17 @@
+# 0.1.4
+
+appVersion: v1.2.1
+
+### [1.2.1](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.2.0...v1.2.1) (2026-04-20)
+
+
+### Maintenance
+
+* **envoy:** bump to v1.37.2 (FB-736) (#20) ([996ebb9](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/996ebb9294c809bf85bf2699bb05fad5366015ad))
+* **helm:** bump chart to 0.1.3 (appVersion v1.2.0) ([2303ccb](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2303ccb3ef01aa89ab5e37624316bac474bcdaf6))
+
+
+
 # 0.1.3
 
 appVersion: v1.2.0
