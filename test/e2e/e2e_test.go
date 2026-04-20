@@ -25,6 +25,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 // queryConfig is defined in query_config_light_test.go or query_config_heavy_test.go
@@ -819,6 +823,84 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
+
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for resources to be deleted")
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	// Test 10: Scale to zero - stop/start lifecycle via spec.replicas=0
+	Describe("Scale To Zero", Ordered, func() {
+		var (
+			instanceName = "inst-stop" + queryConfig.Suffix
+			engineName   = "test-stop" + queryConfig.Suffix + "-engine"
+			lc           *TestInstanceLifecycle
+		)
+
+		BeforeAll(func() {
+			By("Setting up FireboltInstance for scale-to-zero test")
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterAll(func() {
+			By("Cleaning up scale-to-zero test")
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
+
+		It("should scale from 2 to 0 to 2, surfacing PhaseStopped and Ready=Stopped", func() {
+			By("Creating engine with 2 replicas (graceful rollout)")
+			err := CreateEngine(ctx, instanceName, engineName, 2)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying running engine Service has 2 endpoints")
+			Expect(WaitForEngineServiceEndpointCount(ctx, engineName, 2, clusterReadyTimeout)).To(Succeed())
+
+			By("Scaling engine to 0 replicas (stop)")
+			err = UpdateEngineReplicas(ctx, engineName, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for engine Phase to become stopped")
+			err = WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseStopped, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying Ready condition is False with Reason=Stopped")
+			err = WaitForEngineReadyCondition(ctx, engineName, metav1.ConditionFalse, "Stopped", clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying engine Service has 0 endpoints")
+			Expect(WaitForEngineServiceEndpointCount(ctx, engineName, 0, clusterReadyTimeout)).To(Succeed())
+
+			By("Scaling engine back to 2 replicas (resume)")
+			err = UpdateEngineReplicas(ctx, engineName, 2)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for engine to become ready again")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying Ready condition is True with Reason=EngineReady")
+			err = WaitForEngineReadyCondition(ctx, engineName, metav1.ConditionTrue, "EngineReady", clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying engine Service has 2 endpoints again")
+			Expect(WaitForEngineServiceEndpointCount(ctx, engineName, 2, clusterReadyTimeout)).To(Succeed())
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)

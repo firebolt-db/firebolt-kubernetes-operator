@@ -423,6 +423,13 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 
 // WaitForEngineStable waits for the engine status phase to be "stable"
 func WaitForEngineStable(ctx context.Context, engineName string, timeout time.Duration) error {
+	return WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseStable, timeout)
+}
+
+// WaitForEnginePhase waits for the engine status phase to match the given phase.
+// Used by scale-to-zero tests that need to wait for PhaseStopped rather than
+// PhaseStable.
+func WaitForEnginePhase(ctx context.Context, engineName string, phase computev1alpha1.EnginePhase, timeout time.Duration) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -437,14 +444,93 @@ func WaitForEngineStable(ctx context.Context, engineName string, timeout time.Du
 			continue
 		}
 
-		if engine.Status.Phase == computev1alpha1.PhaseStable {
+		if engine.Status.Phase == phase {
 			return nil
 		}
 
 		time.Sleep(pollInterval)
 	}
 
-	return fmt.Errorf("timeout waiting for engine %s to be stable", engineName)
+	return fmt.Errorf("timeout waiting for engine %s to reach phase %s", engineName, phase)
+}
+
+// WaitForEngineReadyCondition waits for the Ready condition on the engine to
+// match the given status and reason. Used to verify contract: stopped engines
+// must surface Ready=False, Reason=Stopped so GitOps tools can tell a parked
+// engine apart from a converging one.
+func WaitForEngineReadyCondition(ctx context.Context, engineName string, wantStatus metav1.ConditionStatus, wantReason string, timeout time.Duration) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+
+	deadline := time.Now().Add(timeout)
+	var lastStatus metav1.ConditionStatus
+	var lastReason string
+
+	for time.Now().Before(deadline) {
+		engine := &computev1alpha1.FireboltEngine{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: engineName, Namespace: testNamespace}, engine); err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		for _, c := range engine.Status.Conditions {
+			if c.Type != computev1alpha1.ConditionReady {
+				continue
+			}
+			lastStatus = c.Status
+			lastReason = c.Reason
+			if c.Status == wantStatus && c.Reason == wantReason {
+				return nil
+			}
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for engine %s Ready=%s reason=%s (last seen status=%s reason=%s)",
+		engineName, wantStatus, wantReason, lastStatus, lastReason)
+}
+
+// WaitForEngineServiceEndpointCount waits for the engine Service to have the
+// expected number of ready endpoint addresses. A stopped engine must have 0;
+// a running engine with N replicas must have N. This is the data-plane
+// contract that matters to clients: DNS resolution of the engine Service
+// returns exactly the ready pods.
+func WaitForEngineServiceEndpointCount(ctx context.Context, engineName string, expected int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	serviceName := engineName + "-service"
+	var lastCount int
+
+	for time.Now().Before(deadline) {
+		ep, err := k8sClient.CoreV1().Endpoints(testNamespace).Get(ctx, serviceName, metav1.GetOptions{})
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				time.Sleep(pollInterval)
+				continue
+			}
+			// Endpoints object may briefly not exist; treat as 0.
+			lastCount = 0
+			if expected == 0 {
+				return nil
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
+		count := 0
+		for _, subset := range ep.Subsets {
+			count += len(subset.Addresses)
+		}
+		lastCount = count
+		if count == expected {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for engine %s Service endpoints: want %d, last saw %d",
+		engineName, expected, lastCount)
 }
 
 // WaitForResourcesDeleted waits for all engine resources to be deleted
