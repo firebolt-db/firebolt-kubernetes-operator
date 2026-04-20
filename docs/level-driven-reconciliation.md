@@ -25,7 +25,7 @@ The operator enforces a hierarchical dependency between instances and engines:
 **Rules:**
 
 - Each `FireboltEngine` declares its parent via `spec.instanceRef` (the name of a `FireboltInstance` in the same namespace).
-- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `spec.id`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable** and **creating** phases (which build ConfigMaps referencing instance data). Phases that operate on already-created resources — **switching**, **draining**, **cleaning** — proceed without blocking on instance readiness.
+- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `spec.id`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable**, **stopped**, and **creating** phases (which may build ConfigMaps referencing instance data: `stopped` is included because a missing ConfigMap can be re-materialized in place against the current instance info even at zero replicas). Phases that operate on already-created resources — **switching**, **draining**, **cleaning** — proceed without blocking on instance readiness.
 - The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
 - The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
 - The instance reconciler is independent and has no dependency on engines.
@@ -118,13 +118,13 @@ The engine reconciler is split into three layers, with instance resolution as a 
 | Compute | `engine_reconcile.go` | None | Pure unit tests |
 | Write | `engine_apply.go` | Yes (K8s API writes) | Requires envtest |
 
-The instance gate runs after the read layer but before the compute layer. It only blocks for phases that need instance data (**stable** and **creating**, which build ConfigMaps containing `metadata_endpoint` and `account_id`). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call — there is no separate status write for conditions.
+The instance gate runs after the read layer but before the compute layer. It only blocks for phases that may build ConfigMaps containing `metadata_endpoint` and `account_id`: **stable**, **stopped**, and **creating**. `stopped` is included because if a ConfigMap is missing at zero replicas, the reconciler re-materializes it in place using live instance info — the same recovery path as `stable`. Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call — there is no separate status write for conditions.
 
 The compute layer is the core of the operator. It is a pure function with no side effects, making it easy to test exhaustively without a running cluster.
 
 ## State machine
 
-The engine lifecycle is a five-phase state machine stored in `.status.phase`:
+The engine lifecycle is a six-phase state machine stored in `.status.phase`. Two of the six (`stable` and `stopped`) are terminal; the others are transition phases. The terminal phase is chosen by `spec.replicas`: non-zero resolves to `stable`, zero resolves to `stopped`. Every transition phase funnels through a single `terminalPhase(spec)` helper so the distinction is made in exactly one place.
 
 ```
          spec change during creating:
@@ -139,32 +139,47 @@ The engine lifecycle is a five-phase state machine stored in `.status.phase`:
          │                        │ (initial deploy,            │ pods drained
          │                        │  no old generation)         │ or drain
          │                        │                             │ check disabled
-         │                   ┌────▼───┐                    ┌────▼─────┐
-         │                   │ stable │◄───────────────────┤cleaning  │
-         │                   └────┬───┘                    └──────────┘
+         │                   ┌────▼────────────────┐       ┌────▼─────┐
+         │                   │ stable  /  stopped  │◄──────┤cleaning  │
+         │                   └────┬────────────────┘       └──────────┘
          │                        │                             ▲
          │                        │ spec change                 │
          └────────────────────────┘                             │
                                                      old resources deleted
 ```
 
+Both terminal phases route spec-change detection through the same `computeStable` code path; from the state machine's perspective `stopped` is just `stable` with `spec.replicas == 0` and a different surfaced name. The `Ready` condition, in contrast, distinguishes them: `stable` with ready pods is `Ready=True, Reason=EngineReady`; `stopped` is always `Ready=False, Reason=Stopped` (see [Top-level Ready condition](#top-level-ready-condition) below).
+
 ### Phase descriptions
 
 | Phase | What happens | Next phase |
 |---|---|---|
-| **stable** | All resources match spec. No work to do. Requeues after 30s for drift detection. On spec change, writes only the status intent (`Phase=creating`, bumped `currentGeneration`) and requeues — no resources are created in this pass. | `creating` (on spec change) |
-| **creating** | New-generation StatefulSet, headless Service, and ConfigMap are ensured. Waits for all pods to become ready. If the spec changes while creating, the in-progress generation is abandoned (its resources are deleted), `currentGeneration` is bumped, and a fresh generation is created on the next reconcile. This avoids patching a live STS whose pods have already read a stale config. | `switching` (all pods ready) |
-| **switching** | Updates the cluster Service selector to point to the new generation. | `draining` (if old generation exists) or `stable` (initial deploy) |
+| **stable** | Terminal phase when `spec.replicas > 0`. All resources match spec. No work to do. Requeues after 30s for drift detection. On spec change, writes only the status intent (`Phase=creating`, bumped `currentGeneration`) and requeues — no resources are created in this pass. | `creating` (on spec change) |
+| **stopped** | Terminal phase when `spec.replicas == 0`. Structurally identical to `stable` — the active generation still exists as a zero-replica StatefulSet + headless Service + ConfigMap — but surfaced as a distinct phase. Spec-change detection and missing-resource re-materialization work identically to `stable`. | `creating` (on spec change) |
+| **creating** | New-generation StatefulSet, headless Service, and ConfigMap are ensured. Waits for all pods to become ready. A zero-replica StatefulSet is trivially "ready" (0/0), so scale-to-zero transitions through this phase without blocking. If the spec changes while creating, the in-progress generation is abandoned (its resources are deleted), `currentGeneration` is bumped, and a fresh generation is created on the next reconcile. This avoids patching a live STS whose pods have already read a stale config. | `switching` (all pods ready) |
+| **switching** | Updates the cluster Service selector to point to the new generation. | `draining` (if old generation exists), `stable` (initial deploy, replicas > 0), or `stopped` (initial deploy, replicas == 0) |
 | **draining** | Waits for old-generation pods to finish serving queries. Skipped entirely when `drainCheckEnabled: false` or `rollout: recreate`. | `cleaning` (drain complete) |
-| **cleaning** | Deletes old-generation StatefulSet, headless Service, and ConfigMap. Clears `drainingGeneration`. | `stable` |
+| **cleaning** | Deletes old-generation StatefulSet, headless Service, and ConfigMap. Clears `drainingGeneration`. | `stable` (replicas > 0) or `stopped` (replicas == 0) |
 
 ### Key invariant
 
 A spec change during `draining` or `cleaning` does **not** create a new generation. The current transition must complete before a new one begins. This prevents unbounded resource accumulation.
 
+### Top-level Ready condition
+
+`setReadyCondition` derives `status.conditions[type=Ready]` from the post-reconcile phase and pod state. Its precedence is:
+
+1. `InstanceNotReady` — the referenced `FireboltInstance` is not healthy. Wins over everything else because nothing downstream works without it.
+2. `Stopped` — `Phase == stopped`. `Ready=False, Reason=Stopped, Message="Engine is stopped (spec.replicas is 0)"`. Explicitly distinguished from `Rolling` so GitOps tooling can tell an intentionally parked engine apart from one mid-transition.
+3. `Rolling` — phase is any non-terminal phase (`creating` / `switching` / `draining` / `cleaning`). `Ready=False, Reason=Rolling`.
+4. `PodsNotReady` — phase is `stable` but the active-generation pods have not all reported Ready yet. `Ready=False, Reason=PodsNotReady`.
+5. `EngineReady` — default. `Ready=True`. The engine is serving traffic on its active generation.
+
+Reason `Stopped` is the only `Ready=False` reason that is not a transient rollout or instance-dependency failure. GitOps tools that key off `Ready=True` should treat a stopped engine as deliberately not-converged-to-serving rather than retrying it indefinitely.
+
 ## Generation model
 
-Each spec change (while in `stable`) increments `status.currentGeneration`. Resources for each generation are named with a `-g<N>` suffix:
+Each spec change (while in `stable` or `stopped`) increments `status.currentGeneration`. Resources for each generation are named with a `-g<N>` suffix:
 
 ```
 core-engine-g0          # StatefulSet for generation 0
@@ -328,7 +343,7 @@ Each `FireboltEngine` declares its parent instance via `spec.instanceRef`. Durin
 - `metadataEndpoint` — the in-cluster address of the metadata gRPC service
 - `spec.id` — the instance identifier, used as the metadata account ID
 
-These are written to the engine ConfigMap. The resolution is only required during the **stable** and **creating** phases (which build ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
+These are written to the engine ConfigMap. The resolution is only required during the **stable**, **stopped**, and **creating** phases (all of which may build or re-materialize ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
 
 When the instance gate blocks, it sets the `InstanceReady=False` condition on the engine's status and requeues after 10 seconds. When the instance is healthy, the condition is updated to `InstanceReady=True`. In both cases the condition update is part of the single `updateStatus` call at the end of the reconcile — the engine controller performs exactly one status write per reconcile loop, never two.
 
