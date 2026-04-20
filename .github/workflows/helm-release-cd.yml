@@ -2,9 +2,8 @@
 name: Helm - Release CD
 
 env:
+  AWS_CONTAINER_REGISTRY: 000000000000.dkr.ecr.us-east-1.amazonaws.com
   HELM_CHARTS_NAMESPACE: helm-charts
-  GHCR_REGISTRY: ghcr.io
-  GHCR_ORG: firebolt-db
 
 on:
   push:
@@ -23,7 +22,6 @@ jobs:
     permissions:
       id-token: write
       contents: write
-      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -50,15 +48,6 @@ jobs:
         with:
           app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
           private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
-
-      - name: Generate GHCR token
-        if: steps.check.outputs.proceed != 'false'
-        id: ghcr-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
-        with:
-          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
-          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
-          owner: ${{ env.GHCR_ORG }}
 
       - name: Determine chart version
         if: steps.check.outputs.proceed != 'false'
@@ -127,11 +116,9 @@ jobs:
         with:
           version: "latest"
 
-      - name: Login to GitHub Container Registry (Helm)
+      - name: Login to Amazon ECR
         if: steps.check.outputs.proceed != 'false'
-        run: |
-          echo "${{ steps.ghcr-token.outputs.token }}" \
-            | helm registry login ${{ env.GHCR_REGISTRY }} --username x-access-token --password-stdin
+        uses: firebolt-analytics/gha-workflows/.github/actions/ecr-login@6c80e1ec32794898d18d86160862131160b4ceba # v3.3.1
 
       - name: Package Helm chart
         if: steps.check.outputs.proceed != 'false'
@@ -140,13 +127,13 @@ jobs:
           helm package helm/firebolt-kubernetes-operator --destination /tmp/helm-packages
           echo "Packaged: $(ls /tmp/helm-packages)"
 
-      - name: Push chart to GitHub Container Registry
+      - name: Push chart to Amazon ECR
         if: steps.check.outputs.proceed != 'false'
         run: |
           helm push \
             /tmp/helm-packages/firebolt-kubernetes-operator-${{ steps.chart.outputs.chart_version }}.tgz \
-            oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}
-          echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to GHCR"
+            oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}
+          echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to ECR"
 
       - name: Job summary
         if: steps.check.outputs.proceed != 'false'
@@ -157,10 +144,10 @@ jobs:
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Chart** | \`firebolt-kubernetes-operator\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Version** | \`${{ steps.chart.outputs.chart_version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Registry** | \`oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Registry** | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "#### Install" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
-          echo "helm install firebolt-operator oci://${{ env.GHCR_REGISTRY }}/${{ env.GHCR_ORG }}/${{ env.HELM_CHARTS_NAMESPACE }}/firebolt-kubernetes-operator --version ${{ steps.chart.outputs.chart_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "helm install firebolt-operator oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}/firebolt-kubernetes-operator --version ${{ steps.chart.outputs.chart_version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
 
