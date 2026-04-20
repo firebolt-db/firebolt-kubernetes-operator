@@ -1,3 +1,31 @@
+# 0.1.5
+
+appVersion: v1.3.0
+
+## [1.3.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.2.1...v1.3.0) (2026-04-20)
+
+
+### Features
+
+* add CLAUDE.md (FB-700) ([c45ae2f](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/c45ae2fef3fbb3aba2885220fe3f8278034abab2))
+* add GH workflow to run TLC (FB-700) ([f5678c9](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/f5678c913be5798d4e036ee122fbdb134645b00e))
+* add TLA+ spec (FB-700) ([d92662e](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/d92662e0e56261dbe2b8c0240d3d1071d0c0e433))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.4 (appVersion v1.2.1) ([bb659ea](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/bb659ea16ec6c19e949f64e2a260d35d07b13167))
+
+
+### Bug fixes
+
+* **formal:** correct TLC violations in FireboltEngine spec (FB-700) ([1010410](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/101041045a1f27778fb463dff3a45faa735b3724))
+* **formal:** fix two more TLC violations in FireboltEngine spec (FB-700) ([254cf83](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/254cf834cfc8ef1bdd79f9c5aa0c341e8fd9a75f))
+* **formal:** reset podsReady in SpecDrift_AtMax action (FB-700) ([3284470](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/3284470853489a55acaa3bd4511718ee0a34fd0a))
+* use latest Core image (FB-700) ([db42176](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/db421766c42170a6c7677bae083f7d969e84b6c4))
+
+
+
 # 0.1.4
 
 appVersion: v1.2.1
