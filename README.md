@@ -169,7 +169,7 @@ All associated resources are cleaned up automatically.
 | `spec.metadata.resources` | No | (operator default) | CPU/memory for metadata service pods |
 | `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
 | `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
-| `spec.gateway.image` | No | `envoyproxy/envoy:v1.33-latest` | Override the Envoy container image |
+| `spec.gateway.image` | No | `envoyproxy/envoy:v1.37.2` | Override the Envoy container image |
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods |
 | `spec.gateway.resources` | No | (operator default) | CPU/memory for gateway pods |
 | `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |
