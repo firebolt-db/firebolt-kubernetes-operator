@@ -66,11 +66,14 @@ jobs:
         run: |
           CURR_VERSION=$(yq '.version' helm/firebolt-kubernetes-operator/Chart.yaml)
           APP_VERSION=$(yq '.appVersion' helm/firebolt-kubernetes-operator/Chart.yaml)
+          CRD_CURR=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
+          NEEDS_COMMIT=false
 
-          # workflow_dispatch: publish the version already in Chart.yaml.
+          # workflow_dispatch: publish the versions already in Chart.yaml.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
-            echo "Releasing existing chart version $CURR_VERSION (appVersion: $APP_VERSION)"
+            echo "crd_chart_version=$CRD_CURR" >> "$GITHUB_OUTPUT"
+            echo "Releasing existing versions: operator=$CURR_VERSION crds=$CRD_CURR (appVersion: $APP_VERSION)"
             exit 0
           fi
 
@@ -79,58 +82,66 @@ jobs:
           if [ "$PREV_VERSION" != "$CURR_VERSION" ]; then
             echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
             echo "Chart.version already bumped ($PREV_VERSION -> $CURR_VERSION); using as-is."
-            exit 0
-          fi
-
-          # ── Auto-bump based on conventional-commit message ────────────────
-          COMMIT_MSG=$(git log --format='%s' -1)
-          COMMIT_BODY=$(git log --format='%b' -1)
-
-          MAJOR=$(echo "$CURR_VERSION" | cut -d. -f1)
-          MINOR=$(echo "$CURR_VERSION" | cut -d. -f2)
-          PATCH=$(echo "$CURR_VERSION" | cut -d. -f3)
-
-          if echo "$COMMIT_BODY" | grep -qi 'BREAKING CHANGE'; then
-            NEW_VERSION="$((MAJOR + 1)).0.0"
-            BUMP_TYPE="major"
-          elif echo "$COMMIT_MSG" | grep -qE '^feat(\(|:)'; then
-            NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
-            BUMP_TYPE="minor"
           else
-            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-            BUMP_TYPE="patch"
+            # ── Auto-bump based on conventional-commit message ────────────────
+            COMMIT_MSG=$(git log --format='%s' -1)
+            COMMIT_BODY=$(git log --format='%b' -1)
+
+            MAJOR=$(echo "$CURR_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$CURR_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$CURR_VERSION" | cut -d. -f3)
+
+            if echo "$COMMIT_BODY" | grep -qi 'BREAKING CHANGE'; then
+              CURR_VERSION="$((MAJOR + 1)).0.0"
+              BUMP_TYPE="major"
+            elif echo "$COMMIT_MSG" | grep -qE '^feat(\(|:)'; then
+              CURR_VERSION="$MAJOR.$((MINOR + 1)).0"
+              BUMP_TYPE="minor"
+            else
+              CURR_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              BUMP_TYPE="patch"
+            fi
+
+            echo "Auto $BUMP_TYPE bump: operator chart -> $CURR_VERSION (commit: $COMMIT_MSG)"
+            yq -i ".version = \"$CURR_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
+            echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
+            NEEDS_COMMIT=true
           fi
 
-          echo "Auto $BUMP_TYPE bump: $CURR_VERSION -> $NEW_VERSION (commit: $COMMIT_MSG)"
+          # ── Bump CRD chart version ────────────────
+          CRD_PREV=$(git show HEAD~1:helm/firebolt-operator-crds/Chart.yaml 2>/dev/null | yq '.version' 2>/dev/null || echo "")
+          if [ "$CRD_PREV" != "$CRD_CURR" ] && [ -n "$CRD_PREV" ]; then
+            echo "CRD chart already bumped ($CRD_PREV -> $CRD_CURR); using as-is."
+          else
+            CRD_MAJ=$(echo "$CRD_CURR" | cut -d. -f1)
+            CRD_MIN=$(echo "$CRD_CURR" | cut -d. -f2)
+            CRD_PAT=$(echo "$CRD_CURR" | cut -d. -f3)
+            CRD_CURR="$CRD_MAJ.$CRD_MIN.$((CRD_PAT + 1))"
+            yq -i ".version = \"$CRD_CURR\"" helm/firebolt-operator-crds/Chart.yaml
+            NEEDS_COMMIT=true
+          fi
+          echo "crd_chart_version=$CRD_CURR" >> "$GITHUB_OUTPUT"
 
-          yq -i ".version = \"$NEW_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
+          if [ "$NEEDS_COMMIT" = "true" ]; then
+            make helm-docs
 
-          CRD_CURR=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
-          CRD_MAJ=$(echo "$CRD_CURR" | cut -d. -f1)
-          CRD_MIN=$(echo "$CRD_CURR" | cut -d. -f2)
-          CRD_PAT=$(echo "$CRD_CURR" | cut -d. -f3)
-          CRD_NEW="$CRD_MAJ.$CRD_MIN.$((CRD_PAT + 1))"
-          yq -i ".version = \"$CRD_NEW\"" helm/firebolt-operator-crds/Chart.yaml
+            COMMIT_MSG=${COMMIT_MSG:-$(git log --format='%s' -1)}
+            printf "# %s\n\n%s\n\n" "$CURR_VERSION" "$COMMIT_MSG" \
+              | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
+            mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
 
-          make helm-docs
-
-          printf "# %s\n\n%s\n\n" "$NEW_VERSION" "$COMMIT_MSG" \
-            | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
-          mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config credential.helper '!f() { echo "password=${GITHUB_TOKEN}"; }; f'
-          git add helm/firebolt-kubernetes-operator/Chart.yaml \
-                  helm/firebolt-kubernetes-operator/CHANGELOG.md \
-                  helm/firebolt-kubernetes-operator/README.md \
-                  helm/firebolt-operator-crds/Chart.yaml \
-                  helm/firebolt-operator-crds/README.md
-          git diff --cached --name-only
-          git commit -m "chore(helm): bump chart to $NEW_VERSION"
-          git push https://x-access-token@github.com/${GITHUB_REPOSITORY}.git HEAD:main
-
-          echo "chart_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config credential.helper '!f() { echo "password=${GITHUB_TOKEN}"; }; f'
+            git add helm/firebolt-kubernetes-operator/Chart.yaml \
+                    helm/firebolt-kubernetes-operator/CHANGELOG.md \
+                    helm/firebolt-kubernetes-operator/README.md \
+                    helm/firebolt-operator-crds/Chart.yaml \
+                    helm/firebolt-operator-crds/README.md
+            git diff --cached --name-only
+            git commit -m "chore(helm): bump charts to operator=$CURR_VERSION crds=$CRD_CURR"
+            git push https://x-access-token@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+          fi
 
       - name: Set up Helm
         if: steps.check.outputs.proceed != 'false'
@@ -162,11 +173,10 @@ jobs:
       - name: Job summary
         if: steps.check.outputs.proceed != 'false'
         run: |
-          CRD_VERSION=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
           echo "### Helm Charts Published :package:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Chart | Version | Registry |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|---------|----------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| \`firebolt-kubernetes-operator\` | \`${{ steps.chart.outputs.chart_version }}\` | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| \`firebolt-operator-crds\` | \`${CRD_VERSION}\` | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`firebolt-operator-crds\` | \`${{ steps.chart.outputs.crd_chart_version }}\` | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
 

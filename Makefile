@@ -174,6 +174,7 @@ helm-lint: ## Lint the Helm charts.
 .PHONY: helm-template
 helm-template: ## Render Helm chart templates locally.
 	helm template firebolt-operator $(HELM_CHART_DIR)
+	helm template firebolt-crds $(HELM_CRD_CHART_DIR)
 
 .PHONY: helm-package
 helm-package: ## Package the Helm charts into dist/.
