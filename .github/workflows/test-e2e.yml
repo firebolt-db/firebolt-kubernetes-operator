@@ -81,6 +81,7 @@ jobs:
         run: make test-e2e KIND_CLUSTER="e2e-${{ matrix.name }}" GINKGO_FOCUS="${{ matrix.focus }}"
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
+          E2E_ARTIFACT_DIR: ${{ github.workspace }}
 
       - name: E2E failure summary (JUnit)
         if: always()
@@ -96,4 +97,5 @@ jobs:
           path: |
             e2e-report.xml
             test.log
+            pod-logs/
           retention-days: 7
