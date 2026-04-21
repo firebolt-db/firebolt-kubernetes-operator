@@ -164,13 +164,24 @@ func (m *engineSim) gcStaleSTSes() {
 	}
 }
 
+// checkRequeue enforces Inv_AlwaysRequeues: every computeEngineReconcile call
+// must schedule a follow-up reconcile. A result with neither Requeue nor
+// RequeueAfter would silently strand the engine in a non-terminal phase.
+func checkRequeue(t *rapid.T, result *EngineReconcileResult) {
+	if !result.Requeue && result.RequeueAfter == 0 {
+		t.Fatalf("Inv_AlwaysRequeues: result has neither Requeue nor RequeueAfter (phase=%s)",
+			result.Status.Phase)
+	}
+}
+
 // Reconcile runs a full reconcile cycle and applies all results including status.
 // When the resulting phase is Stable it also runs GC, mirroring the real controller.
-func (m *engineSim) Reconcile(_ *rapid.T) {
+func (m *engineSim) Reconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
 		propEngineName, propNamespace, 0, testInstanceInfo(),
 	)
+	checkRequeue(t, &result)
 	m.applyResult(&result, true)
 	if m.status.Phase == computev1alpha1.PhaseStable {
 		m.gcStaleSTSes()
@@ -180,11 +191,12 @@ func (m *engineSim) Reconcile(_ *rapid.T) {
 // CrashReconcile applies only the resource writes — not the status update.
 // Simulates a crash in applyEngineState between the last resource write and
 // the updateStatus call.  The following Reconcile exercises crash recovery.
-func (m *engineSim) CrashReconcile(_ *rapid.T) {
+func (m *engineSim) CrashReconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
 		propEngineName, propNamespace, 0, testInstanceInfo(),
 	)
+	checkRequeue(t, &result)
 	m.applyResult(&result, false)
 }
 
