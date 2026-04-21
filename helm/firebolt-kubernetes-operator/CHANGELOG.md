@@ -1,3 +1,22 @@
+# 0.1.8
+
+appVersion: v1.5.1
+
+### [1.5.1](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.5.0...v1.5.1) (2026-04-21)
+
+
+### Bug fixes
+
+* **docker:** include go:embed defaults.env in the CI build context ([2cec4cc](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2cec4ccc2c443de925e5995c92ffd89f46426f8c))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.7 (appVersion v1.5.0) ([27b5e58](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/27b5e58d1220b4e52200e9ab39db86c452606c60))
+* **helm:** regenerate README after chart bumps 0.1.5 -> 0.1.7 (FB-553) ([a1f26d5](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/a1f26d5600ce0dbea1f95d7b6d75621560dbe478))
+
+
+
 # 0.1.7
 
 appVersion: v1.5.0

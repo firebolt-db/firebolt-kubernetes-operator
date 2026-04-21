@@ -1,6 +1,6 @@
 # firebolt-kubernetes-operator
 
-![Version: 0.1.7](https://img.shields.io/badge/Version-0.1.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.5.0](https://img.shields.io/badge/AppVersion-v1.5.0-informational?style=flat-square)
+![Version: 0.1.8](https://img.shields.io/badge/Version-0.1.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.5.1](https://img.shields.io/badge/AppVersion-v1.5.1-informational?style=flat-square)
 
 Helm chart for the Firebolt Kubernetes Operator
 
@@ -9,7 +9,7 @@ Helm chart for the Firebolt Kubernetes Operator
 ```bash
 helm install firebolt-operator \
   oci://000000000000.dkr.ecr.us-east-1.amazonaws.com/helm-charts/firebolt-kubernetes-operator \
-  --version 0.1.7
+  --version 0.1.8
 ```
 
 ## Maintainers
