@@ -91,6 +91,8 @@ func (m *engineSim) buildState() EngineState {
 			// STS already deleted — treat drain as complete.
 			state.DrainingPodsDrained = true
 		}
+		state.DrainingConfigMap = m.configMaps[dg]
+		state.DrainingHeadlessSvc = m.headlessSvcs[dg]
 	}
 
 	if m.clusterSvc != nil {
