@@ -119,7 +119,6 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 //   - The gateway requires an X-Firebolt-Engine header on every request.
 //   - The Lua filter validates the header value matches an RFC 1123 DNS label
 //     (so it cannot inject a path into :authority, cross namespaces, etc.),
-//     unconditionally appends advanced_mode=true to the query string, and
 //     rewrites :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
 //   - The dynamic_forward_proxy cluster resolves that hostname at request time.
 //     With the engine Service being headless, DNS returns the set of ready pod
@@ -202,16 +201,6 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             if not is_valid_engine(engine) then
                               handle:respond({[":status"] = "400"}, "invalid or missing X-Firebolt-Engine header")
                               return
-                            end
-
-                            -- Unconditionally append advanced_mode=true. The
-                            -- engine accepts the flag regardless of how it is
-                            -- configured; clients don't need to know or set it.
-                            local path = handle:headers():get(":path")
-                            if path:find("?", 1, true) then
-                              handle:headers():replace(":path", path .. "&advanced_mode=true")
-                            else
-                              handle:headers():replace(":path", path .. "?advanced_mode=true")
                             end
 
                             handle:headers():replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
@@ -348,7 +337,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # the engine's dedicated health/metrics port, rather than the query
       # port (3473) that query traffic uses. This is the same port the
       # Kubernetes readiness probe targets, so Envoy and kube-proxy agree
-      # on pod health. (alt_port is deprecated in favour of per-endpoint
+      # on pod health. (alt_port is deprecated in favor of per-endpoint
       # overrides in newer Envoy releases; for a DFP cluster with
       # dynamically resolved endpoints it remains the only viable option.)
       health_checks:

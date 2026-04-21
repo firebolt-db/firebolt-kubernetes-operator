@@ -714,7 +714,7 @@ func kubectlArgs(args ...string) []string {
 // inside a client pod. The podName must reference a pod previously created
 // with CreateClientPod.
 func RunQuery(ctx context.Context, podName, engineName, query string) (string, error) {
-	url := fmt.Sprintf("http://%s-service.%s.svc.cluster.local:3473/?query_label=e2e-test&output_format=JSON_Compact&advanced_mode=true",
+	url := fmt.Sprintf("http://%s-service.%s.svc.cluster.local:3473/?query_label=e2e-test&output_format=JSON_Compact",
 		engineName, testNamespace)
 	return execCurlQuery(ctx, podName, url, query)
 }
@@ -1214,7 +1214,7 @@ func WaitForGatewayReplicas(ctx context.Context, instanceName string, expected i
 // engine based on the X-Firebolt-Engine header.
 func RunQueryViaGateway(ctx context.Context, podName, instanceName, engineName, query string) (string, error) {
 	serviceName := instanceName + controller.SuffixGateway
-	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?query_label=e2e-gateway-test&output_format=JSON_Compact&advanced_mode=true",
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?query_label=e2e-gateway-test&output_format=JSON_Compact",
 		serviceName, testNamespace)
 	return execCurlQuery(ctx, podName, url, query, "X-Firebolt-Engine: "+engineName)
 }

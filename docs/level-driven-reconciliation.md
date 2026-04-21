@@ -370,7 +370,7 @@ The Envoy gateway proxy acts as the entry point for client queries and is the on
 
 The gateway ConfigMap (`{instance}-gateway-config`) is a **pure function of the FireboltInstance** — it does not depend on the set of engines. The operator does not regenerate it on engine create/delete/scale/blue-green events, so those events never trigger a gateway rollout. The configuration contains:
 
-- A Lua HTTP filter that validates `X-Firebolt-Engine` as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 chars, no leading or trailing hyphen, no dots), unconditionally appends `advanced_mode=true` to the request path's query string, and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`.
+- A Lua HTTP filter that validates `X-Firebolt-Engine` as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 chars, no leading or trailing hyphen, no dots) and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`.
 - A dynamic forward proxy cluster with `dns_refresh_rate: 1s` and `host_ttl: 5s`, so newly-ready pods enter the gateway's pool quickly and draining pods fall out without a long stale-entry window.
 - A route-level retry policy that retries only transport-level failures (`connect-failure`, `refused-stream`, `reset`) with `num_retries: 2`. 5xx responses are **not** retried, because once an engine has returned a 5xx it may have already executed side effects and a retry could duplicate work. The retries exist purely to hide the brief endpoint-propagation window after a pod becomes not-ready.
 - An admin listener on port 9901 used by the gateway container's `preStop` hook (`POST /healthcheck/fail`) to gracefully fail readiness before SIGTERM.
