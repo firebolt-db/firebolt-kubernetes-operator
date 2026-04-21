@@ -29,6 +29,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -300,6 +301,48 @@ func DeleteEngine(ctx context.Context, name string) error {
 	return err
 }
 
+// podLogDir returns the directory used for pod log dumps. In CI it is rooted
+// at $E2E_ARTIFACT_DIR so the workflow can upload the whole tree as an
+// artifact; locally it falls back to pod-logs/ in the working directory.
+func podLogDir() string {
+	if dir := os.Getenv("E2E_ARTIFACT_DIR"); dir != "" {
+		return filepath.Join(dir, "pod-logs")
+	}
+	return "pod-logs"
+}
+
+// dumpPodLogs streams the full log for podName to <podLogDir>/<podName>.log
+// for artifact collection, and returns the last tailLines lines as a string
+// for inline diagnostic output. Errors are silently swallowed so a log-fetch
+// failure never masks the real test failure.
+func dumpPodLogs(ctx context.Context, podName string, tailLines int) string {
+	dir := podLogDir()
+	_ = os.MkdirAll(dir, 0o755)
+
+	// Full dump streamed directly to disk — avoids buffering large logs in memory.
+	fullStream, err := k8sClient.CoreV1().Pods(testNamespace).
+		GetLogs(podName, &corev1.PodLogOptions{}).Stream(ctx)
+	if err == nil {
+		logPath := filepath.Join(dir, podName+".log")
+		if f, ferr := os.Create(logPath); ferr == nil {
+			_, _ = io.Copy(f, fullStream)
+			f.Close()
+		}
+		fullStream.Close()
+	}
+
+	// Tail for inline display — a second API call so we don't re-read the file.
+	n := int64(tailLines)
+	tailStream, err := k8sClient.CoreV1().Pods(testNamespace).
+		GetLogs(podName, &corev1.PodLogOptions{TailLines: &n}).Stream(ctx)
+	if err != nil {
+		return ""
+	}
+	defer tailStream.Close()
+	buf, _ := io.ReadAll(tailStream)
+	return string(buf)
+}
+
 // WaitForEngineReady waits for all pods in an engine to be ready AND for the
 // engine service to have ready endpoint addresses. Checking both ensures that
 // kube-proxy/iptables rules have been updated and the service is routable.
@@ -385,16 +428,9 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 				}
 			}
 			if !isReady && pod.Status.Phase == corev1.PodRunning {
-				tailLines := int64(30)
-				logOpts := &corev1.PodLogOptions{TailLines: &tailLines}
-				req := k8sClient.CoreV1().Pods(testNamespace).GetLogs(pod.Name, logOpts)
-				logStream, logErr := req.Stream(ctx)
-				if logErr == nil {
-					logBytes, _ := io.ReadAll(io.LimitReader(logStream, 4096))
-					logStream.Close()
-					if len(logBytes) > 0 {
-						diag += fmt.Sprintf("\n  Logs for unready pod %s:\n%s", pod.Name, string(logBytes))
-					}
+				if tail := dumpPodLogs(ctx, pod.Name, 50); tail != "" {
+					diag += fmt.Sprintf("\n  Last 50 log lines for unready pod %s (full log → pod-logs/%s.log):\n%s",
+						pod.Name, pod.Name, tail)
 				}
 			}
 		}
@@ -998,6 +1034,12 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 				}
 				if cs.RestartCount > 0 {
 					diag += fmt.Sprintf(" restarts=%d", cs.RestartCount)
+				}
+			}
+			if pod.Status.Phase == corev1.PodRunning {
+				if tail := dumpPodLogs(ctx, pod.Name, 50); tail != "" {
+					diag += fmt.Sprintf("\n    Last 50 log lines (full log → pod-logs/%s.log):\n%s",
+						pod.Name, tail)
 				}
 			}
 		}
