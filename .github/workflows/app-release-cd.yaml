@@ -92,10 +92,15 @@ jobs:
           yq -i ".appVersion = \"$TAG\""           helm/firebolt-kubernetes-operator/Chart.yaml
           yq -i ".version    = \"$CHART_VERSION\""  helm/firebolt-kubernetes-operator/Chart.yaml
 
-          # Regenerate helm chart README so the badges and install snippet
-          # reflect the new version. Without this, the subsequent PR's lint
-          # step (which enforces helm-docs freshness) fails until someone
-          # manually regenerates.
+          CRD_CURRENT=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
+          CRD_MAJOR=$(echo "$CRD_CURRENT" | cut -d. -f1)
+          CRD_MINOR=$(echo "$CRD_CURRENT" | cut -d. -f2)
+          CRD_PATCH=$(echo "$CRD_CURRENT" | cut -d. -f3)
+          CRD_CHART_VERSION="$CRD_MAJOR.$CRD_MINOR.$((CRD_PATCH + 1))"
+
+          yq -i ".appVersion = \"$TAG\""               helm/firebolt-operator-crds/Chart.yaml
+          yq -i ".version    = \"$CRD_CHART_VERSION\""  helm/firebolt-operator-crds/Chart.yaml
+
           make helm-docs
 
           printf "# %s\n\nappVersion: %s\n\n%s\n\n" \
@@ -107,7 +112,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add helm/firebolt-kubernetes-operator/Chart.yaml \
                   helm/firebolt-kubernetes-operator/CHANGELOG.md \
-                  helm/firebolt-kubernetes-operator/README.md
+                  helm/firebolt-kubernetes-operator/README.md \
+                  helm/firebolt-operator-crds/Chart.yaml \
+                  helm/firebolt-operator-crds/README.md
           git diff --cached --name-only
           git commit -m "chore(helm): bump chart to $CHART_VERSION (appVersion $TAG)"
           git push "https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
