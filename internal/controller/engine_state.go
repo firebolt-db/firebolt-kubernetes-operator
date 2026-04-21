@@ -61,13 +61,90 @@ func (e *DrainProbeError) Error() string {
 
 func (e *DrainProbeError) Unwrap() error { return e.Err }
 
+// rawEngineResources holds already-fetched cluster resources before the
+// status-based guards are applied. Fields are nil / zero when the resource
+// was not found or when the caller determined it was not needed.
+//
+// Separating I/O (getEngineState) from field-population logic
+// (assembleEngineState) lets property tests call assembleEngineState
+// directly with in-memory data and exercise the same guards as production.
+type rawEngineResources struct {
+	CurrentSTS         *appsv1.StatefulSet
+	CurrentConfigMap   *corev1.ConfigMap
+	CurrentHeadlessSvc *corev1.Service
+	CurrentPodsReady   bool
+	CurrentPodTotal    int
+	CurrentPodReady    int
+
+	DrainingSTS         *appsv1.StatefulSet
+	DrainingConfigMap   *corev1.ConfigMap
+	DrainingHeadlessSvc *corev1.Service
+	// DrainingPodsDrained is the result of the drain check, or true when the
+	// caller determined drain should be skipped for spec reasons
+	// (RolloutRecreate, DrainCheckEnabled=false). assembleEngineState
+	// additionally forces it true when DrainingSTS is nil.
+	DrainingPodsDrained bool
+
+	ClusterService *corev1.Service
+}
+
+// assembleEngineState builds an EngineState from pre-fetched resources,
+// applying the same status-based guards used in getEngineState. It is a
+// pure function (no I/O) so that tests can call it with in-memory data.
+func assembleEngineState(
+	status *computev1alpha1.FireboltEngineStatus,
+	raw rawEngineResources,
+) (EngineState, error) {
+	state := EngineState{ClusterServiceTargetGen: -1}
+
+	currentGen := status.CurrentGeneration
+
+	drainingGen := -1
+	if status.DrainingGeneration != nil {
+		drainingGen = *status.DrainingGeneration
+	}
+
+	if currentGen >= 0 {
+		state.CurrentSTS = raw.CurrentSTS
+		state.CurrentConfigMap = raw.CurrentConfigMap
+		state.CurrentHeadlessSvc = raw.CurrentHeadlessSvc
+		if raw.CurrentSTS != nil {
+			state.CurrentPodsReady = raw.CurrentPodsReady
+			state.CurrentPodTotal = raw.CurrentPodTotal
+			state.CurrentPodReady = raw.CurrentPodReady
+		}
+	}
+
+	if drainingGen >= 0 && drainingGen != currentGen {
+		state.DrainingSTS = raw.DrainingSTS
+		state.DrainingConfigMap = raw.DrainingConfigMap
+		state.DrainingHeadlessSvc = raw.DrainingHeadlessSvc
+		if raw.DrainingSTS == nil {
+			state.DrainingPodsDrained = true
+		} else {
+			state.DrainingPodsDrained = raw.DrainingPodsDrained
+		}
+	}
+
+	if raw.ClusterService != nil {
+		state.ClusterService = raw.ClusterService
+		if genStr, ok := raw.ClusterService.Spec.Selector[LabelGeneration]; ok {
+			g, err := strconv.Atoi(genStr)
+			if err != nil {
+				return EngineState{}, fmt.Errorf("parsing %s label %q on cluster service: %w",
+					LabelGeneration, genStr, err)
+			}
+			state.ClusterServiceTargetGen = g
+		}
+	}
+
+	return state, nil
+}
+
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
 // Services, ConfigMaps, pod readiness, and drain status.
 func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
-	state := EngineState{
-		ClusterServiceTargetGen: -1,
-	}
 
 	engineName := engine.Name
 	ns := engine.Namespace
@@ -75,59 +152,56 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 
 	currentGen := status.CurrentGeneration
 
-	var drainingGen = -1
+	drainingGen := -1
 	if status.DrainingGeneration != nil {
 		drainingGen = *status.DrainingGeneration
 	}
 
-	if currentGen >= 0 {
-		var err error
-		if state.CurrentSTS, err = r.getStatefulSet(ctx, engineName, ns, currentGen); err != nil {
-			return state, err
-		}
-		if state.CurrentConfigMap, err = r.getConfigMap(ctx, engineName, ns, currentGen); err != nil {
-			return state, err
-		}
-		if state.CurrentHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, currentGen); err != nil {
-			return state, err
-		}
+	var raw rawEngineResources
+	var err error
 
-		if state.CurrentSTS != nil {
-			allReady, total, ready, err := r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
+	if currentGen >= 0 {
+		if raw.CurrentSTS, err = r.getStatefulSet(ctx, engineName, ns, currentGen); err != nil {
+			return EngineState{}, err
+		}
+		if raw.CurrentConfigMap, err = r.getConfigMap(ctx, engineName, ns, currentGen); err != nil {
+			return EngineState{}, err
+		}
+		if raw.CurrentHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, currentGen); err != nil {
+			return EngineState{}, err
+		}
+		if raw.CurrentSTS != nil {
+			raw.CurrentPodsReady, raw.CurrentPodTotal, raw.CurrentPodReady, err =
+				r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
 			if err != nil {
-				return state, fmt.Errorf("checkPodsReady (gen %d): %w", currentGen, err)
+				return EngineState{}, fmt.Errorf("checkPodsReady (gen %d): %w", currentGen, err)
 			}
-			state.CurrentPodsReady = allReady
-			state.CurrentPodTotal = total
-			state.CurrentPodReady = ready
 		}
 	}
 
 	if drainingGen >= 0 && drainingGen != currentGen {
-		var err error
-		if state.DrainingSTS, err = r.getStatefulSet(ctx, engineName, ns, drainingGen); err != nil {
-			return state, err
+		if raw.DrainingSTS, err = r.getStatefulSet(ctx, engineName, ns, drainingGen); err != nil {
+			return EngineState{}, err
 		}
-		if state.DrainingConfigMap, err = r.getConfigMap(ctx, engineName, ns, drainingGen); err != nil {
-			return state, err
+		if raw.DrainingConfigMap, err = r.getConfigMap(ctx, engineName, ns, drainingGen); err != nil {
+			return EngineState{}, err
 		}
-		if state.DrainingHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, drainingGen); err != nil {
-			return state, err
+		if raw.DrainingHeadlessSvc, err = r.getHeadlessService(ctx, engineName, ns, drainingGen); err != nil {
+			return EngineState{}, err
 		}
 
 		drainCheckDisabled := engine.Spec.DrainCheckEnabled != nil && !*engine.Spec.DrainCheckEnabled
-		skipDrain := state.DrainingSTS == nil ||
-			engine.Spec.Rollout == computev1alpha1.RolloutRecreate ||
-			drainCheckDisabled
+		skipDrain := engine.Spec.Rollout == computev1alpha1.RolloutRecreate || drainCheckDisabled
 
-		if skipDrain {
-			state.DrainingPodsDrained = true
-		} else {
+		// DrainingSTS == nil is handled by assembleEngineState (sets DrainingPodsDrained=true).
+		if raw.DrainingSTS != nil && !skipDrain {
 			drained, err := r.checkDrainComplete(ctx, engine, drainingGen)
 			if err != nil {
-				return state, fmt.Errorf("checkDrainComplete (gen %d): %w", drainingGen, err)
+				return EngineState{}, fmt.Errorf("checkDrainComplete (gen %d): %w", drainingGen, err)
 			}
-			state.DrainingPodsDrained = drained
+			raw.DrainingPodsDrained = drained
+		} else {
+			raw.DrainingPodsDrained = true
 		}
 	}
 
@@ -135,18 +209,19 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 	clusterSvc := &corev1.Service{}
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterSvcName, Namespace: ns}, clusterSvc); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return state, fmt.Errorf("failed to get cluster service: %w", err)
+			return EngineState{}, fmt.Errorf("failed to get cluster service: %w", err)
 		}
 		log.Info("Cluster service not found", "name", clusterSvcName)
 	} else {
-		state.ClusterService = clusterSvc
-		if genStr, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
-			g, err := strconv.Atoi(genStr)
-			if err != nil {
-				return state, fmt.Errorf("parsing %s label %q on service %s: %w", LabelGeneration, genStr, clusterSvcName, err)
-			}
-			state.ClusterServiceTargetGen = g
-		}
+		raw.ClusterService = clusterSvc
+	}
+
+	state, err := assembleEngineState(status, raw)
+	if err != nil {
+		return EngineState{}, err
+	}
+
+	if state.ClusterService != nil {
 		log.Info("Cluster service state",
 			"name", clusterSvcName,
 			"targetGen", state.ClusterServiceTargetGen,
