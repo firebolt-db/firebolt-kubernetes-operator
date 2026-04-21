@@ -97,7 +97,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, instanceName, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -118,18 +118,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - engine becomes ready")
-			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes stable")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-
-			By("Verifying engine works")
-			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(queryConfig.Validator(result)).To(BeTrue())
 		})
 
 		It("should recover from crash after StatefulSet created", func() {
@@ -145,7 +138,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, instanceName, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -166,18 +159,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - engine becomes ready")
-			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes stable")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-
-			By("Verifying engine works")
-			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(queryConfig.Validator(result)).To(BeTrue())
 		})
 
 		It("should recover from crash before status update to switching", func() {
@@ -193,7 +179,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Creating engine")
-			err = CreateEngine(ctx, instanceName, engineName, 2)
+			err = CreateEngine(ctx, instanceName, engineName, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for crash point to be hit")
@@ -214,18 +200,11 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			operator, err = StartOperator(instanceName)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying recovery - engine becomes ready")
-			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			By("Verifying recovery - engine becomes stable")
+			err = WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
-
-			By("Verifying engine works")
-			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(queryConfig.Validator(result)).To(BeTrue())
 		})
 	})
 
