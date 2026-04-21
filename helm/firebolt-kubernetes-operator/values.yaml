@@ -1,3 +1,4 @@
+---
 # Default values for firebolt-kubernetes-operator.
 
 # -- Number of operator replicas.
@@ -68,6 +69,8 @@ additionalArgs: []
 # -- Additional environment variables for the operator container.
 additionalEnv: []
 
+# -- CPU/memory resource requests and limits for the operator pod.
+# @default -- requests: 10m/64Mi, limits: 500m/128Mi
 resources:
   limits:
     cpu: 500m
