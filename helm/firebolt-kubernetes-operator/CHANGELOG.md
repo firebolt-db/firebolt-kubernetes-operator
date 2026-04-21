@@ -1,3 +1,29 @@
+# 0.1.9
+
+appVersion: v1.6.0
+
+## [1.6.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.5.1...v1.6.0) (2026-04-21)
+
+
+### Features
+
+* **helm:** add CRD chart and move operator CRDs to crds/ directory (FB-553) ([1de6146](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/1de61469d45c36653e130ac64cdaef75240df3a3))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.8 (appVersion v1.5.1) ([2890afe](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2890afeaa71b55a59f0c659844c8277cb2466335))
+* **helm:** regenerate READMEs with helm-docs v1.14.2 footer (FB-553) ([97b0f32](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/97b0f32ea86afc9bf29435f1d33436e4dbb7a085))
+
+
+### Bug fixes
+
+* **ci:** add CRD chart to helm-template and fix early-exit version paths (FB-553) ([fb43031](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/fb430311daac8df90710e610a0a827d0c3084b71))
+* **ci:** match commit guard to plural format and skip changelog on CRD-only bumps (FB-553) ([38f69e6](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/38f69e626b0c6484044e6ef70a44220fabd37ec7))
+* **helm:** add empty map to CRD chart values.yaml for helm-docs (FB-553) ([95128a2](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/95128a226787b2b99dda49b198decb10d9f5cd24))
+
+
+
 # 0.1.8
 
 appVersion: v1.5.1
