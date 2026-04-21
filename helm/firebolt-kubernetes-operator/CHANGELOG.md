@@ -1,3 +1,21 @@
+# 0.1.10
+
+appVersion: v1.7.0
+
+## [1.7.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.6.0...v1.7.0) (2026-04-21)
+
+
+### Features
+
+* **test:** add rapid stateful property tests for engine reconciler (FB-700) ([1437bc5](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/1437bc5657a338a3717cdfb833a9c7848611aff8))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.9 (appVersion v1.6.0) ([2f3b54f](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2f3b54f30f839ff4a54a633b36e133ad9ba0621e))
+
+
+
 # 0.1.9
 
 appVersion: v1.6.0
