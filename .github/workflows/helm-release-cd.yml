@@ -105,10 +105,13 @@ jobs:
 
           yq -i ".version = \"$NEW_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
 
-          # Regenerate helm chart README so the badges and install snippet
-          # reflect the new version. Without this, the subsequent PR's lint
-          # step (which enforces helm-docs freshness) fails until someone
-          # manually regenerates.
+          CRD_CURR=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
+          CRD_MAJ=$(echo "$CRD_CURR" | cut -d. -f1)
+          CRD_MIN=$(echo "$CRD_CURR" | cut -d. -f2)
+          CRD_PAT=$(echo "$CRD_CURR" | cut -d. -f3)
+          CRD_NEW="$CRD_MAJ.$CRD_MIN.$((CRD_PAT + 1))"
+          yq -i ".version = \"$CRD_NEW\"" helm/firebolt-operator-crds/Chart.yaml
+
           make helm-docs
 
           printf "# %s\n\n%s\n\n" "$NEW_VERSION" "$COMMIT_MSG" \
@@ -120,7 +123,9 @@ jobs:
           git config credential.helper '!f() { echo "password=${GITHUB_TOKEN}"; }; f'
           git add helm/firebolt-kubernetes-operator/Chart.yaml \
                   helm/firebolt-kubernetes-operator/CHANGELOG.md \
-                  helm/firebolt-kubernetes-operator/README.md
+                  helm/firebolt-kubernetes-operator/README.md \
+                  helm/firebolt-operator-crds/Chart.yaml \
+                  helm/firebolt-operator-crds/README.md
           git diff --cached --name-only
           git commit -m "chore(helm): bump chart to $NEW_VERSION"
           git push https://x-access-token@github.com/${GITHUB_REPOSITORY}.git HEAD:main
@@ -137,34 +142,31 @@ jobs:
         if: steps.check.outputs.proceed != 'false'
         uses: firebolt-analytics/gha-workflows/.github/actions/ecr-login@6c80e1ec32794898d18d86160862131160b4ceba # v3.3.1
 
-      - name: Package Helm chart
+      - name: Package Helm charts
         if: steps.check.outputs.proceed != 'false'
         run: |
           mkdir -p /tmp/helm-packages
           helm package helm/firebolt-kubernetes-operator --destination /tmp/helm-packages
+          helm package helm/firebolt-operator-crds --destination /tmp/helm-packages
           echo "Packaged: $(ls /tmp/helm-packages)"
 
-      - name: Push chart to Amazon ECR
+      - name: Push charts to Amazon ECR
         if: steps.check.outputs.proceed != 'false'
         run: |
-          helm push \
-            /tmp/helm-packages/firebolt-kubernetes-operator-${{ steps.chart.outputs.chart_version }}.tgz \
-            oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}
-          echo "Pushed firebolt-kubernetes-operator:${{ steps.chart.outputs.chart_version }} to ECR"
+          ECR="oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}"
+          for tgz in /tmp/helm-packages/*.tgz; do
+            helm push "$tgz" "$ECR"
+            echo "Pushed $(basename "$tgz") to ECR"
+          done
 
       - name: Job summary
         if: steps.check.outputs.proceed != 'false'
         run: |
-          echo "### Helm Chart Published :package:" >> "$GITHUB_STEP_SUMMARY"
+          CRD_VERSION=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
+          echo "### Helm Charts Published :package:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Chart** | \`firebolt-kubernetes-operator\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Version** | \`${{ steps.chart.outputs.chart_version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Registry** | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "#### Install" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
-          echo "helm install firebolt-operator oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}/firebolt-kubernetes-operator --version ${{ steps.chart.outputs.chart_version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Chart | Version | Registry |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|---------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`firebolt-kubernetes-operator\` | \`${{ steps.chart.outputs.chart_version }}\` | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| \`firebolt-operator-crds\` | \`${CRD_VERSION}\` | \`oci://${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
 

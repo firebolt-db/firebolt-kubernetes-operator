@@ -52,11 +52,11 @@ jobs:
             | sudo tar -xz -C /usr/local/bin helm-docs
           helm-docs --version
 
-      - name: Verify Helm chart README is up to date
+      - name: Verify Helm chart READMEs are up to date
         run: |
           make helm-docs
-          if ! git diff --exit-code -- helm/firebolt-kubernetes-operator/README.md; then
-            echo "ERROR: helm/firebolt-kubernetes-operator/README.md is out of date." 1>&2
+          if ! git diff --exit-code -- helm/firebolt-kubernetes-operator/README.md helm/firebolt-operator-crds/README.md; then
+            echo "ERROR: Helm chart README(s) are out of date." 1>&2
             echo "       Run 'make helm-docs' locally and commit the result." 1>&2
             exit 1
           fi

@@ -5,6 +5,7 @@ LDFLAGS := -X main.version=$(VERSION)
 
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
+HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
 HELM_REGISTRY ?= oci://000000000000.dkr.ecr.us-east-1.amazonaws.com/helm-charts
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -163,24 +164,27 @@ install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~
 
 .PHONY: helm-docs
 helm-docs: ## Generate Helm chart README from values.yaml comments.
-	helm-docs --chart-search-root $(HELM_CHART_DIR) --template-files README.md.gotmpl
+	helm-docs --chart-search-root helm/ --template-files README.md.gotmpl
 
 .PHONY: helm-lint
-helm-lint: ## Lint the Helm chart.
+helm-lint: ## Lint the Helm charts.
 	helm lint $(HELM_CHART_DIR)
+	helm lint $(HELM_CRD_CHART_DIR)
 
 .PHONY: helm-template
 helm-template: ## Render Helm chart templates locally.
 	helm template firebolt-operator $(HELM_CHART_DIR)
 
 .PHONY: helm-package
-helm-package: ## Package the Helm chart into dist/.
+helm-package: ## Package the Helm charts into dist/.
 	mkdir -p dist
 	helm package $(HELM_CHART_DIR) --destination dist/
+	helm package $(HELM_CRD_CHART_DIR) --destination dist/
 
 .PHONY: helm-push
-helm-push: helm-package ## Package and push the Helm chart to ECR.
+helm-push: helm-package ## Package and push the Helm charts to ECR.
 	helm push dist/firebolt-kubernetes-operator-*.tgz $(HELM_REGISTRY)
+	helm push dist/firebolt-operator-crds-*.tgz $(HELM_REGISTRY)
 
 ##@ Dependencies
 
