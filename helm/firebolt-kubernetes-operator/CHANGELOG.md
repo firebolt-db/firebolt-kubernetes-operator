@@ -1,3 +1,28 @@
+# 0.1.7
+
+appVersion: v1.5.0
+
+## [1.5.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.4.0...v1.5.0) (2026-04-21)
+
+
+### Features
+
+* **api:** allow spec.replicas=0 and introduce Stopped phase (FB-555) ([5adcca0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/5adcca0a495abbc0c88673ec9310ed65cb75a9ff))
+* **controller:** route PhaseStopped through state machine and Ready condition (FB-555) ([cc0de25](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/cc0de2529173ec2657fe91c8c3340d7311f7a4ac))
+* **formal:** extend TLA+ spec with Stopped phase and verify scale-to-zero (FB-555) ([411e133](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/411e133e4ddd44c0f09d2d1492fa7480ea66afe8))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.6 (appVersion v1.4.0) ([7cbfb25](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/7cbfb259b7e14a51a301a0a6352859ece9d3d17c))
+
+
+### Bug fixes
+
+* **controller:** extend terminal-phase invariant panic to Stopped (FB-555) ([472d727](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/472d727cdbc71e7b5eec0e616e5357fa76ed71d5))
+
+
+
 # 0.1.6
 
 appVersion: v1.4.0
