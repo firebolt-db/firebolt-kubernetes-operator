@@ -52,8 +52,10 @@ type engineSim struct {
 	spec   computev1alpha1.FireboltEngineSpec
 	status computev1alpha1.FireboltEngineStatus
 
-	// stses tracks which generation StatefulSets exist.
-	stses map[int]*appsv1.StatefulSet
+	// stses, configMaps, headlessSvcs track per-generation resources.
+	stses        map[int]*appsv1.StatefulSet
+	configMaps   map[int]*corev1.ConfigMap
+	headlessSvcs map[int]*corev1.Service
 
 	// clusterSvc is the single cluster-facing Service; nil means absent.
 	clusterSvc *corev1.Service
@@ -77,6 +79,8 @@ func (m *engineSim) buildState() EngineState {
 		state.CurrentSTS = sts
 		state.CurrentPodsReady = m.podsReady
 	}
+	state.CurrentConfigMap = m.configMaps[gen]
+	state.CurrentHeadlessSvc = m.headlessSvcs[gen]
 
 	if m.status.DrainingGeneration != nil {
 		dg := *m.status.DrainingGeneration
@@ -105,18 +109,36 @@ func (m *engineSim) buildState() EngineState {
 // Pass applyStatus=false to simulate a crash before the status write.
 func (m *engineSim) applyResult(result *EngineReconcileResult, applyStatus bool) {
 	if result.EnsureStatefulSet != nil {
-		gen := stsLabelGen(result.EnsureStatefulSet.Labels)
+		gen := labelGen(result.EnsureStatefulSet.Labels)
 		m.stses[gen] = result.EnsureStatefulSet
+	}
+	if result.EnsureConfigMap != nil {
+		gen := labelGen(result.EnsureConfigMap.Labels)
+		if gen >= 0 {
+			m.configMaps[gen] = result.EnsureConfigMap
+		}
+	}
+	if result.EnsureHeadlessSvc != nil {
+		gen := labelGen(result.EnsureHeadlessSvc.Labels)
+		if gen >= 0 {
+			m.headlessSvcs[gen] = result.EnsureHeadlessSvc
+		}
 	}
 	if result.EnsureClusterSvc != nil {
 		m.clusterSvc = result.EnsureClusterSvc
 	}
 	for _, obj := range result.DeleteResources {
-		if sts, ok := obj.(*appsv1.StatefulSet); ok {
-			gen := stsLabelGen(sts.Labels)
-			if gen >= 0 {
-				delete(m.stses, gen)
-			}
+		gen := labelGen(obj.GetLabels())
+		if gen < 0 {
+			continue
+		}
+		switch obj.(type) {
+		case *appsv1.StatefulSet:
+			delete(m.stses, gen)
+		case *corev1.ConfigMap:
+			delete(m.configMaps, gen)
+		case *corev1.Service:
+			delete(m.headlessSvcs, gen)
 		}
 	}
 
@@ -138,8 +160,8 @@ func (m *engineSim) applyResult(result *EngineReconcileResult, applyStatus bool)
 	}
 }
 
-// stsLabelGen extracts the generation number from an object's labels.
-func stsLabelGen(labels map[string]string) int {
+// labelGen extracts the generation number from an object's labels.
+func labelGen(labels map[string]string) int {
 	if s, ok := labels[LabelGeneration]; ok {
 		if g, err := strconv.Atoi(s); err == nil {
 			return g
@@ -150,9 +172,9 @@ func stsLabelGen(labels map[string]string) int {
 
 // ---------- State machine actions ----------
 
-// gcStaleSTSes mirrors gcOrphanedResources, which runs after applyEngineState
+// gcStaleResources mirrors gcOrphanedResources, which runs after applyEngineState
 // in the real controller when phase=Stable.
-func (m *engineSim) gcStaleSTSes() {
+func (m *engineSim) gcStaleResources() {
 	keepGens := map[int]bool{m.status.CurrentGeneration: true}
 	if m.status.DrainingGeneration != nil {
 		keepGens[*m.status.DrainingGeneration] = true
@@ -160,6 +182,16 @@ func (m *engineSim) gcStaleSTSes() {
 	for gen := range m.stses {
 		if !keepGens[gen] {
 			delete(m.stses, gen)
+		}
+	}
+	for gen := range m.configMaps {
+		if !keepGens[gen] {
+			delete(m.configMaps, gen)
+		}
+	}
+	for gen := range m.headlessSvcs {
+		if !keepGens[gen] {
+			delete(m.headlessSvcs, gen)
 		}
 	}
 }
@@ -184,7 +216,7 @@ func (m *engineSim) Reconcile(t *rapid.T) {
 	checkRequeue(t, &result)
 	m.applyResult(&result, true)
 	if m.status.Phase == computev1alpha1.PhaseStable {
-		m.gcStaleSTSes()
+		m.gcStaleResources()
 	}
 }
 
@@ -229,6 +261,8 @@ func (m *engineSim) DrainCompletes(_ *rapid.T) {
 // all generation-scoped objects before stripping the finalizer.
 func (m *engineSim) DeleteEngine(_ *rapid.T) {
 	m.stses = make(map[int]*appsv1.StatefulSet)
+	m.configMaps = make(map[int]*corev1.ConfigMap)
+	m.headlessSvcs = make(map[int]*corev1.Service)
 	m.clusterSvc = nil
 	m.podsReady = false
 	m.podsDrained = true
@@ -285,13 +319,25 @@ func (m *engineSim) Check(t *rapid.T) {
 		}
 	}
 
-	// Inv_NoOrphanedSTSes: Phase=Stable => only currentGen STS survives.
+	// Inv_NoOrphanedResources: Phase=Stable => only currentGen resources survive.
 	// GC runs as part of Reconcile when phase=Stable, so any stale gens still
 	// present after a Reconcile call indicate a GC gap.
 	if s.Phase == computev1alpha1.PhaseStable {
 		for gen := range m.stses {
 			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedSTSes: phase=Stable but STS gen=%d survives (currentGen=%d)",
+				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but STS gen=%d survives (currentGen=%d)",
+					gen, s.CurrentGeneration)
+			}
+		}
+		for gen := range m.configMaps {
+			if gen != s.CurrentGeneration {
+				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but ConfigMap gen=%d survives (currentGen=%d)",
+					gen, s.CurrentGeneration)
+			}
+		}
+		for gen := range m.headlessSvcs {
+			if gen != s.CurrentGeneration {
+				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but HeadlessSvc gen=%d survives (currentGen=%d)",
 					gen, s.CurrentGeneration)
 			}
 		}
@@ -307,8 +353,10 @@ func TestEngineStateMachine(t *testing.T) {
 				CurrentGeneration: 0,
 				ActiveGeneration:  -1,
 			},
-			stses:       make(map[int]*appsv1.StatefulSet),
-			podsDrained: true,
+			stses:        make(map[int]*appsv1.StatefulSet),
+			configMaps:   make(map[int]*corev1.ConfigMap),
+			headlessSvcs: make(map[int]*corev1.Service),
+			podsDrained:  true,
 		}
 		t.Repeat(rapid.StateMachineActions(m))
 	})
