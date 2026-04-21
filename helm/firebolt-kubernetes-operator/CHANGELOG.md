@@ -1,3 +1,21 @@
+# 0.1.6
+
+appVersion: v1.4.0
+
+## [1.4.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.3.0...v1.4.0) (2026-04-21)
+
+
+### Features
+
+* **cd:** push operator image and helm chart to ECR (FB-553) ([a7998d8](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/a7998d81d0e0dc27841a3f10de609f60073bad9a))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.5 (appVersion v1.3.0) ([bf6ebd4](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/bf6ebd42c4dc112c450e2ace236b4cbea9027bc2))
+
+
+
 # 0.1.5
 
 appVersion: v1.3.0
