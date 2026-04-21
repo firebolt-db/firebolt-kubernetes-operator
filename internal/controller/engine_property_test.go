@@ -82,7 +82,7 @@ func (m *engineSim) buildState() EngineState {
 	state.CurrentConfigMap = m.configMaps[gen]
 	state.CurrentHeadlessSvc = m.headlessSvcs[gen]
 
-	if m.status.DrainingGeneration != nil {
+	if m.status.DrainingGeneration != nil && *m.status.DrainingGeneration != m.status.CurrentGeneration {
 		dg := *m.status.DrainingGeneration
 		if sts := m.stses[dg]; sts != nil {
 			state.DrainingSTS = sts
