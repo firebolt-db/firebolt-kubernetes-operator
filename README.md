@@ -127,10 +127,6 @@ With this entry point the caller is responsible for:
   picked up and draining pods are dropped;
 - treating a request on a single endpoint that fails with a transport
   error as "pick another endpoint", not "retry this request";
-- explicitly setting `advanced_mode=true` as a query parameter when needed
-  (the gateway appends it automatically; direct callers do not go through
-  that filter).
-
 ### 4. Scale or Update
 
 ```bash
