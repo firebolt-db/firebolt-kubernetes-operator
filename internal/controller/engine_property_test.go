@@ -172,6 +172,12 @@ func labelGen(labels map[string]string) int {
 	return -1
 }
 
+// isTerminalPhase mirrors terminalPhase() in engine_reconcile.go: both
+// PhaseStable and PhaseStopped are terminal.
+func isTerminalPhase(phase computev1alpha1.EnginePhase) bool {
+	return phase == computev1alpha1.PhaseStable || phase == computev1alpha1.PhaseStopped
+}
+
 // ---------- State machine actions ----------
 
 // gcStaleResources mirrors gcOrphanedResources, which runs after applyEngineState
@@ -209,7 +215,7 @@ func checkRequeue(t *rapid.T, result *EngineReconcileResult) {
 }
 
 // Reconcile runs a full reconcile cycle and applies all results including status.
-// When the resulting phase is Stable it also runs GC, mirroring the real controller.
+// When the resulting phase is terminal it also runs GC, mirroring the real controller.
 func (m *engineSim) Reconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
@@ -217,7 +223,7 @@ func (m *engineSim) Reconcile(t *rapid.T) {
 	)
 	checkRequeue(t, &result)
 	m.applyResult(&result, true)
-	if m.status.Phase == computev1alpha1.PhaseStable {
+	if isTerminalPhase(m.status.Phase) {
 		m.gcStaleResources()
 	}
 }
@@ -244,8 +250,9 @@ func (m *engineSim) ApplySpecChange(t *rapid.T) {
 }
 
 // ScaleReplicas changes the replica count, also triggering spec drift.
+// Range includes 0 so that PhaseStopped is reachable.
 func (m *engineSim) ScaleReplicas(t *rapid.T) {
-	m.spec.Replicas = int32(rapid.IntRange(1, 5).Draw(t, "replicas"))
+	m.spec.Replicas = int32(rapid.IntRange(0, 5).Draw(t, "replicas"))
 }
 
 // PodsBecomesReady marks the current generation's pods as all Running+Ready.
@@ -281,17 +288,16 @@ func (m *engineSim) DeleteEngine(_ *rapid.T) {
 func (m *engineSim) Check(t *rapid.T) {
 	s := &m.status
 
-	// Inv_StableConsistency: Phase=Stable => CurrentGeneration == ActiveGeneration
-	if s.Phase == computev1alpha1.PhaseStable &&
-		s.CurrentGeneration != s.ActiveGeneration {
-		t.Fatalf("Inv_StableConsistency: phase=Stable but CurrentGen=%d != ActiveGen=%d",
-			s.CurrentGeneration, s.ActiveGeneration)
+	// Inv_TerminalConsistency: terminal phase => CurrentGeneration == ActiveGeneration
+	if isTerminalPhase(s.Phase) && s.CurrentGeneration != s.ActiveGeneration {
+		t.Fatalf("Inv_TerminalConsistency: phase=%s but CurrentGen=%d != ActiveGen=%d",
+			s.Phase, s.CurrentGeneration, s.ActiveGeneration)
 	}
 
-	// Inv_NoDrainingInStable: Phase=Stable => DrainingGeneration == nil
-	if s.Phase == computev1alpha1.PhaseStable && s.DrainingGeneration != nil {
-		t.Fatalf("Inv_NoDrainingInStable: phase=Stable but DrainingGen=%d",
-			*s.DrainingGeneration)
+	// Inv_TerminalNoDraining: terminal phase => DrainingGeneration == nil
+	if isTerminalPhase(s.Phase) && s.DrainingGeneration != nil {
+		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
+			s.Phase, *s.DrainingGeneration)
 	}
 
 	// Inv_ActiveHasSTS: ActiveGeneration >= 0 => STS for that gen exists
@@ -321,26 +327,26 @@ func (m *engineSim) Check(t *rapid.T) {
 		}
 	}
 
-	// Inv_NoOrphanedResources: Phase=Stable => only currentGen resources survive.
-	// GC runs as part of Reconcile when phase=Stable, so any stale gens still
+	// Inv_NoOrphanedResources: terminal phase => only currentGen resources survive.
+	// GC runs as part of Reconcile when phase is terminal, so any stale gens still
 	// present after a Reconcile call indicate a GC gap.
-	if s.Phase == computev1alpha1.PhaseStable {
+	if isTerminalPhase(s.Phase) {
 		for gen := range m.stses {
 			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but STS gen=%d survives (currentGen=%d)",
-					gen, s.CurrentGeneration)
+				t.Fatalf("Inv_NoOrphanedResources: phase=%s but STS gen=%d survives (currentGen=%d)",
+					s.Phase, gen, s.CurrentGeneration)
 			}
 		}
 		for gen := range m.configMaps {
 			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but ConfigMap gen=%d survives (currentGen=%d)",
-					gen, s.CurrentGeneration)
+				t.Fatalf("Inv_NoOrphanedResources: phase=%s but ConfigMap gen=%d survives (currentGen=%d)",
+					s.Phase, gen, s.CurrentGeneration)
 			}
 		}
 		for gen := range m.headlessSvcs {
 			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=Stable but HeadlessSvc gen=%d survives (currentGen=%d)",
-					gen, s.CurrentGeneration)
+				t.Fatalf("Inv_NoOrphanedResources: phase=%s but HeadlessSvc gen=%d survives (currentGen=%d)",
+					s.Phase, gen, s.CurrentGeneration)
 			}
 		}
 	}
