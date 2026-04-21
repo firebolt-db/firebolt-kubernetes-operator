@@ -430,7 +430,7 @@ Two files implement the `MaybeCrash` function:
 | `after_service_selector_update` | switching | After Service selector is updated |
 | `before_switching_status_update` | switching | Before status write |
 | `after_statefulset_deleted` | cleaning | After old StatefulSet is deleted |
-| `before_cleaning_to_stable` | cleaning → stable | Before final status write |
+| `before_cleaning_to_terminal` | cleaning → stable or stopped | Before final status write |
 
 ### Test pattern
 

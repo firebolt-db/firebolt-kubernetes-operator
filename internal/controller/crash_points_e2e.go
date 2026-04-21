@@ -39,8 +39,8 @@ const (
 	CrashBeforeSwitchingStatusUpdate CrashPoint = "before_switching_status_update"
 
 	// PhaseCleaning crash points
-	CrashAfterStatefulSetDeleted CrashPoint = "after_statefulset_deleted"
-	CrashBeforeCleaningToStable  CrashPoint = "before_cleaning_to_stable"
+	CrashAfterStatefulSetDeleted  CrashPoint = "after_statefulset_deleted"
+	CrashBeforeCleaningToTerminal CrashPoint = "before_cleaning_to_terminal"
 )
 
 // CrashPointManager manages crash points for testing

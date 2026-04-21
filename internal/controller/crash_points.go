@@ -44,8 +44,9 @@ const (
 
 	// CrashAfterStatefulSetDeleted fires after the old StatefulSet is deleted.
 	CrashAfterStatefulSetDeleted CrashPoint = "after_statefulset_deleted"
-	// CrashBeforeCleaningToStable fires before transitioning from cleaning to stable.
-	CrashBeforeCleaningToStable CrashPoint = "before_cleaning_to_stable"
+	// CrashBeforeCleaningToTerminal fires before transitioning from cleaning
+	// to a terminal phase (stable or stopped).
+	CrashBeforeCleaningToTerminal CrashPoint = "before_cleaning_to_terminal"
 )
 
 // MaybeCrash is a no-op in production builds.
