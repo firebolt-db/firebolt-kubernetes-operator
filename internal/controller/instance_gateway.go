@@ -309,6 +309,17 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # but short enough that the retry policy above can iterate many
       # times within a single client-side deadline.
       connect_timeout: 0.25s
+      # One request per TCP connection.  Forces a fresh DNS lookup on every
+      # query, so after the engine service selector switches (gen N → gen N+1)
+      # the stale-IP window collapses to a single TCP connect rather than the
+      # STRICT_DNS TTL (~5s).  Firebolt queries are long-running (seconds to
+      # minutes), so the per-query handshake overhead (~1–3ms TLS) is
+      # negligible.  Without this, HTTP/2 connection reuse means Envoy keeps
+      # dispatching new streams to gen N pod IPs for up to the full DNS TTL
+      # after the selector switch, and "Killing all queries" responses (HTTP
+      # 200 + error body) from draining pods are not covered by the
+      # transport-failure retry policy.
+      max_requests_per_connection: 1
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
