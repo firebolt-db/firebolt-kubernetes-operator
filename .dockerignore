@@ -10,5 +10,8 @@
 !go.mod
 !go.sum
 
+# Re-include files embedded via //go:embed directives in the Go source
+!config/images/defaults.env
+
 # Re-include pre-built binary (used by local Dockerfile)
 !bin/manager
