@@ -1,21 +1,49 @@
 {{ template "chart.header" . }}
 
-{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
-
 {{ template "chart.description" . }}
 
 ## Installation
 
 ```bash
-helm install firebolt-operator \
-  oci://000000000000.dkr.ecr.us-east-1.amazonaws.com/helm-charts/firebolt-kubernetes-operator \
-  --version {{ template "chart.version" . }}
+helm install firebolt-operator ./helm/firebolt-kubernetes-operator \
+  --namespace firebolt-system --create-namespace
 ```
 
-{{ template "chart.maintainersSection" . }}
+CRDs are bundled in the `crds/` directory and installed automatically on first
+install. Helm does not upgrade or delete CRDs from the `crds/` directory. To
+manage CRD upgrades independently, use the `firebolt-operator-crds` chart
+instead.
+
+## Uninstallation
+
+```bash
+helm uninstall firebolt-operator --namespace firebolt-system
+```
+
+CRDs are **not** deleted on uninstall (Helm default for the `crds/` directory).
+To remove CRDs manually:
+
+```bash
+kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute.firebolt.io
+```
+
+> **Warning:** Deleting CRDs cascades and removes all FireboltEngine and
+> FireboltInstance resources in the cluster.
 
 {{ template "chart.valuesSection" . }}
 
----
+## CRD Sync
 
-_This README is generated with [helm-docs](https://github.com/norwoodj/helm-docs). Run `make helm-docs` to regenerate._
+CRDs in this chart are symlinks to `config/crd/bases/`. After running
+`make manifests` (which regenerates CRDs from Go struct annotations), the
+chart automatically picks up the changes. Since Helm does not upgrade CRDs
+in the `crds/` directory, apply CRD updates manually:
+
+```bash
+kubectl apply -f helm/firebolt-kubernetes-operator/crds/
+```
+
+Or use the `firebolt-operator-crds` chart for managed CRD upgrades via
+`helm upgrade`.
+
+{{ template "helm-docs.versionFooter" . }}

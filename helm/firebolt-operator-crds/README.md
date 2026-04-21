@@ -1,0 +1,43 @@
+# firebolt-operator-crds
+
+CRDs for the Firebolt Kubernetes Operator
+
+## Usage
+
+Install CRDs separately from the operator:
+
+```bash
+helm install firebolt-crds ./helm/firebolt-operator-crds
+```
+
+Then install the operator without CRDs:
+
+```bash
+helm install firebolt-operator ./helm/firebolt-kubernetes-operator --skip-crds
+```
+
+## Upgrading CRDs
+
+Unlike Helm's `crds/` directory, this chart places CRDs in `templates/` so
+they are upgraded on `helm upgrade`:
+
+```bash
+helm upgrade firebolt-crds ./helm/firebolt-operator-crds
+```
+
+## Uninstallation
+
+```bash
+helm uninstall firebolt-crds
+```
+
+> **Warning:** Uninstalling this chart deletes the CRDs, which cascades and
+> removes all FireboltEngine and FireboltInstance resources in the cluster.
+
+## CRDs included
+
+| CRD | Kind |
+|-----|------|
+| `fireboltengines.compute.firebolt.io` | FireboltEngine |
+| `fireboltinstances.compute.firebolt.io` | FireboltInstance |
+
