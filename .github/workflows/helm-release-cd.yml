@@ -49,6 +49,15 @@ jobs:
           app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
           private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
 
+      - name: Install helm-docs
+        if: steps.check.outputs.proceed != 'false'
+        env:
+          HELM_DOCS_VERSION: "1.14.2"
+        run: |
+          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin helm-docs
+          helm-docs --version
+
       - name: Determine chart version
         if: steps.check.outputs.proceed != 'false'
         id: chart
@@ -96,6 +105,12 @@ jobs:
 
           yq -i ".version = \"$NEW_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
 
+          # Regenerate helm chart README so the badges and install snippet
+          # reflect the new version. Without this, the subsequent PR's lint
+          # step (which enforces helm-docs freshness) fails until someone
+          # manually regenerates.
+          make helm-docs
+
           printf "# %s\n\n%s\n\n" "$NEW_VERSION" "$COMMIT_MSG" \
             | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
           mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
@@ -103,7 +118,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config credential.helper '!f() { echo "password=${GITHUB_TOKEN}"; }; f'
-          git add helm/firebolt-kubernetes-operator/Chart.yaml helm/firebolt-kubernetes-operator/CHANGELOG.md
+          git add helm/firebolt-kubernetes-operator/Chart.yaml \
+                  helm/firebolt-kubernetes-operator/CHANGELOG.md \
+                  helm/firebolt-kubernetes-operator/README.md
           git diff --cached --name-only
           git commit -m "chore(helm): bump chart to $NEW_VERSION"
           git push https://x-access-token@github.com/${GITHUB_REPOSITORY}.git HEAD:main
