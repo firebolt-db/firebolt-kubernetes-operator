@@ -110,8 +110,9 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 		if len(result.DeleteResources) > 0 {
 			MaybeCrash(engine.Name, CrashAfterStatefulSetDeleted)
 		}
-		if newPhase == computev1alpha1.PhaseStable {
-			MaybeCrash(engine.Name, CrashBeforeCleaningToStable)
+		if newPhase == computev1alpha1.PhaseStable ||
+			newPhase == computev1alpha1.PhaseStopped {
+			MaybeCrash(engine.Name, CrashBeforeCleaningToTerminal)
 		}
 	default:
 	}

@@ -487,7 +487,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 			By("Setting crash point for the final phase")
 			var crashHit atomic.Bool
-			restartCh := controller.SetCrashPoint(engineName, controller.CrashBeforeCleaningToStable, func() {
+			restartCh := controller.SetCrashPoint(engineName, controller.CrashBeforeCleaningToTerminal, func() {
 				crashHit.Store(true)
 				fmt.Fprintf(GinkgoWriter, "Crash point hit: before cleaning-to-stable status update\n")
 			})
