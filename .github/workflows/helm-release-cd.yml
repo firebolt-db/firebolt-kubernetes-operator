@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   release-chart:
-    if: "!startsWith(github.event.head_commit.message, 'chore(helm): bump chart to')"
+    if: "!startsWith(github.event.head_commit.message, 'chore(helm): bump chart')"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -106,6 +106,7 @@ jobs:
             yq -i ".version = \"$CURR_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
             echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
             NEEDS_COMMIT=true
+            OPERATOR_BUMPED=true
           fi
 
           # ── Bump CRD chart version ────────────────
@@ -125,10 +126,12 @@ jobs:
           if [ "$NEEDS_COMMIT" = "true" ]; then
             make helm-docs
 
-            COMMIT_MSG=${COMMIT_MSG:-$(git log --format='%s' -1)}
-            printf "# %s\n\n%s\n\n" "$CURR_VERSION" "$COMMIT_MSG" \
-              | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
-            mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
+            if [ "${OPERATOR_BUMPED:-false}" = "true" ]; then
+              COMMIT_MSG=${COMMIT_MSG:-$(git log --format='%s' -1)}
+              printf "# %s\n\n%s\n\n" "$CURR_VERSION" "$COMMIT_MSG" \
+                | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
+              mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
+            fi
 
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
