@@ -320,6 +320,45 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # 200 + error body) from draining pods are not covered by the
       # transport-failure retry policy.
       max_requests_per_connection: 1
+      # Active health checks — fast ejection of draining pods.
+      #
+      # Envoy probes every pod IP in the sub-cluster's STRICT_DNS set on
+      # the interval below. When an engine pod receives SIGTERM it must
+      # immediately start returning a non-2xx from /health/ready while
+      # still accepting and completing any query that arrived before the
+      # shutdown signal. Once Envoy sees unhealthy_threshold consecutive
+      # failures it removes that pod from the load-balanced set, so no new
+      # queries are dispatched to it for the remainder of its graceful-
+      # shutdown window. Combined with max_requests_per_connection: 1
+      # (which collapses the DNS-TTL staleness window to a single TCP
+      # connect) this gives two independent layers of zero-downtime
+      # protection without requiring xDS dynamic configuration.
+      #
+      # Why not a ClusterIP service instead of a headless one?
+      # A ClusterIP VIP would remove the DNS-TTL race at the source, but
+      # Envoy would see only one endpoint and lose the ability to load-
+      # balance across pod IPs itself. That breaks the previous_hosts
+      # retry predicate — which guarantees each retry attempt is directed
+      # to a pod that has not already been tried — turning the retry loop
+      # into a probabilistic gamble rather than an exhaustive sweep.
+      # Keeping the headless service preserves Envoy's per-pod LB and
+      # makes the retry policy meaningful.
+      #
+      # alt_port redirects health-check connections to HealthPort (8122),
+      # the engine's dedicated health/metrics port, rather than the query
+      # port (3473) that query traffic uses. This is the same port the
+      # Kubernetes readiness probe targets, so Envoy and kube-proxy agree
+      # on pod health. (alt_port is deprecated in favour of per-endpoint
+      # overrides in newer Envoy releases; for a DFP cluster with
+      # dynamically resolved endpoints it remains the only viable option.)
+      health_checks:
+        - timeout: 0.5s
+          interval: 1s
+          healthy_threshold: 1
+          unhealthy_threshold: 1
+          alt_port: 8122  # HealthPort — keep in sync with constants.go
+          http_health_check:
+            path: /health/ready
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
