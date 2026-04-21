@@ -70,40 +70,33 @@ type engineSim struct {
 }
 
 // buildState constructs the EngineState to pass to computeEngineReconcile
-// from the current simulated cluster view.
+// from the current simulated cluster view. All guard logic lives in
+// assembleEngineState so there is no risk of sim drift from the real
+// getEngineState.
 func (m *engineSim) buildState() EngineState {
-	state := EngineState{ClusterServiceTargetGen: -1}
-
 	gen := m.status.CurrentGeneration
-	if sts := m.stses[gen]; sts != nil {
-		state.CurrentSTS = sts
-		state.CurrentPodsReady = m.podsReady
+	raw := rawEngineResources{
+		CurrentSTS:         m.stses[gen],
+		CurrentConfigMap:   m.configMaps[gen],
+		CurrentHeadlessSvc: m.headlessSvcs[gen],
+		CurrentPodsReady:   m.podsReady,
+		ClusterService:     m.clusterSvc,
 	}
-	state.CurrentConfigMap = m.configMaps[gen]
-	state.CurrentHeadlessSvc = m.headlessSvcs[gen]
 
-	if m.status.DrainingGeneration != nil && *m.status.DrainingGeneration != m.status.CurrentGeneration {
+	if m.status.DrainingGeneration != nil {
 		dg := *m.status.DrainingGeneration
-		if sts := m.stses[dg]; sts != nil {
-			state.DrainingSTS = sts
-			state.DrainingPodsDrained = m.podsDrained
-		} else {
-			// STS already deleted — treat drain as complete.
-			state.DrainingPodsDrained = true
-		}
-		state.DrainingConfigMap = m.configMaps[dg]
-		state.DrainingHeadlessSvc = m.headlessSvcs[dg]
+		raw.DrainingSTS = m.stses[dg]
+		raw.DrainingConfigMap = m.configMaps[dg]
+		raw.DrainingHeadlessSvc = m.headlessSvcs[dg]
+		raw.DrainingPodsDrained = m.podsDrained
+		// assembleEngineState handles DrainingSTS==nil → DrainingPodsDrained=true
+		// and the drainingGen != currentGen guard.
 	}
 
-	if m.clusterSvc != nil {
-		state.ClusterService = m.clusterSvc
-		if s, ok := m.clusterSvc.Spec.Selector[LabelGeneration]; ok {
-			if g, err := strconv.Atoi(s); err == nil {
-				state.ClusterServiceTargetGen = g
-			}
-		}
+	state, err := assembleEngineState(&m.status, raw)
+	if err != nil {
+		panic(fmt.Sprintf("assembleEngineState: %v", err))
 	}
-
 	return state
 }
 
