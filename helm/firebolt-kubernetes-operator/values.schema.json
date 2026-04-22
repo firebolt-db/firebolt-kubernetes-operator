@@ -57,6 +57,9 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
+    "podSecurityContext": {
+      "type": "object"
+    },
     "serviceAccount": {
       "type": "object",
       "properties": {
