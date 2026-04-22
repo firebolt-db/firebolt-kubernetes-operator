@@ -79,6 +79,17 @@ resources:
     cpu: 10m
     memory: 64Mi
 
+# -- Extra volumes attached to the operator Pod. Rendered as-is into
+# `pod.spec.volumes`. Useful for mounting externally-provisioned certs,
+# custom CAs, config files, or sidecar outputs (Vault Agent, CSI
+# secrets-store, projected service-account tokens, etc.).
+extraVolumes: []
+
+# -- Extra volume mounts for the operator container. Rendered as-is into
+# `container.volumeMounts`. Pair each entry with an `extraVolumes` entry
+# of the same `name`.
+extraVolumeMounts: []
+
 # -- Node selector for the operator pod.
 nodeSelector: {}
 # -- Tolerations for the operator pod.
