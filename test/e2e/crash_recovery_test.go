@@ -76,12 +76,15 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
+			// Delete before stopping the operator so the engine finalizer can be
+			// processed. Stopping first would leave the engine stuck "being deleted"
+			// and cause the next It block to get a 409 on CreateEngine.
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after ConfigMap created", func() {
@@ -235,12 +238,15 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
+			// Delete before stopping the operator so the engine finalizer can be
+			// processed. Stopping first would leave the engine stuck "being deleted"
+			// and cause the next It block to get a 409 on CreateEngine.
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after service selector update (CRITICAL)", func() {
@@ -385,12 +391,15 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 
 		AfterEach(func() {
 			controller.ClearAllCrashPoints()
+			// Delete before stopping the operator so the engine finalizer can be
+			// processed. Stopping first would leave the engine stuck "being deleted"
+			// and cause the next It block to get a 409 on CreateEngine.
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			if operator != nil {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 		})
 
 		It("should recover from crash after StatefulSet deleted", func() {
