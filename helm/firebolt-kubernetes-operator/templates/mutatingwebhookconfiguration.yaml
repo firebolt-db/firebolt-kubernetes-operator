@@ -1,0 +1,35 @@
+{{- if and .Values.webhook.enabled .Values.webhook.mutatingWebhookConfiguration.enabled -}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.webhook.webhookConfigurationAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+webhooks:
+  - name: mfireboltinstance.compute.firebolt.io
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ include "firebolt-operator.fullname" . }}-webhook
+        path: /mutate-compute-firebolt-io-v1alpha1-fireboltinstance
+        port: {{ .Values.webhook.port }}
+      {{- with .Values.webhook.caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["compute.firebolt.io"]
+        apiVersions: ["v1alpha1"]
+        resources: ["fireboltinstances"]
+        scope: "Namespaced"
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.mutatingWebhookConfiguration.failurePolicy }}
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.mutatingWebhookConfiguration.timeoutSeconds }}
+    admissionReviewVersions: ["v1"]
+{{- end }}

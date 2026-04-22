@@ -76,6 +76,42 @@ webhook:
   # certs via `extraVolumes` / `extraVolumeMounts` instead.
   certSecretName: ""
 
+  # -- Static CA bundle (base64-encoded) for admission webhook clients.
+  # Ignored when `webhookConfigurationAnnotations` drives CA injection via
+  # a controller (cert-manager, etc.); use this as a last-resort manual
+  # override when no injector is available.
+  caBundle: ""
+
+  # -- Extra annotations merged into every WebhookConfiguration rendered by
+  # this chart. The standard way to wire automated CA injection, e.g.:
+  #   cert-manager.io/inject-ca-from: <namespace>/<certificate-name>
+  webhookConfigurationAnnotations: {}
+
+  mutatingWebhookConfiguration:
+    # -- Render the MutatingWebhookConfiguration for the FireboltInstance
+    # defaulter. Only effective when `webhook.enabled` is also true.
+    enabled: true
+    # -- failurePolicy for the mutating webhook.
+    # Defaults to Ignore because the defaulter only fills in an empty
+    # spec.id (the controller has a fallback path, and the CRD enforces
+    # id immutability via CEL), so admission should not be coupled to
+    # operator availability.
+    failurePolicy: Ignore
+    # -- Max admission request timeout in seconds (k8s caps at 30).
+    timeoutSeconds: 10
+
+  validatingWebhookConfiguration:
+    # -- Render the ValidatingWebhookConfiguration for FireboltInstance
+    # validation (reserved keys, metadata replicas, external Postgres
+    # secret presence). Only effective when `webhook.enabled` is also true.
+    enabled: true
+    # -- failurePolicy for the validating webhook.
+    # Defaults to Fail so invalid CR writes are rejected rather than
+    # silently admitted during operator outages.
+    failurePolicy: Fail
+    # -- Max admission request timeout in seconds (k8s caps at 30).
+    timeoutSeconds: 10
+
 # -- Address the health probe endpoint binds to.
 healthProbeBindAddress: ":8081"
 
