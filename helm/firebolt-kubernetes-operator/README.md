@@ -39,6 +39,8 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | affinity | object | `{}` | Affinity rules for the operator pod. |
 | extraAnnotations | object | `{}` | Extra annotations added to all operator manifests. |
 | extraLabels | object | `{}` | Extra labels added to all operator manifests. |
+| extraVolumeMounts | list | `[]` | Extra volume mounts for the operator container. Rendered as-is into `container.volumeMounts`. Pair each entry with an `extraVolumes` entry of the same `name`. |
+| extraVolumes | list | `[]` | Extra volumes attached to the operator Pod. Rendered as-is into `pod.spec.volumes`. Useful for mounting externally-provisioned certs, custom CAs, config files, or sidecar outputs (Vault Agent, CSI secrets-store, projected service-account tokens, etc.). |
 | fullnameOverride | string | `""` | Override the full resource name. |
 | healthProbeBindAddress | string | `":8081"` | Address the health probe endpoint binds to. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
