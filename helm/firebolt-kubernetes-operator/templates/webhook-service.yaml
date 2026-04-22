@@ -1,0 +1,22 @@
+{{- if .Values.webhook.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-webhook
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+    control-plane: controller-manager
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ports:
+    - name: webhook-server
+      port: {{ .Values.webhook.port }}
+      protocol: TCP
+      targetPort: webhook-server
+  selector:
+    {{- include "firebolt-operator.selectorLabels" . | nindent 4 }}
+    control-plane: controller-manager
+{{- end }}
