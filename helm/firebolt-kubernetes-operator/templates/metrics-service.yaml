@@ -15,7 +15,7 @@ spec:
     - name: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
       port: {{ include "firebolt-operator.portNumber" .Values.metrics.bindAddress }}
       protocol: TCP
-      targetPort: {{ include "firebolt-operator.portNumber" .Values.metrics.bindAddress }}
+      targetPort: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
   selector:
     {{- include "firebolt-operator.selectorLabels" . | nindent 4 }}
     control-plane: controller-manager
