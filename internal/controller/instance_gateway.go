@@ -122,7 +122,7 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 //     rewrites :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
 //   - The dynamic_forward_proxy cluster resolves that hostname at request time.
 //     With the engine Service being headless, DNS returns the set of ready pod
-//     IPs directly, bypassing kube-proxy and its endpoint-propagation lag.
+//     IPs directly, bypassing Cilium LB and its endpoint-propagation lag.
 //
 // This config is deliberately engine-set agnostic so the ConfigMap never has to
 // be regenerated in response to engine create/delete/scale events.
@@ -333,21 +333,40 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # Keeping the headless service preserves Envoy's per-pod LB and
       # makes the retry policy meaningful.
       #
-      # alt_port redirects health-check connections to HealthPort (8122),
-      # the engine's dedicated health/metrics port, rather than the query
-      # port (3473) that query traffic uses. This is the same port the
-      # Kubernetes readiness probe targets, so Envoy and kube-proxy agree
-      # on pod health. (alt_port is deprecated in favor of per-endpoint
-      # overrides in newer Envoy releases; for a DFP cluster with
-      # dynamically resolved endpoints it remains the only viable option.)
+      # Active health checks on the query port (3473). The ideal
+      # approach would redirect health checks to port 8122 (HealthPort)
+      # via Endpoint.HealthCheckConfig.port_value, but that field is
+      # per-endpoint and requires a static load_assignment — DFP
+      # sub-clusters create endpoints dynamically from DNS with no hook
+      # to inject HealthCheckConfig (envoyproxy/envoy#14045). The engine
+      # therefore exposes /health/ready on both ports.
+      #
+      # When an engine pod receives SIGTERM it must immediately return a
+      # non-2xx from /health/ready while still completing in-flight
+      # queries. Once Envoy sees unhealthy_threshold consecutive failures
+      # it removes that pod from the load-balanced set so no new queries
+      # are dispatched to it for the remainder of its graceful-shutdown
+      # window.
       health_checks:
         - timeout: 0.5s
           interval: 1s
+          # no_traffic_interval: probe idle sub-clusters at the same cadence
+          # as active ones. The default (60s) would mean Envoy only checks a
+          # pod once per minute if no queries are in-flight, which defeats the
+          # purpose of fast drain detection.
+          no_traffic_interval: 1s
           healthy_threshold: 1
           unhealthy_threshold: 1
-          alt_port: 8122  # HealthPort — keep in sync with constants.go
           http_health_check:
             path: /health/ready
+            # Accept 2xx–4xx as healthy. Until the engine exposes a real
+            # /health/ready on port 3473 it returns 404; accepting 4xx
+            # keeps the endpoint marked healthy while still ejecting pods
+            # that return 5xx or fail TCP. Once the engine serves 200
+            # normally and 503 on SIGTERM, remove expected_statuses.
+            expected_statuses:
+              - start: 200
+                end: 500
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
@@ -467,7 +486,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	// terminationGracePeriodSeconds budget for graceful shutdown:
 	//   - preStop POSTs /healthcheck/fail to the Envoy admin (bash /dev/tcp
 	//     because the stock envoyproxy/envoy image ships without curl/wget),
-	//     then sleeps 8s so kube-proxy can drop this pod from Service
+	//     then sleeps 8s so Cilium can drop this pod from Service
 	//     endpoints before SIGTERM. The readiness probe below is tuned so
 	//     that the flip is visible to kubelet within that window without
 	//     being so tight that it causes steady-state flapping.
@@ -492,11 +511,11 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	//   - next probe tick:              up to 2s (PeriodSeconds=2)
 	//   - FailureThreshold=2:           up to 2s more
 	//   - EndpointSlice fanout:         ~1s
-	//   - kube-proxy iptables rewrite:  ~1s
+	//   - Cilium eBPF map update:        ~1s
 	// Worst case ~6s, which fits inside the 8s sleep with ~2s of margin.
 	// By the time SIGTERM arrives, new client SYNs are no longer being
-	// DNAT'd to this pod - eliminating the terminating-endpoint race where
-	// new connections would hit a listener that is already shutting down.
+	// load-balanced to this pod - eliminating the terminating-endpoint
+	// race where new connections would hit a listener already shutting down.
 	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
 printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
 cat <&3 >/dev/null
@@ -561,10 +580,10 @@ sleep 8
 						// Readiness tuning balances two opposing requirements:
 						//
 						//   1. At shutdown, the preStop /healthcheck/fail flip must
-						//      propagate to kube-proxy before SIGTERM. With the
+						//      propagate to Cilium before SIGTERM. With the
 						//      preStop sleep of 8s and terminationGracePeriodSeconds
 						//      of 15s, we have budget for Period+Failure probe
-						//      latency plus EndpointSlice/kube-proxy fanout.
+						//      latency plus EndpointSlice/Cilium eBPF fanout.
 						//   2. At steady state, a single probe hiccup (network
 						//      blip, brief CPU throttle, transient listener stall)
 						//      must not flap the pod out of the Service and cause
