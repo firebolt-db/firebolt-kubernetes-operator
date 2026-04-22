@@ -88,6 +88,57 @@
         "secure": { "type": "boolean" }
       }
     },
+    "webhook": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "certDir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "certSecretName": { "type": "string" },
+        "caBundle": { "type": "string" },
+        "webhookConfigurationAnnotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "mutatingWebhookConfiguration": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "failurePolicy": {
+              "type": "string",
+              "enum": ["Fail", "Ignore"]
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            }
+          }
+        },
+        "validatingWebhookConfiguration": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "failurePolicy": {
+              "type": "string",
+              "enum": ["Fail", "Ignore"]
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            }
+          }
+        }
+      }
+    },
     "healthProbeBindAddress": {
       "type": "string"
     },
@@ -136,6 +187,12 @@
       "type": "object"
     },
     "topologySpreadConstraints": {
+      "type": "array"
+    },
+    "extraVolumes": {
+      "type": "array"
+    },
+    "extraVolumeMounts": {
       "type": "array"
     }
   },
