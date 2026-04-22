@@ -386,6 +386,11 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		metadataEndpoint = *spec.MetadataEndpointOverride
 	}
 
+	gracePeriod := getTerminationGracePeriod(spec)
+	shutdownWait := gracePeriod - PreStopGraceMarginSeconds
+	if shutdownWait < 1 {
+		shutdownWait = 1
+	}
 	innerConfig := map[string]interface{}{
 		"account_id":                instanceInfo.AccountID,
 		"account_name":              "default-account",
@@ -398,6 +403,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		"multi_engine_mode_enabled": true,
 		"logger_formatting":         "json",
 		"logger_use_files":          false,
+		"shutdown_wait_unfinished":  fmt.Sprintf("%ds", shutdownWait),
 	}
 
 	coreConfig := map[string]interface{}{
