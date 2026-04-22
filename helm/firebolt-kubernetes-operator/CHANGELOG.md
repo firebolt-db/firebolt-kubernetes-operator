@@ -1,3 +1,25 @@
+# 0.1.11
+
+appVersion: v1.9.0
+
+## [1.9.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.8.0...v1.9.0) (2026-04-22)
+
+
+### Features
+
+* **helm:** add extraVolumes and extraVolumeMounts support (FB-553) ([1720230](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/172023086cf854c15d77c7637e38e9c8c976611b))
+* **helm:** expose named container ports for health, metrics, webhook (FB-553) ([1415b30](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/1415b303e044475075b118a3f933d5dd8ae71ac3))
+* **helm:** extend values.schema.json for webhook and volume values (FB-553) ([e00dc42](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e00dc429222af9a351179f5a4d340cfc442f1134))
+* **helm:** render Mutating/ValidatingWebhookConfigurations for FireboltInstance (FB-553) ([0dc86f2](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/0dc86f276bc3e70fc844924dc6809331e7bc57f3))
+* **helm:** wire admission webhook plumbing behind a toggle (FB-553) ([2009649](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2009649db1ccbf3a156a07f52c4433abcd429683))
+
+
+### Bug fixes
+
+* **helm:** make podSecurityContext configurable with fsGroup default (FB-553) ([1fd3e98](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/1fd3e98d0f4325d4bbb90e329c55b2b7947ca7c8))
+
+
+
 # 0.1.10
 
 appVersion: v1.7.0
