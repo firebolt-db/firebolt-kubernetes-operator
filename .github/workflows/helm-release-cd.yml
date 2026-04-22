@@ -17,7 +17,11 @@ concurrency:
 
 jobs:
   release-chart:
-    if: "!startsWith(github.event.head_commit.message, 'chore(helm): bump chart')"
+    # Skip self-triggered runs for any `chore(helm): bump ...` commit, whether
+    # it came from app-release-cd (legacy singular "bump chart to X") or from
+    # this workflow (plural "bump charts to operator=X crds=Y"). Without this,
+    # the workflow would loop on its own bump commit.
+    if: "!startsWith(github.event.head_commit.message, 'chore(helm): bump')"
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -30,6 +34,13 @@ jobs:
           fetch-depth: 2
 
       - name: Check if app-release-cd will handle this
+        # On a mixed PR (both helm/** and app code changed), this workflow and
+        # app-release-cd fire in parallel because their path filters are
+        # disjoint. app-release-cd runs semantic-release, bumps Chart.yaml,
+        # commits back to main, then dispatches this workflow to publish the
+        # packaged chart. We must stand down here so the chart isn't bumped
+        # twice. Any file outside helm/, README.md, or .github/ is treated as
+        # app-side and triggers deferral.
         if: github.event_name != 'workflow_dispatch'
         id: check
         run: |
@@ -135,7 +146,6 @@ jobs:
 
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git config credential.helper '!f() { echo "password=${GITHUB_TOKEN}"; }; f'
             git add helm/firebolt-kubernetes-operator/Chart.yaml \
                     helm/firebolt-kubernetes-operator/CHANGELOG.md \
                     helm/firebolt-kubernetes-operator/README.md \
@@ -143,7 +153,7 @@ jobs:
                     helm/firebolt-operator-crds/README.md
             git diff --cached --name-only
             git commit -m "chore(helm): bump charts to operator=$CURR_VERSION crds=$CRD_CURR"
-            git push https://x-access-token@github.com/${GITHUB_REPOSITORY}.git HEAD:main
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
           fi
 
       - name: Set up Helm
