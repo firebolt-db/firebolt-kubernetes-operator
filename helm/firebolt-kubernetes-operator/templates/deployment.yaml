@@ -63,6 +63,12 @@ spec:
             {{- else }}
             - --metrics-secure=false
             {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - --enable-webhooks=true
+            - --webhook-cert-path={{ .Values.webhook.certDir }}
+            {{- else }}
+            - --enable-webhooks=false
+            {{- end }}
             {{- with .Values.watchNamespace }}
             - --namespace={{ . }}
             {{- end }}
@@ -79,7 +85,14 @@ spec:
             capabilities:
               drop:
                 - "ALL"
+          {{- if .Values.webhook.enabled }}
+          ports:
+            - name: webhook-server
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+          {{- else }}
           ports: []
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -96,13 +109,29 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.extraVolumeMounts }}
+          {{- $webhookCertMount := and .Values.webhook.enabled .Values.webhook.certSecretName }}
+          {{- if or .Values.extraVolumeMounts $webhookCertMount }}
           volumeMounts:
+            {{- if $webhookCertMount }}
+            - name: webhook-cert
+              mountPath: {{ .Values.webhook.certDir }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
-      {{- with .Values.extraVolumes }}
+      {{- if or .Values.extraVolumes $webhookCertMount }}
       volumes:
+        {{- if $webhookCertMount }}
+        - name: webhook-cert
+          secret:
+            secretName: {{ .Values.webhook.certSecretName }}
+            defaultMode: 0440
+        {{- end }}
+        {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

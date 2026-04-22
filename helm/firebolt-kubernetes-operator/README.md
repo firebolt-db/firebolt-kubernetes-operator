@@ -65,6 +65,10 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | tolerations | list | `[]` | Tolerations for the operator pod. |
 | topologySpreadConstraints | list | `[]` | Topology spread constraints for the operator pod. |
 | watchNamespace | string | `""` | Namespace to watch for FireboltEngine resources. Empty watches all namespaces. |
+| webhook.certDir | string | `"/tmp/k8s-webhook-server/serving-certs"` | Path (inside the container) where the operator reads tls.crt and tls.key. Passed to the operator as `--webhook-cert-path=<certDir>`. Override only when mounting the certs at a different path via `extraVolumes` / `extraVolumeMounts`. |
+| webhook.certSecretName | string | `""` | Optional shortcut for the common case: name of an existing Secret in the release namespace with keys `tls.crt` and `tls.key`. When set, the chart mounts this Secret read-only at `webhook.certDir`. The Secret itself is NOT created by this chart; provision it via cert-manager Certificate, ExternalSecret, Vault Agent, etc. Leave empty to mount certs via `extraVolumes` / `extraVolumeMounts` instead. |
+| webhook.enabled | bool | `false` | Enable the admission webhook server. When false, the operator is started with `--enable-webhooks=false` and no webhook Service, port, or cert mount is created. Left false by default so existing consumers without a cert provisioner keep working. |
+| webhook.port | int | `9443` | Port the webhook server listens on inside the container. Also used as the port of the webhook Service. Only relevant when `enabled` is true. |
 
 ## CRD Sync
 
