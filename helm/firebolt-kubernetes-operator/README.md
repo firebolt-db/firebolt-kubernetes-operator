@@ -65,10 +65,18 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | tolerations | list | `[]` | Tolerations for the operator pod. |
 | topologySpreadConstraints | list | `[]` | Topology spread constraints for the operator pod. |
 | watchNamespace | string | `""` | Namespace to watch for FireboltEngine resources. Empty watches all namespaces. |
+| webhook.caBundle | string | `""` | Static CA bundle (base64-encoded) for admission webhook clients. Ignored when `webhookConfigurationAnnotations` drives CA injection via a controller (cert-manager, etc.); use this as a last-resort manual override when no injector is available. |
 | webhook.certDir | string | `"/tmp/k8s-webhook-server/serving-certs"` | Path (inside the container) where the operator reads tls.crt and tls.key. Passed to the operator as `--webhook-cert-path=<certDir>`. Override only when mounting the certs at a different path via `extraVolumes` / `extraVolumeMounts`. |
 | webhook.certSecretName | string | `""` | Optional shortcut for the common case: name of an existing Secret in the release namespace with keys `tls.crt` and `tls.key`. When set, the chart mounts this Secret read-only at `webhook.certDir`. The Secret itself is NOT created by this chart; provision it via cert-manager Certificate, ExternalSecret, Vault Agent, etc. Leave empty to mount certs via `extraVolumes` / `extraVolumeMounts` instead. |
 | webhook.enabled | bool | `false` | Enable the admission webhook server. When false, the operator is started with `--enable-webhooks=false` and no webhook Service, port, or cert mount is created. Left false by default so existing consumers without a cert provisioner keep working. |
+| webhook.mutatingWebhookConfiguration.enabled | bool | `true` | Render the MutatingWebhookConfiguration for the FireboltInstance defaulter. Only effective when `webhook.enabled` is also true. |
+| webhook.mutatingWebhookConfiguration.failurePolicy | string | `"Ignore"` | failurePolicy for the mutating webhook. Defaults to Ignore because the defaulter only fills in an empty spec.id (the controller has a fallback path, and the CRD enforces id immutability via CEL), so admission should not be coupled to operator availability. |
+| webhook.mutatingWebhookConfiguration.timeoutSeconds | int | `10` | Max admission request timeout in seconds (k8s caps at 30). |
 | webhook.port | int | `9443` | Port the webhook server listens on inside the container. Also used as the port of the webhook Service. Only relevant when `enabled` is true. |
+| webhook.validatingWebhookConfiguration.enabled | bool | `true` | Render the ValidatingWebhookConfiguration for FireboltInstance validation (reserved keys, metadata replicas, external Postgres secret presence). Only effective when `webhook.enabled` is also true. |
+| webhook.validatingWebhookConfiguration.failurePolicy | string | `"Fail"` | failurePolicy for the validating webhook. Defaults to Fail so invalid CR writes are rejected rather than silently admitted during operator outages. |
+| webhook.validatingWebhookConfiguration.timeoutSeconds | int | `10` | Max admission request timeout in seconds (k8s caps at 30). |
+| webhook.webhookConfigurationAnnotations | object | `{}` | Extra annotations merged into every WebhookConfiguration rendered by this chart. The standard way to wire automated CA injection, e.g.:   cert-manager.io/inject-ca-from: <namespace>/<certificate-name> |
 
 ## CRD Sync
 
