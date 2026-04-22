@@ -55,6 +55,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | nodeSelector | object | `{}` | Node selector for the operator pod. |
 | podAnnotations | object | `{}` | Extra annotations added only to the operator pod. |
 | podLabels | object | `{}` | Extra labels added only to the operator pod. |
+| podSecurityContext | object | `{"fsGroup":65532,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context. fsGroup matches the distroless-nonroot UID used by the default `controller` image so mounted Secret files (e.g. the webhook cert) are readable by the operator process. |
 | priorityClassName | string | `""` | Priority class name for the operator pod. |
 | rbac.create | bool | `true` | Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources. |
 | replicaCount | int | `1` | Number of operator replicas. |

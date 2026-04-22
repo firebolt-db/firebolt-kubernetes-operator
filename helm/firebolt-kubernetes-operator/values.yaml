@@ -30,6 +30,15 @@ podLabels: {}
 # -- Extra annotations added only to the operator pod.
 podAnnotations: {}
 
+# -- Pod-level security context. fsGroup matches the distroless-nonroot UID
+# used by the default `controller` image so mounted Secret files (e.g. the
+# webhook cert) are readable by the operator process.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+  fsGroup: 65532
+
 serviceAccount:
   # -- Whether to create a ServiceAccount.
   create: true
