@@ -200,6 +200,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		var instanceErr error
 		instanceInfo, instanceErr = r.resolveInstanceInfo(ctx, engine)
 		if instanceErr != nil {
+			log.Info("Instance gate blocking reconcile", "reason", instanceErr.Error())
 			apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
