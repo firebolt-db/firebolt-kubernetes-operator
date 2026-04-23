@@ -175,6 +175,12 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoWriter.Printf("engine pod %s has IP %s\n", podName, podIP)
 
+			By("Recording health_check.failure count before deletion")
+			statsBefore, statsErr := envoyAdminStats(adminBase)
+			Expect(statsErr).NotTo(HaveOccurred())
+			failuresBefore := parseEnvoyHealthStat(statsBefore, ".health_check.failure")
+			GinkgoWriter.Printf("health_check.failure before deletion: %d\n", failuresBefore)
+
 			By("Deleting the engine pod to trigger SIGTERM")
 			gracePeriod := int64(30)
 			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, podName, metav1.DeleteOptions{
@@ -182,18 +188,24 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// With unhealthy_threshold: 1 and interval: 1s, Envoy should mark
-			// the pod as failed_active_hc within one health check cycle (~1s)
-			// of it returning non-2xx from /health/ready on SIGTERM.
-			By("Verifying Envoy ejects the terminating pod within one health check interval")
-			Eventually(func() (string, error) {
-				return envoyAdminClusters(adminBase)
-			}, 5*time.Second, 500*time.Millisecond).Should(
-				SatisfyAll(
-					ContainSubstring(podIP+":3473"),
-					ContainSubstring("failed_active_hc"),
-				),
-				"Envoy should mark the terminating pod endpoint as failed_active_hc within 1s of SIGTERM")
+			// With unhealthy_threshold: 1 and interval: 1s, Envoy's health check should
+			// detect the 503 from /health/ready within one check cycle (~1s) of SIGTERM.
+			// We verify via the health_check.failure counter delta rather than looking for
+			// podIP+":3473" in /clusters: STRICT_DNS sub-clusters remove endpoints when
+			// DNS propagates the deletion, which in Kind can happen before the health check
+			// fires — so the pod IP may be gone from /clusters before we can observe it as
+			// failed_active_hc. The cumulative failure counter doesn't disappear with the
+			// endpoint and is the reliable signal here.
+			By("Verifying Envoy detects the draining pod within one health check interval (failure counter)")
+			Eventually(func() (int, error) {
+				stats, err := envoyAdminStats(adminBase)
+				if err != nil {
+					return 0, err
+				}
+				return parseEnvoyHealthStat(stats, ".health_check.failure"), nil
+			}, 3*time.Second, 500*time.Millisecond).Should(
+				BeNumerically(">", failuresBefore),
+				"Envoy health check should detect the draining pod's 503 on /health/ready within ~1s of SIGTERM")
 
 			By("Waiting for the replacement pod to become ready")
 			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
