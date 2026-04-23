@@ -1,3 +1,27 @@
+# 0.1.13
+
+appVersion: v1.10.1
+
+### [1.10.1](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.10.0...v1.10.1) (2026-04-23)
+
+
+### Maintenance
+
+* **ci:** normalise workflow file extensions to .yaml (FB-769) ([f7f1dd9](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/f7f1dd9fdd86c87211613ca2e3d22d149514364d))
+* forbid git add -A in commit workflow (FB-769) ([add7c7a](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/add7c7aa4b85c36e836e35a372ef98fa05fa2d89))
+* **helm:** bump chart to 0.1.12 (appVersion v1.10.0) ([66cfa6b](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/66cfa6be5017f7b85a1fb5b5fdd936087f222399))
+
+
+### Bug fixes
+
+* **engine:** log instance gate rejection reason to operator logs (FB-769) ([8d9ec48](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/8d9ec482d75605350583ff0854b3d1b4b74ca8db))
+* **engine:** use foreground propagation for StatefulSet deletion (FB-769) ([4507ab1](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/4507ab140950a77dc2e958a0fb24d0ad47eea624))
+* **formal:** tighten ReadyIsStable consequent to []AllReady (FB-769) ([7edac69](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/7edac694358ba54b7e77b1f2725b315c70763b59))
+* **formal:** use SF_vars for ReconcileRun in FireboltInstance (FB-769) ([54504c3](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/54504c3e0823a7c32f43a730406c15d4a539dc9c))
+* **formal:** weaken EventuallyReady to <>[]AllReady precondition (FB-769) ([483858d](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/483858df6af2c28c136ae780ec60cef7c6028f10))
+
+
+
 # 0.1.12
 
 appVersion: v1.10.0
