@@ -333,18 +333,18 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # Keeping the headless service preserves Envoy's per-pod LB and
       # makes the retry policy meaningful.
       #
-      # Active health checks on the query port (3473). The ideal
-      # approach would redirect health checks to port 8122 (HealthPort)
-      # via Endpoint.HealthCheckConfig.port_value, but that field is
-      # per-endpoint and requires a static load_assignment — DFP
-      # sub-clusters create endpoints dynamically from DNS with no hook
-      # to inject HealthCheckConfig (envoyproxy/envoy#14045). The engine
-      # therefore exposes /health/ready on both ports.
+      # Active health checks on the query port (3473). DFP sub-clusters
+      # create endpoints dynamically from DNS and do not support per-
+      # endpoint port overrides (Endpoint.HealthCheckConfig.port_value
+      # requires a static load_assignment; envoyproxy/envoy#14045), so
+      # Envoy probes the same port it forwards queries to. The engine
+      # exposes GET /health/ready on the query port: 200 when ready,
+      # 503 on SIGTERM.
       #
-      # When an engine pod receives SIGTERM it must immediately return a
-      # non-2xx from /health/ready while still completing in-flight
-      # queries. Once Envoy sees unhealthy_threshold consecutive failures
-      # it removes that pod from the load-balanced set so no new queries
+      # When an engine pod receives SIGTERM it immediately returns 503
+      # from /health/ready while still completing in-flight queries.
+      # Once Envoy sees unhealthy_threshold consecutive failures it
+      # removes that pod from the load-balanced set so no new queries
       # are dispatched to it for the remainder of its graceful-shutdown
       # window.
       health_checks:
