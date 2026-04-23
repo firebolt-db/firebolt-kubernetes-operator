@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"google.golang.org/grpc"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -57,11 +56,6 @@ type FireboltInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	// DialMetadata, if non-nil, overrides the default gRPC dialer used by
-	// account initialization. This is used in E2E tests where the operator
-	// runs on the host and cannot resolve in-cluster DNS names.
-	DialMetadata func(ctx context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error)
-
 	// NameFilter, when non-empty, restricts this reconciler to a single
 	// FireboltInstance by name. Requests for any other instance are dropped.
 	// Intended for E2E tests that run multiple isolated operator instances
@@ -82,8 +76,8 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile ensures the PostgreSQL, metadata service, account, and gateway
-// components described by a FireboltInstance are running and healthy.
+// Reconcile ensures the PostgreSQL, metadata service, and gateway components
+// described by a FireboltInstance are running and healthy.
 func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	if r.NameFilter != "" && req.Name != r.NameFilter {
 		return ctrl.Result{}, nil
@@ -131,19 +125,10 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// InstancePhaseFailed is terminal. The only sites that set it
-	// (instance_account_init.go when the metadata service holds an account
-	// that does not match spec.id, or more than one account) both record
-	// "manual intervention required": either the metadata DB is corrupted
-	// or two FireboltInstances were pointed at it. Neither can be
-	// self-healed by the reconciler, so we stop running the rest of the
-	// loop — most importantly, we stop the every-10s gRPC dial into the
-	// metadata service and the repeated GetAccounts/StartReadOnlyAdminTransaction
-	// round-trips that would otherwise continue forever.
-	//
-	// The long RequeueAfter is a safety net: owned-object events will also
-	// re-enqueue, so this poll only matters if the human edits the status
-	// (e.g. kubectl patch) without touching any watched resource.
+	// InstancePhaseFailed is terminal. The long RequeueAfter is a safety
+	// net: owned-object events will also re-enqueue, so this poll only
+	// matters if the human edits the status (e.g. kubectl patch) without
+	// touching any watched resource.
 	if instance.Status.Phase == computev1alpha1.InstancePhaseFailed {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
@@ -215,21 +200,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		computev1alpha1.InstanceConditionMetadataReady, metav1.ConditionTrue,
 		"Ready", "metadata Deployment has at least one ready replica")
 
-	// Step 4: Account initialization
-	if err := r.ensureAccountInitialized(ctx, instance); err != nil {
-		// InstancePhaseFailed is set inside ensureAccountInitialized for the
-		// terminal cases (wrong account ID, multiple accounts); for
-		// recoverable RPC errors, failWithCondition below does NOT flip
-		// Phase, so the instance stays in Provisioning/Degraded and we
-		// back off via the returned error.
-		return r.failWithCondition(ctx, instance,
-			computev1alpha1.InstanceConditionAccountReady, "InitializationFailed", err)
-	}
-	setInstanceCondition(instance,
-		computev1alpha1.InstanceConditionAccountReady, metav1.ConditionTrue,
-		"Ready", "metadata account is provisioned and active")
-
-	// Step 5: Ensure gateway (native Go resources)
+	// Step 4: Ensure gateway (native Go resources)
 	if err := r.ensureGatewayResources(ctx, instance); err != nil {
 		return r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionGatewayReady, "EnsureFailed", err)
@@ -477,7 +448,7 @@ func setInstanceCondition(
 // per-component conditions. Ready is True iff every required component
 // condition is present AND True; otherwise False with the Reason/Message
 // of the FIRST not-True component in pipeline order (Postgres → Metadata
-// → Account → Gateway). Propagating the first blocker's Reason makes
+// → Gateway). Propagating the first blocker's Reason makes
 // `kubectl describe fireboltinstance` surface the actual root cause on
 // the headline condition, so users do not have to scan every condition
 // to find the one that is False.
@@ -485,7 +456,6 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	components := []string{
 		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
-		computev1alpha1.InstanceConditionAccountReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	}
 	for _, c := range components {
@@ -505,13 +475,13 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	}
 	setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
 		metav1.ConditionTrue, "AllComponentsReady",
-		"Postgres, metadata, account, and gateway are all ready")
+		"Postgres, metadata, and gateway are all ready")
 }
 
 // computePhase derives the instance Phase from InstanceConditionReady,
 // which is itself the roll-up of the per-component conditions
-// (Postgres, Metadata, Account, Gateway) computed by
-// setInstanceReadyRollup. The invariant is:
+// (Postgres, Metadata, Gateway) computed by setInstanceReadyRollup.
+// The invariant is:
 //
 //	Phase == Ready  ⇔  InstanceConditionReady.Status == True
 //
@@ -528,10 +498,9 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 //     credentials Secret was deleted post-rollout kept Phase=Ready
 //     (mounted creds keep the metadata pod running) while
 //     InstanceConditionReady correctly flipped to False.
-//  2. The mid-reconcile booleans are not reset between passes, so a
-//     post-ready Account failure would leave MetadataReady=true,
-//     GatewayReady=true and re-assert Phase=Ready while
-//     InstanceConditionAccountReady was freshly set to False.
+//  2. The mid-reconcile booleans are not reset between passes, leaving
+//     stale-true values that would re-assert Phase=Ready while a
+//     freshly-set component condition was False.
 //
 // Both cases were user-visible lies on the headline Phase field.
 // Deriving Phase from the same condition "Ready" that kubectl describe
@@ -545,13 +514,6 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 //	Provisioning → Ready    when ConditionReady flips True.
 //	Ready       → Degraded  when ConditionReady flips back to False.
 //	Degraded    → Ready     when ConditionReady recovers to True.
-//
-// Scenario NOT fixed here: Status.AccountReady is a one-way latch
-// (see ensureAccountInitialized). If an out-of-band actor deactivates
-// the account after the latch flipped, both AccountReady the boolean
-// AND InstanceConditionAccountReady the condition stay True, so the
-// roll-up and therefore Phase also stay Ready. That is the documented
-// trade-off for skipping the gRPC re-check; recovery is manual.
 func (r *FireboltInstanceReconciler) computePhase(instance *computev1alpha1.FireboltInstance) computev1alpha1.InstancePhase {
 	if instance.Status.Phase == computev1alpha1.InstancePhaseFailed {
 		return computev1alpha1.InstancePhaseFailed

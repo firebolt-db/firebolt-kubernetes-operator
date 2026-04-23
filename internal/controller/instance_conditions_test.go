@@ -63,7 +63,6 @@ func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 	for _, c := range []string{
 		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
-		computev1alpha1.InstanceConditionAccountReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	} {
 		setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
@@ -81,7 +80,7 @@ func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 }
 
 func TestSetInstanceReadyRollup_PropagatesFirstBlocker(t *testing.T) {
-	// Pipeline order: Postgres → Metadata → Account → Gateway.
+	// Pipeline order: Postgres → Metadata → Gateway.
 	// When multiple components are False/missing, the roll-up must
 	// surface the FIRST blocker so users see the root cause at the
 	// headline condition.
@@ -90,8 +89,6 @@ func TestSetInstanceReadyRollup_PropagatesFirstBlocker(t *testing.T) {
 		metav1.ConditionTrue, "Ready", "pg ok")
 	setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
 		metav1.ConditionFalse, "EnsureFailed", "metadata ensure failed: boom")
-	setInstanceCondition(inst, computev1alpha1.InstanceConditionAccountReady,
-		metav1.ConditionFalse, "InitializationFailed", "account init failed: kaboom")
 
 	setInstanceReadyRollup(inst)
 
@@ -112,7 +109,7 @@ func TestSetInstanceReadyRollup_PropagatesFirstBlocker(t *testing.T) {
 
 func TestSetInstanceReadyRollup_MissingComponentCountsAsNotReady(t *testing.T) {
 	inst := newInstance()
-	// Only Postgres is set; Metadata/Account/Gateway are absent.
+	// Only Postgres is set; Metadata/Gateway are absent.
 	setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
 		metav1.ConditionTrue, "Ready", "pg ok")
 
@@ -149,7 +146,6 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 				for _, c := range []string{
 					computev1alpha1.InstanceConditionPostgresReady,
 					computev1alpha1.InstanceConditionMetadataReady,
-					computev1alpha1.InstanceConditionAccountReady,
 					computev1alpha1.InstanceConditionGatewayReady,
 				} {
 					setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
@@ -174,29 +170,6 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 					metav1.ConditionFalse, "SecretPreflightFailed", "boom")
 				setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
 					metav1.ConditionTrue, "Ready", "ok")
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionAccountReady,
-					metav1.ConditionTrue, "Ready", "ok")
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
-					metav1.ConditionTrue, "Ready", "ok")
-				setInstanceReadyRollup(inst)
-			},
-			wantPhase: computev1alpha1.InstancePhaseDegraded,
-		},
-		{
-			// Scenario B from the audit: post-ready Account failure with
-			// stale-true MetadataReady/GatewayReady booleans from the
-			// previous successful pass.
-			name: "Account False mid-reconcile with stale booleans -> Degraded",
-			prepare: func(inst *computev1alpha1.FireboltInstance) {
-				inst.Status.Phase = computev1alpha1.InstancePhaseReady
-				inst.Status.MetadataReady = true
-				inst.Status.GatewayReady = true
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
-					metav1.ConditionTrue, "Ready", "ok")
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
-					metav1.ConditionTrue, "Ready", "ok")
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionAccountReady,
-					metav1.ConditionFalse, "InitializationFailed", "rpc timeout")
 				setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
 					metav1.ConditionTrue, "Ready", "ok")
 				setInstanceReadyRollup(inst)
@@ -218,7 +191,6 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 				for _, c := range []string{
 					computev1alpha1.InstanceConditionPostgresReady,
 					computev1alpha1.InstanceConditionMetadataReady,
-					computev1alpha1.InstanceConditionAccountReady,
 					computev1alpha1.InstanceConditionGatewayReady,
 				} {
 					setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
@@ -254,7 +226,6 @@ func TestSetInstanceReadyRollup_RecoversFromFalseToTrue(t *testing.T) {
 	for _, c := range []string{
 		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
-		computev1alpha1.InstanceConditionAccountReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	} {
 		setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")

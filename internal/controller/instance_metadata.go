@@ -91,6 +91,7 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 	return fmt.Sprintf(`<?xml version="1.0"?>
 <config>
   <pensieve_lite>
+    <default_account_id>%s</default_account_id>
     <host>0.0.0.0</host>
     <port>%d</port>
     <server_threads>0</server_threads>
@@ -117,7 +118,7 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
     </metadata_storage>
   </pensieve_lite>
 </config>`,
-		MetadataServicePort, pgHost, pgPort, pgDatabase)
+		instance.Spec.ID, MetadataServicePort, pgHost, pgPort, pgDatabase)
 }
 
 func metadataConfigMapName(instanceName string) string {
