@@ -359,14 +359,6 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
           unhealthy_threshold: 1
           http_health_check:
             path: /health/ready
-            # Accept 2xx–4xx as healthy. Until the engine exposes a real
-            # /health/ready on port 3473 it returns 404; accepting 4xx
-            # keeps the endpoint marked healthy while still ejecting pods
-            # that return 5xx or fail TCP. Once the engine serves 200
-            # normally and 503 on SIGTERM, remove expected_statuses.
-            expected_statuses:
-              - start: 200
-                end: 500
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
