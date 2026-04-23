@@ -21,6 +21,7 @@ make generate           # regenerate DeepCopy methods
 # Test
 make test               # unit tests (uses envtest)
 make test-e2e           # E2E tests on Kind cluster
+```
 
 # Run a single test
 go test ./internal/controller/... -run "TestControllerSuite/SomeSpec"
@@ -120,6 +121,9 @@ E2E rules:
 - Zero-downtime tests **must not have transient failures** — if they flake, fix the test or the controller
 - Maximum wait for any condition: **15 seconds**
 - No long `sleep` calls while debugging tests
+
+
+When running tests it is important to check the logs of engine containers in case they do not become ready.
 
 ## Commit Conventions
 

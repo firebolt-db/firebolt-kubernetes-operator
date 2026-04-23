@@ -405,7 +405,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		"multi_engine_mode_enabled": true,
 		"logger_formatting":         "json",
 		"logger_use_files":          false,
-		"shutdown_wait_unfinished":  fmt.Sprintf("%ds", shutdownWait),
+		"shutdown_wait_unfinished":  shutdownWait,
 	}
 
 	coreConfig := map[string]interface{}{
