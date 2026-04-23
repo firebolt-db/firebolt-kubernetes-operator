@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What This Operator Does
 
 Firebolt Kubernetes Operator manages two CRDs:
-- **FireboltInstance**: Shared infrastructure per-namespace (PostgreSQL, Pensieve metadata service, Envoy gateway, account init via gRPC)
+- **FireboltInstance**: Shared infrastructure per-namespace (PostgreSQL, Pensieve metadata service, Envoy gateway)
 - **FireboltEngine**: Stateful compute nodes with zero-downtime blue-green deployments
 
-Strict dependency: engines require a ready instance. The instance reconciler runs sequentially through its components (postgres → metadata → account → gateway). The engine reconciler gates on instance readiness during `stable` and `creating` phases only; `switching|draining|cleaning` bypass the gate.
+Strict dependency: engines require a ready instance. The instance reconciler runs sequentially through its components (postgres → metadata → gateway). The engine reconciler gates on instance readiness during `stable` and `creating` phases only; `switching|draining|cleaning` bypass the gate.
 
 ## Commands
 
@@ -87,10 +87,9 @@ Each spec change bumps `currentGeneration` (int). Resources per generation:
 Sequential pipeline in `instance_controller.go`:
 1. `instance_postgres.go` — PostgreSQL StatefulSet or external PG
 2. `instance_metadata.go` — Pensieve metadata service Deployment
-3. `instance_account_init.go` — gRPC bootstrap to Pensieve
-4. `instance_gateway.go` — Envoy gateway Deployment with Lua filter
+3. `instance_gateway.go` — Envoy gateway Deployment with Lua filter
 
-Instance phases: `Provisioning → Ready ↔ Degraded` (terminal: `Failed`). Per-component boolean flags (`postgresReady`, `metadataReady`, `accountReady`, `gatewayReady`) drive condition reporting.
+Instance phases: `Provisioning → Ready ↔ Degraded` (terminal: `Failed`). Per-component boolean flags (`postgresReady`, `metadataReady`, `gatewayReady`) drive condition reporting.
 
 ### Drain Check
 

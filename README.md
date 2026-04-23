@@ -6,7 +6,7 @@ A Kubernetes operator that manages Firebolt infrastructure: metadata services, a
 
 The operator manages two custom resources:
 
-- **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, an Envoy gateway proxy, and account initialization.
+- **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, and an Envoy gateway proxy.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it.
@@ -398,7 +398,7 @@ kubectl get fi -n firebolt
 kubectl describe fi <instance-name> -n firebolt
 ```
 
-Common causes: instance still provisioning, metadata service pods not ready, account initialization failed.
+Common causes: instance still provisioning, metadata service pods not ready, gateway pods not ready.
 
 ### Instance stuck in "Provisioning"
 

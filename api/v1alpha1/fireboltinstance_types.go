@@ -71,11 +71,6 @@ const (
 	// DB connection error in its own status.
 	InstanceConditionMetadataReady = "MetadataReady"
 
-	// InstanceConditionAccountReady is kept for API backwards compatibility.
-	// Account creation is now handled internally by Pensieve Dedicated;
-	// the operator no longer sets this condition.
-	InstanceConditionAccountReady = "AccountReady"
-
 	// InstanceConditionGatewayReady reports whether the Envoy gateway
 	// Deployment's resources were applied successfully and its pods
 	// are reporting Ready.
@@ -214,11 +209,6 @@ type FireboltInstanceStatus struct {
 	// The Engine reconciler uses this to write engine ConfigMaps.
 	// +optional
 	MetadataEndpoint string `json:"metadataEndpoint,omitempty"`
-
-	// AccountReady is kept for API backwards compatibility.
-	// Account creation is now handled internally by Pensieve Dedicated.
-	// +optional
-	AccountReady bool `json:"accountReady,omitempty"`
 
 	// GatewayReady indicates whether the gateway is healthy.
 	// +optional
