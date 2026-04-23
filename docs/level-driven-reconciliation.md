@@ -237,7 +237,7 @@ Specific policies:
 | Resource list/delete during cleanup | Errors are logged, collected, and aggregated. The finalizer is only removed when all cleanup operations succeed. This prevents premature garbage collection when the API server is unhealthy. |
 | Pod readiness and drain checks | Errors from `checkPodsReady` are propagated rather than defaulting to "not ready". Errors from `checkDrainComplete` (e.g. a transient metrics-scrape failure) are logged and treated as "not drained yet" — drain is already a bounded-retry loop at the caller, so re-polling is cheaper and less noisy than blowing up the whole reconcile on a flaky scrape. |
 | JSON marshalling | Config values passed to `json.MarshalIndent` are always well-typed maps. The error path is unreachable and guarded with a panic to catch programming bugs immediately. |
-| Terminal errors | Unrecoverable conditions (e.g. multiple accounts in metadata service) set the instance phase to `Failed` and surface the error, rather than entering an infinite retry loop. |
+| Terminal errors | Unrecoverable conditions set the instance phase to `Failed` and surface the error, rather than entering an infinite retry loop. |
 
 ## Status update strategy
 

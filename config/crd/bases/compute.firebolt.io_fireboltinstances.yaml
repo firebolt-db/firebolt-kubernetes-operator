@@ -2330,11 +2330,6 @@ spec:
             description: FireboltInstanceStatus defines the observed state of a Firebolt
               Instance.
             properties:
-              accountReady:
-                description: |-
-                  AccountReady is kept for API backwards compatibility.
-                  Account creation is now handled internally by Pensieve Dedicated.
-                type: boolean
               conditions:
                 description: Conditions represent the latest available observations
                   of the Instance's state.
