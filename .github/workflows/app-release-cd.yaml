@@ -122,7 +122,7 @@ jobs:
           curl --fail -sS -X POST \
             -H "Authorization: Bearer ${GH_APP_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/helm-release-cd.yml/dispatches" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/helm-release-cd.yaml/dispatches" \
             -d '{"ref":"main"}'
 
   build:
