@@ -389,7 +389,14 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
-	shutdownWait := gracePeriod - PreStopGraceMarginSeconds
+	// shutdown_wait_unfinished is the engine's post-SIGTERM budget: the
+	// preStop hook runs for up to (gracePeriod - PreStopGraceMarginSeconds),
+	// leaving PreStopGraceMarginSeconds for the engine after SIGTERM. Cap at
+	// gracePeriod-1 when TGPS is smaller than PreStopGraceMarginSeconds.
+	shutdownWait := int64(PreStopGraceMarginSeconds)
+	if shutdownWait > gracePeriod-1 {
+		shutdownWait = gracePeriod - 1
+	}
 	if shutdownWait < 1 {
 		shutdownWait = 1
 	}
