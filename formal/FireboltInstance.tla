@@ -24,8 +24,13 @@
 \*     setInstanceReadyRollup). The roll-up is called even on early returns
 \*     (writeStatusAndPoll), so the invariant Phase=Ready <=> AllReady holds
 \*     AFTER every ReconcileRun firing, not necessarily in between.
-\*   - Liveness (EventuallyReady) requires WF on both ReconcileRun and all
-\*     EnvComponentReady actions so TLC can find the fair path to all-ready.
+\*   - Liveness (EventuallyReady) requires SF on ReconcileRun: an adversarial
+\*     cycle between (degraded,[T,T,T]) and (degraded,[F,T,T]) keeps
+\*     Enabled(ReconcileRun) alternating rather than continuously held, so WF
+\*     does not force it to fire. SF_vars(ReconcileRun) is used for the same
+\*     reason SF_vars is used for instance-gated actions in FireboltEngine.tla.
+\*     WF_vars(EnvComponentReady) is sufficient: once all components are ready
+\*     the environment has no reason to keep deferring that action.
 \*   - InstancePhaseFailed is intentionally excluded from this model. The real
 \*     code preserves Failed if already set (e.g. via kubectl patch), but no
 \*     internal reconciler transition produces it; it is therefore unreachable
@@ -137,7 +142,7 @@ Spec ==
     /\ Init
     /\ [][Next]_vars
     /\ WF_vars(ReconcileInit)
-    /\ WF_vars(ReconcileRun)
+    /\ SF_vars(ReconcileRun)
     /\ \A c \in Components : WF_vars(EnvComponentReady(c))
 
 \* Theorems (checked by TLC)
