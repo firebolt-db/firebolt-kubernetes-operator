@@ -1,3 +1,34 @@
+# 0.1.12
+
+appVersion: v1.10.0
+
+## [1.10.0](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.9.0...v1.10.0) (2026-04-23)
+
+
+### Features
+
+* **engine:** enable drain ejection now that engine serves /health/ready on port 3473 (FB-769) ([2cf62da](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/2cf62daa5792d0b0f677d1dd064c3c20abf27286))
+* **engine:** remove preStop hook; rely on shutdown_wait_unfinished + Envoy ejection (FB-769) ([47ad26d](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/47ad26dadff0cdbeadcf0a2649c6fc663d958806))
+* **engine:** set shutdown_wait_unfinished from terminationGracePeriodSeconds (FB-769) ([3e8cafe](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/3e8cafefb69cf6c16ea13ecf94010e4d76de4067))
+* **instance:** remove gRPC account init — Pensieve Dedicated handles account creation (FB-769) ([6f4b340](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/6f4b34023a8bc41f0123966cc38a30191148fb7c))
+* use most recent image with all planned fixes (FB-769) ([e10fa8f](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e10fa8f213b263b7c06020d5896ca3a7c6e001be))
+
+
+### Maintenance
+
+* **helm:** bump chart to 0.1.11 (appVersion v1.9.0) ([26c870d](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/26c870d0da1664c70c75385802c4b693ac48d865))
+
+
+### Bug fixes
+
+* **e2e:** verify health check ejection via failure counter delta (FB-769) ([e95d254](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/e95d254bbb7e9b758cdebba7b05948ff8f00c007))
+* **engine:** correct shutdown_wait_unfinished to PreStopGraceMarginSeconds (FB-769) ([859c751](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/859c75184d083fdfc30d371b10b31a0f20a5a526))
+* **engine:** match labeled metrics in preStop drain check (FB-769) ([a2c1c99](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/a2c1c99d997f230810ce91e9a7a8b950247317c7))
+* **engine:** use integer seconds for shutdown_wait_unfinished (FB-769) ([42f2f43](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/42f2f43db0caa29d164b5379e122b81a648bdfd0))
+* **gateway:** repair active health checks and add E2E verification (FB-760) ([7e70d98](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/7e70d9818810a0542e8f63a45f29d913c8c07079))
+
+
+
 # 0.1.11
 
 appVersion: v1.9.0
