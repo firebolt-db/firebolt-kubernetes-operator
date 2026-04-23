@@ -11,6 +11,7 @@ Firebolt Platform Engineering
 - After: DFP sub-cluster mode + per-connection DNS
 - Zero-downtime blue-green deployments
 - Active health checks and drain ejection
+- Pod termination budget: preStop + shutdown_wait_unfinished
 - Envoy limitation: alt_port unimplemented
 - Envoy configuration: summary table
 - Why a gateway? (feature justification)
@@ -193,6 +194,34 @@ New queries are never dispatched to the draining pod after t≈1 s.
 Combined with `max_requests_per_connection:1` (which already prevents
 *new* connections to a pod with a stale IP), this gives two independent
 layers of zero-downtime protection.
+
+* Pod Termination Budget: preStop + shutdown_wait_unfinished
+
+Two cooperative settings share the `terminationGracePeriodSeconds` (TGPS) budget.
+
+  t = 0s     kubelet starts termination
+             ├─ preStop hook starts: polls /metrics, waits for queries → 0
+             │  deadline = TGPS − PreStopGraceMarginSeconds  (default: 60 − 10 = 50s)
+             │  exits early if queries drain before the deadline
+             │
+  t ≤ 50s    preStop exits
+             │
+  t = 50s    SIGTERM delivered to the engine process
+             │  shutdown_wait_unfinished = PreStopGraceMarginSeconds = 10s
+             │  engine waits up to 10s for any remaining in-flight work
+             │
+  t = 60s    SIGKILL
+
+`PreStopGraceMarginSeconds` (10 s) is the *shared budget*: the preStop script
+stops polling 10 s early so the engine process gets that same window after SIGTERM.
+`shutdown_wait_unfinished` is set to exactly `PreStopGraceMarginSeconds` so the
+engine knows the size of its window and doesn't wait longer than available.
+
+Edge case — very low TGPS (e.g. 5 s):
+
+  preStop deadline = max(1, 5 − 10) → 1s   (clamped)
+  engine window    = min(10, 5 − 1) → 4s   (clamped to gracePeriod − 1)
+  shutdown_wait_unfinished = 4s
 
 * Envoy Limitation: alt_port Is Not Implemented
 
