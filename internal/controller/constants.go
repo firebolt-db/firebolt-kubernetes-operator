@@ -190,8 +190,8 @@ scrape() {
 }
 while [ "$(date +%%s)" -lt "$DEADLINE" ]; do
   body=$(scrape) || { sleep 1; continue; }
-  r=$(printf '%%s\n' "$body" | awk '/^%s / {print $2; exit}')
-  s=$(printf '%%s\n' "$body" | awk '/^%s / {print $2; exit}')
+  r=$(printf '%%s\n' "$body" | awk '/^%s[{ ]/ {print $2; exit}')
+  s=$(printf '%%s\n' "$body" | awk '/^%s[{ ]/ {print $2; exit}')
   if [ "${r:-1}" = "0" ] && [ "${s:-1}" = "0" ]; then
     exit 0
   fi
