@@ -273,7 +273,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	} else {
 		for i := range stsList.Items {
 			log.Info("Deleting StatefulSet", "name", stsList.Items[i].Name)
-			if err := r.Delete(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
+			if err := r.deleteIfExists(ctx, &stsList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete StatefulSet", "name", stsList.Items[i].Name)
 				errs = append(errs, err)
 			}
@@ -289,7 +289,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	} else {
 		for i := range svcList.Items {
 			log.Info("Deleting Service", "name", svcList.Items[i].Name)
-			if err := r.Delete(ctx, &svcList.Items[i]); err != nil && !errors.IsNotFound(err) {
+			if err := r.deleteIfExists(ctx, &svcList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete Service", "name", svcList.Items[i].Name)
 				errs = append(errs, err)
 			}
@@ -305,7 +305,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	} else {
 		for i := range cmList.Items {
 			log.Info("Deleting ConfigMap", "name", cmList.Items[i].Name)
-			if err := r.Delete(ctx, &cmList.Items[i]); err != nil && !errors.IsNotFound(err) {
+			if err := r.deleteIfExists(ctx, &cmList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete ConfigMap", "name", cmList.Items[i].Name)
 				errs = append(errs, err)
 			}
