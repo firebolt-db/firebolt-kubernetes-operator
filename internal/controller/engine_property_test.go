@@ -174,7 +174,7 @@ func isTerminalPhase(phase computev1alpha1.EnginePhase) bool {
 // ---------- State machine actions ----------
 
 // gcStaleResources mirrors gcOrphanedResources, which runs after applyEngineState
-// in the real controller when phase=Stable.
+// in the real controller when phase is any terminal phase (Stable or Stopped).
 func (m *engineSim) gcStaleResources() {
 	keepGens := map[int]bool{m.status.CurrentGeneration: true}
 	if m.status.DrainingGeneration != nil {

@@ -41,9 +41,9 @@ import (
 // reference them because getEngineState only reads CurrentGeneration and
 // DrainingGeneration.
 //
-// This sweep runs only in PhaseStable, where exactly which generations should
-// exist is unambiguous, making it a safe, eventually-consistent safety net
-// rather than the primary lifecycle mechanism.
+// This sweep runs in any terminal phase (PhaseStable or PhaseStopped), where
+// exactly which generations should exist is unambiguous, making it a safe,
+// eventually-consistent safety net rather than the primary lifecycle mechanism.
 func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
