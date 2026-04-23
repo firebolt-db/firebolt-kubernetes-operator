@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,9 +36,6 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -766,74 +762,6 @@ func categorizeQueryError(detail string) string {
 	}
 }
 
-// dialMetadataViaPortForward establishes a gRPC connection to the metadata
-// service by port-forwarding through kubectl. This is needed because the
-// reconciler runs on the host and cannot resolve in-cluster DNS.
-func dialMetadataViaPortForward(_ context.Context, instance *computev1alpha1.FireboltInstance) (*grpc.ClientConn, func(), error) {
-	serviceName := instance.Name + controller.SuffixMetadataService
-	servicePort := controller.MetadataServicePort
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to find free port: %w", err)
-	}
-	localPort := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-
-	args := []string{"port-forward", "-n", testNamespace,
-		fmt.Sprintf("svc/%s", serviceName),
-		fmt.Sprintf("%d:%d", localPort, servicePort)}
-	if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
-		args = append([]string{"--context", "kind-" + kindCluster}, args...)
-	}
-	cmd := exec.Command("kubectl", args...)
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return nil, nil, fmt.Errorf("failed to start port-forward to %s: %w", serviceName, err)
-	}
-
-	// Wait for port-forward to be ready
-	var connected bool
-	for i := 0; i < 50; i++ {
-		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 100*time.Millisecond)
-		if err == nil {
-			c.Close()
-			connected = true
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !connected {
-		if cmd.Process != nil {
-			cmd.Process.Kill() //nolint:errcheck
-			cmd.Wait()         //nolint:errcheck
-		}
-		return nil, nil, fmt.Errorf("timeout waiting for port-forward to %s to be ready", serviceName)
-	}
-
-	target := fmt.Sprintf("127.0.0.1:%d", localPort)
-	conn, err := grpc.NewClient(target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		if cmd.Process != nil {
-			cmd.Process.Kill() //nolint:errcheck
-			cmd.Wait()         //nolint:errcheck
-		}
-		return nil, nil, fmt.Errorf("grpc dial to %s via port-forward: %w", serviceName, err)
-	}
-
-	cleanup := func() {
-		_ = conn.Close()
-		if cmd.Process != nil {
-			cmd.Process.Kill() //nolint:errcheck
-			cmd.Wait()         //nolint:errcheck
-		}
-	}
-
-	return conn, cleanup, nil
-}
-
 // InstanceOperator represents a running instance operator (FireboltInstanceReconciler)
 type InstanceOperator struct {
 	mgr        manager.Manager
@@ -877,10 +805,9 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	}
 
 	reconciler := &controller.FireboltInstanceReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		DialMetadata: dialMetadataViaPortForward,
-		NameFilter:   instanceName,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		NameFilter: instanceName,
 	}
 	controllerName := fmt.Sprintf("fireboltinstance-%d", operatorInstanceCounter.Add(1))
 	if err := reconciler.SetupWithManagerNamed(mgr, controllerName); err != nil {

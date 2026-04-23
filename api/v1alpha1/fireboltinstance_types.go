@@ -36,14 +36,13 @@ const (
 
 // Condition types for FireboltInstance.
 //
-// The per-component conditions (PostgresReady, MetadataReady,
-// AccountReady, GatewayReady) surface the outcome of each ensure step
-// in Reconcile. They flip to False with a descriptive Reason whenever
-// the corresponding sub-reconciler returns an error, which replaces
-// the previous behavior of logging-and-requeueing-silently. The
-// roll-up InstanceConditionReady is False whenever any per-component
-// condition is not True, carrying the first blocker's Reason/Message
-// so `kubectl describe` shows the root cause without digging.
+// The per-component conditions (PostgresReady, MetadataReady, GatewayReady)
+// surface the outcome of each ensure step in Reconcile. They flip to False
+// with a descriptive Reason whenever the corresponding sub-reconciler returns
+// an error, which replaces the previous behavior of logging-and-requeueing-
+// silently. The roll-up InstanceConditionReady is False whenever any
+// per-component condition is not True, carrying the first blocker's
+// Reason/Message so `kubectl describe` shows the root cause without digging.
 //
 // These conditions are additive: the boolean Status.*Ready fields are
 // kept for backward compatibility and for printcolumn display. The
@@ -72,10 +71,9 @@ const (
 	// DB connection error in its own status.
 	InstanceConditionMetadataReady = "MetadataReady"
 
-	// InstanceConditionAccountReady reports whether the one-time
-	// metadata service account bootstrap has completed. Once True,
-	// subsequent reconciles skip the gRPC account-check on the fast
-	// path (see instance_account_init.go).
+	// InstanceConditionAccountReady is kept for API backwards compatibility.
+	// Account creation is now handled internally by Pensieve Dedicated;
+	// the operator no longer sets this condition.
 	InstanceConditionAccountReady = "AccountReady"
 
 	// InstanceConditionGatewayReady reports whether the Envoy gateway
@@ -217,9 +215,8 @@ type FireboltInstanceStatus struct {
 	// +optional
 	MetadataEndpoint string `json:"metadataEndpoint,omitempty"`
 
-	// AccountReady indicates whether the metadata account has been
-	// initialized and activated. Once true, the reconciler skips the
-	// gRPC account-check on subsequent loops.
+	// AccountReady is kept for API backwards compatibility.
+	// Account creation is now handled internally by Pensieve Dedicated.
 	// +optional
 	AccountReady bool `json:"accountReady,omitempty"`
 
