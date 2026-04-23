@@ -24,13 +24,17 @@
 \*     setInstanceReadyRollup). The roll-up is called even on early returns
 \*     (writeStatusAndPoll), so the invariant Phase=Ready <=> AllReady holds
 \*     AFTER every ReconcileRun firing, not necessarily in between.
-\*   - Liveness (EventuallyReady) requires SF on ReconcileRun: an adversarial
-\*     cycle between (degraded,[T,T,T]) and (degraded,[F,T,T]) keeps
-\*     Enabled(ReconcileRun) alternating rather than continuously held, so WF
-\*     does not force it to fire. SF_vars(ReconcileRun) is used for the same
-\*     reason SF_vars is used for instance-gated actions in FireboltEngine.tla.
-\*     WF_vars(EnvComponentReady) is sufficient: once all components are ready
-\*     the environment has no reason to keep deferring that action.
+\*   - EventuallyReady uses <>[]AllReady (permanent stability) rather than the
+\*     simpler AllReady ~> ... (transient). The weaker precondition is unsound:
+\*     an adversarial environment can degrade a component in the very next step
+\*     after AllReady becomes true, before ReconcileRun gets to fire. Once any
+\*     component is down, PhaseFrom returns the same phase (a stuttering step),
+\*     so <<ReconcileRun>>_vars is never enabled inside the resulting cycle —
+\*     neither WF nor SF can force it to fire. Under permanent stability AllReady
+\*     stays true, so ReconcileRun is continuously vars-enabled and WF suffices.
+\*   - WF_vars(ReconcileRun) is sufficient: under the <>[]AllReady precondition
+\*     the vars-enabled condition is held continuously once reached, so WF fires
+\*     it. SF is not required.
 \*   - InstancePhaseFailed is intentionally excluded from this model. The real
 \*     code preserves Failed if already set (e.g. via kubectl patch), but no
 \*     internal reconciler transition produces it; it is therefore unreachable
@@ -128,8 +132,12 @@ Safety ==
 \* Liveness
 \* ---------------------------------------------------------------------------
 
-\* If all three components become and stay available, phase eventually reaches Ready.
-EventuallyReady == AllReady ~> (phase = "ready")
+\* If all three components become and permanently stay available, phase eventually
+\* reaches Ready.  The precondition <>[]AllReady (permanent stability) is needed
+\* because a transiently-ready state is insufficient: the environment can degrade
+\* a component before ReconcileRun fires, at which point ReconcileRun becomes a
+\* stuttering step and no fairness condition can force it to make progress.
+EventuallyReady == (<>[]AllReady) => <>(phase = "ready")
 
 \* Once Ready, the phase stays Ready as long as all components remain available.
 ReadyIsStable == [](((phase = "ready") /\ AllReady) => [](AllReady => (phase = "ready")))
@@ -142,7 +150,7 @@ Spec ==
     /\ Init
     /\ [][Next]_vars
     /\ WF_vars(ReconcileInit)
-    /\ SF_vars(ReconcileRun)
+    /\ WF_vars(ReconcileRun)
     /\ \A c \in Components : WF_vars(EnvComponentReady(c))
 
 \* Theorems (checked by TLC)

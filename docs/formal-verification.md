@@ -80,7 +80,8 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 - 3-phase lifecycle: `Provisioning → Ready ↔ Degraded`
 - Sequential pipeline per reconcile: Postgres → Metadata → Gateway
 - `setInstanceReadyRollup` called even on early returns, so phase always reflects all three conditions
-- Safety: `TypeOK` invariant; liveness: `EventuallyReady` and `ReadyIsStable`
+- Safety: `TypeOK` invariant; liveness: `EventuallyReady` (`(<>[]AllReady) => <>(phase = "ready")`) and `ReadyIsStable`
+- `EventuallyReady` uses permanent-stability precondition `<>[]AllReady`, not transient `AllReady`: the environment can degrade a component before ReconcileRun fires, at which point ReconcileRun is a stuttering step and no fairness condition can force progress
 - `InstancePhaseFailed` excluded: not reachable through internal transitions, only preservable if externally injected
 - TLC runtime: < 5 seconds (32 reachable states)
 
