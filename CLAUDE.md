@@ -136,6 +136,8 @@ Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (F
 
 The FB-<ticket> reference can be taken from branch name or last commit.
 
+**Staging**: always add files by explicit path (`git add file1 file2`). Never use `git add -A`, `git add .`, or `git add --all` — untracked files that are not meant to be versioned will be committed.
+
 ## Code Quality
 
 - Ignoring errors is forbidden except with a documented rationale in a comment
