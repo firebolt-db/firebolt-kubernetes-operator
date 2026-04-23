@@ -288,6 +288,8 @@ func computeSwitching(
 
 	if oldGen >= 0 && oldGen != gen {
 		status.DrainingGeneration = &oldGen
+		// DrainingPodsDrained is not stored in status; it is re-derived from live
+		// pod metrics each reconcile, so no explicit reset is needed here.
 		status.Phase = computev1alpha1.PhaseDraining
 	} else {
 		status.Phase = terminalPhase(spec)
