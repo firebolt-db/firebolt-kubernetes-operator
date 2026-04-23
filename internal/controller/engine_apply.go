@@ -24,6 +24,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -251,7 +252,15 @@ func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context
 }
 
 func (r *FireboltEngineReconciler) deleteIfExists(ctx context.Context, obj client.Object) error {
-	err := r.Delete(ctx, obj)
+	var opts []client.DeleteOption
+	if _, ok := obj.(*appsv1.StatefulSet); ok {
+		// Foreground propagation: K8s GC deletes pods before removing the STS.
+		// Without this, background deletion leaves orphaned pods Running+Ready,
+		// which inflates pod counts seen by the test helper and the drain check.
+		prop := metav1.DeletePropagationForeground
+		opts = append(opts, &client.DeleteOptions{PropagationPolicy: &prop})
+	}
+	err := r.Delete(ctx, obj, opts...)
 	if errors.IsNotFound(err) {
 		return nil
 	}
