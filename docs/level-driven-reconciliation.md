@@ -1,6 +1,6 @@
 # Level-Driven Reconciliation
 
-This document describes the reconciliation architecture used by the Firebolt operator. The operator manages two custom resources with a strict dependency relationship: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway, account initialization), and **FireboltEngine** deploys stateful compute nodes that require a ready instance. An engine cannot be created or updated without a ready instance in its namespace.
+This document describes the reconciliation architecture used by the Firebolt operator. The operator manages two custom resources with a strict dependency relationship: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway), and **FireboltEngine** deploys stateful compute nodes that require a ready instance. An engine cannot be created or updated without a ready instance in its namespace.
 
 ## Resource dependency model
 
@@ -14,11 +14,10 @@ The operator enforces a hierarchical dependency between instances and engines:
 │ - PostgreSQL     │         │ points to the     │
 │ - Metadata svc   │         │ instance by name  │
 │ - Gateway        │         │                  │
-│ - Account init   │         │ Blocked until     │
-│                  │         │ instance has:     │
-│ status:          │         │ - metadataEndpoint│
-│   metadataEndpoint│        │ - spec.id         │
-│                  │         │                  │
+│                  │         │ Blocked until     │
+│ status:          │         │ instance has:     │
+│   metadataEndpoint│        │ - metadataEndpoint│
+│                  │         │ - spec.id         │
 └──────────────────┘         └──────────────────┘
 ```
 
@@ -279,39 +278,38 @@ All per-engine resources have:
 
 ## FireboltInstance reconciler
 
-The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, the Envoy gateway proxy, and account initialization. It follows the same level-triggered principles as the engine reconciler.
+The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, and the Envoy gateway proxy. It follows the same level-triggered principles as the engine reconciler.
 
 ### Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Reconcile()                                                     │
-│  Entry point — reads FireboltInstance CR, runs steps in order    │
-│  File: instance_controller.go                                    │
-└──────┬───────────┬──────────────┬──────────────┬─────────────────┘
-       │           │              │              │
-       ▼           ▼              ▼              ▼
-┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────────┐
-│ PostgreSQL│ │ Metadata │ │ Account   │ │ Gateway      │
-│ (native)  │ │ (native) │ │ Init      │ │ (native)     │
-│           │ │          │ │ (gRPC)    │ │              │
-│ instance_ │ │ instance_│ │ instance_ │ │ instance_    │
-│ postgres  │ │ metadata │ │ account_  │ │ gateway.go   │
-│ .go       │ │ .go      │ │ init.go   │ │              │
-└───────────┘ └──────────┘ └───────────┘ └──────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Reconcile()                                             │
+│  Entry point — reads FireboltInstance CR, runs in order  │
+│  File: instance_controller.go                            │
+└──────┬───────────┬──────────────┬────────────────────────┘
+       │           │              │
+       ▼           ▼              ▼
+┌───────────┐ ┌──────────┐ ┌──────────────┐
+│ PostgreSQL│ │ Metadata │ │ Gateway      │
+│ (native)  │ │ (native) │ │ (native)     │
+│           │ │          │ │              │
+│ instance_ │ │ instance_│ │ instance_    │
+│ postgres  │ │ metadata │ │ gateway.go   │
+│ .go       │ │ .go      │ │              │
+└───────────┘ └──────────┘ └──────────────┘
 ```
 
 ### Reconcile steps
 
-Each `Reconcile` call runs through five sequential steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist).
+Each `Reconcile` call runs through four sequential steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist).
 
 | Step | Description | Implementation |
 |---|---|---|
 | 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
-| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
+| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). The XML config includes `<default_account_id>` set to `spec.id`; Pensieve Dedicated uses this to provision the account on startup. All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
-| 4. Account initialization | Connects to the metadata gRPC API via in-cluster DNS and ensures an account matching `spec.id` exists and is active. Uses `CreateAccountWithID` so the instance ID is the account ID. If the account exists but is not active, the operator retries activation. Multiple accounts or an ID mismatch trigger a terminal `Failed` phase. | `instance_account_init.go` |
-| 5. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
+| 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
 ### Instance lifecycle phases
 
@@ -332,7 +330,7 @@ Each `Reconcile` call runs through five sequential steps. If any step fails, the
 
 The instance starts in `Provisioning` and transitions to `Ready` once both the metadata service and gateway have at least one ready replica. If a previously-ready component becomes unhealthy, the phase transitions to `Degraded`. It returns to `Ready` once all components recover.
 
-The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone (e.g. multiple accounts found in the metadata service). The operator continues to requeue but will not transition out of `Failed` without manual intervention.
+The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone. The operator continues to requeue but will not transition out of `Failed` without manual intervention.
 
 When the metadata service or gateway becomes not-ready, the operator clears the corresponding endpoint from the instance status (`metadataEndpoint` or `gatewayEndpoint`). This ensures that dependent engines observe consistent state and block until the instance is fully operational again.
 

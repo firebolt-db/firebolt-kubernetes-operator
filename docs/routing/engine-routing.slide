@@ -207,8 +207,8 @@ Two cooperative settings share the `terminationGracePeriodSeconds` (TGPS) budget
   t ≤ 50s    preStop exits
              │
   t = 50s    SIGTERM delivered to the engine process
-             │  shutdown_wait_unfinished = PreStopGraceMarginSeconds = 10s
-             │  engine waits up to 10s for any remaining in-flight work
+             │  shutdown_wait_unfinished = PreStopGraceMarginSeconds = 10  (integer seconds)
+             │  engine waits up to 10 s for any remaining in-flight work
              │
   t = 60s    SIGKILL
 
@@ -219,9 +219,9 @@ engine knows the size of its window and doesn't wait longer than available.
 
 Edge case — very low TGPS (e.g. 5 s):
 
-  preStop deadline = max(1, 5 − 10) → 1s   (clamped)
-  engine window    = min(10, 5 − 1) → 4s   (clamped to gracePeriod − 1)
-  shutdown_wait_unfinished = 4s
+  preStop deadline = max(1, 5 − 10) → 1 s   (clamped)
+  engine window    = min(10, 5 − 1) → 4 s   (clamped to gracePeriod − 1)
+  shutdown_wait_unfinished = 4               (integer seconds)
 
 * Envoy Limitation: alt_port Is Not Implemented
 
