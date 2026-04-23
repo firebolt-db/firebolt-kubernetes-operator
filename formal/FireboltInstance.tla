@@ -26,6 +26,10 @@
 \*     AFTER every ReconcileRun firing, not necessarily in between.
 \*   - Liveness (EventuallyReady) requires WF on both ReconcileRun and all
 \*     EnvComponentReady actions so TLC can find the fair path to all-ready.
+\*   - InstancePhaseFailed is intentionally excluded from this model. The real
+\*     code preserves Failed if already set (e.g. via kubectl patch), but no
+\*     internal reconciler transition produces it; it is therefore unreachable
+\*     from the Init state and does not affect any modeled property.
 
 EXTENDS Integers, TLC
 

@@ -64,30 +64,33 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 
 ## Phased plan
 
-### Phase 1 — TLA+ spec of the FireboltEngine state machine (current focus)
+### Phase 1 — TLA+ specs of the reconciler state machines (complete)
 
-Write a PlusCal specification of the `FireboltEngine` reconciler:
+**FireboltEngine** (`formal/FireboltEngine.tla`):
 
-- Model the 6 phases (`stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`)
-- Model generation counters (`currentGeneration`, `activeGeneration`, `drainingGeneration`)
-- Model spec changes arriving at any point (the abandon/defer rules), including scale-to-zero toggles via `specWantsStop`
-- Model operator crashes and restarts
-- Assert safety invariants (active generation always has resources; service selector is consistent; quiesced terminal phase matches `spec.replicas` intent)
-- Assert liveness (engine always eventually reaches a terminal phase — `stable` or `stopped`)
+- 6 phases: `stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`
+- Generation counters: `currentGeneration`, `activeGeneration`, `drainingGeneration`
+- Spec changes at any point (abandon/defer rules); scale-to-zero via `specWantsStop`
+- Safety invariants: active generation always has resources; service selector is consistent; quiesced terminal phase matches `spec.replicas` intent
+- Liveness: engine always eventually reaches a terminal phase (`stable` or `stopped`)
+- TLC runtime: < 30 seconds at `MaxGen=2, MaxSpec=3`
 
-Run TLC to exhaustively explore all reachable states. Fix any violations before they manifest in code.
+**FireboltInstance** (`formal/FireboltInstance.tla`):
 
-Deliverable: `formal/FireboltEngine.tla` (checked into the repository).
+- 3-phase lifecycle: `Provisioning → Ready ↔ Degraded`
+- Sequential pipeline per reconcile: Postgres → Metadata → Gateway
+- `setInstanceReadyRollup` called even on early returns, so phase always reflects all three conditions
+- Safety: `TypeOK` invariant; liveness: `EventuallyReady` and `ReadyIsStable`
+- `InstancePhaseFailed` excluded: not reachable through internal transitions, only preservable if externally injected
+- TLC runtime: < 5 seconds (32 reachable states)
 
-### Phase 2 — `rapid` stateful property tests in envtest
+### Phase 2 — `rapid` stateful property tests (complete)
 
-Add a `rapid`-based `StateMachine` test to the unit test suite:
+`internal/controller/engine_property_test.go` uses `pgregory.net/rapid` to drive `computeEngineReconcile` with random operation sequences and verify the same invariants as the TLA+ spec after every step. Runs fully in-memory (no envtest) under `make test`.
 
-- **Operations**: `ApplySpecChange`, `CrashReconciler`, `DeleteEngine`, `ScaleReplicas`
-- **Invariants**: service selector always points to `activeGeneration`; `DrainingGeneration` is nil in `stable`; no StatefulSet from generation ≤ N−2 survives after `stable`
-- Wire into `make test`
-
-Deliverable: `internal/controller/engine_property_test.go`.
+- **Operations**: `Reconcile`, `CrashReconcile` (applies resources but not status), `ApplySpecChange`, `ScaleReplicas` (range 0–5, making `stopped` reachable), `PodsBecomesReady`, `DrainCompletes`, `DeleteEngine`
+- **Invariants**: `Inv_TerminalConsistency`, `Inv_TerminalNoDraining`, `Inv_ActiveHasSTS`, `Inv_AlwaysRequeues` — mirror the TLA+ `Safety` predicate
+- `CrashReconcile` simulates a crash between the last resource write and the status update in `applyEngineState`, exercising crash recovery on the next step
 
 ### Phase 3 — TLA+ → test-case generation (harness)
 
