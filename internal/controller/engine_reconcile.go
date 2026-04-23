@@ -389,12 +389,12 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
-	// shutdown_wait_unfinished is the engine's post-SIGTERM budget: the
-	// preStop hook runs for up to (gracePeriod - PreStopGraceMarginSeconds),
-	// leaving PreStopGraceMarginSeconds for the engine after SIGTERM. Cap at
-	// gracePeriod-1 when TGPS is smaller than PreStopGraceMarginSeconds.
-	shutdownWait := int64(PreStopGraceMarginSeconds)
-	if shutdownWait > gracePeriod-1 {
+	// shutdown_wait_unfinished is the engine's post-SIGTERM budget for
+	// draining in-flight queries. Without a preStop hook, SIGTERM arrives
+	// immediately; the engine uses this window before SIGKILL. The margin
+	// covers container runtime teardown after the process exits.
+	shutdownWait := gracePeriod - int64(EngineShutdownMarginSeconds)
+	if shutdownWait < 1 {
 		shutdownWait = gracePeriod - 1
 	}
 	if shutdownWait < 1 {
@@ -487,7 +487,6 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
-	preStopScript := BuildEnginePreStopScript(gracePeriod)
 
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -541,13 +540,6 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									MountPath: ConfigMountPath,
 									SubPath:   "config.json",
 									ReadOnly:  true,
-								},
-							},
-							Lifecycle: &corev1.Lifecycle{
-								PreStop: &corev1.LifecycleHandler{
-									Exec: &corev1.ExecAction{
-										Command: []string{"/bin/bash", "-c", preStopScript},
-									},
 								},
 							},
 							ReadinessProbe: &corev1.Probe{

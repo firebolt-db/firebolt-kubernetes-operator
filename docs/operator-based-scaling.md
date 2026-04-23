@@ -460,7 +460,7 @@ The operator runs the same blue-green transition as any other replica change:
 
 1. `creating`: a new generation is created with a zero-replica StatefulSet (plus its headless Service and ConfigMap).
 2. `switching`: the engine Service selector flips to the new generation. Because the new StatefulSet has zero Ready pods, the headless Service's endpoint set is empty.
-3. `draining`: old-generation pods are drained per `spec.rollout` (`graceful` waits for zero in-flight queries; `recreate` skips the wait and relies on per-pod preStop).
+3. `draining`: old-generation pods are drained per `spec.rollout` (`graceful` waits for zero in-flight queries; `recreate` skips the wait).
 4. `cleaning`: old-generation resources are deleted.
 5. Terminal phase is `stopped` instead of `stable`, because `spec.replicas == 0`.
 
@@ -473,7 +473,7 @@ Resuming is symmetric. Setting `spec.replicas` back to a non-zero value triggers
 - The engine Service's headless DNS returns zero A-records (no ready endpoints).
 - Requests through the instance gateway with `X-Firebolt-Engine: <stopped-engine>` return HTTP 503, because Envoy's `dynamic_forward_proxy` resolves the engine Service and finds no upstream. The response is indistinguishable from a request to a non-existent engine. See `docs/option-b-per-engine-envoy-clusters.md` for the gateway resolution model.
 - No gateway reconfiguration happens on stop/resume — the gateway is engine-set agnostic and discovers engines at request time. Existing gateway retry semantics apply unchanged.
-- In-flight requests during the selector flip behave the same as during any other blue-green transition: pods entering termination run their `preStop` hook and continue serving until they report zero in-flight queries or hit `terminationGracePeriodSeconds`.
+- In-flight requests during the selector flip behave the same as during any other blue-green transition: pods entering termination continue serving in-flight queries until `shutdown_wait_unfinished` expires or they complete, then exit before `terminationGracePeriodSeconds`.
 
 **Status signal contract:**
 
@@ -488,9 +488,9 @@ The operator scrapes the engine's Prometheus `/metrics` endpoint on port `9090` 
 
 The scrape goes through the Kubernetes API server's `Pods/proxy` subresource (not pod IPs directly), so the operator works the same way in-cluster and out-of-cluster without needing reachability to pod networks. Required RBAC is `pods/proxy: get`.
 
-In parallel, each engine pod runs a `preStop` lifecycle hook that reads the same two metrics from `127.0.0.1:9090` in bash (via `/dev/tcp`, since the firebolt-core image ships without `curl`/`wget`) and delays SIGTERM until the pod reports zero in-flight queries or the pod's `terminationGracePeriodSeconds − 10s` deadline is reached. This matters because firebolt-core otherwise cancels in-flight queries on SIGTERM; the `preStop` hook is what gives them a chance to finish.
+On SIGTERM, the engine process waits up to `terminationGracePeriodSeconds − 5s` (`shutdown_wait_unfinished`) for in-flight queries to finish before exiting. Envoy's active health checks eject the pod from routing within ~1s of SIGTERM, so no new queries are routed to a draining pod.
 
-See `docs/level-driven-reconciliation.md` for the full drain-check and preStop specification.
+See `docs/level-driven-reconciliation.md` for the full drain-check specification.
 
 ## Spec Change Handling
 

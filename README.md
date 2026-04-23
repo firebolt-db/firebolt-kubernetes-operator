@@ -289,9 +289,9 @@ spec:
 | `spec.resources.cpu` | **Yes** | - | CPU request and limit (e.g., `"2"`, `"500m"`) |
 | `spec.resources.memory` | **Yes** | - | Memory request and limit (e.g., `"8Gi"`) |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain; `recreate` deletes immediately |
-| `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the operator-side drain check. The per-pod `preStop` hook still runs. |
+| `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the operator-side drain check. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status |
-| `spec.terminationGracePeriodSeconds` | No | `60` | Grace period between SIGTERM and SIGKILL for engine pods. The `preStop` hook self-caps at `grace − 10s`; raise this for workloads with long-running queries. |
+| `spec.terminationGracePeriodSeconds` | No | `60` | Grace period between SIGTERM and SIGKILL for engine pods. The engine waits up to `grace − 5s` for in-flight queries after SIGTERM; raise this for workloads with long-running queries. |
 | `spec.nodeSelector` | No | - | Node selector for engine pods |
 | `spec.tolerations` | No | - | Tolerations for engine pods |
 | `spec.metadataEndpointOverride` | No | - | Override the instance-derived metadata endpoint (for cross-cluster setups) |

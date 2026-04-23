@@ -17,7 +17,7 @@ limitations under the License.
 package controller
 
 import (
-	"strings"
+	"encoding/json"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -105,38 +105,7 @@ func TestGetTerminationGracePeriod(t *testing.T) {
 	}
 }
 
-func TestBuildEnginePreStopScript(t *testing.T) {
-	script := BuildEnginePreStopScript(60)
-
-	// Script must be valid bash - no obvious syntax issues.
-	// We can't fully execute it without an actual engine, but we can assert
-	// the critical pieces are there so a refactor cannot silently break the
-	// contract (scrape metrics -> check both gauges -> exit 0 on drained).
-	musts := []string{
-		"/dev/tcp/127.0.0.1/9090",
-		"GET /metrics",
-		MetricRunningQueries,
-		MetricSuspendedQueries,
-		// Deadline is computed from date +%s so termination is bounded.
-		"date +%s",
-		"exit 0",
-	}
-	for _, m := range musts {
-		if !strings.Contains(script, m) {
-			t.Errorf("preStop script missing %q; script=\n%s", m, script)
-		}
-	}
-
-	// A tiny TGPS must still produce a script with a deadline of at least
-	// one second (otherwise the loop never runs and we effectively skip
-	// drain entirely).
-	tiny := BuildEnginePreStopScript(1)
-	if !strings.Contains(tiny, "DEADLINE=$(($(date +%s) + 1))") {
-		t.Errorf("expected 1s deadline in tiny preStop script, got:\n%s", tiny)
-	}
-}
-
-func TestBuildStatefulSetInstallsPreStopAndTGPS(t *testing.T) {
+func TestBuildStatefulSetInstallsTGPS(t *testing.T) {
 	spec := testSpec()
 	custom := int64(45)
 	spec.TerminationGracePeriodSeconds = &custom
@@ -152,15 +121,8 @@ func TestBuildStatefulSetInstallsPreStopAndTGPS(t *testing.T) {
 		t.Fatalf("expected 1 container, got %d", len(podSpec.Containers))
 	}
 	c := podSpec.Containers[0]
-	if c.Lifecycle == nil || c.Lifecycle.PreStop == nil || c.Lifecycle.PreStop.Exec == nil {
-		t.Fatal("expected preStop exec handler on engine container")
-	}
-	cmd := c.Lifecycle.PreStop.Exec.Command
-	if len(cmd) != 3 || cmd[0] != "/bin/bash" || cmd[1] != "-c" {
-		t.Fatalf("unexpected preStop command: %v", cmd)
-	}
-	if !strings.Contains(cmd[2], MetricRunningQueries) {
-		t.Errorf("preStop script does not scrape %s", MetricRunningQueries)
+	if c.Lifecycle != nil && c.Lifecycle.PreStop != nil {
+		t.Fatal("engine container must not have a preStop hook")
 	}
 }
 
@@ -171,6 +133,37 @@ func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 	got := sts.Spec.Template.Spec.TerminationGracePeriodSeconds
 	if got == nil || *got != int64(DefaultTerminationGracePeriodSeconds) {
 		t.Fatalf("expected default TGPS=%d, got %v", DefaultTerminationGracePeriodSeconds, got)
+	}
+}
+
+func TestShutdownWaitUnfinished(t *testing.T) {
+	tests := []struct {
+		name     string
+		tgps     int64
+		wantWait int64
+	}{
+		{"default 60s", 60, 55},
+		{"custom 120s", 120, 115},
+		{"small 5s clamps to tgps-1", 5, 4},
+		{"very small 1s clamps to 1", 1, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := testSpec()
+			spec.TerminationGracePeriodSeconds = &tt.tgps
+			cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+			var wrapper struct {
+				Config struct {
+					ShutdownWait int64 `json:"shutdown_wait_unfinished"`
+				} `json:"config"`
+			}
+			if err := json.Unmarshal([]byte(cm.Data["config.json"]), &wrapper); err != nil {
+				t.Fatalf("failed to parse config.json: %v", err)
+			}
+			if wrapper.Config.ShutdownWait != tt.wantWait {
+				t.Errorf("shutdown_wait_unfinished = %d, want %d", wrapper.Config.ShutdownWait, tt.wantWait)
+			}
+		})
 	}
 }
 

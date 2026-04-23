@@ -181,15 +181,11 @@ spec:
                 default: 60
                 description: |-
                   TerminationGracePeriodSeconds is the grace period given to engine pods
-                  between SIGTERM and SIGKILL during termination.
-
-                  The operator installs a preStop hook on the engine container that
-                  polls Prometheus metrics on 127.0.0.1:9090 (firebolt_running_queries +
-                  firebolt_suspended_queries) and blocks termination until the engine
-                  reports zero in-flight queries. The hook caps its own wait below this
-                  grace period, so an engine with long-running queries will be drained
-                  cleanly up to the configured ceiling and then SIGKILLed if queries
-                  still have not finished.
+                  between SIGTERM and SIGKILL during termination. On SIGTERM the engine
+                  waits up to (TerminationGracePeriodSeconds - 5s) for in-flight queries
+                  to finish before exiting; Envoy's active health checks eject the pod
+                  from the gateway load-balancer within ~1s of SIGTERM so no new queries
+                  are routed to a draining pod.
 
                   Defaults to 60 seconds. Raise it for workloads with analytical
                   queries that routinely exceed a minute; lower it for latency-bounded

@@ -94,7 +94,7 @@ Instance phases: `Provisioning → Ready ↔ Degraded` (terminal: `Failed`). Per
 
 ### Drain Check
 
-The operator scrapes pod metrics via `kubectl proxy`-style API (`GET /api/v1/namespaces/{ns}/pods/{pod}/proxy/metrics`) — no direct pod IP access needed. Engine pods also run a bash preStop hook using `/dev/tcp` (no curl) that reads their own `/metrics` and waits for active queries to reach zero, up to `terminationGracePeriodSeconds - 10s`.
+The operator scrapes pod metrics via `kubectl proxy`-style API (`GET /api/v1/namespaces/{ns}/pods/{pod}/proxy/metrics`) — no direct pod IP access needed. On SIGTERM the engine waits up to `terminationGracePeriodSeconds - 5s` for in-flight queries to finish (`shutdown_wait_unfinished`); Envoy's active health checks eject the pod from routing within ~1s of SIGTERM.
 
 ### Key Design Invariants
 
