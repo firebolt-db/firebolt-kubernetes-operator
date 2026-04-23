@@ -191,10 +191,7 @@ At most two generations exist simultaneously: the active one serving traffic and
 
 ## Drain check
 
-During graceful rollouts, the operator checks whether old-generation pods have finished serving in-flight queries before deleting them. The same signal is consumed by two independent actors:
-
-1. **The operator**, from outside the pod, to decide when it is safe to transition `draining` → `cleaning` (and therefore to delete the old-generation StatefulSet).
-2. **The pod itself**, via a `preStop` lifecycle hook, to delay SIGTERM until in-flight queries have actually finished. This matters because the firebolt-core engine does **not** gracefully block SIGTERM on its own — by default it calls `killAllQueries()` on SIGTERM and cancels everything in flight.
+During graceful rollouts, the operator checks whether old-generation pods have finished serving in-flight queries before deleting them. The operator scrapes pod metrics from outside the pod to decide when it is safe to transition `draining` → `cleaning` (and delete the old-generation StatefulSet). Concurrently, the engine process itself handles in-flight queries via `shutdown_wait_unfinished`: on SIGTERM it waits up to `terminationGracePeriodSeconds − 5s` for queries to finish before exiting.
 
 ### Signal
 
@@ -213,22 +210,16 @@ The operator scrapes `/metrics` via the Kubernetes API server's `Pods/proxy` sub
 - Required RBAC is `pods/proxy: get`. The previous `pods/exec: create` permission is no longer used.
 - Transient scrape failures (pod starting, kubelet flaky, metric temporarily missing) are treated as "not drained yet" and the drain loop simply re-polls. They never fail the reconcile.
 
-### preStop hook on engine pods
-
-Because firebolt-core cancels queries on SIGTERM by default, the operator installs a `preStop` hook on the engine container that holds the pod in `Terminating` state until the metrics read zero. The hook is pure bash — the firebolt-core image does not ship `curl` or `wget`, so the script uses bash's `/dev/tcp` pseudo-device to POST-less-GET `http://127.0.0.1:9090/metrics` and `awk` to pick the two gauge values out of the response. The loop exits as soon as both metrics are zero and otherwise keeps polling at 1 s cadence until its internal deadline.
-
-The hook's deadline is set to `terminationGracePeriodSeconds − 10 s`, leaving the kubelet a 10 s runway to deliver SIGTERM and let firebolt-core run its own `shutdown_wait_unfinished` window before SIGKILL. If queries still have not finished by the time the hook exits, SIGTERM is sent and the standard termination path runs.
-
 ### Configuration
 
 | Field | Default | Description |
 |---|---|---|
-| `spec.terminationGracePeriodSeconds` | `60` | Pod grace period. The preStop loop self-caps at `grace − 10s`; raise this for workloads with analytical queries that routinely exceed a minute. |
-| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the operator-side drain check entirely. The pod-level `preStop` hook still runs. |
+| `spec.terminationGracePeriodSeconds` | `60` | Pod grace period. The engine waits up to `grace − 5s` (`shutdown_wait_unfinished`) for in-flight queries after SIGTERM; raise this for workloads with analytical queries that routinely exceed a minute. |
+| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the operator-side drain check entirely. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | `5s` | How often the operator polls each pod. Only used when drain check is enabled. |
-| `spec.rollout` | `graceful` | Set to `recreate` to skip draining and delete old pods immediately. The `preStop` hook on the pods still runs on its own regardless — it reacts to pod termination, not to the rollout strategy. |
+| `spec.rollout` | `graceful` | Set to `recreate` to skip draining and delete old pods immediately. The engine's `shutdown_wait_unfinished` still runs on pod termination regardless of rollout strategy. |
 
-When `drainCheckEnabled: false`, the operator transitions directly from `switching` to `cleaning` without waiting. The `preStop` hook on the old pods still gives in-flight queries a chance to finish during Kubernetes termination; `drainCheckEnabled` only controls whether the operator gates the rollout on top of that.
+When `drainCheckEnabled: false`, the operator transitions directly from `switching` to `cleaning` without waiting. The engine's `shutdown_wait_unfinished` still gives in-flight queries a chance to finish during Kubernetes termination; `drainCheckEnabled` only controls whether the operator gates the rollout on top of that.
 
 ## Error handling
 
