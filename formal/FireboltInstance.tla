@@ -139,8 +139,14 @@ Safety ==
 \* stuttering step and no fairness condition can force it to make progress.
 EventuallyReady == (<>[]AllReady) => <>(phase = "ready")
 
-\* Once Ready, the phase stays Ready as long as all components remain available.
-ReadyIsStable == [](((phase = "ready") /\ AllReady) => [](AllReady => (phase = "ready")))
+\* Once Ready with all components available, phase stays Ready for as long as all
+\* components remain permanently available.  The consequent is ([]AllReady =>
+\* [](phase = "ready")) rather than [](AllReady => (phase = "ready")) because
+\* the reconciler only enforces Phase=Ready iff AllReady AFTER a ReconcileRun
+\* fires.  A transient state where AllReady is true but phase is still "degraded"
+\* (component recovered before the next reconcile) is valid and does not violate
+\* this property.
+ReadyIsStable == [](((phase = "ready") /\ AllReady) => ([]AllReady => [](phase = "ready")))
 
 \* ---------------------------------------------------------------------------
 \* Temporal spec
