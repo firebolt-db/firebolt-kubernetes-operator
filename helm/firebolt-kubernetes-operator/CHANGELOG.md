@@ -1,3 +1,17 @@
+# 0.1.14
+
+appVersion: v1.10.2
+
+### [1.10.2](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/compare/v1.10.1...v1.10.2) (2026-04-24)
+
+
+### Maintenance
+
+* **deps:** bump go.opentelemetry.io/otel/sdk ([7f8d3c7](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/7f8d3c78c9a2219c115d8fe8fe5e5325d4c446d7))
+* **helm:** bump chart to 0.1.13 (appVersion v1.10.1) ([c3ce441](https://github.com/firebolt-analytics/firebolt-kubernetes-operator/commit/c3ce4414200cd7028bff0da9bc0c0ce2f8e92d21))
+
+
+
 # 0.1.13
 
 appVersion: v1.10.1
