@@ -111,7 +111,7 @@ spec:
   instanceRef: firebolt-production
   replicas: 5
   image:
-    repository: ghcr.io/firebolt-db/firebolt-core
+    repository: ghcr.io/firebolt-db/engine
     tag: v1.2.0
   resources:
     cpu: "2"

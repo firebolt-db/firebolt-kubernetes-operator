@@ -72,5 +72,5 @@ func DefaultMetadata() string { return MetadataImage + ":" + MetadataTag }
 // DefaultEnvoy returns "repo:tag" for the Envoy proxy image.
 func DefaultEnvoy() string { return EnvoyImage + ":" + EnvoyTag }
 
-// DefaultEngine returns "repo:tag" for the engine (firebolt-core) image.
+// DefaultEngine returns "repo:tag" for the engine (firebolt-db) image.
 func DefaultEngine() string { return EngineImage + ":" + EngineTag }

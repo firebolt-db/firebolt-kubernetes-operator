@@ -14,6 +14,10 @@ metadata:
 spec:
   instanceRef: firebolt
   replicas: 5
+  image:
+    repository: ghcr.io/firebolt-db/engine
+    tag: release-4.32.0-pre.0.20260424165648.0581dba99945-amd64
+    pullPolicy: IfNotPresent
   resources:
     cpu: "2"
     memory: 4Gi

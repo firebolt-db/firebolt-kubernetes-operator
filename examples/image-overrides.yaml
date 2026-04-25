@@ -10,8 +10,8 @@ metadata:
 spec:
   metadata:
     image:
-      repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve
-      tag: 4.32.0-pre.0.20260423061425.6d49af2e16b4
+      repository: ghcr.io/firebolt-db/firebolt-metadata
+      tag: 4.32.0-pre.0.20260424165648.0581dba99945
   gateway: {}
 ---
 apiVersion: compute.firebolt.io/v1alpha1
@@ -22,8 +22,8 @@ spec:
   instanceRef: firebolt
   replicas: 1
   image:
-    repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core
-    tag: release-4.32.0-pre.0.20260423061425.6d49af2e16b4-amd64
+    repository: ghcr.io/firebolt-db/engine
+    tag: debug-4.32.0-pre.0.20260424165648.0581dba99945-amd64
   resources:
     cpu: "1"
     memory: 4Gi
