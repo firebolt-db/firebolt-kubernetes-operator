@@ -75,7 +75,7 @@ spec:
   instanceRef: production
   replicas: 3
   image:
-    repository: "ghcr.io/firebolt-db/firebolt-core"
+    repository: "ghcr.io/firebolt-db/firebolt-db"
     tag: "v1.2.0"
   resources:
     cpu: "2"
@@ -240,7 +240,7 @@ spec:
       credentialsSecretRef:
         name: metadata-postgres-credentials
     image:
-      repository: "ghcr.io/firebolt-analytics/dedicated-pensieve"
+      repository: "ghcr.io/firebolt-db/firebolt-metadata"
       tag: "1.0.0"
     replicas: 1
     resources:
@@ -359,7 +359,7 @@ spec:
   instanceRef: production
   replicas: 5
   image:
-    repository: "ghcr.io/firebolt-db/firebolt-core"
+    repository: "ghcr.io/firebolt-db/firebolt-db"
     tag: "v1.2.0"
     pullPolicy: IfNotPresent
   resources:
