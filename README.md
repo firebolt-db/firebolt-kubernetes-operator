@@ -57,8 +57,8 @@ kubectl get fi -n firebolt
 ```
 
 ```
-NAME         PHASE   GATEWAY   METADATA   ENGINES   READY   AGE
-production   Ready   true      true       0         0       2m
+NAME         PHASE   GATEWAY   METADATA   AGE
+production   Ready   true      true       2m
 ```
 
 ### 3. Create a FireboltEngine
@@ -211,8 +211,8 @@ kubectl get fi -n firebolt
 ```
 
 ```
-NAME         PHASE   GATEWAY   METADATA   ENGINES   READY   AGE
-production   Ready   true      true       2         2       24h
+NAME         PHASE   GATEWAY   METADATA   AGE
+production   Ready   true      true       24h
 ```
 
 Inspect details:
@@ -221,7 +221,7 @@ Inspect details:
 kubectl get fi production -n firebolt -o yaml
 ```
 
-Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`.
+Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `conditions` (per-component detail including `PostgresReady`).
 
 ### Full Example
 
@@ -522,7 +522,7 @@ Linter configuration is in `.golangci.yml`.
 
 ## Design Documentation
 
-- [docs/level-driven-reconciliation.md](docs/level-driven-reconciliation.md) — architecture and reconciliation model of the operator (current implementation).
+- [docs/architecture.md](docs/architecture.md) — full architecture and reconciliation model of the operator.
 - [docs/operator-based-scaling.md](docs/operator-based-scaling.md) — zero-downtime blue-green scaling design.
 - [docs/option-b-per-engine-envoy-clusters.md](docs/option-b-per-engine-envoy-clusters.md) — forward-looking sketch of a per-engine Envoy cluster model; not implemented.
 

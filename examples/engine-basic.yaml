@@ -1,7 +1,8 @@
+# Minimal Instance + Engine. The engine uses the operator's default image.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
-  name: basic
+  name: firebolt
 spec:
   metadata: {}
   gateway: {}
@@ -9,13 +10,10 @@ spec:
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: core-engine
+  name: engine
 spec:
-  instanceRef: production
+  instanceRef: firebolt
   replicas: 1
-  image:
-    repository: "000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core"
-    tag: "release-4.32.0-pre.0.20260414104905.92750f097354-amd64"
   resources:
     cpu: "1"
-    memory: "4Gi"
+    memory: 4Gi

@@ -1,7 +1,9 @@
+# Minimal FireboltInstance: shared per-namespace infrastructure (Postgres,
+# metadata service, Envoy gateway). Engines reference this by name.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
-  name: demo
+  name: firebolt
 spec:
   metadata: {}
   gateway: {}

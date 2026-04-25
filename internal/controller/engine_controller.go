@@ -273,7 +273,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	} else {
 		for i := range stsList.Items {
 			log.Info("Deleting StatefulSet", "name", stsList.Items[i].Name)
-			if err := r.deleteIfExists(ctx, &stsList.Items[i]); err != nil {
+			if err := r.Delete(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete StatefulSet", "name", stsList.Items[i].Name)
 				errs = append(errs, err)
 			}

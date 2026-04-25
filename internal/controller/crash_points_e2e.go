@@ -103,6 +103,27 @@ func ClearAllCrashPoints() {
 	}
 }
 
+// ClearCrashPointsForEngine removes all crash points registered for a specific engine.
+// Safe to call concurrently with other engines' crash points.
+func ClearCrashPointsForEngine(engineName string) {
+	prefix := engineName + ":"
+
+	globalCrashPointManager.mu.Lock()
+	defer globalCrashPointManager.mu.Unlock()
+
+	for key, ch := range globalCrashPointManager.crashPoints {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			close(ch)
+			delete(globalCrashPointManager.crashPoints, key)
+		}
+	}
+	for key := range globalCrashPointManager.hitCallbacks {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			delete(globalCrashPointManager.hitCallbacks, key)
+		}
+	}
+}
+
 // MaybeCrash checks if a crash point is active and simulates a crash.
 // When a crash point is set, this function:
 // 1. Calls the registered callback (to signal the test that the point was hit)

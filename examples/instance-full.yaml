@@ -1,22 +1,25 @@
+# FireboltInstance with every supported field set. Most are optional;
+# the operator picks defaults when omitted.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
-  name: full
+  name: firebolt
 spec:
   metadata:
+    # External Postgres for metadata storage. Omit to use an operator-managed instance.
     postgres:
-      host: "postgres.firebolt.svc"
+      host: postgres.firebolt.svc
       port: 5432
-      database: "firebolt_metadata"
+      database: firebolt_metadata
       credentialsSecretRef:
         name: metadata-postgres-credentials
     engineRegistration: true
     resources:
       requests:
-        cpu: "200m"
-        memory: "1Gi"
+        cpu: 200m
+        memory: 1Gi
       limits:
-        memory: "2Gi"
+        memory: 2Gi
     nodeSelector:
       firebolt.dev/pool: system
     serviceAccountName: metadata
@@ -25,18 +28,18 @@ spec:
     replicas: 3
     resources:
       requests:
-        cpu: "100m"
-        memory: "256Mi"
+        cpu: 100m
+        memory: 256Mi
     nodeSelector:
       firebolt.dev/pool: system
 
-  # Auth is not enforced yet; reserved for future engine-level auth.
+  # Reserved: persisted but not yet enforced at the engine level.
   auth:
     mode: openid
     oidc:
-      issuerURL: "https://company.okta.com/oauth2/default"
-      clientID: "firebolt"
+      issuerURL: https://company.okta.com/oauth2/default
+      clientID: firebolt
       clientSecretRef:
         name: oidc-client-secret
       claimMappings:
-        username: "email"
+        username: email

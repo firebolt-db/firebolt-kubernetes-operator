@@ -95,7 +95,7 @@ problems:
   from DNS as soon as the readiness probe fails.
 - Can we get most of the "stop hammering a bad pod" benefit by tightening
   the engine's own readiness probe and/or adding a `preStop` hook on
-  engine pods? (See `docs/level-driven-reconciliation.md` for where the
+  engine pods? (See `docs/architecture.md` for where the
   engine-pod `preStop` discussion lives.)
 
 If the answer to both is "yes, and it's fine", Option A is enough. If

@@ -631,16 +631,73 @@ func CreateClientPod(ctx context.Context, podName string) error {
 	if _, err := k8sClient.CoreV1().Pods(testNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("failed to create client pod %s: %w", podName, err)
 	}
+	return waitForClientPodReady(ctx, podName, 60*time.Second)
+}
 
-	waitArgs := kubectlArgs("wait", "--for=condition=Ready", "pod/"+podName,
-		"-n", testNamespace, "--timeout=60s")
-	cmd := exec.CommandContext(ctx, "kubectl", waitArgs...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("client pod %s not ready: %w (%s)", podName, err, strings.TrimSpace(stderrBuf.String()))
+// waitForClientPodReady polls until all containers in podName are Ready,
+// failing immediately on unrecoverable states (ImagePullBackOff, CrashLoopBackOff,
+// etc.) and returning a diagnostic message on timeout.
+func waitForClientPodReady(ctx context.Context, podName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				return fmt.Errorf("client pod %s: get failed: %w", podName, err)
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		for _, cs := range pod.Status.ContainerStatuses {
+			if w := cs.State.Waiting; w != nil {
+				switch w.Reason {
+				case "ImagePullBackOff", "ErrImagePull", "InvalidImageName",
+					"CrashLoopBackOff", "CreateContainerError", "CreateContainerConfigError":
+					return fmt.Errorf("client pod %s: container %s unrecoverable: %s: %s",
+						podName, cs.Name, w.Reason, w.Message)
+				}
+			}
+		}
+
+		if pod.Status.Phase == corev1.PodRunning && len(pod.Status.ContainerStatuses) > 0 {
+			allReady := true
+			for _, cs := range pod.Status.ContainerStatuses {
+				if !cs.Ready {
+					allReady = false
+					break
+				}
+			}
+			if allReady {
+				return nil
+			}
+		}
+
+		time.Sleep(pollInterval)
 	}
-	return nil
+
+	// Timeout — collect final state for diagnosis.
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "client pod %s: timed out after %s", podName, timeout)
+	if pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, podName, metav1.GetOptions{}); err == nil {
+		fmt.Fprintf(&sb, " (phase=%s", pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			fmt.Fprintf(&sb, "; container %s ready=%t", cs.Name, cs.Ready)
+			if w := cs.State.Waiting; w != nil {
+				fmt.Fprintf(&sb, " waiting[%s: %s]", w.Reason, w.Message)
+			}
+			if t := cs.State.Terminated; t != nil {
+				fmt.Fprintf(&sb, " terminated[%s: %s]", t.Reason, t.Message)
+			}
+		}
+		for _, cond := range pod.Status.Conditions {
+			if cond.Status != corev1.ConditionTrue {
+				fmt.Fprintf(&sb, "; cond %s=%s: %s", cond.Type, cond.Status, cond.Message)
+			}
+		}
+		fmt.Fprintf(&sb, ")")
+	}
+	return fmt.Errorf("%s", sb.String())
 }
 
 // DeleteClientPod deletes the client pod created by CreateClientPod.
