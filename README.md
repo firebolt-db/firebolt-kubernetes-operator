@@ -130,7 +130,7 @@ With this entry point the caller is responsible for:
 ### 4. Scale or Update
 
 ```bash
-kubectl patch fire my-engine -n firebolt \
+kubectl patch fireng my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":5}}'
 ```
 
