@@ -115,7 +115,8 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate ## Build manager binary.
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
+	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
@@ -147,7 +148,7 @@ local-deploy: docker-build-local kind-load-operator manifests ## Build, load, an
 		--set metrics.secure=false \
 		--set leaderElection.enabled=false \
 		--set additionalArgs='{--enable-webhooks=false}' \
-		--set podAnnotations.deploy-timestamp="$(shell date +%s)"
+		--set-string podAnnotations.deploy-timestamp="$(shell date +%s)"
 
 .PHONY: local-undeploy
 local-undeploy: ## Remove the operator Helm release.
