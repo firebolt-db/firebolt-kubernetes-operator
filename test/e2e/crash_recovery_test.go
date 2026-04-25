@@ -30,25 +30,12 @@ import (
 	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
 )
 
-// Each second-level Describe in this file owns its own FireboltInstance so
-// specs can run in parallel. Unlike the engine-centric tests in e2e_test.go,
-// crash recovery specs stop and restart the engine operator within a single
-// It, so the instance operator is set up directly in BeforeAll (without an
-// engine operator) and the engine operator is managed per-It.
+// Each second-level Describe owns its own FireboltInstance and client pod so
+// they run in parallel across Ginkgo procs. Crash recovery specs stop and
+// restart the engine operator within a single It, so the instance operator is
+// set up directly in BeforeAll and the engine operator is managed per-It.
 
-var _ = Describe("Crash Recovery", Ordered, func() {
-	clientPod := "client-crash" + queryConfig.Suffix
-
-	BeforeAll(func() {
-		By("Creating client pod for crash recovery tests")
-		Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
-	})
-
-	AfterAll(func() {
-		DeleteClientPod(ctx, clientPod)
-		controller.ClearAllCrashPoints()
-	})
-
+var _ = Describe("Crash Recovery", func() {
 	Describe("Phase: Creating - Initial Deployment", Ordered, func() {
 		var (
 			instanceName = "inst-crash-create" + queryConfig.Suffix
@@ -75,7 +62,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		})
 
 		AfterEach(func() {
-			controller.ClearAllCrashPoints()
+			controller.ClearCrashPointsForEngine(engineName)
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
@@ -215,6 +202,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		var (
 			instanceName = "inst-crash-switch" + queryConfig.Suffix
 			engineName   = "test-crash-switch" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-crash-switch" + queryConfig.Suffix
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 		)
@@ -227,9 +215,12 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Creating FireboltInstance")
 			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
 			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+			By("Creating client pod for crash switch tests")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteInstance(ctx, instanceName)
 			if instanceOp != nil {
 				instanceOp.Stop()
@@ -237,7 +228,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		})
 
 		AfterEach(func() {
-			controller.ClearAllCrashPoints()
+			controller.ClearCrashPointsForEngine(engineName)
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
@@ -368,6 +359,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		var (
 			instanceName = "inst-crash-clean" + queryConfig.Suffix
 			engineName   = "test-crash-clean" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-crash-clean" + queryConfig.Suffix
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 		)
@@ -380,9 +372,12 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Creating FireboltInstance")
 			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
 			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+			By("Creating client pod for crash clean tests")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteInstance(ctx, instanceName)
 			if instanceOp != nil {
 				instanceOp.Stop()
@@ -390,7 +385,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		})
 
 		AfterEach(func() {
-			controller.ClearAllCrashPoints()
+			controller.ClearCrashPointsForEngine(engineName)
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
@@ -521,6 +516,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 		var (
 			instanceName = "inst-crash-avail" + queryConfig.Suffix
 			engineName   = "test-crash-avail" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-crash-avail" + queryConfig.Suffix
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 			bgRunner     *GatewayBackgroundQueryRunner
@@ -534,9 +530,12 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 			By("Creating FireboltInstance")
 			Expect(CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)).To(Succeed())
 			Expect(WaitForInstanceReady(ctx, instanceName, instanceReadyTimeout)).To(Succeed())
+			By("Creating client pod for availability-during-crash test")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
 		})
 
 		AfterAll(func() {
+			DeleteClientPod(ctx, clientPod)
 			_ = DeleteInstance(ctx, instanceName)
 			if instanceOp != nil {
 				instanceOp.Stop()
@@ -548,7 +547,7 @@ var _ = Describe("Crash Recovery", Ordered, func() {
 				bgRunner.Stop()
 				bgRunner = nil
 			}
-			controller.ClearAllCrashPoints()
+			controller.ClearCrashPointsForEngine(engineName)
 			if operator != nil {
 				operator.Stop()
 				operator = nil

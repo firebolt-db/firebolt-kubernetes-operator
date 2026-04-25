@@ -1,0 +1,243 @@
+Firebolt Engine Routing
+Zero-downtime query delivery at pod granularity
+22 Apr 2026
+
+Firebolt Platform Engineering
+
+* The Naive Approach — Kubernetes ClusterIP
+
+.image _img/clusterip.svg _ 720
+
+A ClusterIP service gives you a stable virtual IP.
+Cilium programs eBPF maps for service load-balancing to a random ready pod.
+
+Looks perfect. Turns out it breaks our requirements in two critical ways.
+
+* Why ClusterIP Fails Us (1/2) — No Retry Diversity
+
+Envoy sees *one* endpoint: the virtual IP.
+
+- Cannot load-balance across pod IPs itself
+- The `previous_hosts` retry predicate is a no-op: the only "host" is the VIP
+- A connect-failure retry just hits the same VIP again (likely the same pod)
+- Outlier ejection and active health checks operate at the endpoint level — one endpoint, nothing to eject
+
+With five pods behind a ClusterIP, Envoy has zero control over which pod
+handles a given retry. Cilium decides, probabilistically.
+
+* Why ClusterIP Fails Us (2/2) — Blue-Green Lag
+
+During a blue-green selector switch, Envoy's single endpoint (the VIP) is
+always reachable. Envoy never knows the switch happened.
+
+Cilium propagates the EndpointSlice change in ~1–2 s:
+
+	SIGTERM → kubelet updates EndpointSlice → Cilium agent re-programs eBPF maps
+	                                           ↑ up to several seconds
+
+In that window, Cilium still load-balances to old-generation pod IPs, even
+after the service selector switched to the new generation. Envoy's
+retry loop cannot help: it keeps re-hitting the VIP.
+
+* The Alternative — Headless Service
+
+A headless service (`clusterIP: None`) has _no_ _virtual_ _IP_.
+DNS resolves directly to the current set of ready pod IPs.
+
+	engine-service.ns.svc.cluster.local → [10.0.0.4, 10.0.0.7, 10.0.0.12]
+
+Envoy receives the full pod IP set and owns all routing decisions.
+
+Benefits:
+
+- Per-pod load balancing (round-robin, least-requests, …)
+- `previous_hosts` retry predicate works: each retry picks an untried pod
+- Health ejection operates at pod granularity
+- No Cilium LB in the data path; DNS served by node-local cache (~5 s TTL)
+
+* DFP Sub-cluster Mode
+
+`sub_clusters_config` makes DFP a *factory*: on first use of an authority it
+synthesises a full STRICT_DNS cluster for that authority.
+
+STRICT_DNS resolves the name to *all* current A-records and creates one
+load-balanced endpoint per IP:
+
+	sub-cluster DFPCluster_engine-service.ns_3473
+	  endpoint 10.0.0.4:3473  (round-robin weight 1)
+	  endpoint 10.0.0.7:3473  (round-robin weight 1)
+	  endpoint 10.0.0.12:3473 (round-robin weight 1)
+
+Now:
+
+- ROUND_ROBIN distributes load across all ready pods
+- `previous_hosts` retries land on pods not yet tried
+- A stale IP is one entry in a balanced pool, not the sole target
+
+* One Connection Per Request
+
+HTTP/2 multiplexes many streams over a single TCP connection.
+Without a constraint, Envoy reuses that connection for the DNS TTL (~5–30 s).
+
+	old gen pods: [10.0.0.4, 10.0.0.7]
+	selector switches → new gen pods: [10.0.0.21, 10.0.0.22]
+	Envoy still dispatches new streams to 10.0.0.4 for up to 30 s  ← bad
+
+Fix: `max_requests_per_connection: 1`
+
+- Forces a new TCP connection (and DNS re-resolution) per query
+- Staleness window shrinks to a single TCP connect (~1 ms intra-cluster)
+
+* The Retry Policy
+
+Retries are enabled only for transport-level failures where the engine
+could not have observed the request as accepted work:
+
+	retry_on: connect-failure, refused-stream, reset
+
+- `connect-failure`: SYN never reached the engine (pod crashed, packet dropped)
+- `refused-stream`: HTTP/2 REFUSED_STREAM — peer confirmed no processing
+- `reset`: stream reset before any response bytes
+
+*Not* retried: `5xx` responses from the engine.
+The engine may have already executed side effects.
+
+`num_retries: 50` combined with `previous_hosts` means every pod in the
+sub-cluster is tried before the request fails, without repeating a host.
+
+* Zero-Downtime Blue-Green Deployment
+
+	new gen STS + headless Service provisioned
+	                  │
+	                  ▼
+	    new pods become Ready → IPs join DNS
+	                  │
+	          selector switch
+	                  │
+	        ┌─────────┴──────────┐
+	        │                   │
+	  DNS layer              Health layer
+	  max_rpc:1               1 s probe, threshold 1
+	  new TCP per query       SIGTERM → 503
+	  DNS re-resolved         ejected in ≈1 s
+	        │                   │
+	        └─────────┬──────────┘
+	                  │
+	     old gen queries drain to completion
+	     (shutdown_wait_unfinished)
+	                  │
+	                  ▼
+	       zero queries dropped
+
+* Why We Need Active Health Checks
+
+Even with DNS-driven routing, there is a gap:
+
+A terminating pod keeps its TCP listener open during `terminationGracePeriodSeconds`.
+New connections can still land on it during that window.
+
+	pod receives SIGTERM
+	├── engine starts shutdown_wait_unfinished countdown
+	└── kubelet removes pod from Endpoints → DNS stops returning this IP
+	     ↑ up to one DNS refresh interval
+
+During that interval, Envoy may still select the pod.
+Active health checks close this gap immediately.
+
+* Active Health Checks: Configuration
+
+	health_checks:
+	  - timeout: 0.5s
+	    interval: 1s
+	    no_traffic_interval: 1s   # same cadence even when sub-cluster is idle
+	    healthy_threshold: 1
+	    unhealthy_threshold: 1    # one failure → ejected
+	    http_health_check:
+	      path: /health/ready
+
+The engine exposes `GET /health/ready` on port 3473 (the query port):
+
+- Returns `200 OK` while healthy and serving
+- Returns `503 Service Unavailable` immediately on SIGTERM,
+  while continuing to complete in-flight queries
+
+One failed probe → pod flagged `failed_active_hc` → removed from LB set.
+
+* Drain Ejection Timeline
+
+	t=0    pod receives SIGTERM
+	t=0    engine returns 503 from /health/ready
+	t≈1s   Envoy health check fires, receives 503
+	t≈1s   pod flagged failed_active_hc, removed from LB set
+	t=1..N in-flight queries on this pod continue to completion
+	t=N    pod exits (or is SIGKILLed at terminationGracePeriodSeconds)
+
+New queries are never dispatched to the draining pod after t≈1 s.
+Two independent zero-downtime layers:
+
+- DNS: `max_requests_per_connection:1` prevents new connections to stale IPs
+- Health: active ejection removes draining pods within ≈1 s regardless of DNS state
+
+* shutdown_wait_unfinished: Engine-Side Drain Budget
+
+The engine process respects `shutdown_wait_unfinished`: on SIGTERM it waits up to
+that many seconds for in-flight queries to finish before exiting.
+
+	t = 0s   SIGTERM
+	         ├─ engine returns 503 from /health/ready immediately
+	         └─ starts shutdown_wait_unfinished countdown
+	t ≈ 1s   Envoy ejects pod from LB set
+	t = 1..N in-flight queries complete
+	t = TGPS SIGKILL (if not exited)
+
+The operator sets `shutdown_wait_unfinished` to `TGPS − 5 s` (minimum 1 s),
+leaving a 5 s margin for container runtime teardown.
+
+Example (TGPS = 60 s): `shutdown_wait_unfinished = 55 s`
+
+* Also Fixed: no_traffic_interval
+
+Envoy's default `no_traffic_interval` is _60_ _seconds_.
+
+When a DFP sub-cluster has no active traffic, health checks back off to
+one probe per minute — effectively disabling fast drain detection for idle engines.
+
+Fix: set `no_traffic_interval: 1s` explicitly.
+
+Idle engines are probed at the same 1 s cadence as busy ones.
+A draining pod is detected within 1 s regardless of recent traffic.
+
+* Envoy Configuration: Why Each Setting
+
+- *DFP* `sub_clusters_config` — per-engine STRICT_DNS sub-cluster; Envoy owns all LB decisions at pod granularity
+
+- `max_requests_per_connection:` *1* — new TCP connection and DNS re-resolution per query; staleness window ~1 ms
+
+- `retry_on` *connect-failure / refused-stream / reset* — transport-level only; engine cannot have observed the request
+
+- `num_retries:` *50* `+` *previous_hosts* — tries every pod once before failing, never repeats a host
+
+- `interval:` *1s,* `unhealthy_threshold:` *1* — one failed probe ejects a draining pod within ≈1 s
+
+- `no_traffic_interval:` *1s* — same 1 s probe cadence even when the sub-cluster is idle
+
+* Architecture Summary
+
+	Client
+	  │  X-Firebolt-Engine: my-engine
+	  ▼
+	Envoy Gateway (DFP sub-cluster mode)
+	  │  resolves: my-engine-service.ns.svc:3473 → [pod IPs]
+	  │  health checks: GET /health/ready every 1s
+	  │  retries: connect-failure / refused-stream / reset
+	  │  one TCP connection per query
+	  ▼
+	Engine pods (headless Service, STRICT_DNS)
+	  ├── pod-A:3473  healthy → receives queries
+	  ├── pod-B:3473  healthy → receives queries
+	  └── pod-C:3473  503 on SIGTERM → ejected within 1s
+
+Two zero-downtime layers:
+1. DNS-driven (headless Service + sub-cluster refresh)
+2. Active health ejection (1s detection, 1s ejection threshold)
+

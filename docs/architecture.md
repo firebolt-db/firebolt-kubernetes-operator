@@ -1,4 +1,4 @@
-# Level-Driven Reconciliation
+# Architecture
 
 This document describes the reconciliation architecture used by the Firebolt operator. The operator manages two custom resources with a strict dependency relationship: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway), and **FireboltEngine** deploys stateful compute nodes that require a ready instance. An engine cannot be created or updated without a ready instance in its namespace.
 

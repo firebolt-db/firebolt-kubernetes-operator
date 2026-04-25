@@ -23,6 +23,7 @@ set -euo pipefail
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 CONTROL_PLANE="${CLUSTER_NAME}-control-plane"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=== Setting up Kind cluster: ${CLUSTER_NAME} ==="
 
@@ -39,7 +40,7 @@ if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
 fi
 
 # Build kind create command
-KIND_CREATE_CMD="kind create cluster --name ${CLUSTER_NAME} --retain"
+KIND_CREATE_CMD="kind create cluster --name ${CLUSTER_NAME} --retain --config ${SCRIPT_DIR}/kind-config.yaml"
 
 # Create cluster (will likely fail due to timeout, but --retain keeps the container)
 echo "Creating Kind cluster (this may report failure due to timeout - that's expected)..."

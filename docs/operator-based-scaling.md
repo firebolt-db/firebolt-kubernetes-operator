@@ -490,7 +490,7 @@ The scrape goes through the Kubernetes API server's `Pods/proxy` subresource (no
 
 On SIGTERM, the engine process waits up to `terminationGracePeriodSeconds − 5s` (`shutdown_wait_unfinished`) for in-flight queries to finish before exiting. Envoy's active health checks eject the pod from routing within ~1s of SIGTERM, so no new queries are routed to a draining pod.
 
-See `docs/level-driven-reconciliation.md` for the full drain-check specification.
+See `docs/architecture.md` for the full drain-check specification.
 
 ## Spec Change Handling
 

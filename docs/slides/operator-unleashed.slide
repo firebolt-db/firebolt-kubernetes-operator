@@ -1,0 +1,139 @@
+Operator Unleashed
+What the operator enables beyond raw Kubernetes primitives
+23 Apr 2026
+
+Infra Team
+
+* Architecture Overview
+
+	Client
+	  │  X-Firebolt-Engine: my-engine
+	  ▼
+	Envoy Gateway (DFP sub-cluster mode)
+	  │  resolves: my-engine-service.ns.svc:3473 → [pod IPs]
+	  │  health checks: GET /health/ready every 1s
+	  │  retries: connect-failure / refused-stream / reset
+	  │  one TCP connection per query
+	  ▼
+	Engine pods (headless Service, STRICT_DNS)
+	  ├── pod-A:3473  healthy → receives queries
+	  ├── pod-B:3473  healthy → receives queries
+	  └── pod-C:3473  503 on SIGTERM → ejected within 1s
+
+Two zero-downtime layers:
+1. DNS-driven (headless Service + sub-cluster refresh)
+2. Active health ejection (1s detection, 1s ejection threshold)
+
+* Headless Service: Per-Pod Routing and Drain Ejection
+
+.image _img/headless.svg _ 700
+
+* The Retry Policy
+
+Retries are enabled only for transport-level failures where the engine
+could not have observed the request as accepted work:
+
+	retry_on: connect-failure, refused-stream, reset
+
+- `connect-failure`: SYN never reached the engine (pod crashed, packet dropped)
+- `refused-stream`: HTTP/2 REFUSED_STREAM — peer confirmed no processing
+- `reset`: stream reset before any response bytes
+
+*Not* retried: `5xx` responses from the engine (side effects may have occurred).
+
+`num_retries: 50` combined with `previous_hosts` means every pod in the
+sub-cluster is tried before the request fails, without repeating a host.
+
+* Why a Gateway?
+
+	┌─────────────────────────────────┬──────────────────────────┬────────────────────────────────┐
+	│ Feature                         │ ClusterIP + Cilium LB    │ Envoy Gateway                  │
+	├─────────────────────────────────┼──────────────────────────┼────────────────────────────────┤
+	│ Per-pod load balancing          │ No — Cilium picks pod    │ Round-robin across pod IPs     │
+	│ Retry without repeating a pod   │ No — previous_hosts noop │ previous_hosts + per-pod epds  │
+	│ Transport retry (connect-fail)  │ No                       │ Yes (connect-failure, reset)   │
+	│ Blue-green staleness window     │ Up to DNS TTL (~5–30 s)  │ ~1 ms (per-request DNS resolv) │
+	│ Drain ejection on SIGTERM       │ No                       │ Pod ejected within 1 s         │
+	│ Engine routing by name          │ No                       │ X-Firebolt-Engine header       │
+	└─────────────────────────────────┴──────────────────────────┴────────────────────────────────┘
+
+Without the gateway, a connect-failure retry lands on the same VIP and likely
+the same pod. With it, every retry tries a pod that has not been attempted yet.
+
+* Formal Verification of the Operator
+
+The operator's state machines have properties that are hard to test exhaustively:
+
+- Does any sequence of spec changes and crashes leave two generations serving simultaneously?
+- Does the engine _always_ eventually stabilise, even if instanceReady oscillates?
+- Can a crash leave the service selector pointing to a generation with no StatefulSet?
+
+Tool: TLA+ / TLC — exhaustive explicit-state model checking.
+AWS found a 35-step S3 bug this way. MongoDB, Kafka, and Datadog all use it.
+
+Two specs: `formal/FireboltEngine.tla` (6 phases) and `formal/FireboltInstance.tla` (3 phases).
+TLC exhausts the full state space in < 1 s for both.
+
+* The Spec Models
+
+`formal/FireboltEngine.tla`
+
+- Phases: creating → switching → draining → cleaning → stable (and stopped)
+- Variables: currentGeneration, activeGeneration, drainingGeneration, specWantsStop, instanceReady
+- Safety: service selector consistent; active gen always has an STS; no orphaned gens after GC
+- Liveness: engine always eventually reaches stable or stopped under any spec-change sequence
+
+`formal/FireboltInstance.tla`
+
+- Phases: uninitialized → provisioning → ready ↔ degraded
+- Variables: phase, compAvail[postgres, metadata, gateway]
+- Safety: valid phase + boolean flags (TypeOK)
+- Liveness: EventuallyReady, ReadyIsStable
+
+Phase 2: `engine_property_test.go` drives `computeEngineReconcile` with random sequences — Reconcile, CrashReconcile, ApplySpecChange, ScaleReplicas, DeleteEngine — verifying the same invariants after every step. No envtest required; runs under `make test`.
+
+* What TLC Found
+
+Writing the spec forced precision. TLC caught three genuine reasoning gaps:
+
+- *EventuallyReady*: our original property allowed a transient "all components ready" flash. The environment can degrade a component before the reconciler fires, making the liveness property unprovable. Fixed by requiring _permanent_ stability as the precondition.
+
+- *ReadyIsStable*: we over-claimed that all components ready implies phase=Ready at every future moment. A brief lag between component recovery and the next reconcile is a valid transient state. Fixed by scoping the consequent correctly.
+
+- *Fairness*: one reconciler action was only _intermittently_ enabled, not continuously. The weaker fairness condition we used cannot force it to fire in that case. Fixed by upgrading to strong fairness for that action.
+
+Next: extract every distinct execution path from TLC's state graph and turn each into a deterministic integration test.
+
+* Dedicated Pensieve: Startup Initialization
+
+*Problem*: Pensieve opened its gRPC port before ensuring the default account existed.
+Firebolt Core's first transaction (`CREATE DATABASE IF NOT EXISTS`) failed with
+`account state does not exist`.
+
+*Fix (merged PR 22303)*: `ReconcileAccountAtStartup` runs _before_ gRPC starts listening.
+
+- Creates the default account + Active state record if no accounts exist
+- With native auth enabled: bootstraps RBAC system roles and initial admin user
+- Startup ordering is now: PostgreSQL → TxManager → ReconcileAccountAtStartup → gRPC
+
+*Also removed*: the `skip_account_state_verification` config knob.
+Account existence is now always verified before read-write transactions begin.
+The prior workaround was bypassing the check rather than fixing the race.
+
+* Future: Unified Server Initialization
+
+Goal: Kubernetes operator and Helm init-container flows, without complicating single-binary local dev.
+
+Three proposed modes:
+
+- `firebolt server start` — initializes metadata by default (no change for local dev)
+- `firebolt server start --no-init` — skips init (operator pre-initializes via init-container)
+- `firebolt server init` — runs initialization and exits (Kubernetes init-container, Helm pre-install hook)
+
+Initialization scope:
+
+- Default location object
+- `fb_catalog` managed tables
+- Schema evolution over time — idempotent, safe to re-run
+
+Keeps single-binary simplicity; enables clean separation of init and serve in k8s deployments.

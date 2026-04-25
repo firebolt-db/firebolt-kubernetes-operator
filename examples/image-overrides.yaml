@@ -1,0 +1,29 @@
+# Override the container images for both the metadata service and the engine.
+# Useful when validating a release candidate or pinning a specific build.
+#
+# When `image:` is set, `repository` and `tag` are required. `pullPolicy`
+# defaults to IfNotPresent.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: firebolt
+spec:
+  metadata:
+    image:
+      repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/dedicated-pensieve
+      tag: 4.32.0-pre.0.20260423061425.6d49af2e16b4
+  gateway: {}
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: engine
+spec:
+  instanceRef: firebolt
+  replicas: 1
+  image:
+    repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core
+    tag: release-4.32.0-pre.0.20260423061425.6d49af2e16b4-amd64
+  resources:
+    cpu: "1"
+    memory: 4Gi

@@ -14,29 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
-    name: Plan E2E matrix
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.groups.outputs.matrix }}
-    steps:
-      - name: Clone the code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
-
-      - name: Extract test groups
-        id: groups
-        run: echo "matrix=$(./scripts/extract-e2e-groups.sh 4)" >> "$GITHUB_OUTPUT"
-
   test-e2e:
-    name: "E2E (${{ matrix.name }})"
-    needs: plan
+    name: E2E Tests
     runs-on: ubuntu-22.04-14-cores-54gb-amd64
     permissions:
       id-token: write
       contents: read
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - name: Generate app token
         id: generate_token
@@ -73,27 +56,25 @@ jobs:
       - name: Prepare Kind cluster and images
         run: |
           go mod tidy
-          make prepare-test-e2e KIND_CLUSTER="e2e-${{ matrix.name }}" 2>&1 | tee test.log
+          make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee test.log
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
 
-      - name: Running E2E tests (${{ matrix.name }})
-        run: make test-e2e KIND_CLUSTER="e2e-${{ matrix.name }}" GINKGO_FOCUS="${{ matrix.focus }}"
+      - name: Run E2E tests
+        run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=23
         env:
           GOPRIVATE: github.com/firebolt-analytics/*
           E2E_ARTIFACT_DIR: ${{ github.workspace }}
 
       - name: E2E failure summary (JUnit)
         if: always()
-        env:
-          E2E_MATRIX_NAME: ${{ matrix.name }}
         run: python3 scripts/summarize-e2e-junit.py e2e-report.xml >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-report-${{ matrix.name }}
+          name: e2e-report
           path: |
             e2e-report.xml
             test.log
