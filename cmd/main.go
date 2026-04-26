@@ -37,8 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
+	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

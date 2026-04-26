@@ -6,7 +6,7 @@ replicaCount: 1
 
 image:
   # -- Container image repository.
-  repository: controller
+  repository: ghcr.io/firebolt-db/firebolt-kubernetes-operator
   # -- Image pull policy.
   pullPolicy: IfNotPresent
   # -- Overrides the image tag whose default is the chart appVersion.

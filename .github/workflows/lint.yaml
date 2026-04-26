@@ -8,20 +8,20 @@ jobs:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
     steps:
-      - name: Generate app token
-        id: generate_token
-        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a  # v2.1.0
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: app-token
         with:
-          app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
-          private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
 
       - name: Configure Git for private modules
-        run: git config --global url."https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Clone the code
         uses: actions/checkout@v4
         with:
-          token: ${{ steps.generate_token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -33,7 +33,7 @@ jobs:
         with:
           version: v2.5.0
         env:
-          GOPRIVATE: github.com/firebolt-analytics/*
+          GOPRIVATE: github.com/firebolt-db/*
 
       - name: Setup Helm
         uses: azure/setup-helm@v4

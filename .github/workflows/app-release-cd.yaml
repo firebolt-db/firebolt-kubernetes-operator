@@ -2,8 +2,8 @@
 name: App - Release CD
 
 env:
-  ECR_REPO_NAME: "firebolt-kubernetes-operator"
-  AWS_CONTAINER_REGISTRY: 000000000000.dkr.ecr.us-east-1.amazonaws.com
+  GHCR_IMAGE: ghcr.io/firebolt-db/firebolt-kubernetes-operator
+  GHCR_REGISTRY: ghcr.io
 
 on:
   push:
@@ -24,36 +24,29 @@ jobs:
       new_release_git_tag: ${{ steps.semantic_release.outputs.new_release_git_tag }}
       chart_version: ${{ steps.update_helm_chart.outputs.chart_version }}
     steps:
-      - name: Generate app token
-        id: generate_token
-        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: app-token
         with:
-          app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
-          private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
+          permission-contents: write
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           show-progress: "false"
-          token: ${{ steps.generate_token.outputs.token }}
-
-      - name: Configure registry
-        run: |
-          npm config set @firebolt-analytics:registry https://npm.pkg.github.com
-          npm config set //npm.pkg.github.com/:_authToken ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Semantic release
         id: semantic_release
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
           semantic_version: 18
-          extends: |
-            @firebolt-analytics/semantic-release-config-simple
           extra_plugins: |
             conventional-changelog-conventionalcommits@4
-            @firebolt-analytics/semantic-release-config-simple@^1.x.x
         env:
-          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Fail in case of no release
         if: steps.semantic_release.outputs.new_release_git_tag == ''
@@ -80,7 +73,7 @@ jobs:
         env:
           TAG: ${{ steps.semantic_release.outputs.new_release_git_tag }}
           RELEASE_NOTES: ${{ steps.semantic_release.outputs.new_release_notes }}
-          GH_APP_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           CURRENT=$(yq '.version' helm/firebolt-kubernetes-operator/Chart.yaml)
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
@@ -131,6 +124,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      packages: write
     outputs:
       image: ${{ steps.build_image.outputs.image }}
     steps:
@@ -138,34 +132,34 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           show-progress: "false"
+          persist-credentials: false
 
-      - name: Generate app token
-        id: generate_token
-        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: app-token
         with:
-          app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
-          private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
 
       - name: Build image
         id: build_image
         env:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
         run: |
-          AWS_IMAGE="${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG"
+          FULL_IMAGE="${{ env.GHCR_IMAGE }}:$IMAGE_TAG"
 
-          git config --global url."https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com".insteadOf "https://github.com"
+          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com".insteadOf "https://github.com"
 
-          make docker-build IMG="$AWS_IMAGE" VERSION="$IMAGE_TAG"
+          make docker-build IMG="$FULL_IMAGE" VERSION="$IMAGE_TAG"
 
-          echo "image=$AWS_IMAGE" >> "$GITHUB_OUTPUT"
-          echo "Built $AWS_IMAGE (not pushed yet)"
+          echo "image=$FULL_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Built $FULL_IMAGE (not pushed yet)"
 
       - name: Save image as tarball
         env:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
         run: |
-          AWS_IMAGE="${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG"
-          docker save "$AWS_IMAGE" -o image.tar
+          FULL_IMAGE="${{ env.GHCR_IMAGE }}:$IMAGE_TAG"
+          docker save "$FULL_IMAGE" -o image.tar
 
       - name: Upload image artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -182,6 +176,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      packages: write
     steps:
       - name: Download image artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -191,30 +186,42 @@ jobs:
       - name: Load image
         run: docker load < image.tar
 
-      - name: Login to Amazon ECR
-        uses: firebolt-analytics/gha-workflows/.github/actions/ecr-login@6c80e1ec32794898d18d86160862131160b4ceba # v3.3.1
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push image
         id: push_image
         env:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
         run: |
-          AWS_IMAGE="${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG"
-          docker push "$AWS_IMAGE"
+          FULL_IMAGE="${{ env.GHCR_IMAGE }}:$IMAGE_TAG"
+          docker push "$FULL_IMAGE"
 
-          aws_digest=$(docker pull "$AWS_IMAGE" | grep ^Digest | awk '{ print $2 }')
-          if [ -z "$aws_digest" ]; then
-            echo "ERROR: cannot get digest for $AWS_IMAGE" 1>&2
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$FULL_IMAGE" 2>/dev/null \
+            | cut -d@ -f2)
+          if [ -z "$digest" ]; then
+            digest=$(docker pull "$FULL_IMAGE" | grep ^Digest | awk '{ print $2 }')
+          fi
+          if [ -z "$digest" ]; then
+            echo "ERROR: cannot get digest for $FULL_IMAGE" 1>&2
             exit 1
           fi
-          echo "aws_digest=$aws_digest" >> "$GITHUB_OUTPUT"
-          echo "Pushed $AWS_IMAGE ($aws_digest)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Pushed $FULL_IMAGE ($digest)"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.2
 
       - name: Sign image
-        uses: firebolt-analytics/gha-workflows/.github/actions/cosign-image@6c80e1ec32794898d18d86160862131160b4ceba # v3.3.1
-        with:
-          ecr_repo_name: ${{ env.ECR_REPO_NAME }}
-          image_digest: ${{ steps.push_image.outputs.aws_digest }}
+        env:
+          IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
+          DIGEST: ${{ steps.push_image.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ env.GHCR_IMAGE }}@${DIGEST}"
 
       - name: Job summary
         env:
@@ -225,6 +232,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Image** | \`${{ env.AWS_CONTAINER_REGISTRY }}/${{ env.ECR_REPO_NAME }}:$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ env.GHCR_IMAGE }}:$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **App Version** | \`$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Chart Version** | \`$CHART_VERSION\` |" >> "$GITHUB_STEP_SUMMARY"

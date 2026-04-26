@@ -7,7 +7,7 @@ domain: firebolt.io
 layout:
 - go.kubebuilder.io/v4
 projectName: operator
-repo: github.com/firebolt-analytics/firebolt-kubernetes-operator
+repo: github.com/firebolt-db/firebolt-kubernetes-operator
 resources:
 - api:
     crdVersion: v1
@@ -16,6 +16,6 @@ resources:
   domain: firebolt.io
   group: compute
   kind: FireboltEngine
-  path: github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1
+  path: github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

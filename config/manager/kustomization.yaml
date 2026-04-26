@@ -4,5 +4,5 @@ resources:
 - manager.yaml
 images:
 - name: controller
-  newName: controller
+  newName: ghcr.io/firebolt-db/firebolt-kubernetes-operator
   newTag: latest

@@ -38,7 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"pgregory.net/rapid"
 
-	computev1alpha1 "github.com/firebolt-analytics/firebolt-kubernetes-operator/api/v1alpha1"
+	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 const (

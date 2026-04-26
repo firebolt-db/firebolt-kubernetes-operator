@@ -16,33 +16,54 @@ concurrency:
 jobs:
   test-e2e:
     name: E2E Tests
-    runs-on: ubuntu-22.04-14-cores-54gb-amd64
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       contents: read
+      packages: read
     steps:
-      - name: Generate app token
-        id: generate_token
-        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a  # v2.1.0
+      - name: Clean Up Disk Space on public GitHub Runner
+        if: runner.os == 'Linux'
+        run: |
+          # Space usage before cleanup
+          df -h /
+
+          # Remove unused tool caches (comment any required ones with #)
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/share/swift
+
+          # Verify gains
+          df -h /
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: app-token
         with:
-          app_id: ${{ secrets.GH_APP_CI_GITOPS_APP_ID }}
-          private_key: ${{ secrets.GH_APP_CI_GITOPS_KEY_PEM }}
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
 
       - name: Configure Git for private modules
-        run: git config --global url."https://x-access-token:${{ steps.generate_token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
 
       - name: Clone the code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
-          token: ${{ steps.generate_token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5  # v5.5.0
         with:
           go-version-file: go.mod
 
-      - name: Login to Amazon ECR
-        uses: firebolt-analytics/gha-workflows/.github/actions/ecr-login@main
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install kind v0.31.0
         run: |
@@ -58,12 +79,12 @@ jobs:
           go mod tidy
           make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee test.log
         env:
-          GOPRIVATE: github.com/firebolt-analytics/*
+          GOPRIVATE: github.com/firebolt-db/*
 
       - name: Run E2E tests
         run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=23
         env:
-          GOPRIVATE: github.com/firebolt-analytics/*
+          GOPRIVATE: github.com/firebolt-db/*
           E2E_ARTIFACT_DIR: ${{ github.workspace }}
 
       - name: E2E failure summary (JUnit)

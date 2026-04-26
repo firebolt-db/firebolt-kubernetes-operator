@@ -6,7 +6,7 @@ LDFLAGS := -X main.version=$(VERSION)
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
 HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
-HELM_REGISTRY ?= oci://000000000000.dkr.ecr.us-east-1.amazonaws.com/helm-charts
+HELM_REGISTRY ?= oci://ghcr.io/firebolt-db/helm-charts
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))

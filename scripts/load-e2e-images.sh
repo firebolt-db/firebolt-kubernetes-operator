@@ -37,9 +37,9 @@ if ! kind get nodes --name "${CLUSTER_NAME}" &>/dev/null; then
     exit 1
 fi
 
-# NOTE: ECR authentication should be done before running this script.
-# In CI, use firebolt-analytics/gha-workflows/.github/actions/ecr-login.
-# Locally, run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <registry>
+# NOTE: GHCR authentication should be done before running this script.
+# In CI, use docker/login-action with ghcr.io.
+# Locally, run: echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
 
 declare -a IMAGES=(
     "${ENGINE_IMAGE}:${ENGINE_TAG}"

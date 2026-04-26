@@ -5,7 +5,7 @@ type: application
 version: 0.1.14
 appVersion: "v1.10.2"
 maintainers:
-  - name: firebolt-analytics
+  - name: firebolt-db
 keywords:
   - firebolt
   - operator

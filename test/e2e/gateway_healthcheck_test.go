@@ -35,7 +35,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
 // drainEjectionEnabled gates the drain-ejection step below.
