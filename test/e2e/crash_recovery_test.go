@@ -27,7 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
 // Each second-level Describe owns its own FireboltInstance and client pod so

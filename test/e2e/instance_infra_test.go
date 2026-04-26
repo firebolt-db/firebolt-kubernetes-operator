@@ -28,7 +28,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/internal/controller"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
 // Each second-level Describe owns its own FireboltInstance so parallel

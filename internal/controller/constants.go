@@ -22,7 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/config/images"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
 )
 
 const (

@@ -43,7 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/firebolt-analytics/firebolt-kubernetes-operator/config/images"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
 )
 
 const (

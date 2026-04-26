@@ -1,4 +1,4 @@
-module github.com/firebolt-analytics/firebolt-kubernetes-operator
+module github.com/firebolt-db/firebolt-kubernetes-operator
 
 go 1.25.0
 

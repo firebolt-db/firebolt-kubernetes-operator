@@ -44,7 +44,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | fullnameOverride | string | `""` | Override the full resource name. |
 | healthProbeBindAddress | string | `":8081"` | Address the health probe endpoint binds to. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| image.repository | string | `"controller"` | Container image repository. |
+| image.repository | string | `"ghcr.io/firebolt-db/firebolt-kubernetes-operator"` | Container image repository. |
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | imagePullSecrets | list | `[]` | Secrets for pulling images from private registries. |
 | leaderElection.enabled | bool | `true` | Enable leader election for the controller manager. |
