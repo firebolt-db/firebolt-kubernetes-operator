@@ -26,6 +26,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -487,6 +488,42 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
+	storage := getEngineStorage(spec)
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "nodes-config",
+			MountPath: ConfigMountPath,
+			SubPath:   "config.json",
+			ReadOnly:  true,
+		},
+		{
+			Name:      DataVolumeName,
+			MountPath: DataMountPath,
+		},
+	}
+	volumeClaimTemplates := []corev1.PersistentVolumeClaim{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   DataVolumeName,
+			Labels: labels,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: storage.AccessModes,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: storage.Size,
+				},
+			},
+			StorageClassName: storage.StorageClassName,
+		},
+	}}
+	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
+	// during blue-green cleaning. WhenScaled stays Retain so a within-
+	// generation scale-down does not silently drop a node's data.
+	pvcRetentionPolicy := &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+	}
 
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -496,10 +533,12 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			Annotations: annotations,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			ServiceName:         headlessSvcName,
-			Replicas:            &spec.Replicas,
-			PodManagementPolicy: appsv1.ParallelPodManagement,
-			Selector:            &metav1.LabelSelector{MatchLabels: labels},
+			ServiceName:                          headlessSvcName,
+			Replicas:                             &spec.Replicas,
+			PodManagementPolicy:                  appsv1.ParallelPodManagement,
+			Selector:                             &metav1.LabelSelector{MatchLabels: labels},
+			VolumeClaimTemplates:                 volumeClaimTemplates,
+			PersistentVolumeClaimRetentionPolicy: pvcRetentionPolicy,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
@@ -531,17 +570,10 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									},
 								},
 							},
-							Ports:   GetContainerPorts(),
-							Command: []string{"/bin/bash", "-c"},
-							Args:    []string{strings.TrimSpace(EngineStartupScript)},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "nodes-config",
-									MountPath: ConfigMountPath,
-									SubPath:   "config.json",
-									ReadOnly:  true,
-								},
-							},
+							Ports:        GetContainerPorts(),
+							Command:      []string{"/bin/bash", "-c"},
+							Args:         []string{strings.TrimSpace(EngineStartupScript)},
+							VolumeMounts: volumeMounts,
 							ReadinessProbe: &corev1.Probe{
 								InitialDelaySeconds: 1,
 								PeriodSeconds:       3,
@@ -667,6 +699,21 @@ func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
 	return DefaultTerminationGracePeriodSeconds
 }
 
+// getEngineStorage returns the resolved engine storage spec, applying the
+// operator's defaults to any unset fields. Mirrors the kubebuilder defaults
+// declared on EngineStorageSpec so unit tests building specs as Go literals
+// see the same values as CRD-loaded specs.
+func getEngineStorage(spec *computev1alpha1.FireboltEngineSpec) computev1alpha1.EngineStorageSpec {
+	s := spec.Storage
+	if s.Size.IsZero() {
+		s.Size = resource.MustParse(DefaultEngineStorageSize)
+	}
+	if len(s.AccessModes) == 0 {
+		s.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	}
+	return s
+}
+
 // stsMatchesSpec returns true if the StatefulSet matches all mutable fields
 // in the engine spec. A mismatch triggers a new blue-green generation.
 func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
@@ -722,5 +769,35 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
+	if !storageMatchesSpec(sts, spec) {
+		return false
+	}
+
 	return true
+}
+
+// storageMatchesSpec reports whether the STS's VolumeClaimTemplates match the
+// engine's resolved storage spec. VolumeClaimTemplates are immutable on a STS,
+// so any drift (resizing, switching access modes or storage class) must
+// trigger a new blue-green generation.
+func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
+	if len(sts.Spec.VolumeClaimTemplates) == 0 {
+		return false
+	}
+	storage := getEngineStorage(spec)
+	vct := sts.Spec.VolumeClaimTemplates[0]
+	if vct.Name != DataVolumeName {
+		return false
+	}
+
+	currentSize := vct.Spec.Resources.Requests[corev1.ResourceStorage]
+	if !currentSize.Equal(storage.Size) {
+		return false
+	}
+
+	if !reflect.DeepEqual(vct.Spec.AccessModes, storage.AccessModes) {
+		return false
+	}
+
+	return reflect.DeepEqual(vct.Spec.StorageClassName, storage.StorageClassName)
 }
