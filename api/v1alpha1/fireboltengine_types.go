@@ -18,8 +18,35 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// EngineStorageSpec configures the per-pod PersistentVolumeClaim mounted into
+// each engine container at /firebolt-core/volume. The PVC is always provisioned;
+// fields here override the operator's defaults.
+//
+// Changing any field triggers a new blue-green generation, since
+// VolumeClaimTemplates are immutable on a StatefulSet. The new generation
+// provisions fresh PVCs; the old generation's PVCs are reclaimed when the
+// old StatefulSet is deleted (whenDeleted=Delete on the retention policy).
+type EngineStorageSpec struct {
+	// Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.
+	// +kubebuilder:default="1Gi"
+	// +optional
+	Size resource.Quantity `json:"size,omitempty"`
+
+	// AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the
+	// per-pod ownership model used by the StatefulSet VolumeClaimTemplate.
+	// +kubebuilder:default={ReadWriteOnce}
+	// +optional
+	AccessModes []corev1.PersistentVolumeAccessMode `json:"accessModes,omitempty"`
+
+	// StorageClassName selects the StorageClass for the PVC. Leave nil to use
+	// the cluster default. An empty string disables dynamic provisioning.
+	// +optional
+	StorageClassName *string `json:"storageClassName,omitempty"`
+}
 
 // RolloutStrategy defines how transitions between generations are handled.
 // +kubebuilder:validation:Enum=graceful;recreate
@@ -153,6 +180,15 @@ type FireboltEngineSpec struct {
 	// Immutable once set: see the struct-level CEL rule on FireboltEngineSpec.
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
+
+	// Storage configures the per-pod PersistentVolumeClaim mounted at
+	// /firebolt-core/volume. The PVC is always provisioned; omit the field
+	// to accept the operator's defaults (1Gi, ReadWriteOnce, cluster default
+	// StorageClass). Changes to any field force a new generation since
+	// VolumeClaimTemplates are immutable on a StatefulSet.
+	// +kubebuilder:default={}
+	// +optional
+	Storage EngineStorageSpec `json:"storage,omitempty"`
 
 	// TerminationGracePeriodSeconds is the grace period given to engine pods
 	// between SIGTERM and SIGKILL during termination. On SIGTERM the engine

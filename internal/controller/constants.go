@@ -102,6 +102,18 @@ const (
 	// ConfigMountPath is where the engine config.json is mounted in the container.
 	ConfigMountPath = "/firebolt-core/config.json"
 
+	// DataMountPath is where the engine's per-pod PVC is mounted. Matches the
+	// path the engine binary uses for its working data.
+	DataMountPath = "/firebolt-core/volume"
+	// DataVolumeName is the name of the data volume inside the StatefulSet's
+	// VolumeClaimTemplates and the corresponding container VolumeMount.
+	DataVolumeName = "data"
+	// DefaultEngineStorageSize is the PVC size applied when
+	// FireboltEngineSpec.Storage.Size is unset. Mirrors the kubebuilder default
+	// so unit tests building specs as Go literals see the same value as
+	// CRD-loaded specs.
+	DefaultEngineStorageSize = "1Gi"
+
 	// DefaultTerminationGracePeriodSeconds is the default value applied to the
 	// engine pod's terminationGracePeriodSeconds when FireboltEngine.spec leaves
 	// it unset. 60s gives in-flight queries up to 55s (TGPS − EngineShutdownMarginSeconds)

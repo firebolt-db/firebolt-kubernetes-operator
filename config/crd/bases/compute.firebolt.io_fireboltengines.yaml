@@ -177,6 +177,39 @@ spec:
                 - graceful
                 - recreate
                 type: string
+              storage:
+                default: {}
+                description: |-
+                  Storage configures the per-pod PersistentVolumeClaim mounted at
+                  /firebolt-core/volume. The PVC is always provisioned; omit the field
+                  to accept the operator's defaults (1Gi, ReadWriteOnce, cluster default
+                  StorageClass). Changes to any field force a new generation since
+                  VolumeClaimTemplates are immutable on a StatefulSet.
+                properties:
+                  accessModes:
+                    default:
+                    - ReadWriteOnce
+                    description: |-
+                      AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the
+                      per-pod ownership model used by the StatefulSet VolumeClaimTemplate.
+                    items:
+                      type: string
+                    type: array
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    default: 1Gi
+                    description: Size is the requested capacity for each engine pod's
+                      PVC. Defaults to 1Gi.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  storageClassName:
+                    description: |-
+                      StorageClassName selects the StorageClass for the PVC. Leave nil to use
+                      the cluster default. An empty string disables dynamic provisioning.
+                    type: string
+                type: object
               terminationGracePeriodSeconds:
                 default: 60
                 description: |-

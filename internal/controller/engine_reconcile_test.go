@@ -70,6 +70,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	spec := testSpec()
 	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
+	storage := getEngineStorage(spec)
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      genResourceName(engineName, gen, ""),
@@ -81,6 +82,16 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas: &replicas,
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
+				ObjectMeta: metav1.ObjectMeta{Name: DataVolumeName},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: storage.AccessModes,
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{corev1.ResourceStorage: storage.Size},
+					},
+					StorageClassName: storage.StorageClassName,
+				},
+			}},
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					NodeSelector:                  spec.NodeSelector,
