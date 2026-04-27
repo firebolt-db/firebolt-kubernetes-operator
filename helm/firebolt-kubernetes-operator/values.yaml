@@ -59,8 +59,11 @@ metrics:
   # -- Enable the metrics Service.
   enabled: true
   # -- Address the metrics endpoint binds to.
+  # Use ":8443" with secure: true (HTTPS) or ":8080" with secure: false (HTTP).
   bindAddress: ":8443"
-  # -- Serve metrics via HTTPS with authn/authz.
+  # -- Serve metrics via HTTPS with authn/authz. When true, controller-runtime
+  # auto-generates self-signed TLS certs and enables Kubernetes authn/authz.
+  # The operator PodMonitor automatically adapts scheme and TLS config.
   secure: true
 
 webhook:
@@ -164,10 +167,6 @@ podMonitor:
     interval: 15s
   # -- Create a PodMonitor for gateway pods (port 9090, /stats/prometheus).
   gateway:
-    enabled: false
-    interval: 15s
-  # -- Create a PodMonitor for metadata pods (port 9090, /metrics).
-  metadata:
     enabled: false
     interval: 15s
   # -- Create a PodMonitor for the operator pod itself (controller-runtime metrics).

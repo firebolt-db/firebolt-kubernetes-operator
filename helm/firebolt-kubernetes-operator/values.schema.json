@@ -159,13 +159,6 @@
             "interval": { "type": "string" }
           }
         },
-        "metadata": {
-          "type": "object",
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "interval": { "type": "string" }
-          }
-        },
         "operator": {
           "type": "object",
           "properties": {
