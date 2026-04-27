@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test-e2e:
     name: E2E Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-16core-64gb-600ssd-amd64
     permissions:
       id-token: write
       contents: read
@@ -38,6 +38,47 @@ jobs:
 
           # Verify gains
           df -h /
+
+      - name: Raise memlock limit for kind nodes
+        # firebolt-core uses io_uring and registers buffers via
+        # io_uring_register_buffers, which fails with ENOMEM when RLIMIT_MEMLOCK
+        # is at the host default (~64KB). Engine pods then crash on init with:
+        #   io_uring_register_buffers failed: Cannot allocate memory (12)
+        # and never reach Ready. CAP_IPC_LOCK doesn't help: io_uring buffer
+        # registration strictly checks RLIMIT_MEMLOCK and ignores the cap.
+        #
+        # The fix has TWO layers and both are required:
+        #   1. systemd's docker.service unit caps the daemon's own ulimit via
+        #      LimitMEMLOCK=. Without raising this, the daemon can't grant a
+        #      higher limit to its containers no matter what daemon.json says.
+        #   2. The daemon's default-ulimits config then applies the now-
+        #      unlimited ceiling to every container it spawns, including the
+        #      kind node containers (and the pods kubelet runs inside them).
+        run: |
+          sudo mkdir -p /etc/systemd/system/docker.service.d
+          sudo tee /etc/systemd/system/docker.service.d/memlock.conf > /dev/null <<'EOF'
+          [Service]
+          LimitMEMLOCK=infinity
+          EOF
+
+          sudo mkdir -p /etc/docker
+          sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+          {
+            "default-ulimits": {
+              "memlock": { "Name": "memlock", "Hard": -1, "Soft": -1 }
+            }
+          }
+          EOF
+
+          sudo systemctl daemon-reload
+          sudo systemctl restart docker
+
+          # Confirm: dockerd's own ulimit, AND a fresh container's ulimit
+          echo "=== dockerd LimitMEMLOCK (systemd-level) ==="
+          systemctl show docker | grep -E '^Limit(MEMLOCK|MEMLOCKSoft)='
+          echo "=== container memlock (daemon-level default-ulimits) ==="
+          docker run --rm alpine sh -c 'ulimit -l'
+
       - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         id: app-token
         with:
