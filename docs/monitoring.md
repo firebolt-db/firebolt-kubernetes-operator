@@ -8,10 +8,20 @@ This document describes how the Firebolt operator exposes Prometheus metrics for
 |---|---|---|---|---|
 | Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges |
 | Gateway pods (Envoy) | 9090 (default) | `metrics` | `/stats/prometheus` | Envoy connection, request, and cluster stats |
-| Metadata pods (pensieve) | 9090 (default) | `metrics` | `/metrics` | Metadata service metrics |
-| Operator pod | 8443 | `https` / `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
+| Operator pod | Configurable via `metrics.bindAddress` | `https` or `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
 
-The gateway and metadata metrics port defaults to 9090 and is configurable per FireboltInstance CR via `spec.gateway.metricsPort` and `spec.metadata.metricsPort`.
+The gateway metrics port defaults to 9090 and is configurable per FireboltInstance CR via `spec.gateway.metricsPort`. Metadata pods do not currently expose a Prometheus metrics endpoint.
+
+### Operator metrics mode
+
+The operator metrics endpoint mode is controlled by two Helm values:
+
+| Mode | `metrics.secure` | `metrics.bindAddress` | Port name | Scheme |
+|---|---|---|---|---|
+| HTTPS (default) | `true` | `:8443` | `https` | `https` with authn/authz and self-signed TLS |
+| HTTP | `false` | `:8080` | `http` | plain `http` |
+
+The operator PodMonitor template automatically adapts its port reference, scheme, bearer token, and TLS configuration based on `metrics.secure`.
 
 ## Scraping with Prometheus
 
@@ -23,8 +33,6 @@ podMonitor:
     enabled: true
   gateway:
     enabled: true
-  metadata:
-    enabled: true
   operator:
     enabled: true
   allNamespaces: false   # set true when the operator watches all namespaces
@@ -32,9 +40,8 @@ podMonitor:
 
 Each PodMonitor uses label selectors to match the relevant pods:
 
-- **Engines**: `firebolt.io/engine` (exists) — matches all engine pods regardless of engine name
+- **Engines**: `firebolt.io/engine` (exists) -- matches all engine pods regardless of engine name
 - **Gateway**: `firebolt.io/component=gateway`
-- **Metadata**: `firebolt.io/component=metadata`
 - **Operator**: `control-plane=controller-manager` + chart selector labels
 
 When `allNamespaces` is true, `namespaceSelector.any: true` is added so pods in any namespace are discovered. This does not apply to the operator PodMonitor since the operator always runs in the release namespace.
@@ -45,7 +52,6 @@ The chart-level PodMonitors apply uniform scrape configuration to all instances 
 
 - Engine pods: `firebolt.io/engine: <engine-name>`
 - Gateway pods: `firebolt.io/instance: <instance-name>`, `firebolt.io/component: gateway`
-- Metadata pods: `firebolt.io/instance: <instance-name>`, `firebolt.io/component: metadata`
 
 ## Architecture decisions
 
