@@ -1063,6 +1063,17 @@ spec:
                     description: Labels are additional labels applied to this component's
                       pods.
                     type: object
+                  metricsPort:
+                    default: 9090
+                    description: |-
+                      MetricsPort is the container port that exposes Prometheus metrics.
+                      The operator always adds this port to the pod spec so that a
+                      PodMonitor can reference it by the well-known name "metrics".
+                      Override only when the component binary listens on a non-default port.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
                   nodeSelector:
                     additionalProperties:
                       type: string
@@ -2162,6 +2173,17 @@ spec:
                     description: Labels are additional labels applied to this component's
                       pods.
                     type: object
+                  metricsPort:
+                    default: 9090
+                    description: |-
+                      MetricsPort is the container port that exposes Prometheus metrics.
+                      The operator always adds this port to the pod spec so that a
+                      PodMonitor can reference it by the well-known name "metrics".
+                      Override only when the component binary listens on a non-default port.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
                   nodeSelector:
                     additionalProperties:
                       type: string

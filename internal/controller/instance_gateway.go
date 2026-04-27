@@ -286,6 +286,31 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
+    - name: stats_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: stats
+                route_config:
+                  name: stats_route
+                  virtual_hosts:
+                    - name: stats
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/stats/prometheus"
+                          route:
+                            cluster: admin_stats
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
@@ -378,6 +403,18 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
             # traffic recently so a long-lived gateway doesn't accumulate
             # one cluster per ever-deleted engine over time.
             sub_cluster_ttl: 300s
+    - name: admin_stats
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: admin_stats
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
 admin:
   address:
     socket_address:
@@ -386,6 +423,8 @@ admin:
 `,
 		gatewayContainerPort,
 		instance.Namespace,
+		instance.Spec.Gateway.MetricsPort,
+		gatewayAdminPort,
 		gatewayAdminPort,
 	)
 }
@@ -550,6 +589,7 @@ sleep 8
 						Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
+							{Name: "metrics", ContainerPort: instance.Spec.Gateway.MetricsPort, Protocol: corev1.ProtocolTCP},
 						},
 						Lifecycle: &corev1.Lifecycle{
 							PreStop: &corev1.LifecycleHandler{
