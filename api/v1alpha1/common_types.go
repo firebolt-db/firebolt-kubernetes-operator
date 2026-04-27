@@ -87,4 +87,14 @@ type ComponentSpec struct {
 	// ServiceAccountName is the ServiceAccount for this component's pods.
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// MetricsPort is the container port that exposes Prometheus metrics.
+	// The operator always adds this port to the pod spec so that a
+	// PodMonitor can reference it by the well-known name "metrics".
+	// Override only when the component binary listens on a non-default port.
+	// +kubebuilder:default=9090
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	MetricsPort int32 `json:"metricsPort,omitempty"`
 }

@@ -244,6 +244,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 						Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
+							{Name: "metrics", ContainerPort: instance.Spec.Metadata.MetricsPort, Protocol: corev1.ProtocolTCP},
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
