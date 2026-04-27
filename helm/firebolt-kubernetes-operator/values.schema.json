@@ -142,6 +142,40 @@
         }
       }
     },
+    "podMonitor": {
+      "type": "object",
+      "properties": {
+        "engines": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" }
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" }
+          }
+        },
+        "operator": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string" }
+          }
+        },
+        "allNamespaces": { "type": "boolean" }
+      }
+    },
     "healthProbeBindAddress": {
       "type": "string"
     },

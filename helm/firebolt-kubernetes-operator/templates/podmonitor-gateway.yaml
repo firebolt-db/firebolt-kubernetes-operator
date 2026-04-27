@@ -1,0 +1,24 @@
+{{- if .Values.podMonitor.gateway.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.podMonitor.allNamespaces }}
+  namespaceSelector:
+    any: true
+  {{- end }}
+  selector:
+    matchLabels:
+      firebolt.io/component: gateway
+  podMetricsEndpoints:
+    - interval: {{ .Values.podMonitor.gateway.interval }}
+      path: /stats/prometheus
+      port: metrics
+  podTargetLabels:
+    - firebolt.io/instance
+    - firebolt.io/component
+{{- end }}

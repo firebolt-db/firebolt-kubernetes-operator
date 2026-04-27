@@ -157,6 +157,28 @@ extraVolumes: []
 # of the same `name`.
 extraVolumeMounts: []
 
+podMonitor:
+  # -- Create a PodMonitor for engine pods (port 9090, /metrics).
+  engines:
+    enabled: false
+    interval: 15s
+  # -- Create a PodMonitor for gateway pods (port 9090, /stats/prometheus).
+  gateway:
+    enabled: false
+    interval: 15s
+  # -- Create a PodMonitor for metadata pods (port 9090, /metrics).
+  metadata:
+    enabled: false
+    interval: 15s
+  # -- Create a PodMonitor for the operator pod itself (controller-runtime metrics).
+  operator:
+    enabled: false
+    interval: 15s
+  # -- When true, PodMonitors discover pods across all namespaces.
+  # Use when the operator watches multiple namespaces (watchNamespace is empty).
+  # When false, PodMonitors only discover pods in the release namespace.
+  allNamespaces: false
+
 # -- Node selector for the operator pod.
 nodeSelector: {}
 # -- Tolerations for the operator pod.

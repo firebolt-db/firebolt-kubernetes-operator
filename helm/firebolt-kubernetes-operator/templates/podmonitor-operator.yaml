@@ -1,0 +1,24 @@
+{{- if .Values.podMonitor.operator.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "firebolt-operator.selectorLabels" . | nindent 6 }}
+      control-plane: controller-manager
+  podMetricsEndpoints:
+    - interval: {{ .Values.podMonitor.operator.interval }}
+      path: /metrics
+      port: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+      {{- if .Values.metrics.secure }}
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+      {{- end }}
+{{- end }}

@@ -1,0 +1,25 @@
+{{- if .Values.podMonitor.engines.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-engines
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.podMonitor.allNamespaces }}
+  namespaceSelector:
+    any: true
+  {{- end }}
+  selector:
+    matchExpressions:
+      - key: firebolt.io/engine
+        operator: Exists
+  podMetricsEndpoints:
+    - interval: {{ .Values.podMonitor.engines.interval }}
+      path: /metrics
+      port: metrics
+  podTargetLabels:
+    - firebolt.io/engine
+    - firebolt.io/generation
+{{- end }}

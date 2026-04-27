@@ -1,0 +1,373 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: fireboltengines.compute.firebolt.io
+spec:
+  group: compute.firebolt.io
+  names:
+    kind: FireboltEngine
+    listKind: FireboltEngineList
+    plural: fireboltengines
+    shortNames:
+    - fireng
+    singular: fireboltengine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.activeGeneration
+      name: Generation
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: FireboltEngine is the Schema for the fireboltengines API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              FireboltEngineSpec defines the desired state of a Firebolt engine.
+
+              The CEL rule freezes spec.metadataEndpointOverride once it has been set
+              (or unset) at creation time. The field selects the cross-cluster metadata
+              topology the engine's nodes bake into their on-disk configuration; letting
+              users mutate it later would silently force a full blue-green rollout (it
+              participates in stsMatchesSpec via AnnotationMetadataOverride) and would
+              break the instanceInfo-drift invariant computeStable relies on to allow
+              in-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces
+              byte-identical content only when all ConfigMap inputs are frozen).
+              The wording mirrors the set-once pattern on FireboltInstanceSpec.ID,
+              adapted for an optional pointer field via has(): absent-on-create may
+              still transition to set, but any set value may not subsequently be
+              changed or cleared.
+            properties:
+              drainCheckEnabled:
+                default: true
+                description: |-
+                  DrainCheckEnabled controls whether the operator performs a SQL-based drain
+                  check on old-generation pods during graceful rollouts. When false, the
+                  operator skips directly to cleaning after switching traffic, without
+                  verifying that in-flight queries have completed. Requires a running
+                  node that can execute the drain-check query when enabled.
+                type: boolean
+              drainCheckInterval:
+                description: |-
+                  DrainCheckInterval controls how often to check if old pods have finished serving queries.
+                  Only used when drainCheckEnabled is true.
+                type: string
+              image:
+                description: |-
+                  Image defines the container image to use.
+                  If not specified, defaults to the engine image embedded in the operator binary.
+                properties:
+                  pullPolicy:
+                    default: IfNotPresent
+                    description: PullPolicy defines when to pull the image.
+                    enum:
+                    - Always
+                    - Never
+                    - IfNotPresent
+                    type: string
+                  repository:
+                    description: Repository is the container image repository.
+                    minLength: 1
+                    type: string
+                  tag:
+                    description: Tag is the container image tag.
+                    minLength: 1
+                    type: string
+                required:
+                - repository
+                - tag
+                type: object
+              instanceRef:
+                description: |-
+                  InstanceRef is the name of the FireboltInstance in the same namespace
+                  that this engine depends on. The engine reconciler will not proceed
+                  until the referenced instance has a populated metadata endpoint and
+                  account ID. This field is immutable after creation.
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: instanceRef is immutable
+                  rule: self == oldSelf
+              metadataEndpointOverride:
+                description: |-
+                  MetadataEndpointOverride overrides the metadata endpoint for this engine.
+                  If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
+                  topology-aware routing). Set this for cross-cluster scenarios where the engine
+                  connects to a metadata service in a different cluster via private link.
+
+                  Immutable once set: see the struct-level CEL rule on FireboltEngineSpec.
+                type: string
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: NodeSelector constrains which nodes the engine pods can
+                  be scheduled on.
+                type: object
+              replicas:
+                description: |-
+                  Replicas is the number of engine nodes. Set to 0 to stop the
+                  engine: the operator tears down the active generation (honoring
+                  spec.rollout for drain behavior) and leaves the CR in the
+                  Stopped phase. Setting replicas back to a non-zero value resumes
+                  the engine via a new blue-green generation.
+                format: int32
+                minimum: 0
+                type: integer
+              resources:
+                description: Resources defines the CPU and memory for engine pods.
+                properties:
+                  cpu:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: CPU request and limit (Kubernetes quantity, e.g.
+                      "2", "500m").
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Memory request and limit (Kubernetes quantity, e.g.
+                      "8Gi", "4096Mi").
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                required:
+                - cpu
+                - memory
+                type: object
+              rollout:
+                default: graceful
+                description: 'Rollout strategy for transitions: "graceful" waits for
+                  drain, "recreate" deletes immediately.'
+                enum:
+                - graceful
+                - recreate
+                type: string
+              storage:
+                default: {}
+                description: |-
+                  Storage configures the per-pod PersistentVolumeClaim mounted at
+                  /firebolt-core/volume. The PVC is always provisioned; omit the field
+                  to accept the operator's defaults (1Gi, ReadWriteOnce, cluster default
+                  StorageClass). Changes to any field force a new generation since
+                  VolumeClaimTemplates are immutable on a StatefulSet.
+                properties:
+                  accessModes:
+                    default:
+                    - ReadWriteOnce
+                    description: |-
+                      AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the
+                      per-pod ownership model used by the StatefulSet VolumeClaimTemplate.
+                    items:
+                      type: string
+                    type: array
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    default: 1Gi
+                    description: Size is the requested capacity for each engine pod's
+                      PVC. Defaults to 1Gi.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  storageClassName:
+                    description: |-
+                      StorageClassName selects the StorageClass for the PVC. Leave nil to use
+                      the cluster default. An empty string disables dynamic provisioning.
+                    type: string
+                type: object
+              terminationGracePeriodSeconds:
+                default: 60
+                description: |-
+                  TerminationGracePeriodSeconds is the grace period given to engine pods
+                  between SIGTERM and SIGKILL during termination. On SIGTERM the engine
+                  waits up to (TerminationGracePeriodSeconds - 5s) for in-flight queries
+                  to finish before exiting; Envoy's active health checks eject the pod
+                  from the gateway load-balancer within ~1s of SIGTERM so no new queries
+                  are routed to a draining pod.
+
+                  Defaults to 60 seconds. Raise it for workloads with analytical
+                  queries that routinely exceed a minute; lower it for latency-bounded
+                  workloads where quicker rollouts are preferable to query survival at
+                  the tail.
+                format: int64
+                minimum: 1
+                type: integer
+              tolerations:
+                description: Tolerations allow engine pods to be scheduled on tainted
+                  nodes.
+                items:
+                  description: |-
+                    The pod this Toleration is attached to tolerates any taint that matches
+                    the triple <key,value,effect> using the matching operator <operator>.
+                  properties:
+                    effect:
+                      description: |-
+                        Effect indicates the taint effect to match. Empty means match all taint effects.
+                        When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                      type: string
+                    key:
+                      description: |-
+                        Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                        If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                      type: string
+                    operator:
+                      description: |-
+                        Operator represents a key's relationship to the value.
+                        Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                        Exists is equivalent to wildcard for value, so that a pod can
+                        tolerate all taints of a particular category.
+                        Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                      type: string
+                    tolerationSeconds:
+                      description: |-
+                        TolerationSeconds represents the period of time the toleration (which must be
+                        of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                        it is not set, which means tolerate the taint forever (do not evict). Zero and
+                        negative values will be treated as 0 (evict immediately) by the system.
+                      format: int64
+                      type: integer
+                    value:
+                      description: |-
+                        Value is the taint value the toleration matches to.
+                        If the operator is Exists, the value should be empty, otherwise just a regular string.
+                      type: string
+                  type: object
+                type: array
+            required:
+            - instanceRef
+            - replicas
+            - resources
+            type: object
+            x-kubernetes-validations:
+            - message: spec.metadataEndpointOverride is immutable once set
+              rule: '!has(oldSelf.metadataEndpointOverride) || (has(self.metadataEndpointOverride)
+                && self.metadataEndpointOverride == oldSelf.metadataEndpointOverride)'
+          status:
+            description: FireboltEngineStatus defines the observed state of a Firebolt
+              engine.
+            properties:
+              activeGeneration:
+                description: ActiveGeneration is the generation currently serving
+                  traffic.
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the engine's state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              currentGeneration:
+                description: CurrentGeneration is the latest generation number created.
+                type: integer
+              drainingGeneration:
+                description: DrainingGeneration is the generation being drained, if
+                  any.
+                type: integer
+              lastReconciled:
+                description: LastReconciled is the timestamp of the last reconciliation.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the metadata.generation that was
+                  last fully reconciled to stable.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the current lifecycle phase of the engine.
+                type: string
+            required:
+            - activeGeneration
+            - currentGeneration
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

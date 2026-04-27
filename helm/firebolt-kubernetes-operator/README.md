@@ -48,13 +48,17 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | imagePullSecrets | list | `[]` | Secrets for pulling images from private registries. |
 | leaderElection.enabled | bool | `true` | Enable leader election for the controller manager. |
-| metrics.bindAddress | string | `":8443"` | Address the metrics endpoint binds to. |
+| metrics.bindAddress | string | `":8443"` | Address the metrics endpoint binds to. Use ":8443" with secure: true (HTTPS) or ":8080" with secure: false (HTTP). |
 | metrics.enabled | bool | `true` | Enable the metrics Service. |
-| metrics.secure | bool | `true` | Serve metrics via HTTPS with authn/authz. |
+| metrics.secure | bool | `true` | Serve metrics via HTTPS with authn/authz. When true, controller-runtime auto-generates self-signed TLS certs and enables Kubernetes authn/authz. The operator PodMonitor automatically adapts scheme and TLS config. |
 | nameOverride | string | `""` | Override the chart name used in resource names. |
 | nodeSelector | object | `{}` | Node selector for the operator pod. |
 | podAnnotations | object | `{}` | Extra annotations added only to the operator pod. |
 | podLabels | object | `{}` | Extra labels added only to the operator pod. |
+| podMonitor.allNamespaces | bool | `false` | When true, PodMonitors discover pods across all namespaces. Use when the operator watches multiple namespaces (watchNamespace is empty). When false, PodMonitors only discover pods in the release namespace. |
+| podMonitor.engines | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for engine pods (port 9090, /metrics). |
+| podMonitor.gateway | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for gateway pods (port 9090, /stats/prometheus). |
+| podMonitor.operator | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for the operator pod itself (controller-runtime metrics). |
 | podSecurityContext | object | `{"fsGroup":65532,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context. fsGroup matches the distroless-nonroot UID used by the default `controller` image so mounted Secret files (e.g. the webhook cert) are readable by the operator process. |
 | priorityClassName | string | `""` | Priority class name for the operator pod. |
 | rbac.create | bool | `true` | Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources. |
