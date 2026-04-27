@@ -1,3 +1,20 @@
+# 0.1.15
+
+appVersion: v1.11.0
+
+## [1.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.10.2...v1.11.0) (2026-04-27)
+
+### Features
+
+* **engine:** add per-pod PVC at /firebolt-core/volume (FB-820) ([#7](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/7)) ([57f282c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/57f282c36d624cc959fd36215b54e67b145c6b86))
+* update examples and use new images (FB-804) ([#6](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/6)) ([c6be6a2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c6be6a25ea70b4a041087fca600011c53fbc0a51))
+
+### Bug Fixes
+
+* **ci:** disable @semantic-release/github PR/issue comments and grant matching App perms (FB-810) ([#10](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/10)) ([a7c3866](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a7c38661a6a9dc868eb5f219c59c913bbda3552a))
+* **ci:** upgrade semantic-release to v25 and switch to GITHUB_TOKEN env (FB-810) ([c83454c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c83454cb467a56c50e636243c8fd4c5fb8f794b0))
+
+
 # 0.1.14
 
 appVersion: v1.10.2
