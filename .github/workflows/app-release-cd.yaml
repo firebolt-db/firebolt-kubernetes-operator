@@ -42,11 +42,18 @@ jobs:
         id: semantic_release
         uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         with:
-          semantic_version: 18
+          semantic_version: 25
           extra_plugins: |
-            conventional-changelog-conventionalcommits@4
+            conventional-changelog-conventionalcommits@9
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Use GITHUB_TOKEN (not GH_TOKEN) so semantic-release prepends the
+          # required `x-access-token:` username when constructing git URLs.
+          # Without this, GitHub App installation tokens (which need basic
+          # auth as `x-access-token:<token>`) are sent bare and rejected
+          # with "Invalid username or token". The runtime check that picks
+          # the prefix is keyed on env var name, not token type, so the
+          # rename is the fix; see semantic-release/lib/get-git-auth-url.js.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Fail in case of no release
         if: steps.semantic_release.outputs.new_release_git_tag == ''
