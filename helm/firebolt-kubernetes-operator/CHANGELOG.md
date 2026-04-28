@@ -1,3 +1,14 @@
+# 0.1.16
+
+appVersion: v1.11.1
+
+## [1.11.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.11.0...v1.11.1) (2026-04-28)
+
+### Bug Fixes
+
+* disallow 2 running metadata services at the same time (FB-828) ([#8](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/8)) ([481e38d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/481e38da2c7a767603bc3010b7775e1bdfa904f4))
+
+
 # 0.1.15
 
 appVersion: v1.11.0
