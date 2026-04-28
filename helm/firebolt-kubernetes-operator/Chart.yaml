@@ -2,7 +2,7 @@ apiVersion: v2
 name: firebolt-kubernetes-operator
 description: Helm chart for the Firebolt Kubernetes Operator
 type: application
-version: 0.1.16
+version: 0.1.17
 appVersion: "v1.11.1"
 maintainers:
   - name: firebolt-db
