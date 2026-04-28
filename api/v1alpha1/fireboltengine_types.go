@@ -168,6 +168,13 @@ type FireboltEngineSpec struct {
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
+	// ServiceAccountName is the name of the ServiceAccount to run engine pods as.
+	// If unset, StatefulSet pods use the namespace default ServiceAccount.
+	// Changing this value triggers a new blue-green generation (see stsMatchesSpec).
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
+
 	// Rollout strategy for transitions: "graceful" waits for drain, "recreate" deletes immediately.
 	// +kubebuilder:default=graceful
 	// +optional
