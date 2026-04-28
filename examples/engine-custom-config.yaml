@@ -1,0 +1,37 @@
+# Engine with spec.customEngineConfig. Top-level keys are merged into
+# each engine node's `config.config` block, overriding the operator's
+# defaults for: account_name, organization_id, organization_name,
+# cluster_id, multi_engine_mode_enabled, logger_formatting,
+# logger_use_files. Other keys understood by the engine binary may be
+# added here as well.
+#
+# Identity/routing keys are operator-authoritative and cannot be
+# overridden via this field: account_id, engine_id, engine_name,
+# multi_engine_endpoint, shutdown_wait_unfinished.
+#
+# Changes to customEngineConfig trigger a new blue-green generation.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: firebolt
+spec:
+  metadata: {}
+  gateway: {}
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: engine
+spec:
+  instanceRef: firebolt
+  replicas: 1
+  resources:
+    cpu: "1"
+    memory: 4Gi
+  customEngineConfig:
+    account_name: acme
+    organization_id: 01KP98J0000000000000000099
+    organization_name: acme-org
+    cluster_id: prod-cluster
+    logger_formatting: json
+    logger_use_files: false
