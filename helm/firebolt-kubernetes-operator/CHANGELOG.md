@@ -1,3 +1,14 @@
+# 0.1.23
+
+appVersion: v1.15.0
+
+## [1.15.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.14.0...v1.15.0) (2026-04-28)
+
+### Features
+
+* reference KSA per engine (FB-870) ([#18](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/18)) ([e6d6aeb](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e6d6aeb0be1d770c738f8592ce371366897f7327))
+
+
 # 0.1.22
 
 appVersion: v1.14.0
