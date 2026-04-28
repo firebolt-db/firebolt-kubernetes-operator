@@ -14,19 +14,14 @@ metadata:
 spec:
   instanceRef: firebolt
   replicas: 5
+  # Image override. When omitted, the operator's embedded default is used.
   image:
     repository: ghcr.io/firebolt-db/engine
-    tag: release-4.32.0-pre.0.20260424165648.0581dba99945-amd64
+    tag: 4.32.0-pre.0.20260428110559.3964114056e2
     pullPolicy: IfNotPresent
   resources:
     cpu: "2"
     memory: 4Gi
-
-  # Image override. When omitted, the operator's embedded default is used.
-  image:
-    repository: 000000000000.dkr.ecr.us-east-1.amazonaws.com/firebolt-core
-    tag: release-4.32.0-pre.0.20260414104905.92750f097354-amd64
-    pullPolicy: IfNotPresent
 
   # Rollout behaviour
   rollout: graceful                 # graceful (default) | recreate
