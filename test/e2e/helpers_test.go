@@ -67,6 +67,14 @@ const (
 	MinHeavyQueryOutputBytes = 50 * 1024 * 1024
 )
 
+// podLogDebugTailLines and Firebolt pod label keys: wait helpers and
+// DumpFireboltPodLogsForDebugWithScope (per-Describe failed-spec JustAfterEach).
+const (
+	podLogDebugTailLines     = 50
+	labelKeyFireboltEngine   = "firebolt.io/engine"
+	labelKeyFireboltInstance = "firebolt.io/instance"
+)
+
 // QueryMode determines which query type to use for tests
 type QueryMode string
 
@@ -226,7 +234,7 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 				PullPolicy: corev1.PullIfNotPresent,
 			},
 			Resources: computev1alpha1.ResourceRequirements{
-				CPU:    resource.MustParse("50m"),
+				CPU:    resource.MustParse("100m"),
 				Memory: resource.MustParse("2Gi"),
 			},
 			DrainCheckEnabled:  &drainCheckEnabled,
@@ -307,36 +315,272 @@ func podLogDir() string {
 	return "pod-logs"
 }
 
-// dumpPodLogs streams the full log for podName to <podLogDir>/<podName>.log
-// for artifact collection, and returns the last tailLines lines as a string
-// for inline diagnostic output. Errors are silently swallowed so a log-fetch
-// failure never masks the real test failure.
-func dumpPodLogs(ctx context.Context, podName string, tailLines int) string {
+// dumpPodLogs streams the current container instance's stdout to
+// <podLogDir>/<pod.Name>.log, and — when any container has restarted —
+// also streams the previous instance to <podLogDir>/<pod.Name>-previous.log
+// (the previous instance is where the actual crash output lives). Returns a
+// fully formatted multi-section block ready to be appended to a diagnostic
+// message, with [current]/[previous] labels and the resolved artifact paths.
+//
+// An empty return means no log file could be produced at all (rare). Errors
+// are intentionally swallowed into in-file marker lines so a log-fetch
+// failure never masks the underlying test failure.
+func dumpPodLogs(ctx context.Context, pod *corev1.Pod, tailLines int) string {
 	dir := podLogDir()
 	_ = os.MkdirAll(dir, 0o755)
 
-	// Full dump streamed directly to disk — avoids buffering large logs in memory.
-	fullStream, err := k8sClient.CoreV1().Pods(testNamespace).
-		GetLogs(podName, &corev1.PodLogOptions{}).Stream(ctx)
-	if err == nil {
-		logPath := filepath.Join(dir, podName+".log")
-		if f, ferr := os.Create(logPath); ferr == nil {
-			_, _ = io.Copy(f, fullStream)
-			f.Close()
+	currentPath := filepath.Join(dir, pod.Name+".log")
+	currentTail, currentOK := fetchPodLog(ctx, pod.Name, currentPath, corev1.PodLogOptions{}, tailLines, "")
+
+	// Fetch previous instance only when at least one container has restarted;
+	// otherwise the API would always return "previous terminated container not found".
+	var (
+		prevTail     string
+		prevOK       bool
+		previousPath string
+		prevDesc     string
+	)
+	if state := findPreviousState(pod); state != nil {
+		prevDesc = state.String()
+		previousPath = filepath.Join(dir, pod.Name+"-previous.log")
+		header := fmt.Sprintf("# previous container instance: %s\n", prevDesc)
+		prevTail, prevOK = fetchPodLog(ctx, pod.Name, previousPath, corev1.PodLogOptions{Previous: true}, tailLines, header)
+	}
+
+	if !currentOK && !prevOK {
+		return ""
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "  Pod %s logs:", pod.Name)
+	if currentOK {
+		fmt.Fprintf(&b, "\n    [current] (full log → %s)", currentPath)
+		if currentTail != "" {
+			fmt.Fprintf(&b, "\n%s", indentBlock(currentTail, "      "))
 		}
-		fullStream.Close()
+	}
+	if prevOK {
+		fmt.Fprintf(&b, "\n    [previous] %s (full log → %s)", prevDesc, previousPath)
+		if prevTail != "" {
+			fmt.Fprintf(&b, "\n%s", indentBlock(prevTail, "      "))
+		}
+	}
+	return b.String()
+}
+
+// DumpFireboltPodLogsForDebugWithScope lists pods labeled with instanceName (if
+// non-empty) and each engine name in engineNames, then calls dumpPodLogs for
+// each pod once (dedupe by name). Used on failed specs so we capture logs even
+// when the failure was not a Wait* timeout. If instanceName is empty and
+// engineNames is empty, does nothing. Best-effort only.
+func DumpFireboltPodLogsForDebugWithScope(ctx context.Context, instanceName string, engineNames ...string) {
+	if k8sClient == nil {
+		return
+	}
+	if instanceName == "" && len(engineNames) == 0 {
+		return
+	}
+	seen := make(map[string]struct{})
+	appendPods := func(list *corev1.PodList) {
+		for i := range list.Items {
+			pod := &list.Items[i]
+			if _, ok := seen[pod.Name]; ok {
+				continue
+			}
+			seen[pod.Name] = struct{}{}
+			_ = dumpPodLogs(ctx, pod, podLogDebugTailLines)
+		}
+	}
+	if instanceName != "" {
+		sel := labelKeyFireboltInstance + "=" + instanceName
+		list, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: sel})
+		if err != nil {
+			fmt.Fprintf(GinkgoWriter, "DumpFireboltPodLogsForDebugWithScope: list instance pods: %v\n", err)
+		} else {
+			appendPods(list)
+		}
+	}
+	for _, en := range engineNames {
+		if en == "" {
+			continue
+		}
+		sel := labelKeyFireboltEngine + "=" + en
+		list, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: sel})
+		if err != nil {
+			fmt.Fprintf(GinkgoWriter, "DumpFireboltPodLogsForDebugWithScope: list engine %q: %v\n", en, err)
+			continue
+		}
+		appendPods(list)
+	}
+}
+
+// RegisterFailedSpecPodLogDump installs a JustAfterEach that dumps pod logs for
+// the same instance and engine string variables this Describe block uses (set
+// in BeforeAll). Pass non-nil pointers; nil for engineName when there is no
+// engine in this test (instance-only).
+func RegisterFailedSpecPodLogDump(instanceName *string, engineName *string) {
+	JustAfterEach(func() {
+		if k8sClient == nil {
+			return
+		}
+		if !CurrentSpecReport().Failed() {
+			return
+		}
+		dumpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		ins := ""
+		if instanceName != nil {
+			ins = *instanceName
+		}
+		var engines []string
+		if engineName != nil && *engineName != "" {
+			engines = append(engines, *engineName)
+		}
+		// If both are empty, skip (e.g. misconfigured registration).
+		if ins == "" && len(engines) == 0 {
+			return
+		}
+		DumpFireboltPodLogsForDebugWithScope(dumpCtx, ins, engines...)
+	})
+}
+
+// RegisterFailedSpecPodLogDumpMulti is like RegisterFailedSpecPodLogDump for
+// Describes that use multiple engine CR names (e.g. multi-engine management).
+func RegisterFailedSpecPodLogDumpMulti(instanceName *string, engineNames *[]string) {
+	JustAfterEach(func() {
+		if k8sClient == nil {
+			return
+		}
+		if !CurrentSpecReport().Failed() {
+			return
+		}
+		dumpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		ins := ""
+		if instanceName != nil {
+			ins = *instanceName
+		}
+		var engines []string
+		if engineNames != nil {
+			engines = *engineNames
+		}
+		if ins == "" && len(engines) == 0 {
+			return
+		}
+		DumpFireboltPodLogsForDebugWithScope(dumpCtx, ins, engines...)
+	})
+}
+
+// fetchPodLog streams one container instance to logPath (prefixed by the
+// optional header line) and returns a tail snippet for the inline diagnostic.
+// On stream error or zero-byte stream, a self-explanatory marker line is
+// written into the file and returned as the inline tail. ok is true whenever
+// the artifact file was successfully created — even if it ended up containing
+// only a marker — so the caller knows there is something to point at.
+func fetchPodLog(ctx context.Context, podName, logPath string, opts corev1.PodLogOptions, tailLines int, header string) (inlineTail string, ok bool) {
+	// Errors when writing the artifact are intentionally swallowed; this is a
+	// best-effort diagnostic helper and must never mask the underlying failure.
+	f, err := os.Create(logPath)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+
+	if header != "" {
+		_, _ = f.WriteString(header)
+	}
+
+	fullStream, err := k8sClient.CoreV1().Pods(testNamespace).
+		GetLogs(podName, &opts).Stream(ctx)
+	if err != nil {
+		marker := fmt.Sprintf("# [error fetching logs: %v]\n", err)
+		_, _ = f.WriteString(marker)
+		return strings.TrimRight(marker, "\n"), true
+	}
+	n, _ := io.Copy(f, fullStream)
+	_ = fullStream.Close()
+	if n == 0 {
+		const marker = "# [stream returned 0 bytes — container had not produced stdout yet]\n"
+		_, _ = f.WriteString(marker)
+		return strings.TrimRight(marker, "\n"), true
 	}
 
 	// Tail for inline display — a second API call so we don't re-read the file.
-	n := int64(tailLines)
+	tailOpts := opts
+	tailN := int64(tailLines)
+	tailOpts.TailLines = &tailN
 	tailStream, err := k8sClient.CoreV1().Pods(testNamespace).
-		GetLogs(podName, &corev1.PodLogOptions{TailLines: &n}).Stream(ctx)
+		GetLogs(podName, &tailOpts).Stream(ctx)
 	if err != nil {
+		return "", true
+	}
+	defer func() { _ = tailStream.Close() }()
+	buf, _ := io.ReadAll(tailStream)
+	return string(buf), true
+}
+
+// terminatedState captures the parts of a container's previous termination
+// that are useful in a diagnostic: container name, exit code, reason, and the
+// time the previous instance finished.
+type terminatedState struct {
+	Container     string
+	HasTerminated bool
+	ExitCode      int32
+	Reason        string
+	FinishedAt    string
+}
+
+func (s *terminatedState) String() string {
+	if !s.HasTerminated {
+		return fmt.Sprintf("container=%s (no termination state available)", s.Container)
+	}
+	parts := []string{
+		fmt.Sprintf("container=%s", s.Container),
+		fmt.Sprintf("exitCode=%d", s.ExitCode),
+	}
+	if s.Reason != "" {
+		parts = append(parts, fmt.Sprintf("reason=%s", s.Reason))
+	}
+	if s.FinishedAt != "" {
+		parts = append(parts, fmt.Sprintf("finishedAt=%s", s.FinishedAt))
+	}
+	return strings.Join(parts, " ")
+}
+
+// findPreviousState returns metadata about the most recently terminated
+// container instance in the pod, or nil if no container has restarted yet.
+func findPreviousState(pod *corev1.Pod) *terminatedState {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.RestartCount == 0 {
+			continue
+		}
+		s := &terminatedState{Container: cs.Name}
+		if cs.LastTerminationState.Terminated != nil {
+			t := cs.LastTerminationState.Terminated
+			s.HasTerminated = true
+			s.ExitCode = t.ExitCode
+			s.Reason = t.Reason
+			if !t.FinishedAt.IsZero() {
+				s.FinishedAt = t.FinishedAt.UTC().Format(time.RFC3339)
+			}
+		}
+		return s
+	}
+	return nil
+}
+
+// indentBlock prefixes every line of s with prefix and trims the trailing
+// newline so the result composes cleanly with the surrounding diagnostic text.
+func indentBlock(s, prefix string) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
 		return ""
 	}
-	defer tailStream.Close()
-	buf, _ := io.ReadAll(tailStream)
-	return string(buf)
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
 }
 
 // WaitForEngineReady waits for all pods in an engine to be ready AND for the
@@ -424,9 +668,8 @@ func WaitForEngineReady(ctx context.Context, engineName string, expectedReplicas
 				}
 			}
 			if !isReady && pod.Status.Phase == corev1.PodRunning {
-				if tail := dumpPodLogs(ctx, pod.Name, 50); tail != "" {
-					diag += fmt.Sprintf("\n  Last 50 log lines for unready pod %s (full log → pod-logs/%s.log):\n%s",
-						pod.Name, pod.Name, tail)
+				if block := dumpPodLogs(ctx, &pod, podLogDebugTailLines); block != "" {
+					diag += "\n" + block
 				}
 			}
 		}
@@ -1021,9 +1264,8 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 				}
 			}
 			if pod.Status.Phase == corev1.PodRunning {
-				if tail := dumpPodLogs(ctx, pod.Name, 50); tail != "" {
-					diag += fmt.Sprintf("\n    Last 50 log lines (full log → pod-logs/%s.log):\n%s",
-						pod.Name, tail)
+				if block := dumpPodLogs(ctx, &pod, podLogDebugTailLines); block != "" {
+					diag += "\n" + block
 				}
 			}
 		}
@@ -1037,9 +1279,9 @@ func WaitForInstanceReady(ctx context.Context, name string, timeout time.Duratio
 // operator. Tests typically create one of these in BeforeAll and release it in
 // AfterAll so parallel Describes stay isolated from each other.
 type TestInstanceLifecycle struct {
-	Name        string
-	InstanceOp  *InstanceOperator
-	EngineOp    *OperatorInstance
+	Name       string
+	InstanceOp *InstanceOperator
+	EngineOp   *OperatorInstance
 }
 
 // SetupTestInstance starts an isolated instance operator, creates a

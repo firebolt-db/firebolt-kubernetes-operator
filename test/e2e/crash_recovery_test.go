@@ -43,6 +43,7 @@ var _ = Describe("Crash Recovery", func() {
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Starting instance operator for crash create tests")
@@ -206,6 +207,7 @@ var _ = Describe("Crash Recovery", func() {
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Starting instance operator for crash switch tests")
@@ -363,6 +365,7 @@ var _ = Describe("Crash Recovery", func() {
 			instanceOp   *InstanceOperator
 			operator     *OperatorInstance
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Starting instance operator for crash clean tests")
@@ -521,6 +524,7 @@ var _ = Describe("Crash Recovery", func() {
 			operator     *OperatorInstance
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Starting instance operator for availability-during-crash test")

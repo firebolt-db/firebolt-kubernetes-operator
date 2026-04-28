@@ -494,6 +494,18 @@ To run a subset of tests:
 make test-e2e GINKGO_FOCUS="Single Node Engine"
 ```
 
+**Controlling parallelism with `GINKGO_PROCS`:**
+
+By default, `make test-e2e` runs Ginkgo with `--procs=$(nproc)/2` (half of the host's online CPUs, with a floor of 1). On a single-node Kind cluster this is usually a good balance between throughput and resource contention, but you can override it:
+
+```bash
+make test-e2e GINKGO_PROCS=1                                  # serial run, easiest to debug
+make test-e2e GINKGO_PROCS=2 GINKGO_FOCUS="Single Node Engine"  # lower parallelism for one focused test
+make test-e2e GINKGO_PROCS=8                                  # higher parallelism on a beefy host
+```
+
+Lower `GINKGO_PROCS` if you see scheduling failures such as `0/1 nodes are available: 1 Insufficient memory` — each engine pod requests 2 GiB, so the per-node memory budget caps effective parallelism on small Kind clusters.
+
 The e2e suite uses the `e2e` build tag, which also activates crash-point injection in the controller for crash-recovery testing.
 
 **Heavy E2E tests** (stress / large query workloads):

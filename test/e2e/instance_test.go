@@ -38,6 +38,7 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			clientPod    = "client-md-switch"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for metadata image switch test")
@@ -108,6 +109,7 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for gateway scaling test")
