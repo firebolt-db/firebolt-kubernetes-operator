@@ -1,0 +1,5 @@
+self-hosted-runner:
+  labels:
+    # Custom larger GitHub-hosted runner used by E2E tests to fit the
+    # multi-engine kind cluster within memory.
+    - ubuntu-16core-64gb-600ssd-amd64
