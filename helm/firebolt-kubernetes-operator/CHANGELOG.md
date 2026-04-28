@@ -1,3 +1,14 @@
+# 0.1.21
+
+appVersion: v1.13.1
+
+## [1.13.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.13.0...v1.13.1) (2026-04-28)
+
+### Bug Fixes
+
+* use most recent image (FB-758) ([a976172](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a9761721a0a2cb9d8613d06b3c2753a5f9296181))
+
+
 # 0.1.20
 
 appVersion: v1.13.0
