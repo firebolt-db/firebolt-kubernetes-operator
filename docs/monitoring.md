@@ -77,3 +77,97 @@ All components default to port 9090 named `metrics` via `ComponentSpec.MetricsPo
 ### Cross-namespace support
 
 When the operator watches all namespaces (`watchNamespace` is empty), engine, gateway, and metadata pods may live in namespaces other than the operator's. Setting `podMonitor.allNamespaces: true` adds `namespaceSelector.any: true` to the PodMonitors so Prometheus discovers pods across all namespaces.
+
+### Embedded CR status metrics
+
+The operator embeds custom Prometheus metrics that expose the status of every FireboltEngine and FireboltInstance it manages. These are level-triggered gauges updated on every reconcile -- no timers or persisted timestamps, consistent with the operator's level-driven reconciliation model. Duration and trend analysis are left to PromQL.
+
+This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconcile_condition`), cert-manager (`certmanager_certificate_ready_status`), and Crossplane (`crossplane_managed_resource_ready`).
+
+## Operator metrics reference
+
+### FireboltEngine metrics
+
+| Metric | Type | Labels | Updated | Description |
+|---|---|---|---|---|
+| `firebolt_engine_status_phase` | Gauge | `namespace`, `name`, `instance`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`. |
+| `firebolt_engine_status_condition` | Gauge | `namespace`, `name`, `instance`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `InstanceReady`. |
+| `firebolt_engine_spec_replicas` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Desired replica count from `spec.replicas`. |
+| `firebolt_engine_active_generation` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Generation number currently serving traffic. |
+| `firebolt_engine_pods_ready` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Number of ready pods in the active generation. |
+| `firebolt_engine_pods_total` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Total pods in the active generation (includes non-ready). |
+| `firebolt_engine_draining_generation` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Generation being drained, or -1 if no drain is in progress. |
+| `firebolt_engine_last_reconciled_timestamp` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Unix timestamp of the last successful reconcile. |
+| `firebolt_engine_drain_check_errors_total` | Counter | `namespace`, `name`, `instance` | On drain probe failure | Cumulative count of drain probe failures (pod unreachable, metrics missing). |
+
+### FireboltInstance metrics
+
+| Metric | Type | Labels | Updated | Description |
+|---|---|---|---|---|
+| `firebolt_instance_status_phase` | Gauge | `namespace`, `name`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `Provisioning`, `Ready`, `Degraded`, `Failed`. |
+| `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `PostgresReady`, `MetadataReady`, `GatewayReady`. |
+| `firebolt_instance_info` | Gauge | `namespace`, `name`, `id`, `postgres_mode` | Every reconcile | Always 1. Carries static metadata: instance ID and postgres mode (`internal` or `external`). |
+| `firebolt_instance_last_reconciled_timestamp` | Gauge | `namespace`, `name` | Every reconcile | Unix timestamp of the last successful reconcile. |
+
+### Label glossary
+
+| Label | Meaning |
+|---|---|
+| `namespace` | Kubernetes namespace of the CR |
+| `name` | Name of the FireboltEngine or FireboltInstance CR |
+| `instance` | Name of the parent FireboltInstance (from `spec.instanceRef` on engines) |
+| `phase` | Current lifecycle phase |
+| `type` | Condition type (e.g., `Ready`, `PostgresReady`) |
+| `id` | Stable instance ID (ULID) |
+| `postgres_mode` | `internal` (operator-managed) or `external` (user-provided) |
+
+### Example PromQL queries
+
+Engine not ready:
+
+```promql
+firebolt_engine_status_condition{type="Ready"} == 0
+```
+
+Engine stuck in draining phase for more than 10 minutes:
+
+```promql
+firebolt_engine_status_phase{phase="draining"} == 1
+  unless firebolt_engine_status_phase{phase="draining"} offset 10m == 0
+```
+
+Scaling in progress (ready pods less than desired):
+
+```promql
+firebolt_engine_pods_ready < firebolt_engine_spec_replicas
+```
+
+Instance degraded:
+
+```promql
+firebolt_instance_status_phase{phase="Degraded"} == 1
+```
+
+Stuck controller (no reconcile for 5 minutes):
+
+```promql
+time() - firebolt_engine_last_reconciled_timestamp > 300
+```
+
+Drain probe failures spiking:
+
+```promql
+rate(firebolt_engine_drain_check_errors_total[5m]) > 0
+```
+
+Fleet overview (ready engines per instance):
+
+```promql
+count by (namespace, instance) (firebolt_engine_status_condition{type="Ready"} == 1)
+```
+
+### Cardinality
+
+Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 10 series (4 phases + 4 conditions + 1 info + 1 timestamp). For a cluster with 10 instances and 50 engines, expect roughly 850 series from the operator -- negligible for any Prometheus deployment.
+
+Metric label sets are cleaned up when CRs are deleted, so terminated engines do not leave stale series.

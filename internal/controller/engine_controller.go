@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
 const finalizerName = "compute.firebolt.io/engine-cleanup"
@@ -60,6 +61,10 @@ type FireboltEngineReconciler struct {
 	// instances in the same namespace; in production this is left empty so
 	// the reconciler processes every FireboltEngine it watches.
 	InstanceFilter string
+
+	// MetricsRecorder records Prometheus metrics for engine CRs.
+	// Must be non-nil; use metrics.NoOpEngineRecorder{} in tests.
+	MetricsRecorder metrics.EngineRecorder
 
 	// DisableGC disables the orphaned-generation garbage collector. When
 	// true, the reconciler will not sweep resources from abandoned
@@ -147,6 +152,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// on the next retry, or they affect every getter and a
 		// bespoke condition would not help triage them.
 		if setDrainCheckFailingCondition(&engine.Status, err, engine.Generation) {
+			r.MetricsRecorder.RecordDrainCheckError(engine.Namespace, engine.Name, engine.Spec.InstanceRef)
 			if updErr := r.updateStatus(ctx, engine); updErr != nil {
 				log.Info("Failed to persist DrainCheckFailing condition; controller-runtime will retry the reconcile",
 					"error", updErr)
@@ -243,6 +249,8 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
+	r.MetricsRecorder.Record(engine, current.CurrentPodReady, current.CurrentPodTotal)
+
 	if !r.DisableGC &&
 		(engine.Status.Phase == computev1alpha1.PhaseStable ||
 			engine.Status.Phase == computev1alpha1.PhaseStopped) {
@@ -320,6 +328,8 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	if err := r.Update(ctx, engine); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	r.MetricsRecorder.Delete(engine.Namespace, engine.Name)
 
 	log.Info("Finalizer removed, deletion complete")
 	return ctrl.Result{}, nil
