@@ -1,3 +1,7 @@
+# 0.1.19
+
+fix(ci): reduce e2e parallelism to 6 to fix memory exhaustion (FB-560)
+
 # 0.1.18
 
 appVersion: v1.12.0
