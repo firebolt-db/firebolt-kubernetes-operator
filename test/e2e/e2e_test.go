@@ -50,6 +50,7 @@ var _ = Describe("Firebolt Engine", func() {
 			clientPod    = "client-single" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for single node test")
@@ -108,6 +109,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for scale up test")
@@ -200,6 +202,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for scale down test")
@@ -292,6 +295,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for rapid changes test")
@@ -396,6 +400,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for harmonic scale test")
@@ -493,6 +498,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for image switching test")
@@ -590,6 +596,7 @@ var _ = Describe("Firebolt Engine", func() {
 			lc          *TestInstanceLifecycle
 			bgRunners   []*GatewayBackgroundQueryRunner
 		)
+		RegisterFailedSpecPodLogDumpMulti(&instanceName, &engineNames)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for multi-engine test")
@@ -701,6 +708,7 @@ var _ = Describe("Firebolt Engine", func() {
 			clientPod    = "client-cfghash" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for config hash test")
@@ -760,6 +768,7 @@ var _ = Describe("Firebolt Engine", func() {
 			clientPod    = "client-recreate" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for recreate rollout test")
@@ -841,6 +850,7 @@ var _ = Describe("Firebolt Engine", func() {
 			engineName   = "test-stop" + queryConfig.Suffix + "-engine"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for scale-to-zero test")

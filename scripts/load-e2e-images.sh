@@ -87,3 +87,34 @@ echo "=== Image loading complete ==="
 echo ""
 echo "Loaded images in Kind cluster:"
 docker exec "${CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | head -20 || true
+
+# Pre-flight: ensure the engine image's architecture matches the kind node's
+# architecture. Otherwise the engine binary will run via the kind node's
+# user-mode emulator which (notably on Apple Silicon, where Rosetta is NOT
+# propagated into nested kind containers) is qemu-x86_64. qemu-x86_64 lacks
+# AVX2/BMI2/FMA, so x86-64-v3 binaries SIGILL during startup -- and the
+# failure surfaces ~6 minutes later as an opaque startup-probe timeout.
+echo ""
+echo "=== Pre-flight: verify ${ENGINE_IMAGE}:${ENGINE_TAG} arch matches kind node ==="
+
+ENGINE_REF="${ENGINE_IMAGE}:${ENGINE_TAG}"
+image_arch=$(docker image inspect "${ENGINE_REF}" --format '{{.Architecture}}' 2>/dev/null || echo "unknown")
+node_arch_kernel=$(docker exec "${CLUSTER_NAME}-control-plane" uname -m 2>/dev/null || echo "unknown")
+case "${node_arch_kernel}" in
+    x86_64)  node_arch=amd64 ;;
+    aarch64) node_arch=arm64 ;;
+    *)       node_arch="${node_arch_kernel}" ;;
+esac
+
+if [ "${image_arch}" != "${node_arch}" ]; then
+    echo "ERROR: engine image arch '${image_arch}' does not match kind node arch '${node_arch}'." >&2
+    echo "       Inside a kind node, foreign-arch binaries are run via user-mode emulation." >&2
+    echo "       On Apple Silicon (arm64 host, amd64 image), kind falls back to qemu-x86_64," >&2
+    echo "       which lacks AVX2/BMI2/FMA -- the engine binary will SIGILL during startup." >&2
+    echo "       Fix: in config/images/defaults.env, drop any '-amd64' suffix on ENGINE_TAG /" >&2
+    echo "       ENGINE_NEW_TAG so Docker resolves a manifest list and pulls the native" >&2
+    echo "       '${node_arch}' variant. Or run on a host whose arch matches the image." >&2
+    exit 1
+fi
+
+echo ">>> Engine image arch '${image_arch}' matches kind node arch '${node_arch}'."

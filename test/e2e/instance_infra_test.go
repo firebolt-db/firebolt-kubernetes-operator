@@ -42,6 +42,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			clientPod    = "client-infra-verify"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			var err error
@@ -124,6 +125,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			clientPod    = "client-pg-crash"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			var err error
@@ -203,6 +205,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			clientPod    = "client-md-crash"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			var err error
@@ -282,6 +285,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			clientPod    = "client-gw-crash"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			var err error
@@ -362,6 +366,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			instanceName = "inst-del-cleanup"
 			instanceOp   *InstanceOperator
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, nil)
 
 		BeforeAll(func() {
 			By("Starting instance operator for deletion-cleanup test")
@@ -420,6 +425,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 			instanceName = "inst-cfg-drift"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, nil)
 
 		BeforeAll(func() {
 			var err error

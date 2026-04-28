@@ -1,3 +1,6 @@
+# MacOS
+.DS_Store
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -28,3 +31,8 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Test artifacts
+e2e-report.xml
+e2e-report/
+test/e2e/pod-logs

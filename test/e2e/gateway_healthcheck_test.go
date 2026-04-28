@@ -59,6 +59,7 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			clientPod    = "client-gw-hc"
 			lc           *TestInstanceLifecycle
 		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance")
