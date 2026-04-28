@@ -228,6 +228,11 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.ServiceAccountName != nil {
+		in, out := &in.ServiceAccountName, &out.ServiceAccountName
+		*out = new(string)
+		**out = **in
+	}
 	if in.MetadataEndpointOverride != nil {
 		in, out := &in.MetadataEndpointOverride, &out.MetadataEndpointOverride
 		*out = new(string)

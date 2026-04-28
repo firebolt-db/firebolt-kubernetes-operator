@@ -564,6 +564,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
 					TerminationGracePeriodSeconds: &gracePeriod,
@@ -721,6 +722,15 @@ func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
 	return DefaultTerminationGracePeriodSeconds
 }
 
+// enginePodServiceAccountName returns the ServiceAccount name stamped on engine
+// pods, or "" when unset (namespace default).
+func enginePodServiceAccountName(spec *computev1alpha1.FireboltEngineSpec) string {
+	if spec.ServiceAccountName == nil || *spec.ServiceAccountName == "" {
+		return ""
+	}
+	return *spec.ServiceAccountName
+}
+
 // customEngineConfigHash returns a stable hash of spec.customEngineConfig
 // suitable for stamping onto the engine StatefulSet so stsMatchesSpec can
 // detect drift. Returns "" when no custom config is set.
@@ -794,6 +804,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Tolerations, spec.Tolerations) {
+		return false
+	}
+
+	if podSpec.ServiceAccountName != enginePodServiceAccountName(spec) {
 		return false
 	}
 

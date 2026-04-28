@@ -195,6 +195,13 @@ spec:
                 - graceful
                 - recreate
                 type: string
+              serviceAccountName:
+                description: |-
+                  ServiceAccountName is the name of the ServiceAccount to run engine pods as.
+                  If unset, StatefulSet pods use the namespace default ServiceAccount.
+                  Changing this value triggers a new blue-green generation (see stsMatchesSpec).
+                minLength: 1
+                type: string
               storage:
                 default: {}
                 description: |-

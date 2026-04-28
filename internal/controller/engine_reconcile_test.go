@@ -94,6 +94,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 			}},
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
+					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
 					TerminationGracePeriodSeconds: &defaultTGPS,
@@ -950,6 +951,9 @@ func TestStsMatchesSpec(t *testing.T) {
 		{"toleration mismatch", mutate(func(s *appsv1.StatefulSet) {
 			s.Spec.Template.Spec.Tolerations = []corev1.Toleration{{Key: "special", Operator: corev1.TolerationOpExists}}
 		}), false},
+		{"service account mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.ServiceAccountName = "custom-sa"
+		}), false},
 		{"termination grace period mismatch", mutate(func(s *appsv1.StatefulSet) {
 			other := int64(30)
 			s.Spec.Template.Spec.TerminationGracePeriodSeconds = &other
@@ -969,6 +973,17 @@ func TestStsMatchesSpec(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("explicit serviceAccountName matches STS", func(t *testing.T) {
+		customSpec := testSpec()
+		sa := "custom-sa"
+		customSpec.ServiceAccountName = &sa
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		sts.Spec.Template.Spec.ServiceAccountName = sa
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
+		}
+	})
 }
 
 // --- Scale to zero / Stopped phase ---

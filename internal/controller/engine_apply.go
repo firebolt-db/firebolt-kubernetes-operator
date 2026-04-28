@@ -297,6 +297,10 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	if a.Spec.Template.Spec.ServiceAccountName != b.Spec.Template.Spec.ServiceAccountName {
+		return false
+	}
+
 	aTGPS := a.Spec.Template.Spec.TerminationGracePeriodSeconds
 	bTGPS := b.Spec.Template.Spec.TerminationGracePeriodSeconds
 	if (aTGPS == nil) != (bTGPS == nil) || (aTGPS != nil && *aTGPS != *bTGPS) {

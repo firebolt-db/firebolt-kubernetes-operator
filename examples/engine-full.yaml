@@ -6,6 +6,11 @@ spec:
   metadata: {}
   gateway: {}
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firebolt-engine
+---
 # FireboltEngine with every supported field set. Most are optional and have defaults.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
@@ -14,6 +19,10 @@ metadata:
 spec:
   instanceRef: firebolt
   replicas: 5
+
+  # Dedicated ServiceAccount for pods (see manifest above). Bind RBAC as needed.
+  serviceAccountName: firebolt-engine
+
   # Image override. When omitted, the operator's embedded default is used.
   image:
     repository: ghcr.io/firebolt-db/firebolt-db
