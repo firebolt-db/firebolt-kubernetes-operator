@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           show-progress: "false"
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check if app-release-cd will handle this
@@ -43,14 +43,28 @@ jobs:
         # packaged chart. We must stand down here so the chart isn't bumped
         # twice. Any file outside helm/, README.md, or .github/ is treated as
         # app-side and triggers deferral.
+        #
+        # Compare github.event.before..github.sha (all commits in the push)
+        # rather than HEAD~1..HEAD: a rebase merge can push multiple commits
+        # at once, and the last commit alone may only touch helm/ even when
+        # earlier commits in the same push touch app code.
         if: github.event_name != 'workflow_dispatch'
         id: check
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
         run: |
-          APP_CHANGES=$(git diff --name-only HEAD~1 HEAD -- ':!helm/' ':!README.md' ':!.github/' | wc -l)
+          # Empty/zero BEFORE_SHA happens on branch creation; treat as no defer.
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          APP_CHANGES=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" -- ':!helm/' ':!README.md' ':!.github/' | wc -l)
           if [ "$APP_CHANGES" -gt 0 ]; then
-            echo "App code also changed; deferring to app-release-cd"
+            echo "App code also changed in this push; deferring to app-release-cd"
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Only helm/ changed in this push; proceeding"
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
 
