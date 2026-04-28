@@ -1,3 +1,7 @@
+# 0.1.17
+
+fix(ci): add actions:write permission to app token for workflow dispatch (FB-810)
+
 # 0.1.16
 
 appVersion: v1.11.1
