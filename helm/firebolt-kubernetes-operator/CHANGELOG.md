@@ -1,3 +1,20 @@
+# 0.1.18
+
+appVersion: v1.12.0
+
+## [1.12.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.11.1...v1.12.0) (2026-04-28)
+
+### Features
+
+* expose metrics ports on gateway and metadata pods (FB-839) ([d684d24](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d684d2483f769b503e89f9762f8cdf7baf0686d5))
+* **helm:** add Prometheus PodMonitor templates (FB-839) ([7ab2cd0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7ab2cd02dbd930ddf73d6046eea76d3248eec9a9))
+
+### Bug Fixes
+
+* **ci:** add actions:write permission to app token for workflow dispatch (FB-810) ([f700065](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f700065d740080f08eeff82ca8d80244a0568637))
+* trigger new CD (FB-828) ([e5f22a4](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e5f22a424132788104217ea350a1b79e2cebbf0b))
+
+
 # 0.1.17
 
 fix(ci): add actions:write permission to app token for workflow dispatch (FB-810)
