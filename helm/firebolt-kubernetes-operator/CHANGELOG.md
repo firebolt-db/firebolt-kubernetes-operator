@@ -1,3 +1,18 @@
+# 0.1.22
+
+appVersion: v1.14.0
+
+## [1.14.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.13.1...v1.14.0) (2026-04-28)
+
+### Features
+
+* **engine:** add customEngineConfig spec field (FB-866) ([f4f60e1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f4f60e12d5f38129e08047614d336511f9c62a7e))
+
+### Bug Fixes
+
+* **ci:** defer helm-release-cd correctly on rebase merges (FB-810) ([7a06f8a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7a06f8a175f11ffa8d155031ef9fa865ac371ec2))
+
+
 # 0.1.21
 
 appVersion: v1.13.1
