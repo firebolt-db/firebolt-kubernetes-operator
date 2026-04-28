@@ -142,7 +142,7 @@ func assembleEngineState(
 }
 
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
-// Services, ConfigMaps, pod readiness, and drain status.
+// Services, ConfigMaps, pod readiness and drain status.
 func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
