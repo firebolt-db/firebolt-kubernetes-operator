@@ -1,3 +1,19 @@
+# 0.1.20
+
+appVersion: v1.13.0
+
+## [1.13.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.12.0...v1.13.0) (2026-04-28)
+
+### Features
+
+* add embedded Prometheus metrics for CR status (FB-560) ([7aae8e6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7aae8e609c7f0f933aae1774cc9d9e6173b4395b))
+* wire CR status metrics into controllers (FB-560) ([f8bb91f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f8bb91ff9b913961d0cb264fb91cfe3c21ff6bdd))
+
+### Bug Fixes
+
+* **ci:** reduce e2e parallelism to 6 to fix memory exhaustion (FB-560) ([6bff89b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6bff89be2b5ca530aa95f2cdd4772007b165bcb2))
+
+
 # 0.1.19
 
 fix(ci): reduce e2e parallelism to 6 to fix memory exhaustion (FB-560)
