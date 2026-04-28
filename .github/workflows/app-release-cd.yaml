@@ -30,6 +30,9 @@ jobs:
           client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
           permission-contents: write
+          # Needed to dispatch the helm-release-cd workflow after pushing
+          # the chart version bump commit.
+          permission-actions: write
           # Needed by @semantic-release/github's success-lifecycle GraphQL
           # query (`associatedPullRequests`) when looking up PRs and issues
           # to comment on.
