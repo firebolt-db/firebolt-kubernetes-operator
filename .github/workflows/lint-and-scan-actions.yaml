@@ -48,3 +48,7 @@ jobs:
         uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3
         with:
           advanced-security: "false"
+          # Fail only on findings of severity low or higher.
+          # Informational findings (e.g. style suggestions like
+          # superfluous-actions) are reported but do not fail the job.
+          min-severity: low
