@@ -96,4 +96,3 @@ kubectl apply -f helm/firebolt-kubernetes-operator/crds/
 
 Or use the `firebolt-operator-crds` chart for managed CRD upgrades via
 `helm upgrade`.
-

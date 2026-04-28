@@ -1107,9 +1107,10 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	}
 
 	reconciler := &controller.FireboltInstanceReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		NameFilter: instanceName,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		NameFilter:      instanceName,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
 	}
 	controllerName := fmt.Sprintf("fireboltinstance-%d", operatorInstanceCounter.Add(1))
 	if err := reconciler.SetupWithManagerNamed(mgr, controllerName); err != nil {
