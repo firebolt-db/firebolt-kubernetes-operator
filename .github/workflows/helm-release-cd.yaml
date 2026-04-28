@@ -12,6 +12,8 @@ on:
       - "helm/**"
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
@@ -202,10 +204,16 @@ jobs:
 
       - name: Job summary
         if: steps.check.outputs.proceed != 'false'
+        env:
+          CHART_VERSION: ${{ steps.chart.outputs.chart_version }}
+          CRD_CHART_VERSION: ${{ steps.chart.outputs.crd_chart_version }}
+          REGISTRY_URL: oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}
         run: |
-          echo "### Helm Charts Published :package:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Chart | Version | Registry |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|---------|----------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| \`firebolt-kubernetes-operator\` | \`${{ steps.chart.outputs.chart_version }}\` | \`oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| \`firebolt-operator-crds\` | \`${{ steps.chart.outputs.crd_chart_version }}\` | \`oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Helm Charts Published :package:"
+            echo ""
+            echo "| Chart | Version | Registry |"
+            echo "|-------|---------|----------|"
+            echo "| \`firebolt-kubernetes-operator\` | \`${CHART_VERSION}\` | \`${REGISTRY_URL}\` |"
+            echo "| \`firebolt-operator-crds\` | \`${CRD_CHART_VERSION}\` | \`${REGISTRY_URL}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

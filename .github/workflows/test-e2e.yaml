@@ -3,6 +3,8 @@ name: E2E Tests
 on:
   pull_request:
 
+permissions: {}
+
 # Cancel any in-flight run of this workflow for the same PR/branch as soon
 # as a new commit is pushed. E2E runs are long and expensive; keeping the
 # superseded run going just burns a runner on a result that nobody is
@@ -86,7 +88,9 @@ jobs:
           private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
 
       - name: Configure Git for private modules
-        run: git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+        env:
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Clone the code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
@@ -108,7 +112,7 @@ jobs:
 
       - name: Install kind v0.31.0
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-$(go env GOARCH)
+          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-$(go env GOARCH)"
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
@@ -134,7 +138,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-report
           path: |

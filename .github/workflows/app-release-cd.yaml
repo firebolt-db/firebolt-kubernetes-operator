@@ -14,12 +14,16 @@ on:
       - ".github/**"
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   semantic_release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       new_release_git_tag: ${{ steps.semantic_release.outputs.new_release_git_tag }}
       chart_version: ${{ steps.update_helm_chart.outputs.chart_version }}
@@ -152,10 +156,11 @@ jobs:
         id: build_image
         env:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           FULL_IMAGE="${{ env.GHCR_IMAGE }}:$IMAGE_TAG"
 
-          git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com".insteadOf "https://github.com"
+          git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com".insteadOf "https://github.com"
 
           make docker-build IMG="$FULL_IMAGE" VERSION="$IMAGE_TAG"
 
@@ -236,10 +241,12 @@ jobs:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
           CHART_VERSION: ${{ needs.semantic_release.outputs.chart_version }}
         run: |
-          echo "### Operator Release :rocket:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Image** | \`${{ env.GHCR_IMAGE }}:$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **App Version** | \`$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **Chart Version** | \`$CHART_VERSION\` |" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Operator Release :rocket:"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| **Image** | \`${{ env.GHCR_IMAGE }}:$IMAGE_TAG\` |"
+            echo "| **App Version** | \`$IMAGE_TAG\` |"
+            echo "| **Chart Version** | \`$CHART_VERSION\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
