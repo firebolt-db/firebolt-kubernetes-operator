@@ -40,6 +40,13 @@ const (
 	// detect changes that require a new generation.
 	AnnotationMetadataOverride = "firebolt.io/metadata-override"
 
+	// AnnotationCustomEngineConfigHash records a content-hash of the
+	// spec.customEngineConfig payload baked into the engine ConfigMap.
+	// stsMatchesSpec compares against this to detect changes that require
+	// a new generation, since ConfigMap content drift is not checked
+	// independently.
+	AnnotationCustomEngineConfigHash = "firebolt.io/custom-engine-config-hash"
+
 	// AnnotationConfigHash carries a content-hash of the rendered config
 	// for the gateway and metadata Deployments. It is set on the pod
 	// template and serves two purposes: (1) any config change propagates

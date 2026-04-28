@@ -136,10 +136,11 @@ func computeStable(
 	// with stale configuration, so we always roll forward via a new gen.
 	//
 	// ConfigMap content drift is not checked independently: all mutable
-	// spec fields that affect the ConfigMap (replicas, MetadataEndpointOverride)
-	// are covered by stsMatchesSpec, which triggers a new generation. The
-	// remaining ConfigMap inputs (instanceInfo, engineName, namespace, gen)
-	// are effectively immutable once the generation has been created.
+	// spec fields that affect the ConfigMap (replicas, MetadataEndpointOverride,
+	// CustomEngineConfig) are covered by stsMatchesSpec, which triggers a new
+	// generation. The remaining ConfigMap inputs (instanceInfo, engineName,
+	// namespace, gen) are effectively immutable once the generation has been
+	// created.
 	if current.CurrentSTS == nil || !stsMatchesSpec(current.CurrentSTS, spec) {
 		newGen := status.CurrentGeneration + 1
 		status.CurrentGeneration = newGen
@@ -401,20 +402,38 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	if shutdownWait < 1 {
 		shutdownWait = 1
 	}
+	// Operator-controlled defaults that spec.customEngineConfig may
+	// override. Identity/routing keys (account_id, engine_id, engine_name,
+	// multi_engine_endpoint, shutdown_wait_unfinished) are reapplied
+	// after the user merge below to keep them authoritative.
 	innerConfig := map[string]interface{}{
-		"account_id":                instanceInfo.AccountID,
 		"account_name":              "default-account",
 		"organization_id":           "01KP98J0000000000000000000",
 		"organization_name":         "default-org",
-		"engine_id":                 engineName,
-		"engine_name":               engineName,
 		"cluster_id":                "default-cluster",
-		"multi_engine_endpoint":     metadataEndpoint,
 		"multi_engine_mode_enabled": true,
 		"logger_formatting":         "json",
 		"logger_use_files":          false,
-		"shutdown_wait_unfinished":  shutdownWait,
 	}
+
+	if spec.CustomEngineConfig != nil && len(spec.CustomEngineConfig.Raw) > 0 {
+		var custom map[string]interface{}
+		// Schemaless+Type=object on the CRD constrains valid input to a
+		// JSON object; any unmarshal failure here means the apiserver
+		// admitted something it should have rejected, so silently
+		// skipping the merge is the conservative choice.
+		if err := json.Unmarshal(spec.CustomEngineConfig.Raw, &custom); err == nil {
+			for k, v := range custom {
+				innerConfig[k] = v
+			}
+		}
+	}
+
+	innerConfig["account_id"] = instanceInfo.AccountID
+	innerConfig["engine_id"] = engineName
+	innerConfig["engine_name"] = engineName
+	innerConfig["multi_engine_endpoint"] = metadataEndpoint
+	innerConfig["shutdown_wait_unfinished"] = shutdownWait
 
 	coreConfig := map[string]interface{}{
 		"config": innerConfig,
@@ -476,6 +495,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	annotations := map[string]string{}
 	if spec.MetadataEndpointOverride != nil {
 		annotations[AnnotationMetadataOverride] = *spec.MetadataEndpointOverride
+	}
+	if h := customEngineConfigHash(spec); h != "" {
+		annotations[AnnotationCustomEngineConfigHash] = h
 	}
 
 	image := DefaultEngineImage
@@ -699,6 +721,27 @@ func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
 	return DefaultTerminationGracePeriodSeconds
 }
 
+// customEngineConfigHash returns a stable hash of spec.customEngineConfig
+// suitable for stamping onto the engine StatefulSet so stsMatchesSpec can
+// detect drift. Returns "" when no custom config is set.
+func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec) string {
+	if spec.CustomEngineConfig == nil || len(spec.CustomEngineConfig.Raw) == 0 {
+		return ""
+	}
+	// Re-marshal through map[string]interface{} so semantically equal
+	// payloads (whitespace, key order) hash to the same value and don't
+	// trigger spurious generations.
+	var custom map[string]interface{}
+	if err := json.Unmarshal(spec.CustomEngineConfig.Raw, &custom); err != nil {
+		return contentHash(string(spec.CustomEngineConfig.Raw))
+	}
+	canonical, err := json.Marshal(custom)
+	if err != nil {
+		return contentHash(string(spec.CustomEngineConfig.Raw))
+	}
+	return contentHash(string(canonical))
+}
+
 // getEngineStorage returns the resolved engine storage spec, applying the
 // operator's defaults to any unset fields. Mirrors the kubebuilder defaults
 // declared on EngineStorageSpec so unit tests building specs as Go literals
@@ -766,6 +809,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		specOverride = *spec.MetadataEndpointOverride
 	}
 	if stsOverride != specOverride {
+		return false
+	}
+
+	if sts.Annotations[AnnotationCustomEngineConfigHash] != customEngineConfigHash(spec) {
 		return false
 	}
 

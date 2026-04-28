@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -205,6 +206,26 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
+
+	// CustomEngineConfig is a free-form JSON object whose top-level keys are
+	// merged into each engine node's `config.config` block. Keys provided
+	// here override the operator's defaults for: account_name, organization_id,
+	// organization_name, cluster_id, multi_engine_mode_enabled,
+	// logger_formatting, and logger_use_files. Any additional keys understood
+	// by the engine binary may also be set here.
+	//
+	// The operator retains authority over identity and routing keys and
+	// reapplies them after the merge: account_id, engine_id, engine_name,
+	// multi_engine_endpoint, and shutdown_wait_unfinished cannot be
+	// overridden via this field.
+	//
+	// Changes to this field trigger a new blue-green generation, since the
+	// rendered config.json content changes.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	// +optional
+	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
