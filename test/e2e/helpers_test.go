@@ -54,6 +54,7 @@ import (
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
+	fireboltmetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
 // Test query constants
@@ -157,12 +158,13 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 	}
 
 	reconciler := &controller.FireboltEngineReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		Namespace:      testNamespace,
-		Clientset:      clientset,
-		InstanceFilter: instanceName,
-		DisableGC:      true,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Namespace:       testNamespace,
+		Clientset:       clientset,
+		InstanceFilter:  instanceName,
+		DisableGC:       true,
+		MetricsRecorder: fireboltmetrics.NoOpEngineRecorder{},
 	}
 
 	controllerName := fmt.Sprintf("fireboltengine-%d", operatorInstanceCounter.Add(1))

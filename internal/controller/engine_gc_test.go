@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
 func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
@@ -87,7 +88,7 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 		WithObjects(orphanedSTS, currentSTS, orphanedSvc, currentSvc, clusterSvc, orphanedCM, currentCM).
 		Build()
 
-	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme}
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
@@ -154,7 +155,7 @@ func TestGCOrphanedResources_PreservesDrainingGeneration(t *testing.T) {
 		WithObjects(drainingSTS, currentSTS).
 		Build()
 
-	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme}
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
@@ -222,7 +223,7 @@ func TestGCOrphanedResources_PreservesUnlabeledResources(t *testing.T) {
 		WithObjects(unlabeledSTS, unlabeledCM, clusterSvc, currentSTS).
 		Build()
 
-	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme}
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
@@ -268,7 +269,7 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 		WithObjects(currentSTS).
 		Build()
 
-	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme}
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},

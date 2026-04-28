@@ -39,6 +39,7 @@ import (
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
+	fireboltmetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -198,18 +199,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	var engineMetrics fireboltmetrics.EngineRecorder = fireboltmetrics.NoOpEngineRecorder{}
+	var instanceMetrics fireboltmetrics.InstanceRecorder = fireboltmetrics.NoOpInstanceRecorder{}
+	if metricsAddr != "0" {
+		engineMetrics = fireboltmetrics.NewEngineRecorder()
+		instanceMetrics = fireboltmetrics.NewInstanceRecorder()
+	}
+
 	if err := (&controller.FireboltEngineReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Namespace: watchNamespace,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Namespace:       watchNamespace,
+		MetricsRecorder: engineMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
 		os.Exit(1)
 	}
 
 	if err := (&controller.FireboltInstanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		MetricsRecorder: instanceMetrics,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)

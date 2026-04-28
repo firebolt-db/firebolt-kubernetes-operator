@@ -39,6 +39,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
 const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
@@ -55,6 +56,10 @@ var errPostgresSecretRefEmpty = stderrors.New(
 type FireboltInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// MetricsRecorder records Prometheus metrics for instance CRs.
+	// Must be non-nil; use metrics.NoOpInstanceRecorder{} in tests.
+	MetricsRecorder metrics.InstanceRecorder
 
 	// NameFilter, when non-empty, restricts this reconciler to a single
 	// FireboltInstance by name. Requests for any other instance are dropped.
@@ -232,6 +237,8 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
+	r.MetricsRecorder.Record(instance)
+
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
@@ -275,6 +282,8 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	if err := r.Update(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	r.MetricsRecorder.Delete(instance.Namespace, instance.Name)
 
 	log.Info("Instance deletion complete")
 	return ctrl.Result{}, nil
@@ -386,6 +395,7 @@ func (r *FireboltInstanceReconciler) writeStatusAndPoll(
 	if err := r.Status().Update(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.MetricsRecorder.Record(instance)
 	return ctrl.Result{RequeueAfter: every}, nil
 }
 
