@@ -202,8 +202,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 
 	configHash := contentHash(configXML)
 
-	maxSurge := intstr.FromInt32(1)
-	maxUnavailable := intstr.FromInt32(0)
+	// Surge=0 + maxUnavailable=1 means the old pod is terminated before the
+	// new one is created. Pensieve assumes single-writer against Postgres, so
+	// we must never have two metadata pods running concurrently. This trades
+	// a brief metadata-unavailable window during rollouts for that guarantee.
+	maxSurge := intstr.FromInt32(0)
+	maxUnavailable := intstr.FromInt32(1)
 
 	podLabels := mergeMaps(labels, spec.Labels)
 	podAnnotations := mergeMaps(map[string]string{

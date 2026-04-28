@@ -382,8 +382,8 @@ The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| `maxSurge` | `1` | Allow one extra pod during rollout |
-| `maxUnavailable` | `0` | Never reduce available replicas below desired count |
+| `maxSurge` | `0` | Never run two metadata pods concurrently — Pensieve assumes single-writer against Postgres |
+| `maxUnavailable` | `1` | Old pod is terminated before the new one starts; brief metadata-unavailable window during rollouts |
 | Replicas | `1` (enforced by webhook) | Multi-replica metadata is not currently supported |
 
 ### Gateway Deployment
