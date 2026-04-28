@@ -123,7 +123,7 @@ jobs:
           GOPRIVATE: github.com/firebolt-db/*
 
       - name: Run E2E tests
-        run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=23
+        run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=6
         env:
           GOPRIVATE: github.com/firebolt-db/*
           E2E_ARTIFACT_DIR: ${{ github.workspace }}
