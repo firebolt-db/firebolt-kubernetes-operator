@@ -526,6 +526,7 @@ The `heavy` tag swaps in a stress-oriented query configuration. Use this for val
 
 ### Linting
 
+
 ```bash
 make lint
 ```
