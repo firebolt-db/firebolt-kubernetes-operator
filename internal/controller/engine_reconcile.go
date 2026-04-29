@@ -511,6 +511,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 
 	gracePeriod := getTerminationGracePeriod(spec)
 	storage := getEngineStorage(spec)
+	podSecurityContext := getEnginePodSecurityContext(spec)
+	containerSecurityContext := getEngineContainerSecurityContext(spec)
 
 	volumeMounts := []corev1.VolumeMount{
 		{
@@ -568,11 +570,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
 					TerminationGracePeriodSeconds: &gracePeriod,
+					SecurityContext:               podSecurityContext,
 					Containers: []corev1.Container{
 						{
 							Name:            ContainerNameEngine,
 							Image:           image,
 							ImagePullPolicy: pullPolicy,
+							SecurityContext: containerSecurityContext,
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    spec.Resources.CPU,
@@ -752,6 +756,41 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec) string {
 	return contentHash(string(canonical))
 }
 
+// getEnginePodSecurityContext returns the resolved pod-level security context
+// for engine pods. The operator's default fsGroup (3473) is applied when the
+// user-supplied spec.PodSecurityContext leaves it unset; FSGroupChangePolicy
+// defaults to OnRootMismatch so kubelet skips the recursive chown on every
+// mount, keeping pod startup fast on restart. All other fields are
+// pass-through. The result is independent of spec (deep-copied) so callers
+// can mutate it safely.
+func getEnginePodSecurityContext(spec *computev1alpha1.FireboltEngineSpec) *corev1.PodSecurityContext {
+	var psc *corev1.PodSecurityContext
+	if spec.PodSecurityContext != nil {
+		psc = spec.PodSecurityContext.DeepCopy()
+	} else {
+		psc = &corev1.PodSecurityContext{}
+	}
+	if psc.FSGroup == nil {
+		fsg := DefaultEngineFSGroup
+		psc.FSGroup = &fsg
+	}
+	if psc.FSGroupChangePolicy == nil {
+		policy := corev1.FSGroupChangeOnRootMismatch
+		psc.FSGroupChangePolicy = &policy
+	}
+	return psc
+}
+
+// getEngineContainerSecurityContext returns the container-level security
+// context for the engine container. Pure pass-through of spec.SecurityContext;
+// the operator stamps no defaults at the container scope.
+func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec) *corev1.SecurityContext {
+	if spec.SecurityContext == nil {
+		return nil
+	}
+	return spec.SecurityContext.DeepCopy()
+}
+
 // getEngineStorage returns the resolved engine storage spec, applying the
 // operator's defaults to any unset fields. Mirrors the kubebuilder defaults
 // declared on EngineStorageSpec so unit tests building specs as Go literals
@@ -814,6 +853,13 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	expectedGracePeriod := getTerminationGracePeriod(spec)
 	if podSpec.TerminationGracePeriodSeconds == nil ||
 		*podSpec.TerminationGracePeriodSeconds != expectedGracePeriod {
+		return false
+	}
+
+	if !reflect.DeepEqual(podSpec.SecurityContext, getEnginePodSecurityContext(spec)) {
+		return false
+	}
+	if !reflect.DeepEqual(container.SecurityContext, getEngineContainerSecurityContext(spec)) {
 		return false
 	}
 

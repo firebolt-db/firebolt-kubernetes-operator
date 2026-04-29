@@ -98,6 +98,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
 					TerminationGracePeriodSeconds: &defaultTGPS,
+					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
 						{
 							Image:           image,
@@ -112,6 +113,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 									corev1.ResourceMemory: spec.Resources.Memory,
 								},
 							},
+							SecurityContext: getEngineContainerSecurityContext(spec),
 						},
 					},
 				},
@@ -982,6 +984,92 @@ func TestStsMatchesSpec(t *testing.T) {
 		sts.Spec.Template.Spec.ServiceAccountName = sa
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
+		}
+	})
+
+	t.Run("pod security context drift triggers mismatch", func(t *testing.T) {
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		// Drop fsGroup to simulate an STS built before the default existed:
+		// the spec resolves to fsGroup=3473, so the comparison must fail.
+		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
+		if stsMatchesSpec(sts, testSpec()) {
+			t.Fatal("stsMatchesSpec() want false when pod SecurityContext drifts")
+		}
+	})
+
+	t.Run("container security context drift triggers mismatch", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.SecurityContext = &corev1.SecurityContext{
+			ReadOnlyRootFilesystem: boolPtr(true),
+		}
+		// STS still has the old (nil) container SC, so a spec change must
+		// not be silently absorbed by an in-place update.
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		if stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
+		}
+	})
+
+	t.Run("user-supplied podSecurityContext fields pass through and override fsGroup", func(t *testing.T) {
+		customSpec := testSpec()
+		userFSGroup := int64(9999)
+		runAsGroup := int64(2000)
+		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
+			FSGroup:    &userFSGroup,
+			RunAsGroup: &runAsGroup,
+		}
+		got := getEnginePodSecurityContext(customSpec)
+		if got.FSGroup == nil || *got.FSGroup != userFSGroup {
+			t.Fatalf("expected user FSGroup=%d to win over operator default, got %+v", userFSGroup, got.FSGroup)
+		}
+		if got.RunAsGroup == nil || *got.RunAsGroup != runAsGroup {
+			t.Fatalf("expected RunAsGroup pass-through, got %+v", got.RunAsGroup)
+		}
+	})
+
+	t.Run("operator stamps default fsGroup 3473 when spec leaves it unset", func(t *testing.T) {
+		got := getEnginePodSecurityContext(testSpec())
+		if got == nil || got.FSGroup == nil || *got.FSGroup != DefaultEngineFSGroup {
+			t.Fatalf("expected default FSGroup=%d, got %+v", DefaultEngineFSGroup, got)
+		}
+	})
+
+	t.Run("operator stamps default FSGroupChangePolicy=OnRootMismatch when spec leaves it unset", func(t *testing.T) {
+		got := getEnginePodSecurityContext(testSpec())
+		if got == nil || got.FSGroupChangePolicy == nil || *got.FSGroupChangePolicy != corev1.FSGroupChangeOnRootMismatch {
+			t.Fatalf("expected default FSGroupChangePolicy=OnRootMismatch, got %+v", got.FSGroupChangePolicy)
+		}
+	})
+
+	t.Run("user-supplied FSGroupChangePolicy is preserved", func(t *testing.T) {
+		customSpec := testSpec()
+		always := corev1.FSGroupChangeAlways
+		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
+			FSGroupChangePolicy: &always,
+		}
+		got := getEnginePodSecurityContext(customSpec)
+		if got.FSGroupChangePolicy == nil || *got.FSGroupChangePolicy != corev1.FSGroupChangeAlways {
+			t.Fatalf("expected user FSGroupChangePolicy=Always to win, got %+v", got.FSGroupChangePolicy)
+		}
+	})
+
+	t.Run("operator preserves user fields without clobbering them", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
+			Sysctls: []corev1.Sysctl{{Name: "net.core.somaxconn", Value: "1024"}},
+		}
+		got := getEnginePodSecurityContext(customSpec)
+		if len(got.Sysctls) != 1 || got.Sysctls[0].Name != "net.core.somaxconn" {
+			t.Fatalf("expected user Sysctls pass-through, got %+v", got.Sysctls)
+		}
+		if got.FSGroup == nil || *got.FSGroup != DefaultEngineFSGroup {
+			t.Fatalf("expected default FSGroup to fill in when user omitted it, got %+v", got.FSGroup)
+		}
+	})
+
+	t.Run("getEngineContainerSecurityContext returns nil when unset", func(t *testing.T) {
+		if got := getEngineContainerSecurityContext(testSpec()); got != nil {
+			t.Fatalf("expected nil container SecurityContext when unset, got %+v", got)
 		}
 	})
 }

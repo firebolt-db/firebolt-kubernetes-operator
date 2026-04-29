@@ -126,6 +126,12 @@ const (
 	// it unset. 60s gives in-flight queries up to 55s (TGPS − EngineShutdownMarginSeconds)
 	// to complete after SIGTERM before SIGKILL is sent.
 	DefaultTerminationGracePeriodSeconds = 60
+	// DefaultEngineFSGroup is the pod-level fsGroup applied to engine pods
+	// when spec.podSecurityContext.fsGroup is unset. Matches the engine
+	// container's listening port (3473) as a memorable shared GID; the
+	// kernel uses it to chown the per-pod data PVC so the (non-root) engine
+	// process can read and write its own volume.
+	DefaultEngineFSGroup int64 = 3473
 	// EngineShutdownMarginSeconds is subtracted from terminationGracePeriodSeconds
 	// to compute shutdown_wait_unfinished. The remaining margin covers container
 	// runtime teardown and pod API deletion after the engine process exits.
