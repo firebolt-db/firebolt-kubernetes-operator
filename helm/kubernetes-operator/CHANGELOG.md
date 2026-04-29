@@ -1,3 +1,15 @@
+# 0.1.26
+
+appVersion: v1.17.1
+
+## [1.17.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.17.0...v1.17.1) (2026-04-29)
+
+### Bug Fixes
+
+* mention difference in semver tags for charts (FB-881) ([b775e98](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b775e983488177f679d29c7f8d61d1126751a560))
+* use latest engine/metadata images (FB-881) ([66c0f43](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/66c0f4394ff424841bc5843b42396821d648c3d2))
+
+
 # 0.1.25
 
 appVersion: v1.17.0
