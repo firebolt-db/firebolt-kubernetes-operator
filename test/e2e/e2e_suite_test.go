@@ -63,9 +63,9 @@ var (
 	testImage      string
 	testTag        string
 	newImageTag    string
-	pensieveImage  string
-	pensieveTag    string
-	newPensieveTag string
+	metadataImage  string
+	metadataTag    string
+	newMetadataTag string
 	postgresImage  string
 	envoyImage     string
 	envoyTag       string
@@ -76,9 +76,9 @@ func init() {
 	testImage = images.Get("ENGINE_IMAGE")
 	testTag = images.Get("ENGINE_TAG")
 	newImageTag = images.Get("ENGINE_NEW_TAG")
-	pensieveImage = images.Get("PENSIEVE_IMAGE")
-	pensieveTag = images.Get("PENSIEVE_TAG")
-	newPensieveTag = images.Get("PENSIEVE_NEW_TAG")
+	metadataImage = images.Get("METADATA_IMAGE")
+	metadataTag = images.Get("METADATA_TAG")
+	newMetadataTag = images.Get("METADATA_NEW_TAG")
 	postgresImage = images.Get("POSTGRES_IMAGE")
 	envoyImage = images.Get("ENVOY_IMAGE")
 	envoyTag = images.Get("ENVOY_TAG")
@@ -203,8 +203,8 @@ var _ = SynchronizedBeforeSuite(func() {
 	requiredImages := []string{
 		testImage + ":" + testTag,
 		testImage + ":" + newImageTag,
-		pensieveImage + ":" + pensieveTag,
-		pensieveImage + ":" + newPensieveTag,
+		metadataImage + ":" + metadataTag,
+		metadataImage + ":" + newMetadataTag,
 		postgresImage,
 		envoyImage + ":" + envoyTag,
 		curlImage,

@@ -71,7 +71,7 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 
 		AfterEach(func() {
 			By("Restoring metadata image to original tag")
-			err := UpdateInstanceMetadataImage(ctx, instanceName, pensieveTag)
+			err := UpdateInstanceMetadataImage(ctx, instanceName, metadataTag)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for instance to stabilize after restore")
@@ -80,12 +80,12 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 		})
 
 		It("should switch metadata to a new image tag", func() {
-			By(fmt.Sprintf("Updating metadata image to tag %s", newPensieveTag))
-			err := UpdateInstanceMetadataImage(ctx, instanceName, newPensieveTag)
+			By(fmt.Sprintf("Updating metadata image to tag %s", newMetadataTag))
+			err := UpdateInstanceMetadataImage(ctx, instanceName, newMetadataTag)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for metadata deployment to roll out new image")
-			err = WaitForInstanceMetadataImage(ctx, instanceName, newPensieveTag, instanceReadyTimeout)
+			err = WaitForInstanceMetadataImage(ctx, instanceName, newMetadataTag, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for instance to return to Ready")

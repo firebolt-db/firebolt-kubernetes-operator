@@ -4,7 +4,7 @@
 
 ## Two CRDs
 
-- **FireboltInstance** — shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway.
+- **FireboltInstance** — shared infrastructure per namespace: PostgreSQL, metadata service, Envoy gateway.
 - **FireboltEngine** — stateful compute nodes with zero-downtime blue-green deployments.
 
 Engines have a hard dependency on a ready instance. The engine reconciler gates on instance readiness during `stable`, `stopped`, and `creating` phases; `switching|draining|cleaning` bypass the gate.

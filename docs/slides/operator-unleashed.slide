@@ -104,9 +104,9 @@ Writing the spec forced precision. TLC caught three genuine reasoning gaps:
 
 Next: extract every distinct execution path from TLC's state graph and turn each into a deterministic integration test.
 
-* Dedicated Pensieve: Startup Initialization
+* Metadata Service: Startup Initialization
 
-*Problem*: Pensieve opened its gRPC port before ensuring the default account existed.
+*Problem*: the metadata service opened its gRPC port before ensuring the default account existed.
 Firebolt Core's first transaction (`CREATE DATABASE IF NOT EXISTS`) failed with
 `account state does not exist`.
 

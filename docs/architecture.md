@@ -298,7 +298,7 @@ Each `Reconcile` call runs through four sequential steps. If any step fails, the
 | Step | Description | Implementation |
 |---|---|---|
 | 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
-| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). The XML config includes `<default_account_id>` set to `spec.id`; Pensieve Dedicated uses this to provision the account on startup. All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
+| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). The XML config includes `<default_account_id>` set to `spec.id`; the metadata service uses this to provision the account on startup. All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
 | 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
@@ -382,7 +382,7 @@ The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| `maxSurge` | `0` | Never run two metadata pods concurrently — Pensieve assumes single-writer against Postgres |
+| `maxSurge` | `0` | Never run two metadata pods concurrently — the metadata service assumes single-writer against Postgres |
 | `maxUnavailable` | `1` | Old pod is terminated before the new one starts; brief metadata-unavailable window during rollouts |
 | Replicas | `1` (enforced by webhook) | Multi-replica metadata is not currently supported |
 

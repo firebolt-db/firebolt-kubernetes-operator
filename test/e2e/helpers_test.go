@@ -1298,7 +1298,7 @@ func SetupTestInstance(ctx context.Context, name string) (*TestInstanceLifecycle
 	if err != nil {
 		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
 	}
-	if err := CreateInstance(ctx, name, pensieveImage, pensieveTag); err != nil {
+	if err := CreateInstance(ctx, name, metadataImage, metadataTag); err != nil {
 		instanceOp.Stop()
 		return nil, fmt.Errorf("create instance %s: %w", name, err)
 	}

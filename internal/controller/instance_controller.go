@@ -139,13 +139,13 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
-	// Postgres and metadata are not separate phases: Pensieve retries its
-	// DB connection internally for up to ~60s on startup, which comfortably
-	// covers the time the postgres StatefulSet needs to become ready on a
-	// fresh provisioning. Applying both resources concurrently and letting
-	// the metadata-readiness check at Step 2 gate the whole stack is
-	// enough. This mirrors firebolt-instance-helm, which has no Helm hook
-	// ordering postgres ahead of metadata. There is no separate
+	// Postgres and metadata are not separate phases: the metadata service
+	// retries its DB connection internally for up to ~60s on startup, which
+	// comfortably covers the time the postgres StatefulSet needs to become
+	// ready on a fresh provisioning. Applying both resources concurrently
+	// and letting the metadata-readiness check at Step 2 gate the whole
+	// stack is enough. This mirrors firebolt-instance-helm, which has no
+	// Helm hook ordering postgres ahead of metadata. There is no separate
 	// PostgresReady condition for the same reason — a metadata pod that
 	// cannot reach Postgres surfaces in the MetadataReady condition's
 	// Reason/Message.

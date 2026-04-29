@@ -533,8 +533,8 @@ The default engine and metadata image references live in [`config/images/default
 Conventions to follow when bumping:
 
 - **`ENGINE_TAG` and `ENGINE_NEW_TAG` must reference the same underlying engine build**, differing only by the `release-` vs `debug-` prefix. The "switch image without downtime" E2E test (`test/e2e/e2e_test.go`) flips between them, so keeping the underlying build identical means the test exercises only the operator's blue/green logic — not behavioural drift between two different engine versions.
-- **`PENSIEVE_TAG` should track the same `<timestamp>.<sha>` build** as the engine, without a `release-`/`debug-` prefix (metadata has no such split).
-- **`PENSIEVE_NEW_TAG` should be the short SHA** (last 12 chars) of the new build, since the metadata switch test (`test/e2e/instance_test.go`) only needs a tag distinct from `PENSIEVE_TAG`.
+- **`METADATA_TAG` should track the same `<timestamp>.<sha>` build** as the engine, without a `release-`/`debug-` prefix (metadata has no such split).
+- **`METADATA_NEW_TAG` should be the short SHA** (last 12 chars) of the new build, since the metadata switch test (`test/e2e/instance_test.go`) only needs a tag distinct from `METADATA_TAG`.
 - **`ENGINE_TAG` and `ENGINE_NEW_TAG` must not be equal** — the E2E suite fails fast at startup if they are, since the upgrade test would be a no-op.
 
 Example for build `4.32.0-pre.0.20260428141824.5abdf30556cd`:
@@ -542,8 +542,8 @@ Example for build `4.32.0-pre.0.20260428141824.5abdf30556cd`:
 ```env
 ENGINE_TAG=release-4.32.0-pre.0.20260428141824.5abdf30556cd
 ENGINE_NEW_TAG=debug-4.32.0-pre.0.20260428141824.5abdf30556cd
-PENSIEVE_TAG=4.32.0-pre.0.20260428141824.5abdf30556cd
-PENSIEVE_NEW_TAG=5abdf30556cd
+METADATA_TAG=4.32.0-pre.0.20260428141824.5abdf30556cd
+METADATA_NEW_TAG=5abdf30556cd
 ```
 
 After bumping, re-run `make prepare-test-e2e` so the new images are pulled and loaded into Kind, then `make test-e2e` to verify.
