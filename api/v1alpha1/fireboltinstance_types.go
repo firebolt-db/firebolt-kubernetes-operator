@@ -36,10 +36,10 @@ const (
 
 // Condition types for FireboltInstance.
 //
-// The per-component conditions (PostgresReady, MetadataReady, GatewayReady)
-// surface the outcome of each ensure step in Reconcile. They flip to False
-// with a descriptive Reason whenever the corresponding sub-reconciler returns
-// an error, which replaces the previous behavior of logging-and-requeueing-
+// The per-component conditions (MetadataReady, GatewayReady) surface the
+// outcome of each ensure step in Reconcile. They flip to False with a
+// descriptive Reason whenever the corresponding sub-reconciler returns an
+// error, which replaces the previous behavior of logging-and-requeueing-
 // silently. The roll-up InstanceConditionReady is False whenever any
 // per-component condition is not True, carrying the first blocker's
 // Reason/Message so `kubectl describe` shows the root cause without digging.
@@ -56,19 +56,13 @@ const (
 	// cannot distinguish "stuck on Postgres" from "stuck on gateway".
 	InstanceConditionReady = "Ready"
 
-	// InstanceConditionPostgresReady reports whether the metadata
-	// PostgreSQL backend is reachable and has at least one ready
-	// replica. For external Postgres, this also covers the
-	// credential-secret preflight that checkExternalPostgresSecret
-	// performs before the metadata Deployment is rolled out.
-	InstanceConditionPostgresReady = "PostgresReady"
-
 	// InstanceConditionMetadataReady reports whether the metadata
 	// Deployment's resources were applied successfully and its pods
-	// are reporting Ready. A pod that fails readiness because
-	// Postgres is unreachable will flip THIS condition to False while
-	// PostgresReady remains True, because the metadata pod owns the
-	// DB connection error in its own status.
+	// are reporting Ready. The operator does not track a separate
+	// PostgresReady condition: postgres is brought up alongside
+	// metadata in the same reconcile pass, and the metadata pod's
+	// connection-retry surfaces a missing or unreachable database in
+	// THIS condition's Reason/Message.
 	InstanceConditionMetadataReady = "MetadataReady"
 
 	// InstanceConditionGatewayReady reports whether the Envoy gateway

@@ -20,7 +20,6 @@ func TestInstanceRecorderRecord(t *testing.T) {
 			Phase: computev1alpha1.InstancePhaseReady,
 			Conditions: []metav1.Condition{
 				{Type: computev1alpha1.InstanceConditionReady, Status: metav1.ConditionTrue},
-				{Type: computev1alpha1.InstanceConditionPostgresReady, Status: metav1.ConditionTrue},
 				{Type: computev1alpha1.InstanceConditionMetadataReady, Status: metav1.ConditionTrue},
 				{Type: computev1alpha1.InstanceConditionGatewayReady, Status: metav1.ConditionFalse},
 			},

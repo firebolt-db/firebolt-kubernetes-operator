@@ -138,27 +138,22 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 	}
 
-	// Step 1: Ensure PostgreSQL (native, when no external PG is configured)
+	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
+	// Postgres and metadata are not separate phases: Pensieve retries its
+	// DB connection internally for up to ~60s on startup, which comfortably
+	// covers the time the postgres StatefulSet needs to become ready on a
+	// fresh provisioning. Applying both resources concurrently and letting
+	// the metadata-readiness check at Step 2 gate the whole stack is
+	// enough. This mirrors firebolt-instance-helm, which has no Helm hook
+	// ordering postgres ahead of metadata. There is no separate
+	// PostgresReady condition for the same reason — a metadata pod that
+	// cannot reach Postgres surfaces in the MetadataReady condition's
+	// Reason/Message.
 	if instance.Spec.Metadata.Postgres == nil {
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
 			return r.failWithCondition(ctx, instance,
-				computev1alpha1.InstanceConditionPostgresReady, "EnsureFailed", err)
+				computev1alpha1.InstanceConditionMetadataReady, "PostgresEnsureFailed", err)
 		}
-		pgReady, err := r.isPostgresReady(ctx, instance)
-		if err != nil {
-			return r.failWithCondition(ctx, instance,
-				computev1alpha1.InstanceConditionPostgresReady, "ProbeFailed", err)
-		}
-		if !pgReady {
-			log.Info("PostgreSQL not ready yet, requeueing", "instance", instance.Name)
-			setInstanceCondition(instance,
-				computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionFalse,
-				"Provisioning", "PostgreSQL StatefulSet has no ready replicas yet")
-			return r.writeStatusAndPoll(ctx, instance, 5*time.Second)
-		}
-		setInstanceCondition(instance,
-			computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionTrue,
-			"Ready", "PostgreSQL StatefulSet has at least one ready replica")
 	} else {
 		// External Postgres: make sure the user-referenced credentials
 		// Secret actually exists before we roll a Deployment that mounts
@@ -170,11 +165,8 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			instance.Status.MetadataReady = false
 			instance.Status.MetadataEndpoint = ""
 			return r.failWithCondition(ctx, instance,
-				computev1alpha1.InstanceConditionPostgresReady, "SecretPreflightFailed", err)
+				computev1alpha1.InstanceConditionMetadataReady, "PostgresSecretPreflightFailed", err)
 		}
-		setInstanceCondition(instance,
-			computev1alpha1.InstanceConditionPostgresReady, metav1.ConditionTrue,
-			"ExternalSecretPresent", "External PostgreSQL credentials Secret is present")
 	}
 
 	// Step 2: Ensure metadata service (native Go resources)
@@ -457,14 +449,13 @@ func setInstanceCondition(
 // setInstanceReadyRollup recomputes InstanceConditionReady from the
 // per-component conditions. Ready is True iff every required component
 // condition is present AND True; otherwise False with the Reason/Message
-// of the FIRST not-True component in pipeline order (Postgres → Metadata
-// → Gateway). Propagating the first blocker's Reason makes
+// of the FIRST not-True component in pipeline order (Metadata →
+// Gateway). Propagating the first blocker's Reason makes
 // `kubectl describe fireboltinstance` surface the actual root cause on
 // the headline condition, so users do not have to scan every condition
 // to find the one that is False.
 func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	components := []string{
-		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	}
@@ -485,7 +476,7 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	}
 	setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
 		metav1.ConditionTrue, "AllComponentsReady",
-		"Postgres, metadata, and gateway are all ready")
+		"metadata and gateway are ready")
 }
 
 // computePhase derives the instance Phase from InstanceConditionReady,
@@ -504,10 +495,12 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 // Status.MetadataReady && Status.GatewayReady, which diverged from
 // InstanceConditionReady in two ways:
 //
-//  1. PostgresReady was ignored, so an external-Postgres instance whose
+//  1. A per-component condition that flipped False post-rollout was
+//     ignored. For example, an external-Postgres instance whose
 //     credentials Secret was deleted post-rollout kept Phase=Ready
 //     (mounted creds keep the metadata pod running) while
-//     InstanceConditionReady correctly flipped to False.
+//     InstanceConditionReady correctly flipped to False on the next
+//     preflight.
 //  2. The mid-reconcile booleans are not reset between passes, leaving
 //     stale-true values that would re-assert Phase=Ready while a
 //     freshly-set component condition was False.
@@ -543,18 +536,6 @@ func (r *FireboltInstanceReconciler) computePhase(instance *computev1alpha1.Fire
 	}
 
 	return computev1alpha1.InstancePhaseProvisioning
-}
-
-func (r *FireboltInstanceReconciler) isPostgresReady(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
-	name := pgResourceName(instance.Name)
-	var sts appsv1.StatefulSet
-	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &sts); err != nil {
-		if errors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return sts.Status.ReadyReplicas > 0, nil
 }
 
 func (r *FireboltInstanceReconciler) isMetadataServiceReady(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {

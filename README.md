@@ -223,7 +223,7 @@ Inspect details:
 kubectl get fi production -n firebolt -o yaml
 ```
 
-Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `conditions` (per-component detail including `PostgresReady`).
+Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `conditions` (`Ready`, `MetadataReady`, `GatewayReady`).
 
 ### Full Example
 

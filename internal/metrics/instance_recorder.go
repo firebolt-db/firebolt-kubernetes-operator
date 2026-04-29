@@ -20,7 +20,6 @@ var InstancePhases = []string{
 // InstanceConditionTypes enumerates the condition types tracked for instances.
 var InstanceConditionTypes = []string{
 	computev1alpha1.InstanceConditionReady,
-	computev1alpha1.InstanceConditionPostgresReady,
 	computev1alpha1.InstanceConditionMetadataReady,
 	computev1alpha1.InstanceConditionGatewayReady,
 }
