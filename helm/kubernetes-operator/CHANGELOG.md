@@ -1,3 +1,20 @@
+# 0.1.28
+
+appVersion: v1.19.0
+
+## [1.19.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.18.0...v1.19.0) (2026-04-29)
+
+### Features
+
+* include more log lines to troubleshoot issues (FB-903) ([6c34153](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c34153583946bc86d8c28b428d95ce2daf834c4))
+
+### Bug Fixes
+
+* Core -> Engine (FB-903) ([9ab7f45](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9ab7f45b7740e083a0131ef6509e33cbc12462a3))
+* no need to wait for Postgres before starting metadata service (FB-903) ([47e5c93](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/47e5c934a05151a853567968e2ab452595404831))
+* rename pensieve -> metadata (FB-903) ([76ce71a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/76ce71ae89ef118da1eed3ec33f02d0991f117ce))
+
+
 # 0.1.27
 
 appVersion: v1.18.0
