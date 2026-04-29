@@ -56,6 +56,9 @@ const (
 	pollInterval             = 1 * time.Second
 )
 
+// Image references for the E2E suite, sourced from config/images/defaults.env.
+// testTag/newImageTag MUST share the same engine build, differing only by the
+// release-/debug- prefix — see README.md "Bumping Default Image Versions".
 var (
 	testImage      string
 	testTag        string
