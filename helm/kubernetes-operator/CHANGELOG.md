@@ -1,3 +1,18 @@
+# 0.1.27
+
+appVersion: v1.18.0
+
+## [1.18.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.17.1...v1.18.0) (2026-04-29)
+
+### Features
+
+* push also latest tag for operator image (FB-881) ([be71336](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/be713363c830e406ec0ebf73f0559feeaa761155))
+
+### Bug Fixes
+
+* override custom engine config at root (FB-902) ([a0d5d1c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a0d5d1cc4cbe324b78f951b5487b770a581af2bf))
+
+
 # 0.1.26
 
 appVersion: v1.17.1
