@@ -1,3 +1,14 @@
+# 0.1.24
+
+appVersion: v1.16.0
+
+## [1.16.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.15.0...v1.16.0) (2026-04-29)
+
+### Features
+
+* **engine:** add securityContext spec fields with default fsGroup 3473 (FB-873) ([ffa319b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ffa319ba3db467c270240cb2e95bd254c7fbcc2e))
+
+
 # 0.1.23
 
 appVersion: v1.15.0
