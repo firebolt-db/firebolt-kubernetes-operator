@@ -212,7 +212,10 @@ jobs:
           IMAGE_TAG: ${{ needs.semantic_release.outputs.new_release_git_tag }}
         run: |
           FULL_IMAGE="${{ env.GHCR_IMAGE }}:$IMAGE_TAG"
+          LATEST_IMAGE="${{ env.GHCR_IMAGE }}:latest"
+          docker tag "$FULL_IMAGE" "$LATEST_IMAGE"
           docker push "$FULL_IMAGE"
+          docker push "$LATEST_IMAGE"
 
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$FULL_IMAGE" 2>/dev/null \
             | cut -d@ -f2)
@@ -224,7 +227,7 @@ jobs:
             exit 1
           fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Pushed $FULL_IMAGE ($digest)"
+          echo "Pushed $FULL_IMAGE and $LATEST_IMAGE ($digest)"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
