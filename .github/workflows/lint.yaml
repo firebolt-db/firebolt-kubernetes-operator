@@ -34,6 +34,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Verify CRDs and JSON schemas are up to date
+        run: |
+          python3 -m pip install --user pyyaml
+          make manifests
+          if ! git diff --exit-code -- config/crd/bases helm/firebolt-operator-crds/json-schema; then
+            echo "ERROR: CRD manifests or JSON schemas are out of date." 1>&2
+            echo "       Run 'make manifests' locally and commit the result." 1>&2
+            exit 1
+          fi
+
       - name: Run linter
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
