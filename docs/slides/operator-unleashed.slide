@@ -107,7 +107,7 @@ Next: extract every distinct execution path from TLC's state graph and turn each
 * Metadata Service: Startup Initialization
 
 *Problem*: the metadata service opened its gRPC port before ensuring the default account existed.
-Firebolt Core's first transaction (`CREATE DATABASE IF NOT EXISTS`) failed with
+The engine's first transaction (`CREATE DATABASE IF NOT EXISTS`) failed with
 `account state does not exist`.
 
 *Fix (merged PR 22303)*: `ReconcileAccountAtStartup` runs _before_ gRPC starts listening.

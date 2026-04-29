@@ -181,10 +181,10 @@ Reason `Stopped` is the only `Ready=False` reason that is not a transient rollou
 Each spec change (while in `stable` or `stopped`) increments `status.currentGeneration`. Resources for each generation are named with a `-g<N>` suffix:
 
 ```
-core-engine-g0          # StatefulSet for generation 0
-core-engine-g0-hl       # Headless Service for generation 0
-core-engine-g0-config   # ConfigMap for generation 0
-core-engine-service     # Cluster Service (shared, selector changes)
+engine-g0          # StatefulSet for generation 0
+engine-g0-hl       # Headless Service for generation 0
+engine-g0-config   # ConfigMap for generation 0
+engine-service     # Cluster Service (shared, selector changes)
 ```
 
 At most two generations exist simultaneously: the active one serving traffic and the new one being created (or the old one being drained/cleaned).

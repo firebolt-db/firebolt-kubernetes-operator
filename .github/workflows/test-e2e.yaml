@@ -42,7 +42,7 @@ jobs:
           df -h /
 
       - name: Raise memlock limit for kind nodes
-        # firebolt-core uses io_uring and registers buffers via
+        # The engine binary uses io_uring and registers buffers via
         # io_uring_register_buffers, which fails with ENOMEM when RLIMIT_MEMLOCK
         # is at the host default (~64KB). Engine pods then crash on init with:
         #   io_uring_register_buffers failed: Cannot allocate memory (12)

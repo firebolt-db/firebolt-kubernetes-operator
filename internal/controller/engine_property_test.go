@@ -237,7 +237,7 @@ func (m *engineSim) CrashReconcile(t *rapid.T) {
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
 	v := rapid.IntRange(1, 99).Draw(t, "imageVersion")
 	m.spec.Image = &computev1alpha1.ImageSpec{
-		Repository: "firebolt/core",
+		Repository: "firebolt/engine",
 		Tag:        fmt.Sprintf("v%d.0", v),
 	}
 }

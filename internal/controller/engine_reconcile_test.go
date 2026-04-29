@@ -50,7 +50,7 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 		InstanceRef: "test-instance",
 		Replicas:    3,
 		Image: &computev1alpha1.ImageSpec{
-			Repository: "firebolt/core",
+			Repository: "firebolt/engine",
 			Tag:        "v1.0",
 		},
 		Resources: computev1alpha1.ResourceRequirements{
@@ -205,7 +205,7 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 	spec.Image.Tag = "v2.0"
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -241,7 +241,7 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -269,7 +269,7 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
 		CurrentPodTotal:         1,
@@ -367,7 +367,7 @@ func TestComputeEngineReconcile_S3_DrainingWait(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		DrainingPodsDrained: false,
 	}
 
@@ -391,7 +391,7 @@ func TestComputeEngineReconcile_S3_DrainingComplete(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		DrainingPodsDrained: true,
 	}
 
@@ -434,7 +434,7 @@ func TestComputeEngineReconcile_S3_DrainingCustomInterval(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		DrainingPodsDrained: false,
 	}
 
@@ -454,7 +454,7 @@ func TestComputeEngineReconcile_S3_CleaningDeletesOldResources(t *testing.T) {
 		ActiveGeneration:   1,
 		DrainingGeneration: &drainingGen,
 	}
-	oldSTS := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+	oldSTS := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
 	oldSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: genResourceName(testEngineName, 0, SuffixHL)}}
 	oldCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: genResourceName(testEngineName, 0, SuffixConfig)}}
 	current := EngineState{
@@ -509,7 +509,7 @@ func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 	status := stableStatus()
 	// The existing STS was built without an override annotation.
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -533,7 +533,7 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -562,7 +562,7 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -600,7 +600,7 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -637,7 +637,7 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		DrainingPodsDrained: false,
 	}
 
@@ -661,7 +661,7 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
-	sts := makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0")
+	sts := makeSTS(testEngineName, 1, 3, "firebolt/engine:v2.0")
 	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
@@ -699,7 +699,7 @@ func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
 		ActiveGeneration:  -1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
 		CurrentPodTotal:         1,
@@ -744,7 +744,7 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -775,7 +775,7 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      nil,
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -822,7 +822,7 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        nil,
 		CurrentPodsReady:        true,
@@ -894,7 +894,7 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
-	sts := makeSTS(testEngineName, 1, 3, "firebolt/core:v2.0")
+	sts := makeSTS(testEngineName, 1, 3, "firebolt/engine:v2.0")
 	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
@@ -930,7 +930,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	spec := testSpec()
 
 	mutate := func(fn func(*appsv1.StatefulSet)) *appsv1.StatefulSet {
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
 		fn(sts)
 		return sts
 	}
@@ -940,9 +940,9 @@ func TestStsMatchesSpec(t *testing.T) {
 		sts   *appsv1.StatefulSet
 		match bool
 	}{
-		{"matching", makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"), true},
-		{"replica mismatch", makeSTS(testEngineName, 0, 5, "firebolt/core:v1.0"), false},
-		{"image mismatch", makeSTS(testEngineName, 0, 3, "firebolt/core:v2.0"), false},
+		{"matching", makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"), true},
+		{"replica mismatch", makeSTS(testEngineName, 0, 5, "firebolt/engine:v1.0"), false},
+		{"image mismatch", makeSTS(testEngineName, 0, 3, "firebolt/engine:v2.0"), false},
 		{"pull policy mismatch", mutate(func(s *appsv1.StatefulSet) {
 			s.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullAlways
 		}), false},
@@ -982,7 +982,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		sa := "custom-sa"
 		customSpec.ServiceAccountName = &sa
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
 		sts.Spec.Template.Spec.ServiceAccountName = sa
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
@@ -990,7 +990,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	})
 
 	t.Run("pod security context drift triggers mismatch", func(t *testing.T) {
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
 		// Drop fsGroup to simulate an STS built before the default existed:
 		// the spec resolves to fsGroup=3473, so the comparison must fail.
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
@@ -1006,7 +1006,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 		// STS still has the old (nil) container SC, so a spec change must
 		// not be silently absorbed by an in-place update.
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0")
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
 		if stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
 		}
@@ -1112,7 +1112,7 @@ func TestComputeEngineReconcile_Stop_StableToCreating(t *testing.T) {
 	spec.Replicas = 0
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -1143,7 +1143,7 @@ func TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero
 		ActiveGeneration:  1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -1202,7 +1202,7 @@ func TestComputeEngineReconcile_Stop_CleaningToStopped(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS: makeSTS(testEngineName, 0, 3, "firebolt/core:v1.0"),
+		DrainingSTS: makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
@@ -1232,7 +1232,7 @@ func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
 		ActiveGeneration:  1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/core:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/engine:v1.0"),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
