@@ -92,8 +92,8 @@ jobs:
         env:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          CURR_VERSION=$(yq '.version' helm/firebolt-kubernetes-operator/Chart.yaml)
-          APP_VERSION=$(yq '.appVersion' helm/firebolt-kubernetes-operator/Chart.yaml)
+          CURR_VERSION=$(yq '.version' helm/kubernetes-operator/Chart.yaml)
+          APP_VERSION=$(yq '.appVersion' helm/kubernetes-operator/Chart.yaml)
           CRD_CURR=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
           NEEDS_COMMIT=false
 
@@ -106,7 +106,7 @@ jobs:
           fi
 
           # If the developer already bumped Chart.version in their commit, honour it.
-          PREV_VERSION=$(git show HEAD~1:helm/firebolt-kubernetes-operator/Chart.yaml | yq '.version')
+          PREV_VERSION=$(git show HEAD~1:helm/kubernetes-operator/Chart.yaml | yq '.version')
           if [ "$PREV_VERSION" != "$CURR_VERSION" ]; then
             echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
             echo "Chart.version already bumped ($PREV_VERSION -> $CURR_VERSION); using as-is."
@@ -131,7 +131,7 @@ jobs:
             fi
 
             echo "Auto $BUMP_TYPE bump: operator chart -> $CURR_VERSION (commit: $COMMIT_MSG)"
-            yq -i ".version = \"$CURR_VERSION\"" helm/firebolt-kubernetes-operator/Chart.yaml
+            yq -i ".version = \"$CURR_VERSION\"" helm/kubernetes-operator/Chart.yaml
             echo "chart_version=$CURR_VERSION" >> "$GITHUB_OUTPUT"
             NEEDS_COMMIT=true
             OPERATOR_BUMPED=true
@@ -157,15 +157,15 @@ jobs:
             if [ "${OPERATOR_BUMPED:-false}" = "true" ]; then
               COMMIT_MSG=${COMMIT_MSG:-$(git log --format='%s' -1)}
               printf "# %s\n\n%s\n\n" "$CURR_VERSION" "$COMMIT_MSG" \
-                | cat - helm/firebolt-kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
-              mv /tmp/CHANGELOG.md helm/firebolt-kubernetes-operator/CHANGELOG.md
+                | cat - helm/kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
+              mv /tmp/CHANGELOG.md helm/kubernetes-operator/CHANGELOG.md
             fi
 
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add helm/firebolt-kubernetes-operator/Chart.yaml \
-                    helm/firebolt-kubernetes-operator/CHANGELOG.md \
-                    helm/firebolt-kubernetes-operator/README.md \
+            git add helm/kubernetes-operator/Chart.yaml \
+                    helm/kubernetes-operator/CHANGELOG.md \
+                    helm/kubernetes-operator/README.md \
                     helm/firebolt-operator-crds/Chart.yaml \
                     helm/firebolt-operator-crds/README.md
             git diff --cached --name-only
@@ -189,7 +189,7 @@ jobs:
         if: steps.check.outputs.proceed != 'false'
         run: |
           mkdir -p /tmp/helm-packages
-          helm package helm/firebolt-kubernetes-operator --destination /tmp/helm-packages
+          helm package helm/kubernetes-operator --destination /tmp/helm-packages
           helm package helm/firebolt-operator-crds --destination /tmp/helm-packages
           echo "Packaged: $(ls /tmp/helm-packages)"
 
@@ -214,6 +214,6 @@ jobs:
             echo ""
             echo "| Chart | Version | Registry |"
             echo "|-------|---------|----------|"
-            echo "| \`firebolt-kubernetes-operator\` | \`${CHART_VERSION}\` | \`${REGISTRY_URL}\` |"
+            echo "| \`kubernetes-operator\` | \`${CHART_VERSION}\` | \`${REGISTRY_URL}\` |"
             echo "| \`firebolt-operator-crds\` | \`${CRD_CHART_VERSION}\` | \`${REGISTRY_URL}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

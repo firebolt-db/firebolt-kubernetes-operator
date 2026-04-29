@@ -111,8 +111,8 @@ spec:
   instanceRef: firebolt-production
   replicas: 5
   image:
-    repository: ghcr.io/firebolt-db/firebolt-db
-    tag: v1.2.0
+    repository: ghcr.io/firebolt-db/engine
+    tag: release-4.32.0-pre.0.20260428141824.5abdf30556cd
   resources:
     cpu: "2"
     memory: "8Gi"
