@@ -45,13 +45,13 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
         ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    FireboltEngine CR                         │
-│  core-engine-production                                     │
+│  engine-production                                     │
 │                                                             │
 │  spec:                          status:                     │
 │    instanceRef: firebolt-prod     currentGeneration: 1      │
 │    replicas: 5                    activeGeneration: 1       │
 │    image:                         phase: stable             │
-│      repository: .../core         observedGeneration: 3     │
+│      repository: .../engine       observedGeneration: 3     │
 │      tag: v1.2                    conditions:               │
 │    resources:                       - type: InstanceReady   │
 │      cpu: "2"                         status: "True"        │
@@ -66,23 +66,23 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Generation 1 (active)                               │   │
 │  │                                                     │   │
-│  │  StatefulSet: core-engine-production-g1             │   │
-│  │  Headless Service: core-engine-production-g1-hl     │   │
-│  │  ConfigMap: core-engine-production-g1-config        │   │
+│  │  StatefulSet: engine-production-g1             │   │
+│  │  Headless Service: engine-production-g1-hl     │   │
+│  │  ConfigMap: engine-production-g1-config        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                            │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ Generation 0 (draining)                             │   │
 │  │                                                     │   │
-│  │  StatefulSet: core-engine-production-g0             │   │
-│  │  Headless Service: core-engine-production-g0-hl     │   │
-│  │  ConfigMap: core-engine-production-g0-config        │   │
+│  │  StatefulSet: engine-production-g0             │   │
+│  │  Headless Service: engine-production-g0-hl     │   │
+│  │  ConfigMap: engine-production-g0-config        │   │
 │  └─────────────────────────────────────────────────────┘   │
 └────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
 │                     Engine Service                         │
-│             core-engine-production-service                 │
+│             engine-production-service                 │
 │        selector: firebolt.io/generation=1                  │
 │                                                            │
 │         (Stable endpoint, operator updates selector)       │
@@ -105,7 +105,7 @@ The engine's status is stored in the `.status` subresource of the CR, managed ex
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
-  name: core-engine-production
+  name: engine-production
   namespace: firebolt
 spec:
   instanceRef: firebolt-production
@@ -212,32 +212,32 @@ Key design choices:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: core-engine-production-g2
+  name: engine-production-g2
   labels:
-    firebolt.io/engine: core-engine-production
+    firebolt.io/engine: engine-production
     firebolt.io/generation: "2"
   ownerReferences:
     - apiVersion: compute.firebolt.io/v1alpha1
       kind: FireboltEngine
-      name: core-engine-production
+      name: engine-production
 spec:
-  serviceName: core-engine-production-g2-hl
+  serviceName: engine-production-g2-hl
   replicas: 5
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      firebolt.io/engine: core-engine-production
+      firebolt.io/engine: engine-production
       firebolt.io/generation: "2"
-  # ... pod template with Core container and config volume
+  # ... pod template with engine container and config volume
 ```
 
 **Headless Service (for StatefulSet pod DNS):**
 
 The headless service (`-hl` suffix) is a critical Kubernetes component required for StatefulSet pod networking:
 
-1. **Stable DNS names**: Each pod gets a predictable DNS name: `{pod-name}.{headless-service}.{namespace}.svc`. For example, `core-engine-production-g2-0.core-engine-production-g2-hl.firebolt.svc`.
+1. **Stable DNS names**: Each pod gets a predictable DNS name: `{pod-name}.{headless-service}.{namespace}.svc`. For example, `engine-production-g2-0.engine-production-g2-hl.firebolt.svc`.
 
-2. **Pod-to-pod communication**: Core nodes need to discover and communicate with each other during cluster formation. The headless service provides the DNS resolution that allows pods to find their peers by name.
+2. **Pod-to-pod communication**: engine nodes need to discover and communicate with each other during cluster formation. The headless service provides the DNS resolution that allows pods to find their peers by name.
 
 3. **Pre-generated config**: The operator generates the config.json with all pod FQDNs before the StatefulSet is created. This is possible because the pod names and headless service name are deterministic.
 
@@ -247,16 +247,16 @@ The headless service (`-hl` suffix) is a critical Kubernetes component required 
 apiVersion: v1
 kind: Service
 metadata:
-  name: core-engine-production-g2-hl
+  name: engine-production-g2-hl
   ownerReferences:
     - apiVersion: compute.firebolt.io/v1alpha1
       kind: FireboltEngine
-      name: core-engine-production
+      name: engine-production
 spec:
   clusterIP: None
   publishNotReadyAddresses: true
   selector:
-    firebolt.io/engine: core-engine-production
+    firebolt.io/engine: engine-production
     firebolt.io/generation: "2"
   ports:
     - port: 3473
@@ -265,16 +265,16 @@ spec:
 
 Note: This per-generation headless service (`-hl` suffix) exists solely for StatefulSet pod-to-pod DNS. External and gateway traffic go through the separate routing Service (`-service` suffix) described in the next section, which is also headless but serves a different purpose.
 
-**Core Config ConfigMap (pre-generated by operator):**
+**Engine Config ConfigMap (pre-generated by operator):**
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: core-engine-production-g2-config
+  name: engine-production-g2-config
   ownerReferences:
     - apiVersion: compute.firebolt.io/v1alpha1
       kind: FireboltEngine
-      name: core-engine-production
+      name: engine-production
 data:
   config.json: |
     {
@@ -283,8 +283,8 @@ data:
         "account_name": "default-account",
         "organization_id": "01KP98J0000000000000000000",
         "organization_name": "default-org",
-        "engine_id": "core-engine-production",
-        "engine_name": "core-engine-production",
+        "engine_id": "engine-production",
+        "engine_name": "engine-production",
         "cluster_id": "default-cluster",
         "multi_engine_endpoint": "firebolt-production-metadata.firebolt.svc.cluster.local:7000",
         "multi_engine_mode_enabled": true,
@@ -292,11 +292,11 @@ data:
         "logger_use_files": false
       },
       "nodes": [
-        {"host": "core-engine-production-g2-0.core-engine-production-g2-hl.firebolt.svc"},
-        {"host": "core-engine-production-g2-1.core-engine-production-g2-hl.firebolt.svc"},
-        {"host": "core-engine-production-g2-2.core-engine-production-g2-hl.firebolt.svc"},
-        {"host": "core-engine-production-g2-3.core-engine-production-g2-hl.firebolt.svc"},
-        {"host": "core-engine-production-g2-4.core-engine-production-g2-hl.firebolt.svc"}
+        {"host": "engine-production-g2-0.engine-production-g2-hl.firebolt.svc"},
+        {"host": "engine-production-g2-1.engine-production-g2-hl.firebolt.svc"},
+        {"host": "engine-production-g2-2.engine-production-g2-hl.firebolt.svc"},
+        {"host": "engine-production-g2-3.engine-production-g2-hl.firebolt.svc"},
+        {"host": "engine-production-g2-4.engine-production-g2-hl.firebolt.svc"}
       ]
     }
 ```
@@ -316,17 +316,17 @@ The service is **headless** (`clusterIP: None`). DNS resolution for the service 
 apiVersion: v1
 kind: Service
 metadata:
-  name: core-engine-production-service
+  name: engine-production-service
   ownerReferences:
     - apiVersion: compute.firebolt.io/v1alpha1
       kind: FireboltEngine
-      name: core-engine-production
+      name: engine-production
 spec:
   type: ClusterIP
   clusterIP: None
   publishNotReadyAddresses: false
   selector:
-    firebolt.io/engine: core-engine-production
+    firebolt.io/engine: engine-production
     firebolt.io/generation: "2"
   ports:
     - port: 3473
@@ -416,7 +416,7 @@ Phase: stable (g0 active, 3 nodes)
 │                                                             │
 │    For each pod in g0:                                      │
 │      Loop:                                                  │
-│        GET /metrics via Pods/proxy on the 'core' container  │
+│        GET /metrics via Pods/proxy on the engine container  │
 │        If firebolt_running_queries +                        │
 │           firebolt_suspended_queries == 0: pod is drained   │
 │        Else: wait drainCheckInterval, retry                 │
@@ -530,7 +530,7 @@ This ensures:
 Queries flow through an Envoy proxy, which routes to engine services based on the `X-Firebolt-Engine` header. A Lua filter extracts the engine name and sets the upstream hostname to `{engine}-service:3473`, then the dynamic forward proxy resolves it via DNS:
 
 ```
-Client (X-Firebolt-Engine: core-engine-production)
+Client (X-Firebolt-Engine: engine-production)
    │
    ▼
 ┌──────────────────────────────────────────────┐
@@ -542,13 +542,13 @@ Client (X-Firebolt-Engine: core-engine-production)
                        ▼
 ┌──────────────────────────────────────────────┐
 │            Engine Service                    │
-│    core-engine-production-service:3473       │
+│    engine-production-service:3473       │
 │    selector: firebolt.io/generation=1        │
 └──────────────────────┬───────────────────────┘
                        │
                        ▼
 ┌──────────────────────────────────────────────┐
-│    StatefulSet core-engine-production-g1     │
+│    StatefulSet engine-production-g1     │
 │                                              │
 │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐   │
 │  │pod-0│ │pod-1│ │pod-2│ │pod-3│ │pod-4│   │
@@ -640,9 +640,9 @@ On startup, the operator:
 The operator can manage multiple independent engines in the same namespace. Each engine is defined by a separate `FireboltEngine` resource:
 
 ```
-core-engine-production   → manages core-engine-production-* resources
-core-engine-staging      → manages core-engine-staging-* resources
-core-engine-dev          → manages core-engine-dev-* resources
+engine-production   → manages engine-production-* resources
+engine-staging      → manages engine-staging-* resources
+engine-dev          → manages engine-dev-* resources
 ```
 
 Reconciliation for each engine is independent.
