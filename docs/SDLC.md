@@ -6,9 +6,7 @@ semantics.
 
 ## Current state
 
-- **Source of builds.** Images are built from `master`. Until a formal
-  release flow exists, builds are produced via **manual workflow runs**.
-  There is no scheduled or tag-driven release pipeline yet.
+- **Source of builds.** Firebolt Kubernetes Operator images and Helm chart releases are built from `main`. Version, release and package creation happens automatically on merge to `main` via GitHub actions.
 - **Mirroring.** Partners that mirror images into their own registry should
   pin by **digest (sha256)**, not by mutable tag. The mutable aliases
   (`latest`, `dev`) exist to make discovery and ad-hoc testing easy; they
@@ -16,13 +14,13 @@ semantics.
 
 ## Package naming
 
-The published GHCR packages use clearer, role-specific names:
+The published GHCR packages from the `firebolt-db/packdb` and `firebolt-db/firebolt-kubernetes-operator` repositories use clear, role-specific names:
 
-| Package | Purpose |
-|---------|---------|
-| `ghcr.io/firebolt-db/engine` | Firebolt engine (compute node) image |
-| `ghcr.io/firebolt-db/kubernetes-operator` | This operator |
-| `ghcr.io/firebolt-db/metadata` | Pensieve metadata service |
+| Package | Purpose | Source |
+|---------|---------|--------|
+| `ghcr.io/firebolt-db/kubernetes-operator` | This operator | `firebolt-db/firebolt-kubernetes-operator` |
+| `ghcr.io/firebolt-db/engine` | Firebolt engine (compute node) image | `firebolt-db/packdb` |
+| `ghcr.io/firebolt-db/metadata` | Pensieve metadata service | `firebolt-db/packdb` |
 
 These names appear in `README.md`, `examples/`, `config/images/defaults.env`,
 `helm/` values, and the operator's CD workflow.
@@ -46,7 +44,7 @@ Rules:
 - Anything that pins for reproducibility — partner mirrors, customer
   deployments, the operator's `config/images/defaults.env` — should pin to
   an immutable tag or digest, never to `latest` or `dev`.
-- **The Helm chart MUST NOT ship `latest` or `dev`** in any of its
+- **The Firebolt Operator Helm chart and the Firebolt Instance Helm chart MUST NOT ship `latest` or `dev`** in any of their
   versioned fields. `Chart.yaml`'s `appVersion`, `values.yaml`'s
   `image.tag` default, and any image tag the chart embeds at render time
   must all reference immutable build tags. The chart is something users
@@ -54,6 +52,17 @@ Rules:
   under it because a mutable alias moved is not a chart we want to ship.
   The mutable aliases are for ad-hoc `kubectl`/`docker pull` discovery,
   not for release artifacts.
+
+## Helm Chart Versioning
+Every chart must have a version number. A version should follow the SemVer 2 standard but it is not strictly enforced. Unlike Helm Classic, Helm v2 and later uses version numbers as release markers. Packages in repositories are identified by name plus version.
+
+For example, an nginx chart whose version field is set to version: `1.2.3` will be named:
+```
+nginx-1.2.3.tgz
+```
+More complex SemVer 2 names are also supported, such as version: `1.2.3-alpha.1+ef365`. But non-SemVer names are explicitly disallowed by the system. Subject to exception are versions in format x or x.y. For example, if there is a leading v or a version listed without all 3 parts (e.g. `v1.2`) it will attempt to coerce it into a valid semantic version (e.g., `v1.2.0`).
+
+Source: [Helm Charts and Versioning](https://helm.sh/docs/topics/charts/#charts-and-versioning)
 
 ## Quickstart and README guidance
 
