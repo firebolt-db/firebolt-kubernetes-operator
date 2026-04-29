@@ -71,7 +71,7 @@ const (
 // podLogDebugTailLines and Firebolt pod label keys: wait helpers and
 // DumpFireboltPodLogsForDebugWithScope (per-Describe failed-spec JustAfterEach).
 const (
-	podLogDebugTailLines     = 50
+	podLogDebugTailLines     = 300
 	labelKeyFireboltEngine   = "firebolt.io/engine"
 	labelKeyFireboltInstance = "firebolt.io/instance"
 )
