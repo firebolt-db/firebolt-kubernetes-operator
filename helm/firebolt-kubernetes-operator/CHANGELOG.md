@@ -1,3 +1,14 @@
+# 0.1.25
+
+appVersion: v1.17.0
+
+## [1.17.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.16.0...v1.17.0) (2026-04-29)
+
+### Features
+
+* always generate JSON schema (FB-879) ([5923ab2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5923ab289b98558bfecfcedd049fbd7c480092fb))
+
+
 # 0.1.24
 
 appVersion: v1.16.0
