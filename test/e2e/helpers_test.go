@@ -390,7 +390,9 @@ func DumpFireboltPodLogsForDebugWithScope(ctx context.Context, instanceName stri
 				continue
 			}
 			seen[pod.Name] = struct{}{}
-			_ = dumpPodLogs(ctx, pod, podLogDebugTailLines)
+			if tail := dumpPodLogs(ctx, pod, podLogDebugTailLines); tail != "" {
+				fmt.Fprintf(GinkgoWriter, "%s\n", tail)
+			}
 		}
 	}
 	if instanceName != "" {
