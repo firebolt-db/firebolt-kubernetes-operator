@@ -17,12 +17,14 @@ limitations under the License.
 package controller
 
 import (
+	"encoding/json"
 	"strconv"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -1245,5 +1247,166 @@ func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
 	}
 	if result.Status.CurrentGeneration != 2 {
 		t.Errorf("expected generation 2, got %d", result.Status.CurrentGeneration)
+	}
+}
+
+// --- buildConfigMap: customEngineConfig root-merge semantics ---
+
+// renderConfig builds a ConfigMap with the given customEngineConfig and
+// returns the parsed config.json document plus the inner config block.
+func renderConfig(t *testing.T, custom string) (root, cfg map[string]interface{}) {
+	t.Helper()
+	spec := testSpec()
+	if custom != "" {
+		spec.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(custom)}
+	}
+	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	if err := json.Unmarshal([]byte(cm.Data["config.json"]), &root); err != nil {
+		t.Fatalf("rendered config.json is not valid JSON: %v", err)
+	}
+	cfg, ok := root["config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rendered config.json has no `config` object: %v", root)
+	}
+	return root, cfg
+}
+
+func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
+	_, cfg := renderConfig(t, "")
+	wants := map[string]interface{}{
+		"account_name":              "default-account",
+		"organization_name":         "default-org",
+		"cluster_id":                "default-cluster",
+		"multi_engine_mode_enabled": true,
+		"logger_formatting":         "json",
+		"account_id":                testAccountID,
+		"engine_id":                 testEngineName,
+		"engine_name":               testEngineName,
+		"multi_engine_endpoint":     testMetadataEndpoint,
+	}
+	for k, want := range wants {
+		if got := cfg[k]; got != want {
+			t.Errorf("config[%q] = %v, want %v", k, got, want)
+		}
+	}
+}
+
+func TestBuildConfigMap_NestedConfigOverridesUserDefaults(t *testing.T) {
+	custom := `{"config": {"account_name": "acme", "logger_formatting": "text", "extra": "x"}}`
+	_, cfg := renderConfig(t, custom)
+	if cfg["account_name"] != "acme" {
+		t.Errorf("account_name = %v, want acme", cfg["account_name"])
+	}
+	if cfg["logger_formatting"] != "text" {
+		t.Errorf("logger_formatting = %v, want text", cfg["logger_formatting"])
+	}
+	if cfg["extra"] != "x" {
+		t.Errorf("config.extra = %v, want x", cfg["extra"])
+	}
+	if cfg["organization_name"] != "default-org" {
+		t.Errorf("organization_name was clobbered: got %v, want default-org", cfg["organization_name"])
+	}
+}
+
+func TestBuildConfigMap_RootKeysAddedAsSiblings(t *testing.T) {
+	custom := `{"some_root_key": "value", "obj": {"a": 1}}`
+	root, cfg := renderConfig(t, custom)
+	if root["some_root_key"] != "value" {
+		t.Errorf("root.some_root_key = %v, want value", root["some_root_key"])
+	}
+	obj, ok := root["obj"].(map[string]interface{})
+	if !ok || obj["a"] != float64(1) {
+		t.Errorf("root.obj = %v, want {a: 1}", root["obj"])
+	}
+	if cfg["account_name"] != "default-account" {
+		t.Errorf("config.account_name was clobbered: got %v", cfg["account_name"])
+	}
+}
+
+func TestBuildConfigMap_ProtectedConfigPathsStripped(t *testing.T) {
+	custom := `{"config": {
+		"account_id": "evil",
+		"engine_id": "evil",
+		"engine_name": "evil",
+		"multi_engine_endpoint": "evil",
+		"shutdown_wait_unfinished": 99999
+	}}`
+	_, cfg := renderConfig(t, custom)
+	if cfg["account_id"] != testAccountID {
+		t.Errorf("account_id = %v, want %v (operator-authoritative)", cfg["account_id"], testAccountID)
+	}
+	if cfg["engine_id"] != testEngineName {
+		t.Errorf("engine_id = %v, want %v", cfg["engine_id"], testEngineName)
+	}
+	if cfg["engine_name"] != testEngineName {
+		t.Errorf("engine_name = %v, want %v", cfg["engine_name"], testEngineName)
+	}
+	if cfg["multi_engine_endpoint"] != testMetadataEndpoint {
+		t.Errorf("multi_engine_endpoint = %v, want %v", cfg["multi_engine_endpoint"], testMetadataEndpoint)
+	}
+	if cfg["shutdown_wait_unfinished"] == float64(99999) {
+		t.Error("shutdown_wait_unfinished was overridden by user input")
+	}
+}
+
+func TestBuildConfigMap_RootNodesProtected(t *testing.T) {
+	custom := `{"nodes": [{"host": "evil"}]}`
+	root, _ := renderConfig(t, custom)
+	nodes, ok := root["nodes"].([]interface{})
+	if !ok {
+		t.Fatalf("nodes = %v, want array", root["nodes"])
+	}
+	if len(nodes) != int(testSpec().Replicas) {
+		t.Errorf("nodes length = %d, want %d (user input must not replace)", len(nodes), testSpec().Replicas)
+	}
+	first, ok := nodes[0].(map[string]interface{})
+	if !ok || first["host"] == "evil" {
+		t.Errorf("nodes[0] was overridden by user input: %v", nodes[0])
+	}
+}
+
+func TestBuildConfigMap_NonMapConfigDropped(t *testing.T) {
+	// When user supplies a scalar (or any non-object) for `config`, the
+	// whole key must be stripped: a deep merge would otherwise replace
+	// the operator-built config block wholesale with the scalar, losing
+	// every authoritative key.
+	cases := []string{
+		`{"config": "evil"}`,
+		`{"config": 42}`,
+		`{"config": ["evil"]}`,
+		`{"config": null}`,
+	}
+	for _, custom := range cases {
+		t.Run(custom, func(t *testing.T) {
+			root, cfg := renderConfig(t, custom)
+			if _, ok := root["config"].(map[string]interface{}); !ok {
+				t.Fatalf("rendered `config` is not an object: %v", root["config"])
+			}
+			if cfg["account_id"] != testAccountID {
+				t.Errorf("operator-authoritative account_id lost: got %v", cfg["account_id"])
+			}
+			if cfg["engine_id"] != testEngineName {
+				t.Errorf("operator-authoritative engine_id lost: got %v", cfg["engine_id"])
+			}
+			if cfg["account_name"] != "default-account" {
+				t.Errorf("operator default account_name lost: got %v", cfg["account_name"])
+			}
+		})
+	}
+}
+
+func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
+	// CRD admission would normally reject this, but the controller defends
+	// against an apiserver bug by skipping the merge silently.
+	spec := testSpec()
+	spec.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(`not valid json`)}
+	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(cm.Data["config.json"]), &root); err != nil {
+		t.Fatalf("rendered config.json is not valid JSON: %v", err)
+	}
+	cfg := root["config"].(map[string]interface{})
+	if cfg["account_name"] != "default-account" {
+		t.Errorf("invalid customEngineConfig should be ignored, but defaults were touched: %v", cfg)
 	}
 }
