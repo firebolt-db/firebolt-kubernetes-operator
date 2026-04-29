@@ -61,7 +61,6 @@ func TestSetInstanceCondition_IdempotentTransitionTime(t *testing.T) {
 func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 	inst := newInstance()
 	for _, c := range []string{
-		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	} {
@@ -80,15 +79,15 @@ func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 }
 
 func TestSetInstanceReadyRollup_PropagatesFirstBlocker(t *testing.T) {
-	// Pipeline order: Postgres → Metadata → Gateway.
+	// Pipeline order: Metadata → Gateway.
 	// When multiple components are False/missing, the roll-up must
 	// surface the FIRST blocker so users see the root cause at the
 	// headline condition.
 	inst := newInstance()
-	setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
-		metav1.ConditionTrue, "Ready", "pg ok")
 	setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
 		metav1.ConditionFalse, "EnsureFailed", "metadata ensure failed: boom")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
+		metav1.ConditionFalse, "EnsureFailed", "gateway ensure failed: boom")
 
 	setInstanceReadyRollup(inst)
 
@@ -109,9 +108,9 @@ func TestSetInstanceReadyRollup_PropagatesFirstBlocker(t *testing.T) {
 
 func TestSetInstanceReadyRollup_MissingComponentCountsAsNotReady(t *testing.T) {
 	inst := newInstance()
-	// Only Postgres is set; Metadata/Gateway are absent.
-	setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
-		metav1.ConditionTrue, "Ready", "pg ok")
+	// Only Gateway is set; Metadata is absent.
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
+		metav1.ConditionTrue, "Ready", "gw ok")
 
 	setInstanceReadyRollup(inst)
 
@@ -144,7 +143,6 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 				inst.Status.MetadataReady = true
 				inst.Status.GatewayReady = true
 				for _, c := range []string{
-					computev1alpha1.InstanceConditionPostgresReady,
 					computev1alpha1.InstanceConditionMetadataReady,
 					computev1alpha1.InstanceConditionGatewayReady,
 				} {
@@ -155,21 +153,20 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 			wantPhase: computev1alpha1.InstancePhaseReady,
 		},
 		{
-			// Scenario A from the audit: external Postgres Secret deleted
-			// after the instance reached Ready. Metadata pod keeps running
-			// with mounted creds so MetadataReady/GatewayReady stay true,
-			// but PostgresReady condition has flipped False. Old Phase
-			// derivation would lie and keep reporting Ready; new
-			// derivation flips to Degraded.
-			name: "Postgres False but booleans still true -> Degraded (not a lie)",
+			// External Postgres Secret deleted after the instance reached
+			// Ready. The metadata pod may keep running with mounted creds so
+			// the boolean stays true, but the next reconcile's preflight
+			// flips MetadataReady to False with reason
+			// PostgresSecretPreflightFailed. Old Phase derivation (off the
+			// boolean) would lie and keep reporting Ready; the
+			// condition-driven derivation flips to Degraded.
+			name: "Metadata False but booleans still true -> Degraded (not a lie)",
 			prepare: func(inst *computev1alpha1.FireboltInstance) {
 				inst.Status.Phase = computev1alpha1.InstancePhaseReady
 				inst.Status.MetadataReady = true
 				inst.Status.GatewayReady = true
-				setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
-					metav1.ConditionFalse, "SecretPreflightFailed", "boom")
 				setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
-					metav1.ConditionTrue, "Ready", "ok")
+					metav1.ConditionFalse, "PostgresSecretPreflightFailed", "boom")
 				setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
 					metav1.ConditionTrue, "Ready", "ok")
 				setInstanceReadyRollup(inst)
@@ -189,7 +186,6 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 			prepare: func(inst *computev1alpha1.FireboltInstance) {
 				inst.Status.Phase = computev1alpha1.InstancePhaseFailed
 				for _, c := range []string{
-					computev1alpha1.InstanceConditionPostgresReady,
 					computev1alpha1.InstanceConditionMetadataReady,
 					computev1alpha1.InstanceConditionGatewayReady,
 				} {
@@ -219,12 +215,11 @@ func TestSetInstanceReadyRollup_RecoversFromFalseToTrue(t *testing.T) {
 	// After a failure flips Ready=False, a subsequent healthy pass must
 	// flip it back to True rather than leaving a stale False.
 	inst := newInstance()
-	setInstanceCondition(inst, computev1alpha1.InstanceConditionPostgresReady,
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
 		metav1.ConditionFalse, "EnsureFailed", "boom")
 	setInstanceReadyRollup(inst)
 
 	for _, c := range []string{
-		computev1alpha1.InstanceConditionPostgresReady,
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
 	} {

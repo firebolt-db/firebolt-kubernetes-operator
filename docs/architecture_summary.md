@@ -49,7 +49,7 @@ Sequential pipeline: `instance_postgres.go` → `instance_metadata.go` → `inst
 
 Phases: `Provisioning → Ready ↔ Degraded` (terminal: `Failed`).
 
-Status: `metadataReady` / `gatewayReady` boolean flags; per-component conditions including `PostgresReady`.
+Status: `metadataReady` / `gatewayReady` boolean flags; per-component conditions `MetadataReady` and `GatewayReady`.
 
 ## Key design principles
 

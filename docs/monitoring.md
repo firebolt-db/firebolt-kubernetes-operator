@@ -105,7 +105,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | Metric | Type | Labels | Updated | Description |
 |---|---|---|---|---|
 | `firebolt_instance_status_phase` | Gauge | `namespace`, `name`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `Provisioning`, `Ready`, `Degraded`, `Failed`. |
-| `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `PostgresReady`, `MetadataReady`, `GatewayReady`. |
+| `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `MetadataReady`, `GatewayReady`. |
 | `firebolt_instance_info` | Gauge | `namespace`, `name`, `id`, `postgres_mode` | Every reconcile | Always 1. Carries static metadata: instance ID and postgres mode (`internal` or `external`). |
 | `firebolt_instance_last_reconciled_timestamp` | Gauge | `namespace`, `name` | Every reconcile | Unix timestamp of the last successful reconcile. |
 
@@ -117,7 +117,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | `name` | Name of the FireboltEngine or FireboltInstance CR |
 | `instance` | Name of the parent FireboltInstance (from `spec.instanceRef` on engines) |
 | `phase` | Current lifecycle phase |
-| `type` | Condition type (e.g., `Ready`, `PostgresReady`) |
+| `type` | Condition type (e.g., `Ready`, `MetadataReady`) |
 | `id` | Stable instance ID (ULID) |
 | `postgres_mode` | `internal` (operator-managed) or `external` (user-provided) |
 
