@@ -233,6 +233,24 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Type=object
 	// +optional
 	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
+
+	// PodSecurityContext sets pod-level security attributes stamped on the
+	// engine pod template. The operator unconditionally applies an fsGroup
+	// (3473) so the kernel chowns the per-pod data PVC for the engine
+	// process; setting fsGroup here overrides that default. All other fields
+	// are passed through verbatim.
+	//
+	// Changes to this field trigger a new blue-green generation.
+	// +optional
+	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
+
+	// SecurityContext sets container-level security attributes for the
+	// engine container. The value is passed through verbatim; the operator
+	// applies no defaults at the container scope.
+	//
+	// Changes to this field trigger a new blue-green generation.
+	// +optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.

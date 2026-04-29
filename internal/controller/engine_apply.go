@@ -307,6 +307,13 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	if !reflect.DeepEqual(a.Spec.Template.Spec.SecurityContext, b.Spec.Template.Spec.SecurityContext) {
+		return false
+	}
+	if !reflect.DeepEqual(ac.SecurityContext, bc.SecurityContext) {
+		return false
+	}
+
 	if a.Annotations[AnnotationMetadataOverride] != b.Annotations[AnnotationMetadataOverride] {
 		return false
 	}
