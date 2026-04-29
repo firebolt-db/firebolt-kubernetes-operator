@@ -402,18 +402,30 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	if shutdownWait < 1 {
 		shutdownWait = 1
 	}
-	// Operator-controlled defaults that spec.customEngineConfig may
-	// override. Identity/routing keys (account_id, engine_id, engine_name,
-	// multi_engine_endpoint, shutdown_wait_unfinished) are reapplied
-	// after the user merge below to keep them authoritative.
-	innerConfig := map[string]interface{}{
-		"account_name":              "default-account",
-		"organization_id":           "01KP98J0000000000000000000",
-		"organization_name":         "default-org",
-		"cluster_id":                "default-cluster",
-		"multi_engine_mode_enabled": true,
-		"logger_formatting":         "json",
-		"logger_use_files":          false,
+	// Canonical document seeded with operator-managed defaults. User input
+	// from spec.customEngineConfig is deep-merged into this at the root
+	// (see deepMergeJSON), so users may add/override keys at the root
+	// (siblings of `config` and `nodes`) and inside `config` itself.
+	// Operator-authoritative paths are stripped from user input before the
+	// merge (see stripProtectedEngineConfigPaths) so they cannot be
+	// overridden — silently, to keep the same spec portable across operator
+	// versions even if the protected set evolves.
+	coreConfig := map[string]interface{}{
+		"config": map[string]interface{}{
+			"account_name":              "default-account",
+			"organization_id":           "01KP98J0000000000000000000",
+			"organization_name":         "default-org",
+			"cluster_id":                "default-cluster",
+			"multi_engine_mode_enabled": true,
+			"logger_formatting":         "json",
+			"logger_use_files":          false,
+			"account_id":                instanceInfo.AccountID,
+			"engine_id":                 engineName,
+			"engine_name":               engineName,
+			"multi_engine_endpoint":     metadataEndpoint,
+			"shutdown_wait_unfinished":  shutdownWait,
+		},
+		"nodes": nodes,
 	}
 
 	if spec.CustomEngineConfig != nil && len(spec.CustomEngineConfig.Raw) > 0 {
@@ -423,21 +435,9 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		// admitted something it should have rejected, so silently
 		// skipping the merge is the conservative choice.
 		if err := json.Unmarshal(spec.CustomEngineConfig.Raw, &custom); err == nil {
-			for k, v := range custom {
-				innerConfig[k] = v
-			}
+			stripProtectedEngineConfigPaths(custom)
+			deepMergeJSON(coreConfig, custom)
 		}
-	}
-
-	innerConfig["account_id"] = instanceInfo.AccountID
-	innerConfig["engine_id"] = engineName
-	innerConfig["engine_name"] = engineName
-	innerConfig["multi_engine_endpoint"] = metadataEndpoint
-	innerConfig["shutdown_wait_unfinished"] = shutdownWait
-
-	coreConfig := map[string]interface{}{
-		"config": innerConfig,
-		"nodes":  nodes,
 	}
 
 	configJSON, err := json.MarshalIndent(coreConfig, "", "  ")
@@ -733,6 +733,47 @@ func enginePodServiceAccountName(spec *computev1alpha1.FireboltEngineSpec) strin
 		return ""
 	}
 	return *spec.ServiceAccountName
+}
+
+// deepMergeJSON merges src into dst recursively. When both sides hold a
+// nested JSON object (map[string]interface{}) at the same key, the merge
+// recurses into it. For any other value type (arrays, primitives, mixed
+// types), src wins and replaces whatever is at that key in dst. dst is
+// mutated in place.
+func deepMergeJSON(dst, src map[string]interface{}) {
+	for k, srcVal := range src {
+		if srcMap, ok := srcVal.(map[string]interface{}); ok {
+			if dstMap, ok := dst[k].(map[string]interface{}); ok {
+				deepMergeJSON(dstMap, srcMap)
+				continue
+			}
+		}
+		dst[k] = srcVal
+	}
+}
+
+// stripProtectedEngineConfigPaths removes paths the operator manages from
+// a user-supplied customEngineConfig payload. Stripping happens in place
+// before the deep merge in buildConfigMap, and is silent — users keep the
+// same spec portable across operator versions even if the protected set
+// changes.
+//
+// When user.config is not a JSON object (string, number, array, …) the
+// whole key is dropped: deepMergeJSON would otherwise replace the
+// operator-built config map wholesale with the user's scalar, losing every
+// authoritative key.
+func stripProtectedEngineConfigPaths(m map[string]interface{}) {
+	delete(m, "nodes")
+	cfg, ok := m["config"].(map[string]interface{})
+	if !ok {
+		delete(m, "config")
+		return
+	}
+	delete(cfg, "account_id")
+	delete(cfg, "engine_id")
+	delete(cfg, "engine_name")
+	delete(cfg, "multi_engine_endpoint")
+	delete(cfg, "shutdown_wait_unfinished")
 }
 
 // customEngineConfigHash returns a stable hash of spec.customEngineConfig
