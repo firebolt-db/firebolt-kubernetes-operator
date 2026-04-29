@@ -32,7 +32,7 @@ Two mutable aliases, plus immutable build tags:
 | Tag | Points to | Audience |
 |-----|-----------|----------|
 | `latest` | Latest **stable / LTS** release | Design partners, POCs, README examples |
-| `dev` | Latest **development / pre-release** build (typically `master`) | Internal testing, early-access validation |
+| `dev` | Latest **development / pre-release** build (typically `main`) | Internal testing, early-access validation. A `dev` tag only exists on projects that work with release branches for stable releases. For projects like `firebolt-db/firebolt-kubernetes-operator` that do continuous releases from main this is not applicable. |
 | `<version>` / `<build-sha>` | Immutable build | Production deployments, anything that needs reproducibility |
 
 Rules:
@@ -66,7 +66,7 @@ More complex SemVer 2 names are also supported, such as version: `1.2.3-alpha.1+
 Source: [Helm Charts and Versioning](https://helm.sh/docs/topics/charts/#charts-and-versioning)
 
 ## Container Image Versioning
-Container image versions MUST use a leading `v`.
+Container image versions for a major, minor or patch release MUST use a leading `v`.
 
 Example: If we build version `1.2.3` the container image will be tagged `myimage:v1.2.3`.
 
@@ -77,7 +77,7 @@ Example: Release `v1.2.3` MUST reference git tag `v1.2.3`.
 
 ## Quickstart and README guidance
 
-Wherever README or `examples/` show an image reference, the example must:
+Wherever README or `examples/` show an image reference, the example MUST:
 
 1. Use a **valid, currently-published tag** (not a placeholder).
 2. Explain **when to use stable vs development tags**: `latest` for trying
