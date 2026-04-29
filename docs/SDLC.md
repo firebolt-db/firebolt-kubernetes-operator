@@ -24,7 +24,7 @@ The published GHCR packages from the `firebolt-db/firebolt-db` and `firebolt-db/
 |---------|---------|--------|
 | `ghcr.io/firebolt-db/kubernetes-operator` | This operator | `firebolt-db/firebolt-kubernetes-operator` |
 | `ghcr.io/firebolt-db/engine` | Firebolt engine (compute node) image | `firebolt-db/firebolt-db` |
-| `ghcr.io/firebolt-db/metadata` | Pensieve metadata service | `firebolt-db/firebolt-db` |
+| `ghcr.io/firebolt-db/metadata` | Metadata service | `firebolt-db/firebolt-db` |
 
 These names appear in `README.md`, `examples/`, `config/images/defaults.env`,
 `helm/` values, and the operator's CD workflow.

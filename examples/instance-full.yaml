@@ -14,7 +14,7 @@ spec:
       credentialsSecretRef:
         name: metadata-postgres-credentials
     engineRegistration: true
-    # Omit image to use the operator default (metadata (pensieve) image from config/images).
+    # Omit image to use the operator default (metadata service image from config/images).
     image:
       repository: ghcr.io/firebolt-db/metadata
       tag: 4.32.0-pre.0.20260428110559.3964114056e2

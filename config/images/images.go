@@ -58,15 +58,15 @@ func All() map[string]string {
 // Operator default images, sourced from defaults.env.
 var (
 	PostgresImage = defaults["POSTGRES_IMAGE"]
-	MetadataImage = defaults["PENSIEVE_IMAGE"]
-	MetadataTag   = defaults["PENSIEVE_TAG"]
+	MetadataImage = defaults["METADATA_IMAGE"]
+	MetadataTag   = defaults["METADATA_TAG"]
 	EnvoyImage    = defaults["ENVOY_IMAGE"]
 	EnvoyTag      = defaults["ENVOY_TAG"]
 	EngineImage   = defaults["ENGINE_IMAGE"]
 	EngineTag     = defaults["ENGINE_TAG"]
 )
 
-// DefaultMetadata returns "repo:tag" for the metadata (pensieve) image.
+// DefaultMetadata returns "repo:tag" for the metadata service image.
 func DefaultMetadata() string { return MetadataImage + ":" + MetadataTag }
 
 // DefaultEnvoy returns "repo:tag" for the Envoy proxy image.

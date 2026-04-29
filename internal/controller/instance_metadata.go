@@ -37,7 +37,7 @@ import (
 const (
 	metadataCredsMount    = "/secrets/postgres" //nolint:gosec // mount path, not a credential
 	metadataConfigMount   = "/configs"
-	metadataContainerName = "dedicated-pensieve"
+	metadataContainerName = "metadata"
 )
 
 // ensureMetadataResources creates or updates the ConfigMap, Deployment, and
@@ -203,9 +203,10 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 	configHash := contentHash(configXML)
 
 	// Surge=0 + maxUnavailable=1 means the old pod is terminated before the
-	// new one is created. Pensieve assumes single-writer against Postgres, so
-	// we must never have two metadata pods running concurrently. This trades
-	// a brief metadata-unavailable window during rollouts for that guarantee.
+	// new one is created. The metadata service assumes single-writer against
+	// Postgres, so we must never have two metadata pods running concurrently.
+	// This trades a brief metadata-unavailable window during rollouts for
+	// that guarantee.
 	maxSurge := intstr.FromInt32(0)
 	maxUnavailable := intstr.FromInt32(1)
 

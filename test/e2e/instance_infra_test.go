@@ -385,7 +385,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		It("should garbage-collect all child resources", func() {
 			By("Creating the instance under test")
-			err := CreateInstance(ctx, instanceName, pensieveImage, pensieveTag)
+			err := CreateInstance(ctx, instanceName, metadataImage, metadataTag)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for the instance to become Ready")

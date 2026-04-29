@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What This Operator Does
 
 Firebolt Kubernetes Operator manages two CRDs:
-- **FireboltInstance**: Shared infrastructure per-namespace (PostgreSQL, Pensieve metadata service, Envoy gateway)
+- **FireboltInstance**: Shared infrastructure per-namespace (PostgreSQL, metadata service, Envoy gateway)
 - **FireboltEngine**: Stateful compute nodes with zero-downtime blue-green deployments
 
 Strict dependency: engines require a ready instance. The instance reconciler runs sequentially through its components (postgres → metadata → gateway). The engine reconciler gates on instance readiness during `stable`, `stopped`, and `creating` phases only; `switching|draining|cleaning` bypass the gate.
