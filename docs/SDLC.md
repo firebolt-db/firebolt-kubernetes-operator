@@ -63,12 +63,29 @@ nginx-1.2.3.tgz
 ```
 More complex SemVer 2 names are also supported, such as version: `1.2.3-alpha.1+ef365`. But non-SemVer names are explicitly disallowed by the system. Subject to exception are versions in format x or x.y. For example, if there is a leading v or a version listed without all 3 parts (e.g. `v1.2`) it will attempt to coerce it into a valid semantic version (e.g., `v1.2.0`).
 
+The Helm chart `Chart.yaml` `version` field is the chart's own semver and MUST be **bare** (e.g. `0.1.25`) — no leading `v`. This is the value that becomes the OCI tag at `helm push` time, so a `v` prefix would land in the registry as `kubernetes-operator:v0.1.25`, which is non-idiomatic for Helm and confuses chart resolvers.
+
 Source: [Helm Charts and Versioning](https://helm.sh/docs/topics/charts/#charts-and-versioning)
 
 ## Container Image Versioning
 Container image versions for a major, minor or patch release MUST use a leading `v`.
 
 Example: If we build version `1.2.3` the container image will be tagged `myimage:v1.2.3`.
+
+### Chart vs image tag prefix — important asymmetry
+
+Because Helm and container-registry conventions diverge, the same release ships under two different tag spellings. This is intentional and not a bug:
+
+| Artifact | Pushed coordinate | Source of truth |
+|----------|-------------------|-----------------|
+| Operator image | `ghcr.io/firebolt-db/kubernetes-operator:v1.17.0` (**`v` prefix**) | git tag from semantic-release |
+| Helm chart | `oci://ghcr.io/firebolt-db/helm-charts/kubernetes-operator:0.1.25` (**no prefix**) | `Chart.yaml` `version` |
+
+Inside `Chart.yaml` itself, both spellings co-exist:
+- `version: 0.1.25` — the chart's own semver, bare. Used as the OCI tag.
+- `appVersion: "v1.17.0"` — mirrors the operator git tag, with the `v` prefix. Metadata only; not used as the OCI tag.
+
+When telling a partner "we shipped 1.17", point them at `kubernetes-operator:v1.17.0` (image) **and** at the chart version that carries `appVersion: v1.17.0`, not at a chart whose own `version` happens to be `1.17.0`.
 
 ## GitHub Releases
 We do GitHub releases for major, minor and patch versions. A GitHub release always references a git tag (see [tag semantics](#tag-semantics)). A GitHub release name MUST also use a leading `v` to match the git tag.
