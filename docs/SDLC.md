@@ -52,6 +52,7 @@ Rules:
   under it because a mutable alias moved is not a chart we want to ship.
   The mutable aliases are for ad-hoc `kubectl`/`docker pull` discovery,
   not for release artifacts.
+- Git tags that represent Semantic Versions like `1.2.3` MUST have a leading `v` like `v1.2.3`
 
 ## Helm Chart Versioning
 Every chart must have a version number. A version should follow the SemVer 2 standard but it is not strictly enforced. Unlike Helm Classic, Helm v2 and later uses version numbers as release markers. Packages in repositories are identified by name plus version.
@@ -63,6 +64,16 @@ nginx-1.2.3.tgz
 More complex SemVer 2 names are also supported, such as version: `1.2.3-alpha.1+ef365`. But non-SemVer names are explicitly disallowed by the system. Subject to exception are versions in format x or x.y. For example, if there is a leading v or a version listed without all 3 parts (e.g. `v1.2`) it will attempt to coerce it into a valid semantic version (e.g., `v1.2.0`).
 
 Source: [Helm Charts and Versioning](https://helm.sh/docs/topics/charts/#charts-and-versioning)
+
+## Container Image Versioning
+Container image versions MUST use a leading `v`.
+
+Example: If we build version `1.2.3` the container image will be tagged `myimage:v1.2.3`.
+
+## GitHub Releases
+We do GitHub releases for major, minor and patch versions. A GitHub release always references a git tag (see [tag semantics](#tag-semantics)). A GitHub release name MUST also use a leading `v` to match the git tag.
+
+Example: Release `v1.2.3` MUST reference git tag `v1.2.3`.
 
 ## Quickstart and README guidance
 
