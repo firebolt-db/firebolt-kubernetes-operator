@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-helm install firebolt-operator ./helm/firebolt-kubernetes-operator \
+helm install firebolt-operator ./helm/kubernetes-operator \
   --namespace firebolt-system --create-namespace
 ```
 
@@ -40,7 +40,7 @@ chart automatically picks up the changes. Since Helm does not upgrade CRDs
 in the `crds/` directory, apply CRD updates manually:
 
 ```bash
-kubectl apply -f helm/firebolt-kubernetes-operator/crds/
+kubectl apply -f helm/kubernetes-operator/crds/
 ```
 
 Or use the `firebolt-operator-crds` chart for managed CRD upgrades via

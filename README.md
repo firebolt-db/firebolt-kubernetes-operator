@@ -22,9 +22,9 @@ When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the o
 **Production / CI:**
 
 ```bash
-make docker-build docker-push IMG=<your-registry>/firebolt-kubernetes-operator:latest
-helm upgrade --install firebolt-operator helm/firebolt-kubernetes-operator \
-  --set image.repository=<your-registry>/firebolt-kubernetes-operator \
+make docker-build docker-push IMG=<your-registry>/kubernetes-operator:latest
+helm upgrade --install firebolt-operator helm/kubernetes-operator \
+  --set image.repository=<your-registry>/kubernetes-operator \
   --set image.tag=latest
 ```
 
@@ -76,13 +76,15 @@ spec:
   replicas: 3
   image:
     repository: "ghcr.io/firebolt-db/engine"
-    tag: "v1.2.0"
+    tag: "dev"
   resources:
     cpu: "2"
     memory: "8Gi"
 ```
 
 The engine will not start until the referenced instance has a populated metadata endpoint and account ID.
+
+**Choosing an image tag.** `dev` tracks the latest development build and is the right choice while no stable release exists yet. Once a stable release is published, prefer `latest` for evaluation and POCs. For anything reproducible (production deployments, GitOps repos, mirrors into a partner registry), pin to an immutable build tag or digest instead. See [docs/SDLC.md](docs/SDLC.md) for the full tag convention.
 
 ### Connecting to Engines
 
@@ -240,8 +242,8 @@ spec:
       credentialsSecretRef:
         name: metadata-postgres-credentials
     image:
-      repository: "ghcr.io/firebolt-db/firebolt-metadata"
-      tag: "1.0.0"
+      repository: "ghcr.io/firebolt-db/metadata"
+      tag: "4.32.0-pre.0.20260428141824.5abdf30556cd"
     replicas: 1
     resources:
       requests:
@@ -360,7 +362,7 @@ spec:
   replicas: 5
   image:
     repository: "ghcr.io/firebolt-db/engine"
-    tag: "v1.2.0"
+    tag: "release-4.32.0-pre.0.20260428141824.5abdf30556cd"
     pullPolicy: IfNotPresent
   resources:
     cpu: "4"

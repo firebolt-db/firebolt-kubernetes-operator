@@ -10,7 +10,7 @@ metadata:
 spec:
   metadata:
     image:
-      repository: ghcr.io/firebolt-db/firebolt-metadata
+      repository: ghcr.io/firebolt-db/metadata
       tag: 4.32.0-pre.0.20260428110559.3964114056e2
   gateway: {}
 ---

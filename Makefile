@@ -4,7 +4,7 @@ VERSION ?= dev
 LDFLAGS := -X main.version=$(VERSION)
 
 # Helm chart configuration
-HELM_CHART_DIR ?= helm/firebolt-kubernetes-operator
+HELM_CHART_DIR ?= helm/kubernetes-operator
 HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
 HELM_REGISTRY ?= oci://ghcr.io/firebolt-db/helm-charts
 
@@ -144,7 +144,7 @@ kind-load-operator: ## Load the operator image into the Kind cluster.
 .PHONY: local-deploy
 local-deploy: docker-build-local kind-load-operator manifests ## Build, load, and deploy operator to Kind (one command).
 	helm upgrade --install firebolt-operator $(HELM_CHART_DIR) \
-		--set fullnameOverride=firebolt-kubernetes-operator \
+		--set fullnameOverride=kubernetes-operator \
 		--set image.repository=$(LOCAL_IMG_REPO) \
 		--set image.tag=$(LOCAL_IMG_TAG) \
 		--set image.pullPolicy=Never \
@@ -188,7 +188,7 @@ helm-package: ## Package the Helm charts into dist/.
 
 .PHONY: helm-push
 helm-push: helm-package ## Package and push the Helm charts to ECR.
-	helm push dist/firebolt-kubernetes-operator-*.tgz $(HELM_REGISTRY)
+	helm push dist/kubernetes-operator-*.tgz $(HELM_REGISTRY)
 	helm push dist/firebolt-operator-crds-*.tgz $(HELM_REGISTRY)
 
 ##@ Dependencies
