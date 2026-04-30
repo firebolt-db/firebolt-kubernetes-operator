@@ -254,13 +254,16 @@ def main() -> int:
             for k in sts:
                 max_gen = max(max_gen, k)
 
-    # Filter starting states.
+    # Filter starting states. TLC's node IDs are NOT stable across runs (they
+    # depend on worker count, exploration order, and other run-specific factors),
+    # so the output must be ordered by *state content* — the projected tuple of
+    # TLA+ variables — rather than by node ID.
     start_ids: List[int] = []
     for nid, state in nodes.items():
         if not args.include_uninitialized and state["phase"] == "uninitialized":
             continue
         start_ids.append(nid)
-    start_ids.sort()  # deterministic output
+    start_ids.sort(key=lambda nid: state_key(nodes[nid]))
 
     # Compute closures and emit the fixture.
     out_lines: List[str] = [
@@ -275,10 +278,11 @@ def main() -> int:
         start = nodes[nid]
         closure_ids = reconciler_closure(nid, reconciler_edges)
         # Deduplicate closure entries by their projected key (same observable
-        # state may correspond to multiple TLC node ids in rare cases).
+        # state may correspond to multiple TLC node ids in rare cases) and
+        # order by content for cross-run stability.
         seen_keys: Set[Tuple[object, ...]] = set()
         closure_states: List[Dict[str, object]] = []
-        for cid in sorted(closure_ids):
+        for cid in sorted(closure_ids, key=lambda c: state_key(nodes[c])):
             cstate = nodes[cid]
             key = state_key(cstate)
             if key in seen_keys:
