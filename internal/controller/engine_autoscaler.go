@@ -38,6 +38,12 @@ const (
 	DefaultAutoscalerIdleTimeout  = 30 * time.Minute
 	DefaultAutoscalerPollInterval = 1 * time.Minute
 	DefaultAutoscalerMinReplicas  = int32(0)
+	// DefaultAutoscalerWakeTTL bounds how long an unrefreshed
+	// AnnotationWakeRequested value still triggers a scale-up. Generous
+	// enough to cover engine cold-start (image pull on a fresh node, blue-
+	// green creating phase) while short enough that an abandoned request
+	// does not pin the engine indefinitely after the gateway gives up.
+	DefaultAutoscalerWakeTTL = 5 * time.Minute
 )
 
 // Autoscaler reason tokens written to status.autoscalerReason. Constants
@@ -50,10 +56,12 @@ const (
 	AutoscalerReasonActivity       = "ActivityObserved"
 	AutoscalerReasonScrapeFailed   = "ScrapeFailed"
 	AutoscalerReasonIdle           = "Idle"
+	AutoscalerReasonWakeRequested  = "WakeRequested"
 )
 
 // AutoscalerObservation is the runtime input the autoscaler consumes each
-// cycle, sourced from a metric scrape over the active generation's pods.
+// cycle, sourced from a metric scrape over the active generation's pods
+// and the FireboltEngine's wake-up annotation.
 type AutoscalerObservation struct {
 	// ActiveQueries is the sum of firebolt_running_queries +
 	// firebolt_suspended_queries across the active generation. Set to 0
@@ -65,6 +73,13 @@ type AutoscalerObservation struct {
 	// conservatively treats this as "activity observed" so a broken probe
 	// never trips an unintended scale-down.
 	ScrapeFailed bool
+
+	// WakeRequestedAt is the parsed timestamp from
+	// metadata.annotations[AnnotationWakeRequested], or nil when the
+	// annotation is absent or malformed. The autoscaler treats a value
+	// within DefaultAutoscalerWakeTTL of now as a request to immediately
+	// scale up to MaxReplicas.
+	WakeRequestedAt *time.Time
 }
 
 // AutoscalerDecision is the output of computeAutoscalerDecision and is
@@ -135,6 +150,14 @@ func computeAutoscalerDecision(
 	minReplicas := DefaultAutoscalerMinReplicas
 	if as.MinReplicas != nil {
 		minReplicas = *as.MinReplicas
+	}
+
+	// Wake annotation: a fresh stamp from the gateway requests an
+	// immediate scale-up to MaxReplicas. Honored above schedule because
+	// either path lands at the same target (MaxReplicas), but reporting
+	// WakeRequested is more informative for operators looking at status.
+	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoscalerWakeTTL {
+		return decisionWithScale(spec.Replicas, as.MaxReplicas, AutoscalerReasonWakeRequested, pollInterval)
 	}
 
 	if scheduleActive(as.Schedule, now) {
@@ -312,6 +335,27 @@ func parseHHMM(s string) (int, bool) {
 	return h*60 + m, true
 }
 
+// parseWakeAnnotation reads metadata.annotations[AnnotationWakeRequested]
+// and returns the parsed RFC 3339 timestamp, or nil when the annotation is
+// absent or malformed. A malformed value is treated as absent (rather than
+// returning an error) so a typo in an external client cannot wedge the
+// autoscaler — the worst case is "wake never fires" which the gateway will
+// notice and re-stamp with a valid value.
+func parseWakeAnnotation(annotations map[string]string) *time.Time {
+	if annotations == nil {
+		return nil
+	}
+	v := annotations[AnnotationWakeRequested]
+	if v == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
 // windowContains reports whether minute (0-1439) is inside [start, end). When
 // end < start the window is treated as crossing midnight: it is inside on
 // either side of 00:00. start == end is an empty window (returns false) so
@@ -384,7 +428,9 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoscaler")
 
-	obs := AutoscalerObservation{}
+	obs := AutoscalerObservation{
+		WakeRequestedAt: parseWakeAnnotation(engine.Annotations),
+	}
 	if engine.Spec.Replicas > 0 {
 		active, failed := r.scrapeActiveQueries(ctx, engine)
 		obs.ActiveQueries = active

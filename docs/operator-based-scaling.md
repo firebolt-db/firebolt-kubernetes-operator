@@ -675,6 +675,17 @@ When `spec.autoscaling.enabled=true`, the operator owns `spec.replicas` (HPA-sty
 
 Scale events are level-driven: the autoscaler patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. The autoscaler runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [`docs/architecture.md`](architecture.md#autoscaler) for the full decision precedence and configuration reference.
 
+### Gateway wake-up
+
+When an engine is at zero replicas, the gateway can wake it by stamping the `firebolt.io/wake-requested` annotation (RFC 3339 timestamp) on the FireboltEngine CR. The engine autoscaler treats a fresh value (within 5 minutes of now) as a request to scale up to `maxReplicas`, bypassing the idle-timeout check. The operator provisions per-instance RBAC for this:
+
+- `ServiceAccount` `<instance>-gateway`
+- `Role` `<instance>-gateway-wake` granting `get/list/patch` on `fireboltengines` in the namespace
+- `RoleBinding` linking them
+
+The gateway-side buffering, annotation patching, and retry logic are not yet wired in; they would extend the Envoy Lua filter rendered by the operator in `internal/controller/instance_gateway.go`.
+
+
 ## Concurrency and Race Conditions
 
 The operator uses Kubernetes optimistic concurrency control (ResourceVersion) to handle concurrent reconciles safely:
