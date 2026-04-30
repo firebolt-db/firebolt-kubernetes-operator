@@ -62,6 +62,7 @@ type EngineStorageSpec struct {
 // (firebolt_running_queries + firebolt_suspended_queries) that drive the
 // blue-green drain check, so a wake-up triggered by query traffic transitions
 // out of MinReplicas without an additional probe protocol.
+// +kubebuilder:validation:XValidation:rule="self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas : 0)",message="maxReplicas must be >= minReplicas"
 type AutoscalingSpec struct {
 	// Enabled turns the autoscaler on for this engine. Defaults to false.
 	// +kubebuilder:default=false
