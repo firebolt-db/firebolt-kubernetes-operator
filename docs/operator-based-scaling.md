@@ -661,6 +661,19 @@ For the complete list of configurable fields in the engine spec, see the [README
 | `phase` | string | Current phase (stable/creating/switching/draining/cleaning/stopped) |
 | `observedGeneration` | int | Kubernetes metadata generation last reconciled |
 | `conditions` | list | Status conditions (e.g. `InstanceReady`) |
+| `lastActivityTime` | timestamp/null | Most recent autoscaler observation that recorded activity |
+| `autoscaledAt` | timestamp/null | Most recent autoscaler-driven `spec.replicas` mutation |
+| `autoscalerReason` | string | One of `Disabled`/`ScheduleActive`/`Stopped`/`ActivityObserved`/`ScrapeFailed`/`Idle` |
+
+### Autoscaling
+
+When `spec.autoscaling.enabled=true`, the operator owns `spec.replicas` (HPA-style) and toggles it between `minReplicas` (default `0`, scale-to-zero) and `maxReplicas` based on:
+
+- the same `firebolt_running_queries + firebolt_suspended_queries` gauges that drive the drain check, summed across the active generation;
+- `idleTimeout` (default 30m) measured from `status.lastActivityTime`;
+- optional UTC `schedule[]` windows that pin replicas at `maxReplicas` regardless of activity.
+
+Scale events are level-driven: the autoscaler patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. The autoscaler runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [`docs/architecture.md`](architecture.md#autoscaler) for the full decision precedence and configuration reference.
 
 ## Concurrency and Race Conditions
 

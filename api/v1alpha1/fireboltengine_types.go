@@ -49,6 +49,82 @@ type EngineStorageSpec struct {
 	StorageClassName *string `json:"storageClassName,omitempty"`
 }
 
+// AutoscalingSpec configures replica autoscaling for a FireboltEngine.
+//
+// When Enabled is true the autoscaler owns spec.replicas: the controller will
+// mutate spec.replicas between zero (or MinReplicas) and MaxReplicas based on
+// the engine's observed query activity and the optional always-on Schedule.
+// User edits to spec.replicas while autoscaling is enabled are converged on
+// the next reconcile, so the user-facing "active" replica count is
+// MaxReplicas.
+//
+// Activity is observed via the same Prometheus gauges
+// (firebolt_running_queries + firebolt_suspended_queries) that drive the
+// blue-green drain check, so a wake-up triggered by query traffic transitions
+// out of MinReplicas without an additional probe protocol.
+type AutoscalingSpec struct {
+	// Enabled turns the autoscaler on for this engine. Defaults to false.
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// MaxReplicas is the replica count the autoscaler scales up to when the
+	// engine is active (during a Schedule window or following a wake-up).
+	// Required when Enabled is true.
+	// +kubebuilder:validation:Minimum=1
+	MaxReplicas int32 `json:"maxReplicas"`
+
+	// MinReplicas is the floor the autoscaler scales down to once IdleTimeout
+	// elapses with no observed query activity. 0 enables scale-to-zero.
+	// Defaults to 0.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MinReplicas *int32 `json:"minReplicas,omitempty"`
+
+	// IdleTimeout is how long the engine must observe zero in-flight and
+	// suspended queries before the autoscaler scales down to MinReplicas.
+	// Defaults to 30 minutes.
+	// +kubebuilder:default="30m"
+	// +optional
+	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
+
+	// PollInterval is how often the autoscaler scrapes engine metrics to
+	// re-evaluate idleness. Defaults to 1 minute.
+	// +kubebuilder:default="1m"
+	// +optional
+	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
+
+	// Schedule is an optional list of UTC time windows during which the
+	// autoscaler holds the engine at MaxReplicas regardless of observed
+	// activity. Useful for "always-on during business hours" policies.
+	// +optional
+	Schedule []ScheduleWindow `json:"schedule,omitempty"`
+}
+
+// ScheduleWindow is a recurring UTC time window during which the autoscaler
+// keeps the engine pinned at MaxReplicas. End may be less than Start to
+// express a window that crosses midnight (e.g. 22:00-02:00).
+type ScheduleWindow struct {
+	// Start is the window opening time in UTC, formatted "HH:MM".
+	// +kubebuilder:validation:Pattern=`^([01]\d|2[0-3]):[0-5]\d$`
+	Start string `json:"start"`
+
+	// End is the window closing time in UTC, formatted "HH:MM". An End equal
+	// to Start is treated as an empty window.
+	// +kubebuilder:validation:Pattern=`^([01]\d|2[0-3]):[0-5]\d$`
+	End string `json:"end"`
+
+	// Days lists the UTC weekdays the window applies to. Empty means every
+	// day. The window is anchored to the day on which Start falls; if End
+	// crosses midnight the trailing portion still belongs to the listed day.
+	// +optional
+	Days []ScheduleDay `json:"days,omitempty"`
+}
+
+// ScheduleDay is a UTC weekday code used in ScheduleWindow.Days.
+// +kubebuilder:validation:Enum=Mon;Tue;Wed;Thu;Fri;Sat;Sun
+type ScheduleDay string
+
 // RolloutStrategy defines how transitions between generations are handled.
 // +kubebuilder:validation:Enum=graceful;recreate
 type RolloutStrategy string
@@ -260,6 +336,13 @@ type FireboltEngineSpec struct {
 	// Changes to this field trigger a new blue-green generation.
 	// +optional
 	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+
+	// Autoscaling configures automatic replica management for this engine.
+	// When omitted or with Enabled=false, replicas is governed entirely by
+	// the user. When enabled, the autoscaler owns spec.replicas (HPA-style)
+	// and mutates it based on query activity and Schedule windows.
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
@@ -285,6 +368,25 @@ type FireboltEngineStatus struct {
 	// LastReconciled is the timestamp of the last reconciliation.
 	// +optional
 	LastReconciled *metav1.Time `json:"lastReconciled,omitempty"`
+
+	// LastActivityTime is the timestamp of the most recent autoscaler
+	// observation that recorded in-flight or suspended queries. The
+	// autoscaler scales down once now() - LastActivityTime exceeds
+	// spec.autoscaling.idleTimeout. Cleared when autoscaling is disabled.
+	// +optional
+	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
+
+	// AutoscaledAt is the timestamp of the most recent autoscaler-driven
+	// mutation of spec.replicas. Distinguishes autoscaler scale events from
+	// user edits in audit trails.
+	// +optional
+	AutoscaledAt *metav1.Time `json:"autoscaledAt,omitempty"`
+
+	// AutoscalerReason is a short token describing the most recent autoscaler
+	// decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
+	// "Disabled", "Stopped".
+	// +optional
+	AutoscalerReason string `json:"autoscalerReason,omitempty"`
 
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional

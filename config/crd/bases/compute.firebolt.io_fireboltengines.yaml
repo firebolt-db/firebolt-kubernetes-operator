@@ -71,6 +71,97 @@ spec:
               still transition to set, but any set value may not subsequently be
               changed or cleared.
             properties:
+              autoscaling:
+                description: |-
+                  Autoscaling configures automatic replica management for this engine.
+                  When omitted or with Enabled=false, replicas is governed entirely by
+                  the user. When enabled, the autoscaler owns spec.replicas (HPA-style)
+                  and mutates it based on query activity and Schedule windows.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled turns the autoscaler on for this engine.
+                      Defaults to false.
+                    type: boolean
+                  idleTimeout:
+                    default: 30m
+                    description: |-
+                      IdleTimeout is how long the engine must observe zero in-flight and
+                      suspended queries before the autoscaler scales down to MinReplicas.
+                      Defaults to 30 minutes.
+                    type: string
+                  maxReplicas:
+                    description: |-
+                      MaxReplicas is the replica count the autoscaler scales up to when the
+                      engine is active (during a Schedule window or following a wake-up).
+                      Required when Enabled is true.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  minReplicas:
+                    default: 0
+                    description: |-
+                      MinReplicas is the floor the autoscaler scales down to once IdleTimeout
+                      elapses with no observed query activity. 0 enables scale-to-zero.
+                      Defaults to 0.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  pollInterval:
+                    default: 1m
+                    description: |-
+                      PollInterval is how often the autoscaler scrapes engine metrics to
+                      re-evaluate idleness. Defaults to 1 minute.
+                    type: string
+                  schedule:
+                    description: |-
+                      Schedule is an optional list of UTC time windows during which the
+                      autoscaler holds the engine at MaxReplicas regardless of observed
+                      activity. Useful for "always-on during business hours" policies.
+                    items:
+                      description: |-
+                        ScheduleWindow is a recurring UTC time window during which the autoscaler
+                        keeps the engine pinned at MaxReplicas. End may be less than Start to
+                        express a window that crosses midnight (e.g. 22:00-02:00).
+                      properties:
+                        days:
+                          description: |-
+                            Days lists the UTC weekdays the window applies to. Empty means every
+                            day. The window is anchored to the day on which Start falls; if End
+                            crosses midnight the trailing portion still belongs to the listed day.
+                          items:
+                            description: ScheduleDay is a UTC weekday code used in
+                              ScheduleWindow.Days.
+                            enum:
+                            - Mon
+                            - Tue
+                            - Wed
+                            - Thu
+                            - Fri
+                            - Sat
+                            - Sun
+                            type: string
+                          type: array
+                        end:
+                          description: |-
+                            End is the window closing time in UTC, formatted "HH:MM". An End equal
+                            to Start is treated as an empty window.
+                          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+                          type: string
+                        start:
+                          description: Start is the window opening time in UTC, formatted
+                            "HH:MM".
+                          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+                          type: string
+                      required:
+                      - end
+                      - start
+                      type: object
+                    type: array
+                required:
+                - enabled
+                - maxReplicas
+                type: object
               customEngineConfig:
                 description: |-
                   CustomEngineConfig is a free-form JSON object deep-merged into the
@@ -753,6 +844,19 @@ spec:
                 description: ActiveGeneration is the generation currently serving
                   traffic.
                 type: integer
+              autoscaledAt:
+                description: |-
+                  AutoscaledAt is the timestamp of the most recent autoscaler-driven
+                  mutation of spec.replicas. Distinguishes autoscaler scale events from
+                  user edits in audit trails.
+                format: date-time
+                type: string
+              autoscalerReason:
+                description: |-
+                  AutoscalerReason is a short token describing the most recent autoscaler
+                  decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
+                  "Disabled", "Stopped".
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                   of the engine's state.
@@ -818,6 +922,14 @@ spec:
                 description: DrainingGeneration is the generation being drained, if
                   any.
                 type: integer
+              lastActivityTime:
+                description: |-
+                  LastActivityTime is the timestamp of the most recent autoscaler
+                  observation that recorded in-flight or suspended queries. The
+                  autoscaler scales down once now() - LastActivityTime exceeds
+                  spec.autoscaling.idleTimeout. Cleared when autoscaling is disabled.
+                format: date-time
+                type: string
               lastReconciled:
                 description: LastReconciled is the timestamp of the last reconciliation.
                 format: date-time

@@ -257,9 +257,24 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.gcOrphanedResources(ctx, engine)
 	}
 
+	requeueAfter := result.RequeueAfter
+
+	// Autoscaler runs only after a clean main reconcile and only in terminal
+	// phases. It may patch spec.replicas (level-driven: the patch flows
+	// through the FireboltEngine watch and the next reconcile picks it up
+	// via the existing blue-green path). Errors here do not poison the main
+	// reconcile result, since the cluster state we just wrote is consistent.
+	asResult, asErr := r.runAutoscaler(ctx, engine)
+	if asErr != nil {
+		log.Error(asErr, "Autoscaler step failed; will retry on next reconcile")
+	}
+	if asResult.RequeueAfter > 0 && (requeueAfter == 0 || asResult.RequeueAfter < requeueAfter) {
+		requeueAfter = asResult.RequeueAfter
+	}
+
 	return ctrl.Result{
 		Requeue:      result.Requeue,
-		RequeueAfter: result.RequeueAfter,
+		RequeueAfter: requeueAfter,
 	}, nil
 }
 

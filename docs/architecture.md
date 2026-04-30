@@ -221,6 +221,48 @@ The operator scrapes `/metrics` via the Kubernetes API server's `Pods/proxy` sub
 
 When `drainCheckEnabled: false`, the operator transitions directly from `switching` to `cleaning` without waiting. The engine's `shutdown_wait_unfinished` still gives in-flight queries a chance to finish during Kubernetes termination; `drainCheckEnabled` only controls whether the operator gates the rollout on top of that.
 
+## Autoscaler
+
+Autoscaling is opt-in via `spec.autoscaling.enabled=true`. When enabled, the operator owns `spec.replicas` (HPA-style) and toggles it between `minReplicas` (default 0, enabling scale-to-zero) and `maxReplicas` based on observed query activity and an optional UTC `schedule`.
+
+The autoscaler reuses the **same Prometheus signal** the drain check consumes — `firebolt_running_queries + firebolt_suspended_queries` — summed across all running pods of the active generation. Sharing the signal keeps "the engine is busy" in exactly one place: a pod that the drain check would refuse to evict is the same pod the autoscaler counts as activity.
+
+### Decision precedence
+
+`computeAutoscalerDecision` is a pure function over `(spec, status, observation, now)`. Precedence, top-down:
+
+1. **Disabled** — if `spec.autoscaling` is unset or `enabled=false`, the autoscaler emits no decision and `spec.replicas` is fully user-owned.
+2. **Schedule active** — `now` falls inside any window in `spec.autoscaling.schedule`. Replicas are pinned at `maxReplicas`. Schedule wins over both idle and stopped paths so an "always-on during business hours" policy can wake a parked engine.
+3. **Stopped** — `spec.replicas == 0` and no schedule window is active. No-op; wake-up via gateway is handled separately.
+4. **Scrape failed or activity observed** — refresh `status.lastActivityTime`, do not scale. Scrape failures are grouped with activity intentionally: a broken probe must never look quiet enough to scale down.
+5. **Quiet ≥ idleTimeout, replicas > minReplicas** — patch `spec.replicas = minReplicas` and stamp `status.autoscaledAt`.
+6. **First quiet observation** — `status.lastActivityTime` is anchored to `now` so a fresh engine gets one full `idleTimeout` of grace.
+
+### Level-driven encoding
+
+Scale events are encoded by patching `spec.replicas` via the standard `r.Update`. The `FireboltEngine` watch fires; the next reconcile takes the normal blue-green path through `creating → switching → draining → cleaning`. The autoscaler runs only in **terminal phases** (`stable`/`stopped`) so it cannot fight a rollout in progress.
+
+Because scale-down only fires when `firebolt_running_queries + firebolt_suspended_queries == 0` was just observed, the subsequent drain check on the old generation completes immediately — no wasted grace period. A separate "skip drain because the autoscaler vouched for it" path is unnecessary.
+
+### Configuration
+
+| Field | Default | Description |
+|---|---|---|
+| `spec.autoscaling.enabled` | `false` | Master toggle. |
+| `spec.autoscaling.maxReplicas` | (required) | Replica count when active. |
+| `spec.autoscaling.minReplicas` | `0` | Floor; `0` enables scale-to-zero. |
+| `spec.autoscaling.idleTimeout` | `30m` | Quiet window before scaling to `minReplicas`. |
+| `spec.autoscaling.pollInterval` | `1m` | Scrape cadence. |
+| `spec.autoscaling.schedule[]` | `[]` | UTC `HH:MM`-`HH:MM` always-on windows; optional `days` filter (`Mon`..`Sun`). End < start crosses midnight. |
+
+### Status fields
+
+| Field | Meaning |
+|---|---|
+| `status.lastActivityTime` | Most recent observation that recorded activity (or, for a fresh engine, the first quiet observation). Drives the idle clock. |
+| `status.autoscaledAt` | Timestamp of the most recent autoscaler-driven `spec.replicas` mutation. Distinguishes autoscaler scale events from user edits. |
+| `status.autoscalerReason` | Token: `Disabled` / `ScheduleActive` / `Stopped` / `ActivityObserved` / `ScrapeFailed` / `Idle`. |
+
 ## Error handling
 
 The operator follows strict error propagation rules to ensure failures are always visible.

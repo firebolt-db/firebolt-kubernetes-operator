@@ -42,6 +42,17 @@ Each spec change bumps `currentGeneration`. Resources per generation:
 | `engine_reconcile.go` | Pure compute layer — zero I/O |
 | `engine_apply.go` | Write layer — applies reconcile result |
 | `engine_gc.go` | Garbage-collects stale generations |
+| `engine_autoscaler.go` | Optional second pass: scrapes activity, mutates `spec.replicas` based on idle timeout / Schedule |
+
+## Engine autoscaler
+
+Opt-in via `spec.autoscaling.enabled=true`. When enabled the autoscaler owns `spec.replicas` (HPA-style) and toggles it between `minReplicas` (default 0) and `maxReplicas` based on:
+
+- the same `firebolt_running_queries + firebolt_suspended_queries` gauges scraped for the drain check, summed across the active generation;
+- `idleTimeout` (default 30m) measured from `status.lastActivityTime`;
+- optional UTC `schedule` windows that pin replicas at `maxReplicas` regardless of activity.
+
+The autoscaler runs only in terminal phases (`stable`/`stopped`) so it cannot fight a blue-green rollout. Scale events are level-driven: a decision is encoded by patching `spec.replicas`, the existing watch fires, and the next reconcile converges via the normal blue-green path.
 
 ## Instance reconciler
 
