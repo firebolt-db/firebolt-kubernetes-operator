@@ -162,6 +162,10 @@ spec:
                 - enabled
                 - maxReplicas
                 type: object
+                x-kubernetes-validations:
+                - message: maxReplicas must be >= minReplicas
+                  rule: 'self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas
+                    : 0)'
               customEngineConfig:
                 description: |-
                   CustomEngineConfig is a free-form JSON object deep-merged into the
