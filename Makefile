@@ -106,6 +106,44 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run
 
+##@ Formal Verification
+
+TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
+TLA2TOOLS_VERSION ?= v1.8.0
+TLA2TOOLS_URL ?= https://github.com/tlaplus/tlaplus/releases/download/$(TLA2TOOLS_VERSION)/tla2tools.jar
+
+$(TLA2TOOLS): $(LOCALBIN)
+	wget -q -O "$(TLA2TOOLS)" "$(TLA2TOOLS_URL)"
+
+.PHONY: tla2tools
+tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
+
+.PHONY: formal-check
+formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
+
+.PHONY: formal-dump
+formal-dump: tla2tools ## Dump the TLC state graph for FireboltEngine to formal/FireboltEngine.dot.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/FireboltEngine.cfg \
+		-dump dot,actionlabels formal/FireboltEngine.dot \
+		formal/FireboltEngine.tla
+
+.PHONY: formal-gen
+formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixture from the TLC state graph.
+	python3 scripts/gen-tla-state-tests.py \
+		--dot formal/FireboltEngine.dot \
+		--out internal/controller/engine_tla_states_data_test.go
+
+.PHONY: formal-verify
+formal-verify: formal-gen ## CI guard: regenerate the fixture and fail if the generated file changed.
+	@if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then \
+		echo "ERROR: TLA+ state-cover fixture is out of date. Run 'make formal-gen' and commit the result." >&2; \
+		git --no-pager diff -- internal/controller/engine_tla_states_data_test.go; \
+		exit 1; \
+	fi
+
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	"$(GOLANGCI_LINT)" run --fix

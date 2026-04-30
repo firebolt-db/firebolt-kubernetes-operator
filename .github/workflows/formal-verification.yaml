@@ -52,3 +52,21 @@ jobs:
             -workers 2 \
             -config formal/FireboltInstance.cfg \
             formal/FireboltInstance.tla
+
+      - name: Verify Phase 3 state-cover fixture is up to date
+        run: |
+          # Reuse the cached tla2tools.jar at the location the Makefile expects.
+          mkdir -p bin
+          cp tla2tools.jar bin/tla2tools.jar
+          java -cp bin/tla2tools.jar tlc2.TLC -workers 2 \
+            -config formal/FireboltEngine.cfg \
+            -dump dot,actionlabels formal/FireboltEngine.dot \
+            formal/FireboltEngine.tla
+          python3 scripts/gen-tla-state-tests.py \
+            --dot formal/FireboltEngine.dot \
+            --out internal/controller/engine_tla_states_data_test.go
+          if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then
+            echo "::error::TLA+ state-cover fixture is stale; run 'make formal-gen' and commit"
+            git --no-pager diff -- internal/controller/engine_tla_states_data_test.go
+            exit 1
+          fi

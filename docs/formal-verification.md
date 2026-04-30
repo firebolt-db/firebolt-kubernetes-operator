@@ -93,11 +93,22 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 - **Invariants**: `Inv_TerminalConsistency`, `Inv_TerminalNoDraining`, `Inv_ActiveHasSTS`, `Inv_AlwaysRequeues` — mirror the TLA+ `Safety` predicate
 - `CrashReconcile` simulates a crash between the last resource write and the status update in `applyEngineState`, exercising crash recovery on the next step
 
-### Phase 3 — TLA+ → test-case generation (harness)
+### Phase 3 — TLA+ state cover (complete)
 
-Extract every distinct execution path from the TLC state graph. Turn each path into a deterministic envtest scenario that replaces/extends the random rapid sequences. This closes the model-to-implementation gap: TLC drives the real reconciler.
+Phase 2's `rapid` sequences explore the compute layer with random walks. Phase 3 turns the TLC state graph into a deterministic exhaustive state cover for the same compute layer: every reachable TLA+ state becomes a test case that calls `computeEngineReconcile` and asserts the resulting state lies in the model's "reconciler closure" of the start (states reachable via 0+ consecutive reconciler-only transitions). Random walks miss states they did not visit; state cover hits every reachable input by construction.
 
-Deliverable: `scripts/gen-tla-tests.py` + generated test stubs.
+The level-triggered design motivates state cover over edge cover (path replay). Reconcile correctness is a state-local property — given any reachable state, `Reconcile(X) ∈ successors(X)` — so once every reachable state is checked, every transition is checked by composition. Path replay is the right tool for event-sourced systems; this is not one.
+
+The fixture lives in the controller package as a generated Go file:
+
+- `formal/FireboltEngine.dot` — TLC state graph dump (gitignored, regenerated via `make formal-dump`)
+- `scripts/gen-tla-state-tests.py` — DOT parser + closure builder
+- `internal/controller/engine_tla_states_data_test.go` — generated fixture (committed)
+- `internal/controller/engine_tla_state_test.go` — `TestTLAEngineStateCover` runs against the fixture
+
+At `MaxGen=2, MaxSpec=3` TLC produces 1,386 reachable states. 28 fall on the model's MaxGen ceiling where the spec's bounded handling diverges from the unbounded implementation (documented in `tlaModelBoundary`); 438 are skipped because the outer Reconcile method's instance gate prevents the compute layer from running (`tlaShouldGateOut`); uninitialised states are filtered at generation time because the controller's first reconcile handles them via a single early-return that existing unit tests cover. The remaining 892 states are exercised against `computeEngineReconcile` in well under a second, with all Phase 2 invariants checked after each call.
+
+CI guard: `make formal-verify` regenerates the fixture and fails if the result differs from what is committed.
 
 ### Phase 4 — Kamera (conditional on maturity)
 
