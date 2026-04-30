@@ -6,7 +6,7 @@ This document describes how the Firebolt operator exposes Prometheus metrics for
 
 | Component | Port | Name | Path | What it exposes |
 |---|---|---|---|---|
-| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges |
+| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges. The operator scrapes the first two via `Pods/proxy` to drive both the drain check and the autoscaler. |
 | Gateway pods (Envoy) | 9090 (default) | `metrics` | `/stats/prometheus` | Envoy connection, request, and cluster stats |
 | Operator pod | Configurable via `metrics.bindAddress` | `https` or `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
 
