@@ -28,6 +28,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,6 +81,8 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
@@ -265,6 +268,9 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&corev1.SecretList{}, "Secret")
 	deleteList(&corev1.PersistentVolumeClaimList{}, "PersistentVolumeClaim")
 	deleteList(&policyv1.PodDisruptionBudgetList{}, "PodDisruptionBudget")
+	deleteList(&corev1.ServiceAccountList{}, "ServiceAccount")
+	deleteList(&rbacv1.RoleBindingList{}, "RoleBinding")
+	deleteList(&rbacv1.RoleList{}, "Role")
 
 	if len(errs) > 0 {
 		return ctrl.Result{}, fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
@@ -323,6 +329,24 @@ func extractItems(list client.ObjectList) []client.Object {
 		}
 		return out
 	case *policyv1.PodDisruptionBudgetList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *corev1.ServiceAccountList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *rbacv1.RoleList:
+		out := make([]client.Object, len(l.Items))
+		for i := range l.Items {
+			out[i] = &l.Items[i]
+		}
+		return out
+	case *rbacv1.RoleBindingList:
 		out := make([]client.Object, len(l.Items))
 		for i := range l.Items {
 			out[i] = &l.Items[i]

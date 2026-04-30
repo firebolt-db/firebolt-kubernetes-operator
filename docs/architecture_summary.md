@@ -50,7 +50,8 @@ Opt-in via `spec.autoscaling.enabled=true`. When enabled the autoscaler owns `sp
 
 - the same `firebolt_running_queries + firebolt_suspended_queries` gauges scraped for the drain check, summed across the active generation;
 - `idleTimeout` (default 30m) measured from `status.lastActivityTime`;
-- optional UTC `schedule` windows that pin replicas at `maxReplicas` regardless of activity.
+- optional UTC `schedule` windows that pin replicas at `maxReplicas` regardless of activity;
+- a `firebolt.io/wake-requested` annotation written by the gateway when a request lands for a stopped engine (see [Gateway wake-up protocol](architecture.md#gateway-wake-up-protocol)).
 
 The autoscaler runs only in terminal phases (`stable`/`stopped`) so it cannot fight a blue-green rollout. Scale events are level-driven: a decision is encoded by patching `spec.replicas`, the existing watch fires, and the next reconcile converges via the normal blue-green path.
 

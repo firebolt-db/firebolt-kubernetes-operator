@@ -232,11 +232,12 @@ The autoscaler reuses the **same Prometheus signal** the drain check consumes �
 `computeAutoscalerDecision` is a pure function over `(spec, status, observation, now)`. Precedence, top-down:
 
 1. **Disabled** — if `spec.autoscaling` is unset or `enabled=false`, the autoscaler emits no decision and `spec.replicas` is fully user-owned.
-2. **Schedule active** — `now` falls inside any window in `spec.autoscaling.schedule`. Replicas are pinned at `maxReplicas`. Schedule wins over both idle and stopped paths so an "always-on during business hours" policy can wake a parked engine.
-3. **Stopped** — `spec.replicas == 0` and no schedule window is active. No-op; wake-up via gateway is handled separately.
-4. **Scrape failed or activity observed** — refresh `status.lastActivityTime`, do not scale. Scrape failures are grouped with activity intentionally: a broken probe must never look quiet enough to scale down.
-5. **Quiet ≥ idleTimeout, replicas > minReplicas** — patch `spec.replicas = minReplicas` and stamp `status.autoscaledAt`.
-6. **First quiet observation** — `status.lastActivityTime` is anchored to `now` so a fresh engine gets one full `idleTimeout` of grace.
+2. **Wake requested** — `metadata.annotations["firebolt.io/wake-requested"]` carries an RFC 3339 timestamp younger than `DefaultAutoscalerWakeTTL` (5 minutes). Replicas are scaled to `maxReplicas`. Reason `WakeRequested`. See [Gateway wake-up protocol](#gateway-wake-up-protocol).
+3. **Schedule active** — `now` falls inside any window in `spec.autoscaling.schedule`. Replicas are pinned at `maxReplicas`. Schedule wins over both idle and stopped paths so an "always-on during business hours" policy can wake a parked engine.
+4. **Stopped** — `spec.replicas == 0`, no fresh wake annotation, no schedule window active. No-op.
+5. **Scrape failed or activity observed** — refresh `status.lastActivityTime`, do not scale. Scrape failures are grouped with activity intentionally: a broken probe must never look quiet enough to scale down.
+6. **Quiet ≥ idleTimeout, replicas > minReplicas** — patch `spec.replicas = minReplicas` and stamp `status.autoscaledAt`.
+7. **First quiet observation** — `status.lastActivityTime` is anchored to `now` so a fresh engine gets one full `idleTimeout` of grace.
 
 ### Level-driven encoding
 
@@ -262,6 +263,60 @@ Because scale-down only fires when `firebolt_running_queries + firebolt_suspende
 | `status.lastActivityTime` | Most recent observation that recorded activity (or, for a fresh engine, the first quiet observation). Drives the idle clock. |
 | `status.autoscaledAt` | Timestamp of the most recent autoscaler-driven `spec.replicas` mutation. Distinguishes autoscaler scale events from user edits. |
 | `status.autoscalerReason` | Token: `Disabled` / `ScheduleActive` / `Stopped` / `ActivityObserved` / `ScrapeFailed` / `Idle`. |
+
+## Gateway wake-up protocol
+
+A FireboltEngine that has been autoscaled to zero replicas needs a way to come back to life when a query arrives. The operator and the Envoy-based gateway exchange a single, level-driven signal for this:
+
+```
+                       patch annotation
+                ┌─────────────────────────────┐
+   ┌──────────┐ │   metadata.annotations      │  ┌────────────┐
+   │ Gateway  ├─►   firebolt.io/wake-requested├─►│ Engine CR  │
+   │ (Envoy)  │ │   = "<RFC 3339 timestamp>"  │  └─────┬──────┘
+   └──────────┘ └─────────────────────────────┘        │ Watch fires
+                                                       ▼
+                                               ┌────────────┐
+                                               │ Autoscaler │
+                                               │ runs:      │
+                                               │ wake fresh │
+                                               │ → MaxRepl. │
+                                               └─────┬──────┘
+                                                     │ patch spec.replicas
+                                                     ▼
+                                               ┌────────────┐
+                                               │ Blue-green │
+                                               │ creating   │
+                                               └────────────┘
+```
+
+### Why an annotation
+
+- **Level-driven**: the annotation timestamp is part of the resource state. Any reconcile (operator restart, periodic poll, watch event) reads the same value and converges identically.
+- **Fire-and-forget**: a wake-up does not require a synchronous response. The gateway buffers the triggering query locally and retries against engine DNS once Envoy's active health checks observe a ready upstream.
+- **Coalescing**: 1000 simultaneous queries for the same stopped engine produce a handful of identical patches via K8s optimistic concurrency, not a thundering-herd RPC.
+- **Operator-down tolerant**: K8s API still accepts the patch when the operator manager is restarting; the next reconciler instance picks it up.
+
+### Wake annotation TTL
+
+`DefaultAutoscalerWakeTTL` (5 minutes) bounds how long an unrefreshed annotation continues to trigger scale-up. Long enough to cover engine cold-start (image pull, blue-green creating phase) and short enough that an abandoned wake does not pin an engine after the gateway has given up. The gateway is expected to keep stamping the annotation while it has buffered queries waiting.
+
+The annotation is honored only when `spec.autoscaling.enabled=true`. Without an autoscaling policy the operator has no `MaxReplicas` to scale to, and respecting a wake from a non-policy actor would silently override the user's `spec.replicas==0` intent.
+
+### Gateway RBAC
+
+Each FireboltInstance now provisions per-gateway RBAC alongside the gateway Deployment:
+
+| Resource | Name | Purpose |
+|---|---|---|
+| `ServiceAccount` | `<instance>-gateway` | Identity attached to gateway pods. |
+| `Role` | `<instance>-gateway-wake` | Grants `get`, `list`, `patch` on `fireboltengines` in the same namespace. |
+| `RoleBinding` | `<instance>-gateway-wake` | Binds the SA to the Role. |
+
+RBAC cannot restrict patch to a specific subresource or field, so the gateway holds patch on the whole CR. The wake protocol constrains the gateway to a strategic-merge patch that only touches `metadata.annotations[firebolt.io/wake-requested]`; misuse beyond that is reviewed via Kubernetes audit logs, not enforced by RBAC.
+
+> **Note:** the gateway-side implementation (intercept routing for stopped engines, buffer the request, patch the annotation, retry against engine DNS) is not yet wired in. It would extend the Envoy Lua filter rendered by the operator in `internal/controller/instance_gateway.go`. This document defines the contract and the operator-side enforcement (RBAC, fresh-annotation handling); the Envoy-side hook is tracked as a follow-up.
+
 
 ## Error handling
 

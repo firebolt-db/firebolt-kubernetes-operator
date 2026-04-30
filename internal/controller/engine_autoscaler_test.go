@@ -308,6 +308,83 @@ func TestComputeAutoscalerDecision_IdleAtMinDoesNothing(t *testing.T) {
 	}
 }
 
+func TestComputeAutoscalerDecision_FreshWakeRequestScalesToMax(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{
+		Replicas:    0,
+		Autoscaling: enabledAutoscalingSpec(),
+	}
+	wake := fixedNow().Add(-30 * time.Second)
+	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+		AutoscalerObservation{WakeRequestedAt: &wake}, fixedNow())
+
+	if !d.ScaleAction || d.DesiredReplicas != 3 {
+		t.Fatalf("fresh wake must scale to MaxReplicas: %+v", d)
+	}
+	if d.Reason != AutoscalerReasonWakeRequested {
+		t.Fatalf("reason: want %q got %q", AutoscalerReasonWakeRequested, d.Reason)
+	}
+}
+
+func TestComputeAutoscalerDecision_StaleWakeRequestIgnored(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{
+		Replicas:    0,
+		Autoscaling: enabledAutoscalingSpec(),
+	}
+	stale := fixedNow().Add(-2 * DefaultAutoscalerWakeTTL)
+	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+		AutoscalerObservation{WakeRequestedAt: &stale}, fixedNow())
+
+	if d.ScaleAction {
+		t.Fatal("stale wake annotation must not trigger scale-up")
+	}
+	if d.Reason != AutoscalerReasonStopped {
+		t.Fatalf("reason: want %q got %q", AutoscalerReasonStopped, d.Reason)
+	}
+}
+
+func TestComputeAutoscalerDecision_WakeIgnoredWhenAutoscalingDisabled(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 0}
+	wake := fixedNow().Add(-1 * time.Second)
+	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+		AutoscalerObservation{WakeRequestedAt: &wake}, fixedNow())
+
+	if d.ScaleAction {
+		t.Fatal("wake must be ignored when autoscaling is disabled")
+	}
+	if d.Reason != AutoscalerReasonDisabled {
+		t.Fatalf("reason: want %q got %q", AutoscalerReasonDisabled, d.Reason)
+	}
+}
+
+func TestParseWakeAnnotation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		annots    map[string]string
+		expectNil bool
+	}{
+		{"nil map", nil, true},
+		{"empty value", map[string]string{AnnotationWakeRequested: ""}, true},
+		{"missing key", map[string]string{"unrelated": "x"}, true},
+		{"valid RFC3339", map[string]string{AnnotationWakeRequested: "2026-04-30T12:00:00Z"}, false},
+		{"malformed", map[string]string{AnnotationWakeRequested: "not-a-time"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseWakeAnnotation(tc.annots)
+			if (got == nil) != tc.expectNil {
+				t.Fatalf("parseWakeAnnotation(%v): got nil=%v want nil=%v", tc.annots, got == nil, tc.expectNil)
+			}
+		})
+	}
+}
+
 func TestComputeAutoscalerDecision_StoppedNoSchedule(t *testing.T) {
 	t.Parallel()
 

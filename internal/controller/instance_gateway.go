@@ -81,6 +81,14 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 
 	envoyYAML := buildEnvoyConfigYAML(instance)
 
+	// RBAC must exist before the Deployment that mounts the ServiceAccount;
+	// without it the Deployment would still admit (kubelet creates a token
+	// for any SA name), but the gateway's first wake-patch attempt would
+	// fail with Forbidden.
+	if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
+		return fmt.Errorf("ensuring gateway RBAC: %w", err)
+	}
+
 	if err := r.ensureGatewayConfigMap(ctx, instance, envoyYAML); err != nil {
 		return fmt.Errorf("ensuring gateway configmap: %w", err)
 	}
@@ -581,6 +589,7 @@ sleep 8
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName:            gatewayServiceAccountName(instance.Name),
 					TerminationGracePeriodSeconds: &gracePeriod,
 					Containers: []corev1.Container{{
 						Name:            gatewayContainerName,
