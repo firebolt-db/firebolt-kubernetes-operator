@@ -1329,6 +1329,7 @@ func TestBuildConfigMap_ProtectedConfigPathsStripped(t *testing.T) {
 		"engine_id": "evil",
 		"engine_name": "evil",
 		"multi_engine_endpoint": "evil",
+		"multi_engine_mode_enabled": false,
 		"shutdown_wait_unfinished": 99999
 	}}`
 	_, cfg := renderConfig(t, custom)
@@ -1343,6 +1344,9 @@ func TestBuildConfigMap_ProtectedConfigPathsStripped(t *testing.T) {
 	}
 	if cfg["multi_engine_endpoint"] != testMetadataEndpoint {
 		t.Errorf("multi_engine_endpoint = %v, want %v", cfg["multi_engine_endpoint"], testMetadataEndpoint)
+	}
+	if v, ok := cfg["multi_engine_mode_enabled"].(bool); !ok || !v {
+		t.Errorf("multi_engine_mode_enabled = %v, want true (operator-authoritative)", cfg["multi_engine_mode_enabled"])
 	}
 	if cfg["shutdown_wait_unfinished"] == float64(99999) {
 		t.Error("shutdown_wait_unfinished was overridden by user input")

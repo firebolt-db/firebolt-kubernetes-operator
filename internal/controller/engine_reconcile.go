@@ -773,6 +773,7 @@ func stripProtectedEngineConfigPaths(m map[string]interface{}) {
 	delete(cfg, "engine_id")
 	delete(cfg, "engine_name")
 	delete(cfg, "multi_engine_endpoint")
+	delete(cfg, "multi_engine_mode_enabled")
 	delete(cfg, "shutdown_wait_unfinished")
 }
 

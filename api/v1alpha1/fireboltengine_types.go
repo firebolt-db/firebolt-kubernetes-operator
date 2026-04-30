@@ -296,9 +296,9 @@ type FireboltEngineSpec struct {
 	// customEngineConfig become siblings of `config` and `nodes`, and keys
 	// nested under `config:` are deep-merged into the inner config block,
 	// overriding the operator's defaults for: account_name, organization_id,
-	// organization_name, cluster_id, multi_engine_mode_enabled,
-	// logger_formatting, and logger_use_files. Any additional keys
-	// understood by the engine binary may be set at either level.
+	// organization_name, cluster_id, logger_formatting, and logger_use_files.
+	// Any additional keys understood by the engine binary may be set at
+	// either level.
 	//
 	// The operator retains authority over identity, routing, and topology
 	// paths. The following are silently stripped from user input before the
@@ -309,6 +309,7 @@ type FireboltEngineSpec struct {
 	//   - config.engine_id
 	//   - config.engine_name
 	//   - config.multi_engine_endpoint
+	//   - config.multi_engine_mode_enabled
 	//   - config.shutdown_wait_unfinished
 	//
 	// Changes to this field trigger a new blue-green generation, since the
