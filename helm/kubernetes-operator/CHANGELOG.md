@@ -1,3 +1,18 @@
+# 0.1.29
+
+appVersion: v1.20.0
+
+## [1.20.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.19.0...v1.20.0) (2026-04-30)
+
+### Features
+
+* **controller:** add TLA+ state-cover tests for engine reconciler (FB-804) ([13b6087](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/13b608722b921f90eca8a929671ff6d4c1824192))
+
+### Bug Fixes
+
+* **controller:** order TLA+ state-cover fixture by content (FB-804) ([c7343ab](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c7343abb8ba98887ff39695bda1dfaf4128f140c))
+
+
 # 0.1.28
 
 appVersion: v1.19.0
