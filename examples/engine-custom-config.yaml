@@ -2,9 +2,9 @@
 # rendered engine config.json at the root: keys nested under `config:`
 # merge into the inner config block (overriding operator defaults for
 # account_name, organization_id, organization_name, cluster_id,
-# multi_engine_mode_enabled, logger_formatting, logger_use_files), and
-# any keys placed at the top of customEngineConfig become siblings of
-# `config` and `nodes` in the rendered file.
+# logger_formatting, logger_use_files), and any keys placed at the top
+# of customEngineConfig become siblings of `config` and `nodes` in the
+# rendered file.
 #
 # Operator-authoritative paths are silently stripped from user input and
 # cannot be overridden via this field:
@@ -13,6 +13,7 @@
 #   - config.engine_id
 #   - config.engine_name
 #   - config.multi_engine_endpoint
+#   - config.multi_engine_mode_enabled
 #   - config.shutdown_wait_unfinished
 #
 # Changes to customEngineConfig trigger a new blue-green generation.

@@ -171,14 +171,13 @@ spec:
                   CustomEngineConfig is a free-form JSON object whose top-level keys are
                   merged into each engine node's `config.config` block. Keys provided
                   here override the operator's defaults for: account_name, organization_id,
-                  organization_name, cluster_id, multi_engine_mode_enabled,
-                  logger_formatting, and logger_use_files. Any additional keys understood
-                  by the engine binary may also be set here.
+                  organization_name, cluster_id, logger_formatting, and logger_use_files.
+                  Any additional keys understood by the engine binary may also be set here.
 
                   The operator retains authority over identity and routing keys and
                   reapplies them after the merge: account_id, engine_id, engine_name,
-                  multi_engine_endpoint, and shutdown_wait_unfinished cannot be
-                  overridden via this field.
+                  multi_engine_endpoint, multi_engine_mode_enabled, and
+                  shutdown_wait_unfinished cannot be overridden via this field.
 
                   Changes to this field trigger a new blue-green generation, since the
                   rendered config.json content changes.
