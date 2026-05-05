@@ -587,6 +587,11 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 										},
 									},
 								},
+								// Allows the default AWS SDK EC2 metadata detection (required for IRSA).
+								{
+									Name:  "FIREBOLT_ALLOW_AWS_IRSA",
+									Value: "true",
+								},
 							},
 							Ports:        GetContainerPorts(),
 							Command:      []string{"/bin/bash", "-c"},
