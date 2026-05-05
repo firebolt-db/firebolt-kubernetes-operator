@@ -1,3 +1,14 @@
+# 0.1.32
+
+appVersion: v1.23.0
+
+## [1.23.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.22.0...v1.23.0) (2026-05-05)
+
+### Features
+
+* **controller:** apply independent engine resource requirements (FB-864) ([#30](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/30)) ([a6d9bd3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a6d9bd3a7ff097fb6b0b3e0006ceeaf5ba023343))
+
+
 # 0.1.31
 
 appVersion: v1.22.0
