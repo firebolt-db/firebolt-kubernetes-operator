@@ -1,3 +1,14 @@
+# 0.1.31
+
+appVersion: v1.22.0
+
+## [1.22.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.21.0...v1.22.0) (2026-05-05)
+
+### Features
+
+* bump engine/metadata images and use latest/dev where makes sense (FB-908) ([d6eb7cc](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d6eb7cc460dc3a2fe60066bd2bbafe93f9a30ef9))
+
+
 # 0.1.30
 
 appVersion: v1.21.0
