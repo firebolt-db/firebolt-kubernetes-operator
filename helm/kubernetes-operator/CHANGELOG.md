@@ -1,3 +1,20 @@
+# 0.1.30
+
+appVersion: v1.21.0
+
+## [1.21.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.20.0...v1.21.0) (2026-05-05)
+
+### Features
+
+* **autoscaler:** add per-engine idle/schedule autoscaling (FB-903) ([6e28d9b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6e28d9b38288853e789ab322e9a095d32aa8caec))
+* **autoscaler:** wake-up annotation contract + per-instance gateway RBAC (FB-903) ([b860ac3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b860ac3fa1f7322c2021103f4441393718fef591))
+
+### Bug Fixes
+
+* **autoscaler:** reject minReplicas > maxReplicas at admission (FB-908) ([11ab027](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/11ab0272d8a1a91287da3df60cec6aab11181594))
+* disallow user overrides for config.multi_engine_mode_enabled (FB-908) ([f8a0c1a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f8a0c1aff9cf255ee7f842f91cdd704c42fdda90))
+
+
 # 0.1.29
 
 appVersion: v1.20.0
