@@ -220,8 +220,9 @@ type FireboltEngineSpec struct {
 	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
-	// Resources defines the CPU and memory for engine pods.
-	Resources ResourceRequirements `json:"resources"`
+	// Resources defines the Kubernetes resource requests and limits for engine pods.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
 	// check on old-generation pods during graceful rollouts. When false, the

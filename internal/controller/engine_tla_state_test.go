@@ -54,9 +54,15 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 			Repository: "firebolt/engine",
 			Tag:        fmt.Sprintf("v%d.0", s.SpecVer),
 		},
-		Resources: computev1alpha1.ResourceRequirements{
-			CPU:    resource.MustParse("2"),
-			Memory: resource.MustParse("8Gi"),
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
 		},
 		Rollout: computev1alpha1.RolloutGraceful,
 	}

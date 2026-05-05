@@ -577,16 +577,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 							Image:           image,
 							ImagePullPolicy: pullPolicy,
 							SecurityContext: containerSecurityContext,
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    spec.Resources.CPU,
-									corev1.ResourceMemory: spec.Resources.Memory,
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    spec.Resources.CPU,
-									corev1.ResourceMemory: spec.Resources.Memory,
-								},
-							},
+							Resources:       engineContainerResources(spec),
 							Env: []corev1.EnvVar{
 								{
 									Name: "POD_INDEX",
@@ -848,6 +839,29 @@ func getEngineStorage(spec *computev1alpha1.FireboltEngineSpec) computev1alpha1.
 	return s
 }
 
+func engineContainerResources(spec *computev1alpha1.FireboltEngineSpec) corev1.ResourceRequirements {
+	return *spec.Resources.DeepCopy()
+}
+
+func resourceRequirementsEqual(actual, desired corev1.ResourceRequirements) bool {
+	return resourceListEqual(actual.Requests, desired.Requests) &&
+		resourceListEqual(actual.Limits, desired.Limits) &&
+		reflect.DeepEqual(actual.Claims, desired.Claims)
+}
+
+func resourceListEqual(actual, desired corev1.ResourceList) bool {
+	if len(actual) != len(desired) {
+		return false
+	}
+	for name, desiredQuantity := range desired {
+		actualQuantity, ok := actual[name]
+		if !ok || !actualQuantity.Equal(desiredQuantity) {
+			return false
+		}
+	}
+	return true
+}
+
 // stsMatchesSpec returns true if the StatefulSet matches all mutable fields
 // in the engine spec. A mismatch triggers a new blue-green generation.
 func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
@@ -875,8 +889,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !container.Resources.Requests.Cpu().Equal(spec.Resources.CPU) ||
-		!container.Resources.Requests.Memory().Equal(spec.Resources.Memory) {
+	if !resourceRequirementsEqual(container.Resources, engineContainerResources(spec)) {
 		return false
 	}
 
