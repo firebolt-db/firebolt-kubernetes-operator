@@ -243,7 +243,7 @@ spec:
         name: metadata-postgres-credentials
     image:
       repository: "ghcr.io/firebolt-db/metadata"
-      tag: "4.32.0-pre.0.20260428141824.5abdf30556cd"
+      tag: "latest"
     replicas: 1
     resources:
       requests:
@@ -362,7 +362,7 @@ spec:
   replicas: 5
   image:
     repository: "ghcr.io/firebolt-db/engine"
-    tag: "release-4.32.0-pre.0.20260428141824.5abdf30556cd"
+    tag: "latest"
     pullPolicy: IfNotPresent
   resources:
     cpu: "4"
@@ -537,13 +537,13 @@ Conventions to follow when bumping:
 - **`METADATA_NEW_TAG` should be the short SHA** (last 12 chars) of the new build, since the metadata switch test (`test/e2e/instance_test.go`) only needs a tag distinct from `METADATA_TAG`.
 - **`ENGINE_TAG` and `ENGINE_NEW_TAG` must not be equal** — the E2E suite fails fast at startup if they are, since the upgrade test would be a no-op.
 
-Example for build `4.32.0-pre.0.20260428141824.5abdf30556cd`:
+Example for build `4.32.0-pre.0.20260505103729.c1bdd880cb63`:
 
 ```env
-ENGINE_TAG=release-4.32.0-pre.0.20260428141824.5abdf30556cd
-ENGINE_NEW_TAG=debug-4.32.0-pre.0.20260428141824.5abdf30556cd
-METADATA_TAG=4.32.0-pre.0.20260428141824.5abdf30556cd
-METADATA_NEW_TAG=5abdf30556cd
+ENGINE_TAG=release-4.32.0-pre.0.20260505103729.c1bdd880cb63
+ENGINE_NEW_TAG=debug-4.32.0-pre.0.20260505103729.c1bdd880cb63
+METADATA_TAG=4.32.0-pre.0.20260505103729.c1bdd880cb63
+METADATA_NEW_TAG=c1bdd880cb63
 ```
 
 After bumping, re-run `make prepare-test-e2e` so the new images are pulled and loaded into Kind, then `make test-e2e` to verify.

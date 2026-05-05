@@ -26,8 +26,8 @@ spec:
   # Image override. When omitted, the operator's embedded default is used.
   image:
     repository: ghcr.io/firebolt-db/engine
-    tag: 4.32.0-pre.0.20260428110559.3964114056e2
-    pullPolicy: IfNotPresent
+    tag: latest
+    pullPolicy: Always
   resources:
     cpu: "2"
     memory: 4Gi
