@@ -33,8 +33,12 @@ spec:
   instanceRef: firebolt
   replicas: 1
   resources:
-    cpu: "1"
-    memory: 4Gi
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "1"
+      memory: 4Gi
   customEngineConfig:
     config:
       account_name: acme

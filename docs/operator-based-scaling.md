@@ -114,8 +114,12 @@ spec:
     repository: ghcr.io/firebolt-db/engine
     tag: dev
   resources:
-    cpu: "2"
-    memory: "8Gi"
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
 status:
   currentGeneration: 2
   activeGeneration: 2

@@ -78,8 +78,12 @@ spec:
     repository: "ghcr.io/firebolt-db/engine"
     tag: "dev"
   resources:
-    cpu: "2"
-    memory: "8Gi"
+    requests:
+      cpu: "2"
+      memory: "8Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
 ```
 
 The engine will not start until the referenced instance has a populated metadata endpoint and account ID.
@@ -288,8 +292,8 @@ spec:
 | `spec.image.repository` | **Yes** | - | Container image repository |
 | `spec.image.tag` | **Yes** | - | Container image tag |
 | `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy |
-| `spec.resources.cpu` | **Yes** | - | CPU request and limit (e.g., `"2"`, `"500m"`) |
-| `spec.resources.memory` | **Yes** | - | Memory request and limit (e.g., `"8Gi"`) |
+| `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory` |
+| `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory` |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain; `recreate` deletes immediately |
 | `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the operator-side drain check. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status |
@@ -365,8 +369,12 @@ spec:
     tag: "latest"
     pullPolicy: IfNotPresent
   resources:
-    cpu: "4"
-    memory: "16Gi"
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+    limits:
+      cpu: "4"
+      memory: "16Gi"
   drainCheckInterval: "10s"
   rollout: graceful
   nodeSelector:

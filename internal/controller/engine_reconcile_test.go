@@ -53,9 +53,15 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 			Repository: "firebolt/engine",
 			Tag:        "v1.0",
 		},
-		Resources: computev1alpha1.ResourceRequirements{
-			CPU:    resource.MustParse("2"),
-			Memory: resource.MustParse("8Gi"),
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
 		},
 		Rollout: computev1alpha1.RolloutGraceful,
 	}
@@ -105,16 +111,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 						{
 							Image:           image,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    spec.Resources.CPU,
-									corev1.ResourceMemory: spec.Resources.Memory,
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    spec.Resources.CPU,
-									corev1.ResourceMemory: spec.Resources.Memory,
-								},
-							},
+							Resources:       engineContainerResources(spec),
 							SecurityContext: getEngineContainerSecurityContext(spec),
 						},
 					},
@@ -978,6 +975,98 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 	}
 
+	t.Run("no resources matches empty container resources", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.Resources = corev1.ResourceRequirements{}
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for omitted resources")
+		}
+	})
+
+	t.Run("requests only matches", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			},
+		}
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for requests-only resources")
+		}
+	})
+
+	t.Run("limits only matches", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.Resources = corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("2Gi"),
+			},
+		}
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for limits-only resources")
+		}
+	})
+
+	t.Run("partial requests and limits match", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("750m"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("2Gi"),
+			},
+		}
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for partial resource requirements")
+		}
+	})
+
+	t.Run("limit drift triggers mismatch", func(t *testing.T) {
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceMemory] = resource.MustParse("16Gi")
+		if stsMatchesSpec(sts, testSpec()) {
+			t.Fatal("stsMatchesSpec() want false when a resource limit drifts")
+		}
+	})
+
+	t.Run("removed resources trigger mismatch", func(t *testing.T) {
+		customSpec := testSpec()
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
+		if stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want false when resources are removed")
+		}
+	})
+
+	t.Run("equivalent quantities match", func(t *testing.T) {
+		customSpec := testSpec()
+		customSpec.Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			},
+		}
+		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("1024Mi"),
+			},
+		}
+		if !stsMatchesSpec(sts, customSpec) {
+			t.Fatal("stsMatchesSpec() want true for semantically equivalent quantities")
+		}
+	})
+
 	t.Run("explicit serviceAccountName matches STS", func(t *testing.T) {
 		customSpec := testSpec()
 		sa := "custom-sa"
@@ -1074,6 +1163,24 @@ func TestStsMatchesSpec(t *testing.T) {
 			t.Fatalf("expected nil container SecurityContext when unset, got %+v", got)
 		}
 	})
+}
+
+func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
+	spec := testSpec()
+	spec.Resources = corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("750m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("3Gi"),
+		},
+	}
+
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	got := sts.Spec.Template.Spec.Containers[0].Resources
+	if !resourceRequirementsEqual(got, spec.Resources) {
+		t.Fatalf("buildStatefulSet resources = %#v, want %#v", got, spec.Resources)
+	}
 }
 
 // --- Scale to zero / Stopped phase ---

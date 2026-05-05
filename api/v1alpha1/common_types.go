@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // ImageSpec defines the container image configuration.
@@ -36,15 +35,6 @@ type ImageSpec struct {
 	// +kubebuilder:default=IfNotPresent
 	// +optional
 	PullPolicy corev1.PullPolicy `json:"pullPolicy,omitempty"`
-}
-
-// ResourceRequirements defines the CPU and memory resources for engine pods.
-type ResourceRequirements struct {
-	// CPU request and limit (Kubernetes quantity, e.g. "2", "500m").
-	CPU resource.Quantity `json:"cpu"`
-
-	// Memory request and limit (Kubernetes quantity, e.g. "8Gi", "4096Mi").
-	Memory resource.Quantity `json:"memory"`
 }
 
 // ComponentSpec defines deployment configuration shared by operator-managed
