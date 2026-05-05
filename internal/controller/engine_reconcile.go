@@ -583,7 +583,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									Name: "POD_INDEX",
 									ValueFrom: &corev1.EnvVarSource{
 										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "metadata.labels['apps.kubernetes.io/pod-index']",
+											// Set explicitly so it matches the API-server-defaulted value on read-back.
+											APIVersion: "v1",
+											FieldPath:  "metadata.labels['apps.kubernetes.io/pod-index']",
 										},
 									},
 								},

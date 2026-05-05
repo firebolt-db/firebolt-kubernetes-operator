@@ -290,6 +290,9 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 	if !reflect.DeepEqual(ac.Resources, bc.Resources) {
 		return false
 	}
+	if !reflect.DeepEqual(ac.Env, bc.Env) {
+		return false
+	}
 	if !reflect.DeepEqual(a.Spec.Template.Spec.NodeSelector, b.Spec.Template.Spec.NodeSelector) {
 		return false
 	}
