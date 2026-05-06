@@ -54,8 +54,12 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 │      repository: .../engine       observedGeneration: 3     │
 │      tag: v1.2                    conditions:               │
 │    resources:                       - type: InstanceReady   │
-│      cpu: "2"                         status: "True"        │
-│      memory: "8Gi"                                          │
+│      requests:                        status: "True"        │
+│        cpu: "2"                                             │
+│        memory: "8Gi"                                        │
+│      limits:                                                │
+│        cpu: "2"                                             │
+│        memory: "8Gi"                                        │
 └─────────────────────────────────────────────────────────────┘
 
         │ creates / manages
@@ -589,8 +593,8 @@ rules:
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]
+    resources: ["pods/proxy"]
+    verbs: ["get"]
 
   # Instance controller
   - apiGroups: ["compute.firebolt.io"]
