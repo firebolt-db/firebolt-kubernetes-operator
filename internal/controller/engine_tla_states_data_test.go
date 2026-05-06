@@ -41,42 +41,36 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -85,42 +79,36 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -129,42 +117,36 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -173,14 +155,12 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -189,28 +169,24 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -219,42 +195,36 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -263,14 +233,12 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -279,28 +247,24 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -309,252 +273,216 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -567,7 +495,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -581,7 +508,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -597,7 +523,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -610,7 +535,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -637,7 +561,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -651,7 +574,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -665,7 +587,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -681,7 +602,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -696,7 +616,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -711,7 +630,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -725,7 +643,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -739,7 +656,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -752,7 +668,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -779,7 +694,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -793,7 +707,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -807,7 +720,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -823,7 +735,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -838,7 +749,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -853,7 +763,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -867,7 +776,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -881,7 +789,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -894,7 +801,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -921,7 +827,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -935,7 +840,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -949,7 +853,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -965,7 +868,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -980,7 +882,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -995,7 +896,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1009,7 +909,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1023,7 +922,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1038,7 +936,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1053,7 +950,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1067,7 +963,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1081,7 +976,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1094,7 +988,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1121,7 +1014,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -1135,7 +1027,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1149,7 +1040,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1165,7 +1055,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1180,7 +1069,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1195,7 +1083,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1209,7 +1096,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1223,7 +1109,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1238,7 +1123,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1253,7 +1137,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1267,7 +1150,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1281,7 +1163,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1294,7 +1175,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1321,7 +1201,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -1335,7 +1214,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1349,7 +1227,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1365,7 +1242,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1380,7 +1256,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1395,7 +1270,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1409,7 +1283,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1423,7 +1296,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1438,7 +1310,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1453,7 +1324,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1467,7 +1337,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1481,7 +1350,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1496,7 +1364,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1511,7 +1378,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1525,7 +1391,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1539,7 +1404,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1552,7 +1416,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1579,7 +1442,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -1593,7 +1455,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1607,7 +1468,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1623,7 +1483,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1638,7 +1497,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1653,7 +1511,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1667,7 +1524,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1681,7 +1537,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1696,7 +1551,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1711,7 +1565,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1725,7 +1578,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1739,7 +1591,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1754,7 +1605,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -1769,7 +1619,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1783,7 +1632,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1797,7 +1645,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1810,7 +1657,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1837,7 +1683,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -1851,7 +1696,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -1865,7 +1709,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1881,7 +1724,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1894,7 +1736,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1910,7 +1751,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -1923,7 +1763,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1950,7 +1789,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -1977,7 +1815,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -1991,7 +1828,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2005,7 +1841,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2021,7 +1856,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2034,7 +1868,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2050,7 +1883,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2063,7 +1895,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2090,7 +1921,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2117,7 +1947,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -2131,7 +1960,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2145,7 +1973,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2161,7 +1988,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2174,7 +2000,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2190,7 +2015,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2205,7 +2029,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2220,7 +2043,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2234,7 +2056,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2248,7 +2069,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2262,7 +2082,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2276,7 +2095,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2289,7 +2107,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2316,7 +2133,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2343,7 +2159,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -2357,7 +2172,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2371,7 +2185,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2387,7 +2200,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2400,7 +2212,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2416,7 +2227,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2431,7 +2241,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2446,7 +2255,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2460,7 +2268,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2474,7 +2281,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2488,7 +2294,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2502,7 +2307,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2515,7 +2319,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2542,7 +2345,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2569,7 +2371,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -2583,7 +2384,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2597,7 +2397,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2613,7 +2412,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2626,7 +2424,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2642,7 +2439,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2657,7 +2453,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2672,7 +2467,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2686,7 +2480,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2700,7 +2493,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2714,7 +2506,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2728,7 +2519,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2743,7 +2533,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2758,7 +2547,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2772,7 +2560,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2786,7 +2573,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2800,7 +2586,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2814,7 +2599,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2827,7 +2611,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2854,7 +2637,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2881,7 +2663,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -2895,7 +2676,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2909,7 +2689,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2925,7 +2704,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -2938,7 +2716,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -2954,7 +2731,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2969,7 +2745,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -2984,7 +2759,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -2998,7 +2772,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3012,7 +2785,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3026,7 +2798,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3040,7 +2811,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -3055,7 +2825,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
@@ -3070,7 +2839,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3084,7 +2852,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3098,7 +2865,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3112,7 +2878,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3126,7 +2891,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3139,7 +2903,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3166,7 +2929,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3193,7 +2955,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -3207,7 +2968,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3220,7 +2980,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3248,7 +3007,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3263,7 +3021,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3276,7 +3033,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3304,7 +3060,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3319,7 +3074,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3332,7 +3086,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3348,7 +3101,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3362,7 +3114,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3388,7 +3139,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3403,7 +3153,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3416,7 +3165,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3444,7 +3192,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3459,7 +3206,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3472,7 +3218,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3488,7 +3233,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3502,7 +3246,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3528,7 +3271,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3543,7 +3285,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3556,7 +3297,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3584,7 +3324,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3599,7 +3338,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3612,7 +3350,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3628,7 +3365,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3642,7 +3378,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3656,7 +3391,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3670,7 +3404,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3696,7 +3429,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3711,7 +3443,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3724,7 +3455,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3740,7 +3470,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3754,7 +3483,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3780,7 +3508,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3795,7 +3522,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3808,7 +3534,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3836,7 +3561,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3851,7 +3575,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3864,7 +3587,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3880,7 +3602,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3894,7 +3615,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3908,7 +3628,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3922,7 +3641,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -3948,7 +3666,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3963,7 +3680,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -3976,7 +3692,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -3992,7 +3707,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4006,7 +3720,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4032,7 +3745,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4047,7 +3759,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4060,7 +3771,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4088,7 +3798,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4103,7 +3812,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4117,7 +3825,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4133,7 +3840,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4146,7 +3852,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4162,7 +3867,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4175,7 +3879,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4191,7 +3894,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4204,7 +3906,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4231,7 +3932,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4258,7 +3958,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4285,7 +3984,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -4299,7 +3997,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4313,7 +4010,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4329,7 +4025,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4342,7 +4037,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4358,7 +4052,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4371,7 +4064,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4387,7 +4079,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4400,7 +4091,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4427,7 +4117,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4454,7 +4143,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4481,7 +4169,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -4495,7 +4182,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4509,7 +4195,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4525,7 +4210,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4538,7 +4222,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4554,7 +4237,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4567,7 +4249,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4583,7 +4264,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4596,7 +4276,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4612,7 +4291,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4627,7 +4305,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4642,7 +4319,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4656,7 +4332,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4670,7 +4345,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4684,7 +4358,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4698,7 +4371,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4712,7 +4384,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4725,7 +4396,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4738,7 +4408,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4765,7 +4434,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4792,7 +4460,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4819,7 +4486,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -4833,7 +4499,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4847,7 +4512,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4863,7 +4527,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4876,7 +4539,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4892,7 +4554,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4905,7 +4566,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4921,7 +4581,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4934,7 +4593,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -4950,7 +4608,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4965,7 +4622,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
@@ -4980,7 +4636,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -4994,7 +4649,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5008,7 +4662,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5022,7 +4675,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5036,7 +4688,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5050,7 +4701,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, -1}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5063,7 +4713,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5076,7 +4725,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: -1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5103,7 +4751,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5130,7 +4777,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5157,7 +4803,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
@@ -5171,7 +4816,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5184,7 +4828,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5212,7 +4855,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5227,7 +4869,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5240,7 +4881,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5268,7 +4908,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5283,7 +4922,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5296,7 +4934,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5313,7 +4950,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5327,7 +4963,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5352,7 +4987,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5367,7 +5001,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5380,7 +5013,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5408,7 +5040,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5423,7 +5054,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5436,7 +5066,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5453,7 +5082,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5467,7 +5095,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5492,7 +5119,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5507,7 +5133,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5520,7 +5145,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5548,7 +5172,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5563,7 +5186,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5576,7 +5198,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5604,7 +5225,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5619,7 +5239,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5632,7 +5251,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5660,7 +5278,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5675,7 +5292,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5688,7 +5304,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5705,7 +5320,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5719,7 +5333,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5744,7 +5357,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5759,7 +5371,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5772,7 +5383,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5800,7 +5410,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5815,7 +5424,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5828,7 +5436,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5845,7 +5452,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5859,7 +5465,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5884,7 +5489,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5899,7 +5503,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5912,7 +5515,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5940,7 +5542,6 @@ var tlaEngineStateCases = []tlaTestCase{
 	{
 		Start: tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
-			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
@@ -5962,7 +5563,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -5970,7 +5570,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -5990,7 +5589,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -5998,7 +5596,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6018,7 +5615,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6028,7 +5624,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6048,7 +5643,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6056,7 +5650,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6076,7 +5669,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6084,7 +5676,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6104,7 +5695,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6114,7 +5704,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6134,7 +5723,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6142,7 +5730,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6162,7 +5749,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6170,7 +5756,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6190,7 +5775,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6200,7 +5784,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6220,7 +5803,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6230,7 +5812,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6250,7 +5831,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6258,7 +5838,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6278,7 +5857,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6288,7 +5866,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6308,7 +5885,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6316,7 +5892,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6336,7 +5911,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6344,7 +5918,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6364,7 +5937,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6374,7 +5946,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6394,7 +5965,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6404,7 +5974,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6424,7 +5993,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6432,7 +6000,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6452,7 +6019,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6462,7 +6028,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6482,7 +6047,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6490,7 +6054,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6510,7 +6073,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6518,7 +6080,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6538,7 +6099,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6546,7 +6106,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6566,7 +6125,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6574,7 +6132,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6594,7 +6151,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6602,7 +6158,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6622,7 +6177,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6630,7 +6184,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6650,7 +6203,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6658,7 +6210,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6678,7 +6229,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6686,7 +6236,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6706,7 +6255,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6714,7 +6262,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6734,7 +6281,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6742,7 +6288,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6762,7 +6307,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6770,7 +6314,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6790,7 +6333,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6798,7 +6340,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6818,7 +6359,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6826,7 +6366,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6846,7 +6385,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6854,7 +6392,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6874,7 +6411,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6882,7 +6418,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6902,7 +6437,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6910,7 +6444,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6930,7 +6463,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6938,7 +6470,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6958,7 +6489,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -6966,7 +6496,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "cleaning", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -6993,7 +6522,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7019,7 +6547,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7033,7 +6560,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7047,7 +6573,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7073,7 +6598,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7087,7 +6611,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7101,7 +6624,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7115,7 +6637,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7129,7 +6650,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7155,7 +6675,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7169,7 +6688,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7183,7 +6701,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7209,7 +6726,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7235,7 +6751,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7249,7 +6764,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7263,7 +6777,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7289,7 +6802,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7303,7 +6815,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7365,7 +6876,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7391,7 +6901,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7405,7 +6914,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7419,7 +6927,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7433,7 +6940,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7459,7 +6965,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7473,7 +6978,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7487,7 +6991,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7501,7 +7004,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7515,7 +7017,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7529,7 +7030,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7567,7 +7067,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7581,7 +7080,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7607,7 +7105,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7621,7 +7118,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7635,7 +7131,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7649,7 +7144,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Closure: []tlaState{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
@@ -7716,21 +7210,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 0, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7739,28 +7230,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7769,28 +7256,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7799,14 +7282,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7815,28 +7296,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7845,14 +7322,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7861,28 +7336,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7891,14 +7362,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7907,14 +7376,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7923,28 +7390,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7953,14 +7416,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7969,14 +7430,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -7985,28 +7444,24 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 0, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 0, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{3, -1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8014,7 +7469,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8022,21 +7476,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8044,7 +7495,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8052,21 +7502,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8076,7 +7523,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8084,7 +7530,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8093,14 +7538,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8108,7 +7551,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8116,21 +7558,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8140,7 +7579,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8148,7 +7586,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8157,14 +7594,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8172,7 +7607,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8180,21 +7614,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8204,7 +7635,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8212,7 +7642,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8221,14 +7650,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8238,7 +7665,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8246,7 +7672,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8255,14 +7680,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8270,7 +7693,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8278,21 +7700,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8302,7 +7721,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8310,7 +7728,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8319,14 +7736,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8336,7 +7751,6 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8344,7 +7758,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
@@ -8353,14 +7766,12 @@ var tlaEngineStateCases = []tlaTestCase{
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "creating", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: false, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8368,7 +7779,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8376,21 +7786,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 1, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8398,7 +7805,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8406,21 +7812,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8428,7 +7831,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8436,21 +7838,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 1, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8458,7 +7857,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8466,21 +7864,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8488,7 +7883,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8496,21 +7890,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8518,7 +7909,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8526,21 +7916,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8548,7 +7935,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8556,21 +7942,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8578,7 +7961,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8586,21 +7968,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8608,7 +7987,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8616,21 +7994,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8638,7 +8013,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8646,21 +8020,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8668,7 +8039,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8676,21 +8046,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8698,7 +8065,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8706,21 +8072,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8728,7 +8091,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8736,21 +8098,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8758,7 +8117,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8766,21 +8124,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8788,7 +8143,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8796,21 +8150,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8818,7 +8169,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8826,21 +8176,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 1, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8848,7 +8195,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8856,21 +8202,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8878,7 +8221,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8886,21 +8228,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8908,7 +8247,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8916,21 +8254,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 2, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8938,7 +8273,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8946,21 +8280,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8968,7 +8299,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -8976,21 +8306,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 1, ActiveGen: 1, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 1, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{2, 3, -1}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -8998,7 +8325,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9006,7 +8332,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9014,7 +8339,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9022,21 +8346,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9044,7 +8365,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9052,7 +8372,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9060,7 +8379,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9068,21 +8386,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9090,7 +8405,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9098,7 +8412,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9106,7 +8419,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9114,21 +8426,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9136,7 +8445,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9144,7 +8452,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9152,7 +8459,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9160,21 +8466,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stable", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9182,7 +8485,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9190,7 +8492,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9198,7 +8499,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9206,21 +8506,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9228,7 +8525,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9236,7 +8532,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9244,7 +8539,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9252,21 +8546,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "stopped", CurrentGen: 2, ActiveGen: 2, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: -1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9274,7 +8565,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9282,21 +8572,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9304,7 +8591,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9312,21 +8598,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9334,7 +8617,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9342,21 +8624,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9364,7 +8643,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9372,21 +8650,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9394,7 +8669,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9402,21 +8676,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9424,7 +8695,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9432,21 +8702,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9454,7 +8721,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9462,21 +8728,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{0, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9484,7 +8747,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 0, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9492,21 +8754,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 0, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 0, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{1, -1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9514,7 +8773,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9522,21 +8780,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9544,7 +8799,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9552,21 +8806,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 2, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9574,7 +8825,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9582,21 +8832,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9604,7 +8851,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9612,21 +8858,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9634,7 +8877,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9642,21 +8884,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: false, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9664,7 +8903,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9672,21 +8910,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 2}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9694,7 +8929,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9702,21 +8936,18 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 1, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: false},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
@@ -9724,7 +8955,6 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 1, PodsReady: true, PodsDrained: true, InstanceReady: true},
 			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
@@ -9732,14 +8962,12 @@ var tlaEngineStateCases = []tlaTestCase{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: false},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: false},
 		},
 	},
 	{
 		Start: tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		Closure: []tlaState{
 			tlaState{Phase: "draining", CurrentGen: 2, ActiveGen: 2, DrainingGen: 1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: false, InstanceReady: true},
-			tlaState{Phase: "switching", CurrentGen: 2, ActiveGen: 1, DrainingGen: -1, SpecVer: 3, SpecWantsStop: true, StsSpecVer: [3]int{-1, 2, 3}, SvcTargetGen: 2, PodsReady: true, PodsDrained: true, InstanceReady: true},
 		},
 	},
 }

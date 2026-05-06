@@ -124,25 +124,34 @@ formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
 
 .PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graph for FireboltEngine to formal/FireboltEngine.dot.
+formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/FireboltEngine.cfg \
 		-dump dot,actionlabels formal/FireboltEngine.dot \
 		formal/FireboltEngine.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/FireboltInstance.cfg \
+		-dump dot,actionlabels formal/FireboltInstance.dot \
+		formal/FireboltInstance.tla
 
 .PHONY: formal-gen
-formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixture from the TLC state graph.
+formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
 	python3 scripts/gen-tla-state-tests.py \
 		--dot formal/FireboltEngine.dot \
 		--out internal/controller/engine_tla_states_data_test.go
+	python3 scripts/gen-tla-instance-state-tests.py \
+		--dot formal/FireboltInstance.dot \
+		--out internal/controller/instance_tla_states_data_test.go
 
 .PHONY: formal-verify
-formal-verify: formal-gen ## CI guard: regenerate the fixture and fail if the generated file changed.
-	@if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then \
-		echo "ERROR: TLA+ state-cover fixture is out of date. Run 'make formal-gen' and commit the result." >&2; \
-		git --no-pager diff -- internal/controller/engine_tla_states_data_test.go; \
-		exit 1; \
-	fi
+formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
+		if ! git diff --quiet -- "$$f"; then \
+			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
+			git --no-pager diff -- "$$f"; \
+			exit 1; \
+		fi; \
+	done
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
