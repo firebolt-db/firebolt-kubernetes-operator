@@ -457,11 +457,13 @@ The Envoy gateway proxy acts as the entry point for client queries and is the on
 The gateway ConfigMap (`{instance}-gateway-config`) is a **pure function of the FireboltInstance** — it does not depend on the set of engines. The operator does not regenerate it on engine create/delete/scale/blue-green events, so those events never trigger a gateway rollout. The configuration contains:
 
 - A Lua HTTP filter that validates `X-Firebolt-Engine` as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 chars, no leading or trailing hyphen, no dots) and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`.
-- A dynamic forward proxy cluster with `dns_refresh_rate: 1s` and `host_ttl: 5s`, so newly-ready pods enter the gateway's pool quickly and draining pods fall out without a long stale-entry window.
-- A route-level retry policy that retries only transport-level failures (`connect-failure`, `refused-stream`, `reset`) with `num_retries: 2`. 5xx responses are **not** retried, because once an engine has returned a 5xx it may have already executed side effects and a retry could duplicate work. The retries exist purely to hide the brief endpoint-propagation window after a pod becomes not-ready.
-- An admin listener on port 9901 used by the gateway container's `preStop` hook (`POST /healthcheck/fail`) to gracefully fail readiness before SIGTERM.
+- A dynamic forward proxy in **sub-cluster mode** (`sub_clusters_config`, *not* `dns_cache_config`). Each authority synthesises a full STRICT_DNS sub-cluster on first use, so all A-records of the headless engine Service become individual upstream hosts with normal load-balancing, outlier-detection and `previous_hosts` retry semantics. DNS-cache mode would have collapsed the headless Service back into a single sticky IP per cluster and made `previous_hosts` a no-op.
+- `max_requests_per_connection: 1` on the DFP cluster: every query gets a fresh TCP connect and therefore a fresh DNS lookup. This collapses the stale-IP window after a selector flip to a single TCP handshake instead of the STRICT_DNS refresh interval.
+- Active HTTP health checks on `/health/ready` every `1s` with `healthy_threshold: 1` / `unhealthy_threshold: 1`. The engine flips this endpoint to 503 immediately on SIGTERM, so Envoy ejects a draining pod from the load-balanced set within one probe interval — independently of DNS.
+- A route-level retry policy that retries on transport-level failures (`connect-failure`, `refused-stream`, `reset`) **and** on responses carrying the `X-Firebolt-Drained` header (`retriable-headers`). The header is set only by the engine's pre-work shutdown fence (see [Graceful pod shutdown](#graceful-pod-shutdown)), so that one specific shape of 503 is provably side-effect free and safe to retry. Bare 5xx is **not** retried, because once an engine has executed a request it may have applied side effects and a retry could duplicate them. `num_retries: 50` combined with the `previous_hosts` retry-host predicate means each successive attempt lands on a pod we have not tried yet, until either the sub-cluster's host set is exhausted or the client deadline expires.
+- An admin listener on `127.0.0.1:9901` used by the gateway pod's own `preStop` hook (`POST /healthcheck/fail`) to fail the gateway's readiness *before* the kubelet sends SIGTERM, so service load-balancers stop sending it new requests before its filters tear down.
 
-Because the per-engine routing Service is headless (`ClusterIP: None`), the `:authority` hostname resolves directly to the set of ready pod IPs. kube-proxy is not in the data path, so there is no terminating-endpoint race where a SYN would be DNAT'd to a pod whose listener has already closed.
+Because the per-engine routing Service is headless (`ClusterIP: None`), the `:authority` hostname resolves directly to the set of *ready* pod IPs. kube-proxy is not in the data path, so there is no terminating-endpoint race where a SYN would be DNAT'd to a pod whose listener has already closed.
 
 ### Traffic path
 
@@ -470,6 +472,30 @@ Client (X-Firebolt-Engine: my-engine) → Gateway Service (:80) → Envoy (:8080
 ```
 
 The gateway Deployment uses a rolling update strategy with `maxSurge: 25%` and `maxUnavailable: 0`, ensuring zero downtime during gateway upgrades.
+
+### Graceful pod shutdown
+
+When a blue-green cutover or scale-down deletes the old-generation StatefulSet, the kubelet sends SIGTERM to its pods while client queries may still be in flight at the gateway. Zero-downtime is preserved end-to-end by a chain of independent mechanisms; **no operator-side gate on EndpointSlice routability is required** (see [Why no EndpointSlice gate](#why-no-endpointslice-gate)). In order of when they fire after SIGTERM:
+
+1. **Engine `/health/ready` flips to 503.** The kubelet readiness probe sees this on its next scrape and marks the pod NotReady. The K8s endpoint controller removes the pod from the cluster Service's EndpointSlices; CoreDNS stops returning that pod IP for the headless Service.
+2. **Envoy active health check ejects the host.** Envoy probes `/health/ready` directly on each pod IP every `1s`. With `unhealthy_threshold: 1`, one failed probe is enough to remove the host from the load-balanced set. This is independent of DNS, so it does not wait on EndpointSlice / CoreDNS propagation.
+3. **`max_requests_per_connection: 1` + per-request DNS.** Any query that arrives at the gateway after the host is excluded from DNS opens a fresh TCP connection (no keep-alive reuse), does a fresh DNS lookup, and never sees the dying pod.
+4. **Engine pre-work shutdown fence.** A query that did slip onto an open connection or a stale-DNS host *before* either of the above hides it hits the engine's HTTP handler, which fast-fails with `503 Service Unavailable`, `Connection: close`, and the `X-Firebolt-Drained` header **before** any executor or Storage Manager work runs. The connection drops out of any pool, and the request is provably side-effect free.
+5. **Gateway retries the 503 on a different host.** The `retriable-headers` rule matches `X-Firebolt-Drained: present`; combined with the `previous_hosts` retry-host predicate, the retry never picks the same draining pod. The client sees a single 200 response.
+
+In-flight queries that the engine accepted *before* SIGTERM continue to run, bounded by `shutdown_wait_unfinished` (= `terminationGracePeriodSeconds − 5s`). The fence only fences *new* requests; it does not interrupt work already in progress.
+
+### Why no EndpointSlice gate
+
+A previous design (removed in **FB-661**, commits `be577f2` and `d6dce81`) had the operator wait in `Switching` for the cluster Service's EndpointSlice to contain at least one Ready endpoint. It was deleted when the cluster Service became headless: with kube-proxy out of the data path, K8s automatically excludes not-ready pods from the headless DNS A-record set, and the gate was redundant.
+
+The same conclusion holds for the *symmetric* version of the gate — "wait until the EndpointSlice no longer references the **draining** generation before transitioning `draining → cleaning`":
+
+- The chain in [Graceful pod shutdown](#graceful-pod-shutdown) closes the race in the data plane: any late request on a draining pod gets a clean retriable 503 and the gateway recovers before the client.
+- An EndpointSlice gate only shifts *when* SIGTERM fires (after the slice update vs. concurrent with it); it does not shrink the window where Envoy might still pick a draining host, which is bounded by the active-health-check interval, not by slice propagation.
+- Reintroducing it costs an extra Watch + RBAC + reconcile-state field with no liveness improvement under the existing data-plane contract.
+
+If you find yourself wanting to add such a gate to fix a 5xx during cutover, the right question is which of mechanisms 1–5 above is broken — not whether to bolt on a sixth.
 
 ---
 

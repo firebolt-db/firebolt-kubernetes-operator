@@ -9,6 +9,11 @@ Firebolt Kubernetes Operator manages two CRDs:
 
 Engines require a ready instance. See [docs/architecture.md](docs/architecture.md) for the full design.
 
+Before touching the engine reconciler — especially anything in `engine_reconcile.go`, `engine_state.go`, or the gateway `instance_gateway.go` — read the relevant section of [docs/architecture.md](docs/architecture.md) first. In particular:
+
+- The blue-green state machine (`creating → switching → draining → cleaning`) is also formalised in [formal/FireboltEngine.tla](formal/FireboltEngine.tla); a change in one belongs in both, and `make formal-verify` is the CI guard.
+- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.md` document the chain and call out a previously-removed design (FB-661) that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
+
 Built with Go and controller-runtime.
 
 ## Commands
@@ -96,3 +101,4 @@ When breaking work into a plan, divide it into self-contained commits. Each comm
 
 - Ignoring errors is forbidden except with a documented rationale in a comment.
 - Keep documents under `docs/` up to date as code changes. Documents about historical or unimplemented features do not need updates.
+- Architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) **must** include a matching update to [docs/architecture.md](docs/architecture.md) in the same commit. The architecture doc is the canonical record of *why* the system is shaped the way it is — when a future change re-asks a question we have already answered, the previous answer should be on the page rather than only in commit history.
