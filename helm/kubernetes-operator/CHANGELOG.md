@@ -1,3 +1,15 @@
+# 0.1.34
+
+appVersion: v1.25.0
+
+## [1.25.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.24.0...v1.25.0) (2026-05-06)
+
+### Features
+
+* **gateway:** retry shutdown-fence 503s via X-Firebolt-Drained (FB-849) ([601ba41](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/601ba41c5c909ddeaf1360d841b21f850b070b87))
+* switch to AGENTS.md (FB-849) ([3862e7a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3862e7abe14c819140461a397722dc22c7e9852c))
+
+
 # 0.1.33
 
 appVersion: v1.24.0
