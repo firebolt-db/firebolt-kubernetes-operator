@@ -258,6 +258,17 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             #   - reset:           stream reset before any
                             #     response bytes - same guarantee as
                             #     connect-failure.
+                            #   - retriable-headers (X-Firebolt-Drained):
+                            #     a 503 emitted by the engine's pre-work
+                            #     shutdown fence (HTTPHandler::handleRequestImpl
+                            #     fast-fails before any executor / Storage
+                            #     Manager work). The fence sets this header
+                            #     ONLY on that early-bail path, so the same
+                            #     side-effect-free guarantee as the transport
+                            #     failures above holds. Without this trigger,
+                            #     a request that lands on a pod between
+                            #     SIGTERM and the EndpointSlice update
+                            #     would propagate a 503 to the client.
                             #
                             # We deliberately do NOT list "5xx" or
                             # "gateway-error" here: those match 5xx responses
@@ -284,7 +295,10 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             # per_try_timeout, so legitimate long-running
                             # queries are never cut off mid-flight.
                             retry_policy:
-                              retry_on: connect-failure,refused-stream,reset
+                              retry_on: connect-failure,refused-stream,reset,retriable-headers
+                              retriable_headers:
+                                - name: X-Firebolt-Drained
+                                  present_match: true
                               num_retries: 50
                               retry_back_off:
                                 base_interval: 0.025s
