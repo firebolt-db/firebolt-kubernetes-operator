@@ -320,10 +320,12 @@ spec:
 | `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata. |
 | `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / account ID. |
 | `Ready=True, Reason=EngineReady` | Engine is serving traffic with all replicas ready. |
+| `Ready=False, Reason=Initializing` | First reconcile of a freshly created CR; transient. |
 | `Ready=False, Reason=Rolling` | A blue-green transition is in progress (`creating` / `switching` / `draining` / `cleaning`). |
 | `Ready=False, Reason=PodsNotReady` | Phase is `stable` but some pods are not yet ready (e.g., image pull in progress). |
 | `Ready=False, Reason=Stopped` | `spec.replicas == 0`. The engine is intentionally parked; not a transient failure. |
 | `Ready=False, Reason=InstanceNotReady` | The referenced `FireboltInstance` is not ready. |
+| `Ready=False, Reason=DrainCheckFailing` | The drain-readiness probe (Prometheus scrape on a draining-generation pod) cannot reach the pod or parse its metrics. The blue-green is paused until the probe recovers. |
 
 ### Monitoring
 

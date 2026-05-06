@@ -262,7 +262,7 @@ Because scale-down only fires when `firebolt_running_queries + firebolt_suspende
 |---|---|
 | `status.lastActivityTime` | Most recent observation that recorded activity (or, for a fresh engine, the first quiet observation). Drives the idle clock. |
 | `status.autoscaledAt` | Timestamp of the most recent autoscaler-driven `spec.replicas` mutation. Distinguishes autoscaler scale events from user edits. |
-| `status.autoscalerReason` | Token: `Disabled` / `ScheduleActive` / `Stopped` / `ActivityObserved` / `ScrapeFailed` / `Idle`. |
+| `status.autoscalerReason` | Token: `Disabled` / `WakeRequested` / `ScheduleActive` / `Stopped` / `ActivityObserved` / `ScrapeFailed` / `Idle`. |
 
 ## Gateway wake-up protocol
 
