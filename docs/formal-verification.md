@@ -145,14 +145,17 @@ Phases 5–11 each add one axis. Each phase entry calls out the false-positive c
 
 ### Phase 8 — Informer cache staleness
 
-Real reconciles read from the informer cache, which can lag by up to the watch round-trip relative to a write the controller itself just made. We currently model this as instantaneous.
+Real reconciles read from the informer cache, which can lag by up to the watch round-trip relative to a write the controller itself just made. We previously modelled this as instantaneous.
 
-- Two views in `engineSim`: `apiCluster` (truth) and `cacheCluster` (what `getEngineState` sees). New `CacheCatchesUp` action propagates one pending write from API to cache.
-- TLA: `EnvCacheLag` action that delays reflection of a previous reconcile's writes; paired with `WF_vars(EnvCacheCatchesUp)` so permanent lag is excluded.
-- New `Inv_NoLostWrite`: every write that landed in the API eventually appears to a subsequent reconcile. This is what classifies "permanent lag" as a misconfiguration rather than a bug — it cannot satisfy fairness, so a TLC counterexample to `EventuallyTerminal` under permanent lag would not be a bug, it would be a violation of the modelling assumption.
-- All existing safety invariants must hold against the **API** view, not the cache. The cache view is the controller's *input*; the API view is the system *truth*.
+- `clusterView` struct in `engineSim`: `m.api` is the source of truth (what the K8s API server stores); `m.cache` is the controller's informer view. `buildState` reads from `cache`; `applyResultUpTo` writes to `api`. All safety invariants in `Check` (and `tlaInvariants` in state cover) check against `api`.
+- `CacheCatchesUp` action atomically copies the api snapshot to the cache (full snapshot, not per-resource — the simpler model keeps the false-positive surface contained at the cost of not exercising per-resource lag interleavings).
+- Bounded staleness comes from rapid's uniform action distribution: with N actions in the StateMachine set, `CacheCatchesUp` fires on average every ~N steps. No fairness condition is needed in the harness; the article's "cache lags forever → test hangs" trap is avoided structurally rather than by an explicit invariant.
 
-**False-positive risk**: highest in this plan, exactly the article's archetypal trap. Mitigation is the explicit fairness condition + `Inv_NoLostWrite`. If a test fails because the cache lagged forever, the failing condition is the modelling assumption, not the controller.
+The TLA spec is **not** extended in this iteration. Adding `EnvCacheLag` + `WF_vars(EnvCacheCatchesUp)` + `Inv_NoLostWrite` would roughly double the state space and require re-running TLC against deeper bounds; the rapid harness is the right place to exercise cache lag for now. The state-cover test (Phase 3) initializes both views identically because it runs only one Reconcile per state — cache lag is meaningless across a single transition.
+
+**Bug-finding scope**: the engine reconciler today is the only writer to its own child resources, so cache lag is one-way (cache catches up to api, never the reverse). The existing invariants don't catch new bug classes from this dimension because the controller's writes are based on the spec (in-memory, fresh), not on cache reads of resources it created. The infrastructure is in place; future controllers or future code that reads-then-writes a child resource (Get-Update on the resource itself, not on the parent CR) would expose new bug classes that this scaffolding can catch.
+
+**False-positive risk**: low in practice. The two anticipated traps — permanent lag and per-resource interleaving — are sidestepped by atomic full-snapshot catch-up plus rapid's natural distribution. A future per-resource lag model would re-introduce the article's classic trap and would need explicit fairness; documented as a follow-up rather than a present-day concern.
 
 ### Phase 9 — Outer Reconcile envtest harness *(optional)*
 
