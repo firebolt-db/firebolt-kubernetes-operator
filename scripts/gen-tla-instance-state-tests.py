@@ -170,6 +170,9 @@ package controller
 
 // tlaInstanceState is one reachable TLA+ state of the FireboltInstance spec,
 // projected to the variables the instanceSim can materialise and observe.
+// Field order is load-bearing: tlaInstanceStatePool below uses positional
+// composite literals; adding/reordering/removing fields here must be done
+// in lockstep with the generator's go_state_lit.
 type tlaInstanceState struct {
 \tPhase         string
 \tPostgresAvail bool
@@ -177,12 +180,14 @@ type tlaInstanceState struct {
 \tGatewayAvail  bool
 }
 
-// tlaInstanceTestCase pairs a TLA+ state with the set of states the model
-// considers reachable from it via 0+ consecutive reconciler-only transitions.
-// After instanceSim.Reconcile, the resulting state must lie in this closure.
+// tlaInstanceTestCase references tlaInstanceStatePool by index. Start is the
+// index of the starting state; Closure is the set of indices the model
+// considers reachable from Start via 1+ reconciler-only transitions (plus
+// Start itself when a stutter is legitimate). The indirection keeps the
+// fixture compact and matches the engine fixture's shape.
 type tlaInstanceTestCase struct {
-\tStart   tlaInstanceState
-\tClosure []tlaInstanceState // includes Start (stutter)
+\tStart   int
+\tClosure []int
 }
 
 """
@@ -193,14 +198,17 @@ def go_bool(v: bool) -> str:
 
 
 def go_state_lit(s: Dict[str, object]) -> str:
+    """Positional tlaInstanceState composite literal. Outer type is elided
+    because the literal sits inside `[]tlaInstanceState{ … }` (the pool).
+    Field order MUST match the tlaInstanceState struct in GO_HEADER."""
     avail = s["compAvail"]
     assert isinstance(avail, dict)
     return (
-        "tlaInstanceState{"
-        f'Phase: "{s["phase"]}", '
-        f'PostgresAvail: {go_bool(bool(avail["postgres"]))}, '
-        f'MetadataAvail: {go_bool(bool(avail["metadata"]))}, '
-        f'GatewayAvail: {go_bool(bool(avail["gateway"]))}'
+        "{"
+        f'"{s["phase"]}", '
+        f'{go_bool(bool(avail["postgres"]))}, '
+        f'{go_bool(bool(avail["metadata"]))}, '
+        f'{go_bool(bool(avail["gateway"]))}'
         "}"
     )
 
@@ -225,37 +233,56 @@ def main() -> int:
     # Order starting states by content (TLC node IDs are not stable across runs).
     start_ids: List[int] = sorted(nodes.keys(), key=lambda nid: state_key(nodes[nid]))
 
-    out_lines: List[str] = [GO_HEADER]
-    out_lines.append(f"// {len(start_ids)} reachable states")
-    out_lines.append("var tlaInstanceStateCases = []tlaInstanceTestCase{")
+    # Build the state pool, deduped by projected state_key.
+    key_to_pool_idx: Dict[Tuple[object, ...], int] = {}
+    pool_states: List[Dict[str, object]] = []
+
+    def pool_idx(state: Dict[str, object]) -> int:
+        key = state_key(state)
+        idx = key_to_pool_idx.get(key)
+        if idx is None:
+            idx = len(pool_states)
+            key_to_pool_idx[key] = idx
+            pool_states.append(state)
+        return idx
 
     for nid in start_ids:
-        start = nodes[nid]
-        closure_ids = reconciler_closure(nid, reconciler_edges)
-        # Deduplicate closure entries by projected key, ordered for stability.
-        seen_keys: Set[Tuple[object, ...]] = set()
-        closure_states: List[Dict[str, object]] = []
-        for cid in sorted(closure_ids, key=lambda c: state_key(nodes[c])):
-            cstate = nodes[cid]
-            key = state_key(cstate)
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            closure_states.append(cstate)
+        pool_idx(nodes[nid])
 
-        out_lines.append("\t{")
-        out_lines.append(f"\t\tStart: {go_state_lit(start)},")
-        out_lines.append("\t\tClosure: []tlaInstanceState{")
-        for cstate in closure_states:
-            out_lines.append(f"\t\t\t{go_state_lit(cstate)},")
-        out_lines.append("\t\t},")
-        out_lines.append("\t},")
+    # Build cases: dedupe starts by state_key; closure entries are pool indices.
+    emitted_starts: Set[Tuple[object, ...]] = set()
+    cases: List[Tuple[int, List[int]]] = []
+    for nid in start_ids:
+        start_key = state_key(nodes[nid])
+        if start_key in emitted_starts:
+            continue
+        emitted_starts.add(start_key)
+        closure_node_ids = reconciler_closure(nid, reconciler_edges)
+        closure_pool: Set[int] = set()
+        for cid in closure_node_ids:
+            closure_pool.add(pool_idx(nodes[cid]))
+        cases.append((pool_idx(nodes[nid]), sorted(closure_pool)))
 
+    out_lines: List[str] = [GO_HEADER]
+    out_lines.append(f"// {len(pool_states)} unique reachable TLA+ states.")
+    out_lines.append("var tlaInstanceStatePool = []tlaInstanceState{")
+    for s in pool_states:
+        out_lines.append(f"\t{go_state_lit(s)},")
+    out_lines.append("}")
+    out_lines.append("")
+    out_lines.append(f"// {len(cases)} test cases referencing tlaInstanceStatePool by index.")
+    out_lines.append("var tlaInstanceStateCases = []tlaInstanceTestCase{")
+    for start_idx, closure_indices in cases:
+        closure_str = ", ".join(str(i) for i in closure_indices)
+        out_lines.append(f"\t{{{start_idx}, []int{{{closure_str}}}}},")
     out_lines.append("}")
     out_lines.append("")
 
     args.out.write_text("\n".join(out_lines))
-    print(f"wrote {args.out}: {len(start_ids)} test cases")
+    print(
+        f"wrote {args.out}: {len(cases)} test cases over "
+        f"{len(pool_states)} pooled states"
+    )
     return 0
 
 

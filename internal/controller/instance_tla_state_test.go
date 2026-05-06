@@ -125,10 +125,10 @@ func projectInstanceSim(m *instanceSim) tlaInstanceState {
 
 // instanceClosureContains reports whether `actual` is one of the TLA+ states
 // the model considers reachable from the test's starting state via 0+
-// reconciler-only transitions.
-func instanceClosureContains(closure []tlaInstanceState, actual tlaInstanceState) bool {
-	for i := range closure {
-		if closure[i] == actual {
+// reconciler-only transitions. closureIDs are indices into tlaInstanceStatePool.
+func instanceClosureContains(closureIDs []int, actual tlaInstanceState) bool {
+	for _, id := range closureIDs {
+		if tlaInstanceStatePool[id] == actual {
 			return true
 		}
 	}
@@ -181,11 +181,12 @@ func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 func TestTLAInstanceStateCover(t *testing.T) {
 	for i := range tlaInstanceStateCases {
 		tc := tlaInstanceStateCases[i]
+		start := tlaInstanceStatePool[tc.Start]
 		name := fmt.Sprintf("case-%02d/%s/p=%t/m=%t/g=%t",
-			i, tc.Start.Phase,
-			tc.Start.PostgresAvail, tc.Start.MetadataAvail, tc.Start.GatewayAvail)
+			i, start.Phase,
+			start.PostgresAvail, start.MetadataAvail, start.GatewayAvail)
 		t.Run(name, func(t *testing.T) {
-			m := materializeTLAInstanceState(tc.Start)
+			m := materializeTLAInstanceState(start)
 
 			// Mirror instanceSim.Reconcile in engine_property_test.go style:
 			// init-seed branch when Phase is empty, otherwise the full
@@ -204,22 +205,25 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			actual := projectInstanceSim(m)
 			if !instanceClosureContains(tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					tc.Start, actual, len(tc.Closure), formatInstanceClosure(tc.Closure))
+					start, actual, len(tc.Closure), formatInstanceClosure(tc.Closure))
 			}
 		})
 	}
 	t.Logf("instance state cover: ran %d cases", len(tlaInstanceStateCases))
 }
 
-func formatInstanceClosure(closure []tlaInstanceState) string {
+// formatInstanceClosure renders the first few entries of a closure index list
+// for inclusion in a Fatalf message; pool indices are surfaced so errors
+// point straight back into tlaInstanceStatePool.
+func formatInstanceClosure(closureIDs []int) string {
 	const limit = 8
 	out := ""
-	for i, s := range closure {
+	for i, id := range closureIDs {
 		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closure)-limit)
+			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
 			break
 		}
-		out += fmt.Sprintf("    [%d] %+v\n", i, s)
+		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaInstanceStatePool[id])
 	}
 	return out
 }

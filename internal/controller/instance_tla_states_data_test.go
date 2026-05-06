@@ -7,6 +7,9 @@ package controller
 
 // tlaInstanceState is one reachable TLA+ state of the FireboltInstance spec,
 // projected to the variables the instanceSim can materialise and observe.
+// Field order is load-bearing: tlaInstanceStatePool below uses positional
+// composite literals; adding/reordering/removing fields here must be done
+// in lockstep with the generator's go_state_lit.
 type tlaInstanceState struct {
 	Phase         string
 	PostgresAvail bool
@@ -14,208 +17,85 @@ type tlaInstanceState struct {
 	GatewayAvail  bool
 }
 
-// tlaInstanceTestCase pairs a TLA+ state with the set of states the model
-// considers reachable from it via 0+ consecutive reconciler-only transitions.
-// After instanceSim.Reconcile, the resulting state must lie in this closure.
+// tlaInstanceTestCase references tlaInstanceStatePool by index. Start is the
+// index of the starting state; Closure is the set of indices the model
+// considers reachable from Start via 1+ reconciler-only transitions (plus
+// Start itself when a stutter is legitimate). The indirection keeps the
+// fixture compact and matches the engine fixture's shape.
 type tlaInstanceTestCase struct {
-	Start   tlaInstanceState
-	Closure []tlaInstanceState // includes Start (stutter)
+	Start   int
+	Closure []int
 }
 
 
-// 32 reachable states
+// 32 unique reachable TLA+ states.
+var tlaInstanceStatePool = []tlaInstanceState{
+	{"degraded", false, false, false},
+	{"degraded", false, false, true},
+	{"degraded", false, true, false},
+	{"degraded", false, true, true},
+	{"degraded", true, false, false},
+	{"degraded", true, false, true},
+	{"degraded", true, true, false},
+	{"degraded", true, true, true},
+	{"provisioning", false, false, false},
+	{"provisioning", false, false, true},
+	{"provisioning", false, true, false},
+	{"provisioning", false, true, true},
+	{"provisioning", true, false, false},
+	{"provisioning", true, false, true},
+	{"provisioning", true, true, false},
+	{"provisioning", true, true, true},
+	{"ready", false, false, false},
+	{"ready", false, false, true},
+	{"ready", false, true, false},
+	{"ready", false, true, true},
+	{"ready", true, false, false},
+	{"ready", true, false, true},
+	{"ready", true, true, false},
+	{"ready", true, true, true},
+	{"uninitialized", false, false, false},
+	{"uninitialized", false, false, true},
+	{"uninitialized", false, true, false},
+	{"uninitialized", false, true, true},
+	{"uninitialized", true, false, false},
+	{"uninitialized", true, false, true},
+	{"uninitialized", true, true, false},
+	{"uninitialized", true, true, true},
+}
+
+// 32 test cases referencing tlaInstanceStatePool by index.
 var tlaInstanceStateCases = []tlaInstanceTestCase{
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "degraded", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: false, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: false, GatewayAvail: true},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: true, GatewayAvail: false},
-		},
-	},
-	{
-		Start: tlaInstanceState{Phase: "uninitialized", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		Closure: []tlaInstanceState{
-			tlaInstanceState{Phase: "provisioning", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-			tlaInstanceState{Phase: "ready", PostgresAvail: true, MetadataAvail: true, GatewayAvail: true},
-		},
-	},
+	{0, []int{0}},
+	{1, []int{1}},
+	{2, []int{2}},
+	{3, []int{3}},
+	{4, []int{4}},
+	{5, []int{5}},
+	{6, []int{6}},
+	{7, []int{23}},
+	{8, []int{8}},
+	{9, []int{9}},
+	{10, []int{10}},
+	{11, []int{11}},
+	{12, []int{12}},
+	{13, []int{13}},
+	{14, []int{14}},
+	{15, []int{23}},
+	{16, []int{0}},
+	{17, []int{1}},
+	{18, []int{2}},
+	{19, []int{3}},
+	{20, []int{4}},
+	{21, []int{5}},
+	{22, []int{6}},
+	{23, []int{23}},
+	{24, []int{8}},
+	{25, []int{9}},
+	{26, []int{10}},
+	{27, []int{11}},
+	{28, []int{12}},
+	{29, []int{13}},
+	{30, []int{14}},
+	{31, []int{15, 23}},
 }

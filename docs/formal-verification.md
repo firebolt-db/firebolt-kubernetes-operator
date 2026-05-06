@@ -73,7 +73,7 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 - Spec changes at any point (abandon/defer rules); scale-to-zero via `specWantsStop`
 - Safety invariants: active generation always has resources; service selector is consistent; quiesced terminal phase matches `spec.replicas` intent
 - Liveness: engine always eventually reaches a terminal phase (`stable` or `stopped`)
-- TLC runtime: < 30 seconds at `MaxGen=2, MaxSpec=3`
+- TLC runtime: ~2 seconds at `MaxGen=3, MaxSpec=4` (~3,200 reachable states)
 
 **FireboltInstance** (`formal/FireboltInstance.tla`):
 
@@ -106,7 +106,7 @@ The fixture lives in the controller package as a generated Go file:
 - `internal/controller/engine_tla_states_data_test.go` — generated fixture (committed)
 - `internal/controller/engine_tla_state_test.go` — `TestTLAEngineStateCover` runs against the fixture
 
-At `MaxGen=2, MaxSpec=3` TLC produces 1,386 reachable states. 28 fall on the model's MaxGen ceiling where the spec's bounded handling diverges from the unbounded implementation (documented in `tlaModelBoundary`); 438 are skipped because the outer Reconcile method's instance gate prevents the compute layer from running (`tlaShouldGateOut`); uninitialised states are filtered at generation time because the controller's first reconcile handles them via a single early-return that existing unit tests cover. The remaining 892 states are exercised against `computeEngineReconcile` in well under a second, with all Phase 2 invariants checked after each call.
+At `MaxGen=3, MaxSpec=4` TLC produces 3,202 reachable states (uninitialised excluded at generation time, since the controller's first reconcile handles those via a single early-return that existing unit tests cover). 36 fall on the model's MaxGen ceiling where the spec's bounded handling diverges from the unbounded implementation (documented in `tlaModelBoundary`); 952 are skipped because the outer Reconcile method's instance gate prevents the compute layer from running (`tlaShouldGateOut`). The remaining 2,214 states are exercised against `computeEngineReconcile` in a few seconds, with all Phase 2 invariants checked after each call.
 
 CI guard: `make formal-verify` regenerates the fixture and fails if the result differs from what is committed.
 
@@ -162,17 +162,13 @@ Phases 2/3/6/7/8 all exercise the compute layer (`computeEngineReconcile`). The 
 
 **False-positive risk**: moderate. envtest occasionally stutters for reasons unrelated to controller correctness (apiserver timing, watch propagation). Mitigation: deterministic seeds and short fixed timeouts; a test failure that does not reproduce on replay is treated as infrastructure, not as a controller bug, until shown otherwise.
 
-### Phase 10 — Bump TLC bounds *(cheap; nightly)*
-
-`MaxGen=3, MaxSpec=4`. `formal/FireboltEngine.deep.cfg` + `make formal-check-deep` target. Initially scoped as a ~5-min nightly job; in practice TLC explores the ~3,200-state space in ~2 seconds, so it could be promoted to inner-loop CI without noticeable cost. Kept as a separate target for now to keep the bound documentation explicit. The inner-loop `make formal-check` continues to use `MaxGen=2 / MaxSpec=3` because the *state-cover fixture* (Phase 3) is generated at those bounds — the runtime constant `tlaMaxGen` in the generated Go file pins the test fixture's projection.
-
 ### Phase 11 — Time / drain timeouts *(deferred)*
 
 The article's highest false-positive class. Deferred until Phases 6–8 are stable so we have the invariant-discipline patterns in place before introducing fuzzed time. Likely shape: a discrete logical clock, bounded drain deadlines, and `Inv_DrainCompletesByDeadline`-style invariants. Until then, drain-timeout behaviour is covered by hand-written E2E tests, not by the property/state-cover harness.
 
 ### Implementation order
 
-5 → 6 → 10 → 8 → 9 → (defer) 11. Phase 10 slots in early because it is a configuration-only change that can run in parallel with the others.
+5 → 6 → 8 → 9 → (defer) 11.
 
 ## References
 
