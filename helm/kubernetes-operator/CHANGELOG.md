@@ -1,3 +1,14 @@
+# 0.1.35
+
+appVersion: v1.25.1
+
+## [1.25.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.25.0...v1.25.1) (2026-05-06)
+
+### Bug Fixes
+
+* **gateway:** hard-code envoy per-connection buffer at 2 MiB (FB-849) ([aa37a36](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/aa37a36aca396a1a6ef1f19508d2da9f99dcda5d))
+
+
 # 0.1.34
 
 appVersion: v1.25.0
