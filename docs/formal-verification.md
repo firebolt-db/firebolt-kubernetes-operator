@@ -114,6 +114,66 @@ CI guard: `make formal-verify` regenerates the fixture and fails if the result d
 
 If Kamera reaches a stable release, adopt it to do Phase 1 + Phase 3 directly against the Go code without maintaining a parallel TLA+ spec.
 
+## The state-exploration / false-positive trade-off
+
+Phases 1–3 protect us from the "harness too simple to find bugs" failure mode but leave us in a complementary trap: the harness is single-actor, fault-injection is limited to one crash point (`CrashReconcile`, which models only "all writes succeed, status write fails"), the Go side exercises only the compute layer, and time / informer staleness / write-conflicts are not modelled. Each axis we *don't* fuzz is a class of bug the harness cannot find.
+
+The opposite trap follows from naive expansion: every new dimension of state exploration produces a class of *invalid* configurations that fail tests without representing real bugs (a fault-probability fuzz that fails too often to make progress; a clock that advances faster than scans can complete; a compactor fenced faster than it can finish). The discipline that makes expansion productive rather than noisy is to pair every new exploration axis with a model update *and* an invariant that distinguishes "invalid configuration" from "real bug". TLA+ already gives us that vocabulary; Phases 5–11 cash it in.
+
+Phases 5–11 each add one axis. Each phase entry calls out the false-positive class it introduces and the invariant or fairness condition that keeps it from masking real bugs.
+
+### Phase 5 — FireboltInstance harness parity
+
+`formal/FireboltInstance.tla` exists; the rapid (Phase 2) and state-cover (Phase 3) harnesses do not. The second CRD has only formal-spec coverage today, no real-Go harness.
+
+- `internal/controller/instance_property_test.go` — rapid stateful test that drives the instance reconciler's compute layer (Postgres → Metadata → Gateway pipeline) with random environment events (each component becoming `Ready` / `Degraded`) and asserts the same invariants as `FireboltInstance.tla` (`TypeOK`, `ReadyIsStable`, "phase reflects condition rollup").
+- `formal/FireboltInstance.dot` — TLC state graph dump (gitignored, regenerated via `make formal-dump`).
+- `scripts/gen-tla-state-tests.py` extended to handle either spec (selected via flag), or a sibling generator for the instance state graph.
+- `internal/controller/instance_tla_states_data_test.go` (generated) and `instance_tla_state_test.go` exercise every reachable `FireboltInstance` state against the real `instance_*.go` compute functions.
+- Wired into `make formal-verify` so the CI guard covers both CRDs.
+
+**False-positive risk**: none. Same methodology, different state machine. Either it works mechanically or it surfaces a real bug in the instance reconciler.
+
+### Phase 6 — Generalised crash-point coverage
+
+`internal/controller/crash_points.go` enumerates 9 deterministic crash points used by E2E (`CrashAfterEngineConfigMapCreated`, `CrashAfterStatefulSetCreated`, …). The Phase 2 property test exercises only one (`CrashReconcile` ≈ status write skipped). The TLA spec models reconciles atomically, so every partial-write state is already a valid model state — no spec extension is required for safety, only coverage.
+
+- New `CrashAt(point CrashPoint)` action in `engineSim` for each of the 9 crash points: applies side effects up to that point only. The existing `applyResult` already separates `EnsureStatefulSet`, `EnsureConfigMap`, `EnsureHeadlessSvc`, `EnsureClusterSvc` and the per-resource deletes, so per-write granularity is mostly there; a small refactor surfaces "stop after the *k*-th side effect".
+- Note in `FireboltEngine.tla` acknowledging the property test goes finer-grained than the spec, listing the 9 sub-points, and explaining why no new spec actions are required (every partial state already lies in the spec's reachable set).
+
+**False-positive risk**: low. The 9 crash points have hand-written E2E coverage already; the bar here is "rapid finds a sequence with no E2E counterpart that violates an invariant", which is by construction a real bug.
+
+### Phase 8 — Informer cache staleness
+
+Real reconciles read from the informer cache, which can lag by up to the watch round-trip relative to a write the controller itself just made. We currently model this as instantaneous.
+
+- Two views in `engineSim`: `apiCluster` (truth) and `cacheCluster` (what `getEngineState` sees). New `CacheCatchesUp` action propagates one pending write from API to cache.
+- TLA: `EnvCacheLag` action that delays reflection of a previous reconcile's writes; paired with `WF_vars(EnvCacheCatchesUp)` so permanent lag is excluded.
+- New `Inv_NoLostWrite`: every write that landed in the API eventually appears to a subsequent reconcile. This is what classifies "permanent lag" as a misconfiguration rather than a bug — it cannot satisfy fairness, so a TLC counterexample to `EventuallyTerminal` under permanent lag would not be a bug, it would be a violation of the modelling assumption.
+- All existing safety invariants must hold against the **API** view, not the cache. The cache view is the controller's *input*; the API view is the system *truth*.
+
+**False-positive risk**: highest in this plan, exactly the article's archetypal trap. Mitigation is the explicit fairness condition + `Inv_NoLostWrite`. If a test fails because the cache lagged forever, the failing condition is the modelling assumption, not the controller.
+
+### Phase 9 — Outer Reconcile envtest harness *(optional)*
+
+Phases 2/3/6/7/8 all exercise the compute layer (`computeEngineReconcile`). The instance gate, finalizer handling, owner-ref drift, and optimistic-concurrency on status updates live in the outer `Reconcile` and are not exercised.
+
+- `internal/controller/engine_outer_property_test.go` — rapid harness over the full `Reconcile` against envtest. Slower; gated to a separate `make test-property` target rather than `make test`.
+
+**False-positive risk**: moderate. envtest occasionally stutters for reasons unrelated to controller correctness (apiserver timing, watch propagation). Mitigation: deterministic seeds and short fixed timeouts; a test failure that does not reproduce on replay is treated as infrastructure, not as a controller bug, until shown otherwise.
+
+### Phase 10 — Bump TLC bounds *(cheap; nightly)*
+
+`MaxGen=3, MaxSpec=4`. `formal/FireboltEngine.deep.cfg` + `make formal-check-deep` target. Initially scoped as a ~5-min nightly job; in practice TLC explores the ~3,200-state space in ~2 seconds, so it could be promoted to inner-loop CI without noticeable cost. Kept as a separate target for now to keep the bound documentation explicit. The inner-loop `make formal-check` continues to use `MaxGen=2 / MaxSpec=3` because the *state-cover fixture* (Phase 3) is generated at those bounds — the runtime constant `tlaMaxGen` in the generated Go file pins the test fixture's projection.
+
+### Phase 11 — Time / drain timeouts *(deferred)*
+
+The article's highest false-positive class. Deferred until Phases 6–8 are stable so we have the invariant-discipline patterns in place before introducing fuzzed time. Likely shape: a discrete logical clock, bounded drain deadlines, and `Inv_DrainCompletesByDeadline`-style invariants. Until then, drain-timeout behaviour is covered by hand-written E2E tests, not by the property/state-cover harness.
+
+### Implementation order
+
+5 → 6 → 10 → 8 → 9 → (defer) 11. Phase 10 slots in early because it is a configuration-only change that can run in parallel with the others.
+
 ## References
 
 - [How Amazon Web Services Uses Formal Methods (CACM)](https://cacm.acm.org/research/how-amazon-web-services-uses-formal-methods/)
