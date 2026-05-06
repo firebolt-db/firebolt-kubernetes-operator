@@ -345,9 +345,11 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 // single specific successor. The closure includes the starting state itself
 // only when the model permits a stutter there (no reconciler action enabled
 // or a self-loop edge); otherwise a no-op Reconcile is rejected.
-func closureContains(closure []tlaState, actual tlaState) bool {
-	for i := range closure {
-		if tlaStateEqual(closure[i], actual) {
+//
+// closureIDs are indices into tlaStatePool.
+func closureContains(closureIDs []int, actual tlaState) bool {
+	for _, id := range closureIDs {
+		if tlaStateEqual(tlaStatePool[id], actual) {
 			return true
 		}
 	}
@@ -380,19 +382,20 @@ func TestTLAEngineStateCover(t *testing.T) {
 	skippedBoundary := 0
 	for i := range tlaEngineStateCases {
 		tc := tlaEngineStateCases[i]
-		if tlaShouldGateOut(tc.Start) {
+		start := tlaStatePool[tc.Start]
+		if tlaShouldGateOut(start) {
 			skippedGate++
 			continue
 		}
-		if tlaModelBoundary(tc.Start) {
+		if tlaModelBoundary(start) {
 			skippedBoundary++
 			continue
 		}
 		name := fmt.Sprintf("case-%04d/%s/g%d/a%d/d%d/s%d",
-			i, tc.Start.Phase, tc.Start.CurrentGen, tc.Start.ActiveGen,
-			tc.Start.DrainingGen, tc.Start.SpecVer)
+			i, start.Phase, start.CurrentGen, start.ActiveGen,
+			start.DrainingGen, start.SpecVer)
 		t.Run(name, func(t *testing.T) {
-			m := materializeTLAState(tc.Start)
+			m := materializeTLAState(start)
 			result := computeEngineReconcile(
 				&m.spec, &m.status, m.buildState(),
 				propEngineName, propNamespace, 0, testInstanceInfo(),
@@ -407,10 +410,10 @@ func TestTLAEngineStateCover(t *testing.T) {
 			}
 			tlaInvariants(t, m)
 
-			actual := projectEngineSim(m, tc.Start.InstanceReady)
+			actual := projectEngineSim(m, start.InstanceReady)
 			if !closureContains(tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					tc.Start, actual, len(tc.Closure), formatClosure(tc.Closure))
+					start, actual, len(tc.Closure), formatClosure(tc.Closure))
 			}
 		})
 	}
@@ -419,15 +422,18 @@ func TestTLAEngineStateCover(t *testing.T) {
 		skippedGate, skippedBoundary)
 }
 
-func formatClosure(closure []tlaState) string {
+// formatClosure renders the first few entries of a closure index list for
+// inclusion in a Fatalf message. Each entry is prefixed by its pool index so
+// errors point straight back into tlaStatePool.
+func formatClosure(closureIDs []int) string {
 	const limit = 8
 	out := ""
-	for i, s := range closure {
+	for i, id := range closureIDs {
 		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closure)-limit)
+			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
 			break
 		}
-		out += fmt.Sprintf("    [%d] %+v\n", i, s)
+		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaStatePool[id])
 	}
 	return out
 }
