@@ -95,9 +95,13 @@ A UC Santa Cruz research tool that simulates the Kubernetes API server in-proces
 
 ### Phase 3 — TLA+ state cover (complete)
 
-Phase 2's `rapid` sequences explore the compute layer with random walks. Phase 3 turns the TLC state graph into a deterministic exhaustive state cover for the same compute layer: every reachable TLA+ state becomes a test case that calls `computeEngineReconcile` and asserts the resulting state lies in the model's "reconciler closure" of the start (states reachable via 0+ consecutive reconciler-only transitions). Random walks miss states they did not visit; state cover hits every reachable input by construction.
+Phase 2's `rapid` sequences explore the compute layer with random walks. Phase 3 turns the TLC state graph into a deterministic exhaustive state cover for the same compute layer: every reachable TLA+ state becomes a test case that calls `computeEngineReconcile` and asserts the resulting state lies in the model's "reconciler closure" of the start. Random walks miss states they did not visit; state cover hits every reachable input by construction.
 
-The level-triggered design motivates state cover over edge cover (path replay). Reconcile correctness is a state-local property — given any reachable state, `Reconcile(X) ∈ successors(X)` — so once every reachable state is checked, every transition is checked by composition. Path replay is the right tool for event-sourced systems; this is not one.
+The reconciler closure of a state `X` is the set of TLA+ states reachable from `X` via 1+ reconciler-only transitions, plus `X` itself when a stutter is legitimate (`X` has no enabled reconciler action, or has a self-loop reconciler edge). The closure is transitive on purpose: Go's compute layer legitimately fires several TLA sub-actions in one Reconcile when their preconditions hold simultaneously — e.g. from `(creating, sts ok, svc absent, podsReady=true)` it does EnsureService + Advance in one shot, landing in `(switching, …)`. A strict direct-successor closure would reject that valid behaviour.
+
+Trade-off: a buggy reconciler that takes a *valid* multi-step path but skips an intermediate step with no observable effect on the projection would slip through. The closure check pairs with the explicit safety invariants (`Inv_TerminalConsistency`, `Inv_ServiceKnownGen`, `Inv_NoOrphanedResources`, …) to catch bugs at the level the projection observes; for finer-grained per-step assertions, the rapid harness in Phase 2 runs after every action.
+
+Reconcile correctness is therefore a state-local property: given any reachable state `X`, `Reconcile(X)` lies in `closure(X)`. Once every reachable state is checked, every implementation trajectory is bounded by valid model trajectories. Path replay is the right tool for event-sourced systems; this is not one.
 
 The fixture lives in the controller package as a generated Go file:
 
@@ -157,13 +161,40 @@ The TLA spec is **not** extended in this iteration. Adding `EnvCacheLag` + `WF_v
 
 **False-positive risk**: low in practice. The two anticipated traps — permanent lag and per-resource interleaving — are sidestepped by atomic full-snapshot catch-up plus rapid's natural distribution. A future per-resource lag model would re-introduce the article's classic trap and would need explicit fairness; documented as a follow-up rather than a present-day concern.
 
-### Phase 9 — Outer Reconcile envtest harness *(optional)*
+### Phase 9 — Outer Reconcile envtest harness
 
-Phases 2/3/6/7/8 all exercise the compute layer (`computeEngineReconcile`). The instance gate, finalizer handling, owner-ref drift, and optimistic-concurrency on status updates live in the outer `Reconcile` and are not exercised.
+Phases 2/3/6/8 exercise the compute layer (`computeEngineReconcile`). The outer `Reconcile` carries the responsibilities the compute layer cannot model:
 
-- `internal/controller/engine_outer_property_test.go` — rapid harness over the full `Reconcile` against envtest. Slower; gated to a separate `make test-property` target rather than `make test`.
+- The instance gate (`needsInstance` switch + `resolveInstanceInfo`).
+- Finalizer add on first reconcile, remove on deletion.
+- Owner refs on every child resource.
+- `applyEngineState` writing through the real client (including the silent `IsAlreadyExists` and `IsNotFound` short-circuits in `ensureService` / `ensureStatefulSet`).
+- `updateStatus` going through real optimistic-concurrency control.
 
-**False-positive risk**: moderate. envtest occasionally stutters for reasons unrelated to controller correctness (apiserver timing, watch propagation). Mitigation: deterministic seeds and short fixed timeouts; a test failure that does not reproduce on replay is treated as infrastructure, not as a controller bug, until shown otherwise.
+`internal/controller/engine_outer_property_test.go` (build tag `outerharness`) hosts a rapid stateful harness that drives `r.Reconcile(ctx, req)` against an envtest API server.
+
+**Scope is intentionally narrow.** Engines are pinned to `replicas=0` with `drainCheckEnabled=false`, which makes `checkPodsReady` vacuously true (no real Pods needed; envtest has no kubelet) and skips drain HTTP probes (no Pod IPs needed). With this scoping the rapid sequence walks the full `creating → switching → draining → cleaning → stopped` lifecycle on real K8s API semantics, but does **not** exercise:
+
+- pod-level readiness or any `CurrentPodReady`/`CurrentPodTotal` accounting
+- query-traffic correctness during a switch (Envoy is not in the loop)
+- the actual SQL drain probe path or its timeout behaviour
+- spec changes at non-zero replicas (every drift here is a zero-pod generation bump)
+
+What it *does* exercise that the compute-layer harnesses (Phases 2/3/6/8) cannot:
+
+- the instance gate (`needsInstance` + `resolveInstanceInfo`) under flip-flopping parent status
+- finalizer add on first reconcile, remove on deletion
+- owner refs on every child resource (the API server actually persists them)
+- `applyEngineState` writing through the real client, including the silent `IsAlreadyExists` and `IsNotFound` short-circuits in `ensureService` / `ensureStatefulSet`
+- `updateStatus` going through real optimistic-concurrency control
+
+Actions: `Reconcile`, `ApplySpecChange` (bumps engine image), `InstanceReady` / `InstanceDegraded` (flip parent instance status to exercise the gate), `DeleteEngine` (sets `DeletionTimestamp` so the next reconcile runs the finalizer cleanup).
+
+Invariants checked after each action (against the live API): terminal consistency (`Phase=Stopped ⇒ CurrentGen=ActiveGen`), `DrainingGen` only set during `draining` / `cleaning`, every surviving child resource owned by the engine, no child resources surviving past finalizer removal.
+
+Run with `make test-property` (~26 s at `RAPID_CHECKS=25`, ~100 s at the rapid default). Build-tagged out of `make test` because envtest setup adds ~3-5 s; PRs that touch `Reconcile`, `applyEngineState`, finalizer or owner-ref code should run the dedicated target.
+
+**False-positive risk**: moderate. envtest occasionally stutters for reasons unrelated to controller correctness (apiserver timing, watch propagation). Mitigation: deterministic seeds and short fixed timeouts; a test failure that does not reproduce on replay is treated as infrastructure, not as a controller bug, until shown otherwise. Reconciler conflicts on `Update` / `Status().Update` are tolerated (treated as benign retry signals) so a failure means a real invariant violation, not a transient race.
 
 ### Phase 11 — Time / drain timeouts *(deferred)*
 

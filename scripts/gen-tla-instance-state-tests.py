@@ -116,20 +116,20 @@ def reconciler_closure(
     reconciler_edges: Dict[int, List[int]],
 ) -> FrozenSet[int]:
     """States reachable from `start` via 1+ reconciler edges, plus `start`
-    itself iff the reconciler legitimately stutters at `start`.
+    itself iff a legitimate stutter is permitted there.
 
-    Stuttering is legitimate when:
-      - `start` has no outgoing reconciler edges, OR
-      - `start` has a self-loop reconciler edge.
+    Go's compute layer can fire several TLA actions in one Reconcile call
+    (e.g. ReconcileInit + ReconcileRun on the first reconcile from
+    uninitialized). The closure therefore tracks the transitive set of
+    states reachable via reconciler-only edges.
 
-    Including `start` unconditionally would let buggy implementations pass:
-    if `computePhase` failed to advance from Provisioning to Ready when
-    all components are available, the projection of the post-Reconcile
-    state would equal `start` and the closure check would trivially
-    accept it, hiding the regression. Excluding `start` forces the test
-    to assert that `Reconcile` advances to a model-valid successor.
-
-    Cycles back to `start` via 2+ edges are still respected.
+    A stutter at `start` is legitimate iff `start` has no outgoing
+    reconciler edges or has a self-loop reconciler edge. Excluding
+    `start` otherwise forces the test to assert that Reconcile advances
+    to a model-valid successor — without this, a buggy `computePhase`
+    that fails to advance from Provisioning to Ready when all components
+    are available would project to `actual == start` and the closure
+    check would trivially accept it.
     """
     out = reconciler_edges.get(start, ())
     seen: Set[int] = set()
