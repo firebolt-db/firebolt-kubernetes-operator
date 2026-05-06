@@ -116,25 +116,34 @@ def reconciler_closure(
     reconciler_edges: Dict[int, List[int]],
 ) -> FrozenSet[int]:
     """States reachable from `start` via 1+ reconciler edges, plus `start`
-    itself iff the reconciler legitimately stutters at `start`.
+    itself iff a legitimate stutter is permitted there.
 
-    Stuttering is legitimate when:
-      - `start` has no outgoing reconciler edges (no reconciler action is
-        enabled, so a no-op Reconcile is the only valid outcome), OR
-      - `start` has a self-loop reconciler edge (some reconciler action
-        transitions `start` to itself, so a no-op result is one valid
-        outcome among several).
+    The spec models each reconciler action atomically, but Go's compute
+    layer legitimately fires several TLA actions in one Reconcile when
+    their preconditions are simultaneously satisfied (e.g. from
+    `(creating, sts ok, svc absent, podsReady=true)` Go does
+    EnsureService + Advance in one shot, landing in `(switching, …)`).
+    The closure therefore tracks the transitive set of states reachable
+    via reconciler-only edges — the upper bound on what one Reconcile
+    can produce without touching environment state.
 
-    Including `start` unconditionally would let buggy implementations pass:
-    a stutter where the model says progress is mandatory (e.g. phase
-    transitioning from Provisioning to Ready when all conditions hold)
-    would project to `actual == start`, which would then trivially lie in
-    the closure and mask the regression. Excluding `start` in those cases
-    forces the test to assert that `Reconcile` advances to a model-valid
-    successor.
+    A stutter at `start` is legitimate iff `start` has no outgoing
+    reconciler edges or has a self-loop reconciler edge. Including
+    `start` unconditionally would let a buggy implementation that
+    fails to advance from a state where the model says progress is
+    mandatory pass silently — `actual == start` would trivially lie
+    in the closure. Excluding `start` in those cases forces the test
+    to assert that Reconcile advances to a model-valid successor.
 
     Cycles back to `start` via 2+ edges are still respected — they are
     discovered during BFS and `start` re-enters `seen` via the cycle.
+
+    The remaining gap (acknowledged in docs/formal-verification.md): a
+    reconciler that takes a *valid* multi-step path but skips an
+    intermediate step that has no observable downstream effect on the
+    projection would slip through. The closure check pairs with the
+    explicit safety invariants in `tlaInvariants` to catch bugs at
+    the level the projection observes.
     """
     out = reconciler_edges.get(start, ())
     seen: Set[int] = set()

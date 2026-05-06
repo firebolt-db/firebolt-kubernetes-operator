@@ -63,6 +63,14 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 test: manifests generate setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+RAPID_CHECKS ?= 25
+
+.PHONY: test-property
+test-property: manifests generate setup-envtest ## Run the outer-Reconcile rapid harness (Phase 9). Override RAPID_CHECKS for deeper runs.
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test -tags outerharness -run TestEngineOuterStateMachine -count=1 \
+		./internal/controller/... -args -rapid.checks=$(RAPID_CHECKS)
+
 KIND_CLUSTER ?= operator-test-e2e
 
 .PHONY: setup-kind
