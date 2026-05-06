@@ -1,3 +1,18 @@
+# 0.1.33
+
+appVersion: v1.24.0
+
+## [1.24.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.23.0...v1.24.0) (2026-05-06)
+
+### Features
+
+* allow AWS SDK EC2 metadata detection via IRSA (FB-875) ([52f154c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/52f154cd6a535b9f9203e3af3c8ad9e7d0893f07))
+
+### Bug Fixes
+
+* always check env variables when comparing spec (FB-875) ([4d41a91](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4d41a91871bd4b5344a7f9eb7760a6b8066e0fcd))
+
+
 # 0.1.32
 
 appVersion: v1.23.0
