@@ -100,59 +100,95 @@ func (m *engineSim) buildState() EngineState {
 	return state
 }
 
-// applyResult applies an EngineReconcileResult to the simulated cluster state.
-// Pass applyStatus=false to simulate a crash before the status write.
-func (m *engineSim) applyResult(result *EngineReconcileResult, applyStatus bool) {
-	if result.EnsureStatefulSet != nil {
-		gen := labelGen(result.EnsureStatefulSet.Labels)
-		m.stses[gen] = result.EnsureStatefulSet
-	}
-	if result.EnsureConfigMap != nil {
+// applyEngineState executes side effects in the order:
+//
+//	1: EnsureConfigMap
+//	2: EnsureHeadlessSvc
+//	3: EnsureStatefulSet
+//	4: EnsureClusterSvc
+//	5: DeleteResources (loop)
+//	6: status update
+//
+// applyResultUpTo applies the first k of those steps to the simulated cluster.
+// k=6 is a successful reconcile; k<6 simulates a crash after step k. The 9
+// MaybeCrash points in engine_apply.go are all prefixes of this sequence:
+//
+//	CrashAfterEngineConfigMapCreated   -> k=1
+//	CrashAfterHeadlessServiceCreated   -> k=2
+//	CrashAfterStatefulSetCreated       -> k=3
+//	CrashAfterClusterServiceEnsured    -> k=4
+//	CrashBeforeCreatingToSwitching     -> k=5 (creating reconcile)
+//	CrashAfterServiceSelectorUpdate    -> k=4 (switching reconcile)
+//	CrashBeforeSwitchingStatusUpdate   -> k=5 (switching reconcile)
+//	CrashAfterStatefulSetDeleted       -> k=5 (cleaning reconcile)
+//	CrashBeforeCleaningToTerminal      -> k=5 (cleaning reconcile)
+//
+// The TLA+ spec models reconciles atomically; every partial-write state below
+// is already a reachable model state, so no spec extension is required for
+// safety. CrashAtPrefix exercises recovery from each prefix; all the existing
+// invariants (terminal consistency, service-known-gen, no-orphans, etc.) must
+// hold after the next Reconcile.
+func (m *engineSim) applyResultUpTo(result *EngineReconcileResult, k int) {
+	if k >= 1 && result.EnsureConfigMap != nil {
 		gen := labelGen(result.EnsureConfigMap.Labels)
 		if gen >= 0 {
 			m.configMaps[gen] = result.EnsureConfigMap
 		}
 	}
-	if result.EnsureHeadlessSvc != nil {
+	if k >= 2 && result.EnsureHeadlessSvc != nil {
 		gen := labelGen(result.EnsureHeadlessSvc.Labels)
 		if gen >= 0 {
 			m.headlessSvcs[gen] = result.EnsureHeadlessSvc
 		}
 	}
-	if result.EnsureClusterSvc != nil {
+	if k >= 3 && result.EnsureStatefulSet != nil {
+		gen := labelGen(result.EnsureStatefulSet.Labels)
+		m.stses[gen] = result.EnsureStatefulSet
+	}
+	if k >= 4 && result.EnsureClusterSvc != nil {
 		m.clusterSvc = result.EnsureClusterSvc
 	}
-	for _, obj := range result.DeleteResources {
-		gen := labelGen(obj.GetLabels())
-		if gen < 0 {
-			continue
+	if k >= 5 {
+		for _, obj := range result.DeleteResources {
+			gen := labelGen(obj.GetLabels())
+			if gen < 0 {
+				continue
+			}
+			switch obj.(type) {
+			case *appsv1.StatefulSet:
+				delete(m.stses, gen)
+			case *corev1.ConfigMap:
+				delete(m.configMaps, gen)
+			case *corev1.Service:
+				delete(m.headlessSvcs, gen)
+			}
 		}
-		switch obj.(type) {
-		case *appsv1.StatefulSet:
-			delete(m.stses, gen)
-		case *corev1.ConfigMap:
-			delete(m.configMaps, gen)
-		case *corev1.Service:
-			delete(m.headlessSvcs, gen)
+	}
+	if k >= 6 {
+		prevCurrentGen := m.status.CurrentGeneration
+		prevDrainingGen := m.status.DrainingGeneration
+		m.status = result.Status
+
+		if m.status.CurrentGeneration != prevCurrentGen {
+			m.podsReady = false
+		}
+
+		newDG := m.status.DrainingGeneration
+		if newDG != nil && (prevDrainingGen == nil || *prevDrainingGen != *newDG) {
+			m.podsDrained = false
 		}
 	}
+}
 
-	if !applyStatus {
-		return
+// applyResult is the legacy two-mode entry point: the historical
+// applyStatus=true is k=6 (full success); applyStatus=false is k=5 (status
+// dropped; the original CrashReconcile model).
+func (m *engineSim) applyResult(result *EngineReconcileResult, applyStatus bool) {
+	k := 5
+	if applyStatus {
+		k = 6
 	}
-
-	prevCurrentGen := m.status.CurrentGeneration
-	prevDrainingGen := m.status.DrainingGeneration
-	m.status = result.Status
-
-	if m.status.CurrentGeneration != prevCurrentGen {
-		m.podsReady = false
-	}
-
-	newDG := m.status.DrainingGeneration
-	if newDG != nil && (prevDrainingGen == nil || *prevDrainingGen != *newDG) {
-		m.podsDrained = false
-	}
+	m.applyResultUpTo(result, k)
 }
 
 // labelGen extracts the generation number from an object's labels.
@@ -231,6 +267,23 @@ func (m *engineSim) CrashReconcile(t *rapid.T) {
 	)
 	checkRequeue(t, &result)
 	m.applyResult(&result, false)
+}
+
+// CrashAtPrefix simulates a crash after the k-th side effect of
+// applyEngineState, drawn uniformly from [1, 5]. CrashReconcile (k=5) is the
+// final-prefix special case kept as a separate action for shrinking clarity;
+// CrashAtPrefix exercises the four earlier prefixes (k=1..4) that correspond
+// to the CrashAfter*Created / CrashAfter*Ensured points in crash_points.go.
+// Recovery is exercised on the next Reconcile / CrashReconcile / CrashAtPrefix
+// the rapid sequence draws; all invariants must hold after every recovery.
+func (m *engineSim) CrashAtPrefix(t *rapid.T) {
+	result := computeEngineReconcile(
+		&m.spec, &m.status, m.buildState(),
+		propEngineName, propNamespace, 0, testInstanceInfo(),
+	)
+	checkRequeue(t, &result)
+	k := rapid.IntRange(1, 4).Draw(t, "crashPrefix")
+	m.applyResultUpTo(&result, k)
 }
 
 // ApplySpecChange bumps the engine image tag, triggering spec drift detection.

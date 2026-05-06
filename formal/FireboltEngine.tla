@@ -21,7 +21,14 @@
 \*   - Each reconcile call is modeled as one atomic step. This is conservative
 \*     (the real code makes multiple K8s writes per reconcile) but correct:
 \*     safety violations found here are real; absence of violations holds in
-\*     the coarser implementation too.
+\*     the coarser implementation too. The Phase 6 rapid harness goes finer-
+\*     grained: it crashes the simulated apply at each of the 9 MaybeCrash
+\*     points enumerated in crash_points.go, which form prefixes
+\*     k in {1..5} of the production order
+\*     [ConfigMap, HeadlessSvc, STS, ClusterSvc, Deletes, Status]. Each
+\*     intermediate prefix is already a reachable model state — the spec
+\*     allows resources to be in any subset present — so no spec extension
+\*     is required; the harness narrows to recovery from concrete prefixes.
 \*   - podsReady is a boolean abstraction of "all pods in currentGen are ready".
 \*     It is reset to FALSE whenever currentGen is bumped. For spec.replicas=0
 \*     the real code returns allReady=true vacuously; the model still requires
