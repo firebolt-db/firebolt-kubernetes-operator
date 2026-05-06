@@ -65,6 +65,48 @@ const (
 	gatewayServicePort   int32 = 80
 	gatewayContainerName       = "envoy"
 	gatewayConfigKey           = "envoy.yaml"
+
+	// gatewayPerConnectionBufferLimitBytes is the value the operator stamps
+	// onto Envoy's per_connection_buffer_limit_bytes on BOTH the listener
+	// and the dynamic_forward_proxy cluster. It is hard-coded — not exposed
+	// on the FireboltInstance spec — because the same number governs three
+	// invariants the operator owns end-to-end:
+	//
+	//   1. **Request-replay budget for retries.** Envoy's router can only
+	//      replay a request whose full body fits in this buffer. The
+	//      X-Firebolt-Drained retry rule (see retry_policy below) and the
+	//      transport-failure retries (`connect-failure`, `refused-stream`,
+	//      `reset`) ALL share this constraint. A request body larger than
+	//      this limit is dispatched without buffering and any 5xx it
+	//      receives — including a retry-safe shutdown-fence 503 —
+	//      propagates to the client unretried, breaking the zero-downtime
+	//      contract for that request. The chosen 2 MiB covers typical
+	//      Firebolt SQL plus modest COPY ingest with headroom; jobs that
+	//      send single requests larger than this are out of scope for the
+	//      operator-managed retry path and should be split client-side.
+	//
+	//   2. **Gateway memory budget.** Peak buffering is roughly
+	//      `concurrent_in_flight_requests * (1 + retry_factor) * this`.
+	//      Doubling this value doubles the steady-state memory floor for
+	//      gateway pods at any given concurrency. The hard-coded value is
+	//      matched in helm/kubernetes-operator/values.yaml's gateway
+	//      resources defaults; raising it without also raising
+	//      `spec.gateway.resources.limits.memory` and `replicas` invites
+	//      OOMKills under load. Keeping it operator-controlled means the
+	//      two move together.
+	//
+	//   3. **Cross-component agreement.** The standalone helm chart in
+	//      ../firebolt-instance-helm renders the same buffer value through
+	//      its own gateway-configmap.yaml; the operator-managed gateway
+	//      and the chart-managed gateway behave identically here. If you
+	//      change this value, change it in the helm chart's values.yaml
+	//      in the same release so the two paths do not drift.
+	//
+	// See docs/architecture.md "Gateway query routing" → "Graceful pod
+	// shutdown" → step 5 for the retry-coverage caveat as a user-facing
+	// constraint, and the README's "Gateway sizing" section for the
+	// memory-budget formula.
+	gatewayPerConnectionBufferLimitBytes int64 = 2 << 20 // 2 MiB
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -148,6 +190,17 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
+      # per_connection_buffer_limit_bytes caps both downstream-receive and
+      # upstream-send buffering on this listener, AND it is the budget the
+      # router uses when deciding whether to BUFFER a request for retry.
+      # A request whose body exceeds this cap is dispatched without
+      # buffering and any 5xx it returns - including a retry-safe
+      # X-Firebolt-Drained 503 - propagates to the client unretried.
+      # Hard-coded by the operator (see gatewayPerConnectionBufferLimitBytes
+      # in instance_gateway.go) and intentionally NOT exposed on
+      # FireboltInstance.spec.gateway: the value is part of the operator's
+      # zero-downtime + memory-budget contract.
+      per_connection_buffer_limit_bytes: %d
       address:
         socket_address:
           address: 0.0.0.0
@@ -336,6 +389,14 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
+      # Mirror the listener's per_connection_buffer_limit_bytes onto the
+      # cluster so upstream connection buffers are sized identically. The
+      # router consults the smaller of the two when deciding whether a
+      # retry's request body fits, so leaving these in lockstep avoids a
+      # surprise where raising the listener limit alone has no effect on
+      # retry coverage. Hard-coded by the operator; see the listener-side
+      # comment for the full rationale.
+      per_connection_buffer_limit_bytes: %d
       # Short per-attempt TCP connect budget. "Connection refused" fails in
       # <1ms, but if the route to a stale pod IP is silently black-holed
       # (e.g. iptables DROP instead of REJECT) the connect can otherwise
@@ -443,11 +504,13 @@ admin:
       address: 127.0.0.1
       port_value: %d
 `,
-		gatewayContainerPort,
-		instance.Namespace,
-		instance.Spec.Gateway.MetricsPort,
-		gatewayAdminPort,
-		gatewayAdminPort,
+		gatewayPerConnectionBufferLimitBytes, // listener: per_connection_buffer_limit_bytes
+		gatewayContainerPort,                 // listener: port_value
+		instance.Namespace,                   // Lua: :authority rewrite
+		instance.Spec.Gateway.MetricsPort,    // stats_listener: port_value
+		gatewayPerConnectionBufferLimitBytes, // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayAdminPort,                     // admin_stats endpoint: port_value
+		gatewayAdminPort,                     // admin: port_value
 	)
 }
 

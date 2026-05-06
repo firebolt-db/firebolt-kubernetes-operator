@@ -111,6 +111,16 @@ type MetadataSpec struct {
 }
 
 // GatewaySpec configures the gateway component.
+//
+// The Envoy `per_connection_buffer_limit_bytes` is intentionally NOT
+// exposed here. The operator hard-codes it (see GatewayPerConnectionBufferLimitBytes
+// in instance_gateway.go) because it sits at the center of multiple
+// correctness invariants — retry coverage for the X-Firebolt-Drained
+// shutdown fence, gateway memory budget under concurrent load — that
+// the operator owns end-to-end. A user-tunable knob would invite
+// settings that silently break the zero-downtime contract or OOM the
+// gateway pod. If this trade-off needs to be revisited, raise it in
+// the architecture doc rather than re-adding a field.
 type GatewaySpec struct {
 	ComponentSpec `json:",inline"`
 }
