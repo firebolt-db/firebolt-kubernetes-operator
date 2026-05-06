@@ -338,11 +338,13 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 }
 
 // closureContains reports whether `actual` is one of the TLA+ states the model
-// considers reachable from the test's starting state via 0+ consecutive
-// reconciler-only transitions. A real Reconcile call may perform several model
-// sub-steps in one shot (the spec models reconciles atomically per sub-action;
-// the implementation batches), so the resulting state is checked for closure
-// membership rather than equality with any single specific successor.
+// considers reachable from the test's starting state. A real Reconcile call
+// may perform several model sub-steps in one shot (the spec models reconciles
+// atomically per sub-action; the implementation batches), so the resulting
+// state is checked for closure membership rather than equality with any
+// single specific successor. The closure includes the starting state itself
+// only when the model permits a stutter there (no reconciler action enabled
+// or a self-loop edge); otherwise a no-op Reconcile is rejected.
 func closureContains(closure []tlaState, actual tlaState) bool {
 	for i := range closure {
 		if tlaStateEqual(closure[i], actual) {
