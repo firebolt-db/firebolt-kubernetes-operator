@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -165,6 +166,27 @@ func TestBuildEnvoyConfigYAMLRetryPolicy(t *testing.T) {
 	}
 	if !hasPrev {
 		t.Error("retry_host_predicate missing previous_hosts; without it a retry can land on the same draining pod")
+	}
+}
+
+// TestBuildEnvoyConfigYAMLBufferLimit guards the operator's hard-coded
+// per_connection_buffer_limit_bytes. The value is intentionally NOT
+// user-configurable (see the comment on gatewayPerConnectionBufferLimitBytes
+// in instance_gateway.go for the rationale): if it changes, both the
+// listener and the DFP cluster must change in lockstep, and that change
+// must be deliberate. This test fails loudly on any drift between the
+// two sites or any drift away from the documented 2 MiB.
+func TestBuildEnvoyConfigYAMLBufferLimit(t *testing.T) {
+	const want2MiB = 2 << 20
+
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	want := fmt.Sprintf("per_connection_buffer_limit_bytes: %d", want2MiB)
+	if n := strings.Count(got, want); n != 2 {
+		t.Errorf("expected exactly 2 occurrences of %q (listener + DFP cluster); got %d in:\n%s",
+			want, n, got)
 	}
 }
 
