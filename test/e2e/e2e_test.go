@@ -287,7 +287,13 @@ var _ = Describe("Firebolt Engine", func() {
 	})
 
 	// Test 4: Rapid config changes - only the last change should be applied
-	Describe("Rapid Config Changes", Ordered, func() {
+	// Serial because the rapid-change loop creates short-lived StatefulSets
+	// (and therefore PVCs) faster than the kind cluster's scheduler and PV
+	// controller can settle. Running concurrently with other Describes
+	// pushed kube-scheduler's VolumeBinding plugin into 409-Conflict retries
+	// on PreBind, leaving pods stuck in FailedScheduling and the engine in a
+	// half-rolled-out state past the rapid-changes timeout. See FB-996.
+	Describe("Rapid Config Changes", Ordered, Serial, func() {
 		var (
 			instanceName = "inst-rapid" + queryConfig.Suffix
 			engineName   = "test-rapid" + queryConfig.Suffix + "-engine"
@@ -341,13 +347,19 @@ var _ = Describe("Firebolt Engine", func() {
 			err = WaitForEngineReady(ctx, engineName, 4, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Rapidly applying 15 config changes alternating between 3 and 1, ending with 1")
-			for i := 0; i < 15; i++ {
+			// 7 rapid changes alternating 3↔1 (ending at 1) is enough to exercise
+			// the operator's "abandon if creating, defer if draining/cleaning"
+			// path multiple times. The original 15-change variant produced ~32
+			// short-lived PVCs in <1s, which overran the kind cluster's
+			// scheduler+PV-controller and stranded pods in FailedScheduling well
+			// past the rapid-changes timeout. See FB-996.
+			By("Rapidly applying 7 config changes alternating between 3 and 1, ending with 1")
+			for i := 0; i < 7; i++ {
 				replicas := 3
 				if i%2 == 1 {
 					replicas = 1
 				}
-				if i == 14 {
+				if i == 6 {
 					replicas = 1
 				}
 				err = UpdateEngineReplicas(ctx, engineName, replicas)
