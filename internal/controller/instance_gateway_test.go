@@ -96,6 +96,94 @@ func TestBuildEnvoyConfigYAMLDFPSubClusterMode(t *testing.T) {
 	}
 }
 
+// TestBuildEnvoyConfigYAMLRetryPolicy guards the retry contract:
+//   - We retry on connect-failure / refused-stream / reset (transport-level
+//     failures where the engine could not have observed the request).
+//   - We retry on retriable-headers, gated by present_match on
+//     X-Firebolt-Drained. The engine's shutdown fence sets that header
+//     before any executor / Storage Manager work runs, so the request is
+//     provably side-effect free; treating those 503s as retriable is the
+//     only way the gateway can return a successful response when a query
+//     lands on a pod between SIGTERM and the EndpointSlice update.
+//   - We do NOT retry on bare 5xx; that would risk replaying a write that
+//     the engine partially applied before failing.
+//   - previous_hosts retry-host predicate is preserved; without it the
+//     retry could land on the same draining pod and fail again.
+func TestBuildEnvoyConfigYAMLRetryPolicy(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+
+	retry := dfpRouteRetryPolicy(t, parsed)
+
+	retryOn, _ := retry["retry_on"].(string)
+	for _, want := range []string{"connect-failure", "refused-stream", "reset", "retriable-headers"} {
+		if !strings.Contains(retryOn, want) {
+			t.Errorf("retry_on %q is missing %q", retryOn, want)
+		}
+	}
+	for _, banned := range []string{"5xx", "gateway-error"} {
+		if strings.Contains(retryOn, banned) {
+			t.Errorf("retry_on %q must not include %q (would retry side-effecting 5xx)", retryOn, banned)
+		}
+	}
+
+	// retriable_headers must include X-Firebolt-Drained with present_match.
+	headers, ok := retry["retriable_headers"].([]any)
+	if !ok || len(headers) == 0 {
+		t.Fatalf("retriable_headers missing or not a list; got %T = %v", retry["retriable_headers"], retry["retriable_headers"])
+	}
+	foundDrained := false
+	for _, h := range headers {
+		hm, _ := h.(map[string]any)
+		if hm == nil {
+			continue
+		}
+		if name, _ := hm["name"].(string); strings.EqualFold(name, "X-Firebolt-Drained") {
+			if pm, _ := hm["present_match"].(bool); pm {
+				foundDrained = true
+			}
+		}
+	}
+	if !foundDrained {
+		t.Errorf("retriable_headers does not include X-Firebolt-Drained with present_match=true; got %v", headers)
+	}
+
+	// previous_hosts predicate must be preserved.
+	preds, _ := retry["retry_host_predicate"].([]any)
+	hasPrev := false
+	for _, p := range preds {
+		pm, _ := p.(map[string]any)
+		if name, _ := pm["name"].(string); strings.Contains(name, "previous_hosts") {
+			hasPrev = true
+		}
+	}
+	if !hasPrev {
+		t.Error("retry_host_predicate missing previous_hosts; without it a retry can land on the same draining pod")
+	}
+}
+
+func dfpRouteRetryPolicy(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	filterChains := listeners[0].(map[string]any)["filter_chains"].([]any)
+	filters := filterChains[0].(map[string]any)["filters"].([]any)
+	hcm := filters[0].(map[string]any)["typed_config"].(map[string]any)
+	virtualHosts := hcm["route_config"].(map[string]any)["virtual_hosts"].([]any)
+	routes := virtualHosts[0].(map[string]any)["routes"].([]any)
+	route := routes[0].(map[string]any)["route"].(map[string]any)
+	rp, ok := route["retry_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("route retry_policy missing or wrong type; got %T", route["retry_policy"])
+	}
+	return rp
+}
+
 func dfpFilterTypedConfig(t *testing.T, parsed map[string]any) map[string]any {
 	t.Helper()
 	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
