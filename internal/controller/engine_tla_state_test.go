@@ -102,7 +102,10 @@ func tlaMakeClusterSvc(gen int) *corev1.Service {
 // corresponds to the given TLA+ state. instanceReady is intentionally not
 // plumbed — the real instance gate lives in the outer Reconcile method, not
 // in the compute layer this test exercises; states gated by instanceReady=FALSE
-// are skipped at test time (see tlaShouldGateOut).
+// are skipped at test time (see tlaShouldGateOut). Both api and cache views
+// are initialized identically: state cover only runs one Reconcile per state,
+// so cache lag is not modeled here (the rapid harness in
+// engine_property_test.go is where lag is exercised via CacheCatchesUp).
 func materializeTLAState(s tlaState) *engineSim {
 	spec := tlaSpecForState(s)
 	m := &engineSim{
@@ -112,11 +115,10 @@ func materializeTLAState(s tlaState) *engineSim {
 			CurrentGeneration: s.CurrentGen,
 			ActiveGeneration:  s.ActiveGen,
 		},
-		stses:        make(map[int]*appsv1.StatefulSet),
-		configMaps:   make(map[int]*corev1.ConfigMap),
-		headlessSvcs: make(map[int]*corev1.Service),
-		podsReady:    s.PodsReady,
-		podsDrained:  s.PodsDrained,
+		api:         newClusterView(),
+		cache:       newClusterView(),
+		podsReady:   s.PodsReady,
+		podsDrained: s.PodsDrained,
 	}
 	if s.DrainingGen >= 0 {
 		dg := s.DrainingGen
@@ -126,10 +128,10 @@ func materializeTLAState(s tlaState) *engineSim {
 		if sv < 0 {
 			continue
 		}
-		m.stses[g] = tlaMakeSTS(&spec, g, sv)
+		sts := tlaMakeSTS(&spec, g, sv)
 		// ConfigMap and headless Service are co-resources of the STS — populate
 		// stub objects so assembleEngineState sees a consistent per-gen picture.
-		m.configMaps[g] = &corev1.ConfigMap{
+		cm := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      genResourceName(propEngineName, g, SuffixConfig),
 				Namespace: propNamespace,
@@ -139,7 +141,7 @@ func materializeTLAState(s tlaState) *engineSim {
 				},
 			},
 		}
-		m.headlessSvcs[g] = &corev1.Service{
+		hl := &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      genResourceName(propEngineName, g, SuffixHL),
 				Namespace: propNamespace,
@@ -149,9 +151,17 @@ func materializeTLAState(s tlaState) *engineSim {
 				},
 			},
 		}
+		m.api.stses[g] = sts
+		m.api.configMaps[g] = cm
+		m.api.headlessSvcs[g] = hl
+		m.cache.stses[g] = sts
+		m.cache.configMaps[g] = cm
+		m.cache.headlessSvcs[g] = hl
 	}
 	if s.SvcTargetGen >= 0 {
-		m.clusterSvc = tlaMakeClusterSvc(s.SvcTargetGen)
+		svc := tlaMakeClusterSvc(s.SvcTargetGen)
+		m.api.clusterSvc = svc
+		m.cache.clusterSvc = svc
 	}
 	return m
 }
@@ -178,7 +188,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 	if m.status.DrainingGeneration != nil {
 		st.DrainingGen = *m.status.DrainingGeneration
 	}
-	for g, sts := range m.stses {
+	for g, sts := range m.api.stses {
 		if g < 0 || g >= len(st.StsSpecVer) {
 			continue
 		}
@@ -187,8 +197,8 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		}
 		st.StsSpecVer[g] = parseImageVer(sts.Spec.Template.Spec.Containers[0].Image)
 	}
-	if m.clusterSvc != nil {
-		if v, ok := m.clusterSvc.Spec.Selector[LabelGeneration]; ok {
+	if m.api.clusterSvc != nil {
+		if v, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]; ok {
 			if n, err := strconv.Atoi(v); err == nil {
 				st.SvcTargetGen = n
 			}
@@ -303,7 +313,7 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
 			s.Phase, *s.DrainingGeneration)
 	}
-	if s.ActiveGeneration >= 0 && m.stses[s.ActiveGeneration] == nil {
+	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
 		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS", s.ActiveGeneration)
 	}
 	if s.DrainingGeneration != nil && s.Phase != computev1alpha1.PhaseDraining && s.Phase != computev1alpha1.PhaseCleaning {
@@ -318,8 +328,8 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 		t.Fatalf("Inv_GenOrder: ActiveGen=%d > CurrentGen=%d",
 			s.ActiveGeneration, s.CurrentGeneration)
 	}
-	if m.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.clusterSvc.Spec.Selector[LabelGeneration]
+	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
+		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
 		if !ok {
 			t.Fatalf("cluster service missing %s label", LabelGeneration)
 		}
@@ -331,7 +341,7 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d not in {activeGen=%d, currentGen=%d}",
 				targetGen, s.ActiveGeneration, s.CurrentGeneration)
 		}
-		if m.stses[targetGen] == nil {
+		if m.api.stses[targetGen] == nil {
 			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS", targetGen)
 		}
 	}

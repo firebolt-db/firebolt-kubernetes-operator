@@ -28,6 +28,16 @@ package controller
 // CrashReconcile simulates a crash between the last resource write and the
 // status update in applyEngineState: resources are applied but the status
 // write is omitted.  The next Reconcile call then exercises crash recovery.
+//
+// Phase 8 (informer cache staleness): the simulated cluster carries two
+// views — `api` is the source of truth (what the K8s API server stores)
+// and `cache` is what the controller's informer cache sees via
+// getEngineState. Reconcile reads from cache and writes to api; the cache
+// is propagated via the explicit CacheCatchesUp action. Until that action
+// fires, the cache lags behind api, which is the production failure mode
+// where a controller decides based on stale child-resource state.
+// All safety invariants are checked against the api view (truth);
+// transient cache/api divergence is the input space, not the bug surface.
 
 import (
 	"fmt"
@@ -46,19 +56,64 @@ const (
 	propNamespace  = "prop-ns"
 )
 
+// clusterView is one consistent snapshot of the child resources owned by an
+// engine. The api view is the source of truth (what the K8s API server has);
+// the cache view is what the controller's informer cache sees. Production
+// cache lag is per-resource; this sim treats it as all-or-nothing (a single
+// CacheCatchesUp action copies the full api snapshot to the cache) to keep
+// the model simple and the false-positive surface contained.
+type clusterView struct {
+	stses        map[int]*appsv1.StatefulSet
+	configMaps   map[int]*corev1.ConfigMap
+	headlessSvcs map[int]*corev1.Service
+	clusterSvc   *corev1.Service
+}
+
+func newClusterView() clusterView {
+	return clusterView{
+		stses:        make(map[int]*appsv1.StatefulSet),
+		configMaps:   make(map[int]*corev1.ConfigMap),
+		headlessSvcs: make(map[int]*corev1.Service),
+	}
+}
+
+// snapshot returns a shallow copy of v: the maps are duplicated so subsequent
+// writes to one view do not bleed into the other, but the value pointers
+// (*StatefulSet, *ConfigMap, …) are shared. This is sound because
+// applyResultUpTo always replaces values via assignment rather than mutating
+// the underlying struct in place.
+func (v clusterView) snapshot() clusterView {
+	out := clusterView{
+		stses:        make(map[int]*appsv1.StatefulSet, len(v.stses)),
+		configMaps:   make(map[int]*corev1.ConfigMap, len(v.configMaps)),
+		headlessSvcs: make(map[int]*corev1.Service, len(v.headlessSvcs)),
+		clusterSvc:   v.clusterSvc,
+	}
+	for k, val := range v.stses {
+		out.stses[k] = val
+	}
+	for k, val := range v.configMaps {
+		out.configMaps[k] = val
+	}
+	for k, val := range v.headlessSvcs {
+		out.headlessSvcs[k] = val
+	}
+	return out
+}
+
 // engineSim is the state machine.  It holds the simulated cluster state and
 // drives computeEngineReconcile to verify invariants from the TLA+ spec.
 type engineSim struct {
 	spec   computev1alpha1.FireboltEngineSpec
 	status computev1alpha1.FireboltEngineStatus
 
-	// stses, configMaps, headlessSvcs track per-generation resources.
-	stses        map[int]*appsv1.StatefulSet
-	configMaps   map[int]*corev1.ConfigMap
-	headlessSvcs map[int]*corev1.Service
+	// api is the source of truth: what the K8s API server stores. Reconciler
+	// writes go here; safety invariants are checked against this view.
+	api clusterView
 
-	// clusterSvc is the single cluster-facing Service; nil means absent.
-	clusterSvc *corev1.Service
+	// cache is the controller's informer view. Reconcile reads from it via
+	// buildState. Lags behind api until CacheCatchesUp fires.
+	cache clusterView
 
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
 	// Reset to false whenever currentGen is bumped.
@@ -70,24 +125,24 @@ type engineSim struct {
 }
 
 // buildState constructs the EngineState to pass to computeEngineReconcile
-// from the current simulated cluster view. All guard logic lives in
-// assembleEngineState so there is no risk of sim drift from the real
-// getEngineState.
+// from the cache view (what getEngineState would observe in production).
+// All guard logic lives in assembleEngineState so there is no risk of sim
+// drift from the real getEngineState.
 func (m *engineSim) buildState() EngineState {
 	gen := m.status.CurrentGeneration
 	raw := rawEngineResources{
-		CurrentSTS:         m.stses[gen],
-		CurrentConfigMap:   m.configMaps[gen],
-		CurrentHeadlessSvc: m.headlessSvcs[gen],
+		CurrentSTS:         m.cache.stses[gen],
+		CurrentConfigMap:   m.cache.configMaps[gen],
+		CurrentHeadlessSvc: m.cache.headlessSvcs[gen],
 		CurrentPodsReady:   m.podsReady,
-		ClusterService:     m.clusterSvc,
+		ClusterService:     m.cache.clusterSvc,
 	}
 
 	if m.status.DrainingGeneration != nil {
 		dg := *m.status.DrainingGeneration
-		raw.DrainingSTS = m.stses[dg]
-		raw.DrainingConfigMap = m.configMaps[dg]
-		raw.DrainingHeadlessSvc = m.headlessSvcs[dg]
+		raw.DrainingSTS = m.cache.stses[dg]
+		raw.DrainingConfigMap = m.cache.configMaps[dg]
+		raw.DrainingHeadlessSvc = m.cache.headlessSvcs[dg]
 		raw.DrainingPodsDrained = m.podsDrained
 		// assembleEngineState handles DrainingSTS==nil → DrainingPodsDrained=true
 		// and the drainingGen != currentGen guard.
@@ -109,9 +164,10 @@ func (m *engineSim) buildState() EngineState {
 //	5: DeleteResources (loop)
 //	6: status update
 //
-// applyResultUpTo applies the first k of those steps to the simulated cluster.
-// k=6 is a successful reconcile; k<6 simulates a crash after step k. The 9
-// MaybeCrash points in engine_apply.go are all prefixes of this sequence:
+// applyResultUpTo applies the first k of those steps to the api view (the
+// cache is only updated by CacheCatchesUp). k=6 is a successful reconcile;
+// k<6 simulates a crash after step k. The 9 MaybeCrash points in
+// engine_apply.go are all prefixes of this sequence:
 //
 //	CrashAfterEngineConfigMapCreated   -> k=1
 //	CrashAfterHeadlessServiceCreated   -> k=2
@@ -132,21 +188,21 @@ func (m *engineSim) applyResultUpTo(result *EngineReconcileResult, k int) {
 	if k >= 1 && result.EnsureConfigMap != nil {
 		gen := labelGen(result.EnsureConfigMap.Labels)
 		if gen >= 0 {
-			m.configMaps[gen] = result.EnsureConfigMap
+			m.api.configMaps[gen] = result.EnsureConfigMap
 		}
 	}
 	if k >= 2 && result.EnsureHeadlessSvc != nil {
 		gen := labelGen(result.EnsureHeadlessSvc.Labels)
 		if gen >= 0 {
-			m.headlessSvcs[gen] = result.EnsureHeadlessSvc
+			m.api.headlessSvcs[gen] = result.EnsureHeadlessSvc
 		}
 	}
 	if k >= 3 && result.EnsureStatefulSet != nil {
 		gen := labelGen(result.EnsureStatefulSet.Labels)
-		m.stses[gen] = result.EnsureStatefulSet
+		m.api.stses[gen] = result.EnsureStatefulSet
 	}
 	if k >= 4 && result.EnsureClusterSvc != nil {
-		m.clusterSvc = result.EnsureClusterSvc
+		m.api.clusterSvc = result.EnsureClusterSvc
 	}
 	if k >= 5 {
 		for _, obj := range result.DeleteResources {
@@ -156,11 +212,11 @@ func (m *engineSim) applyResultUpTo(result *EngineReconcileResult, k int) {
 			}
 			switch obj.(type) {
 			case *appsv1.StatefulSet:
-				delete(m.stses, gen)
+				delete(m.api.stses, gen)
 			case *corev1.ConfigMap:
-				delete(m.configMaps, gen)
+				delete(m.api.configMaps, gen)
 			case *corev1.Service:
-				delete(m.headlessSvcs, gen)
+				delete(m.api.headlessSvcs, gen)
 			}
 		}
 	}
@@ -211,24 +267,26 @@ func isTerminalPhase(phase computev1alpha1.EnginePhase) bool {
 
 // gcStaleResources mirrors gcOrphanedResources, which runs after applyEngineState
 // in the real controller when phase is any terminal phase (Stable or Stopped).
+// GC is an api-side delete; cache observation comes through the next
+// CacheCatchesUp.
 func (m *engineSim) gcStaleResources() {
 	keepGens := map[int]bool{m.status.CurrentGeneration: true}
 	if m.status.DrainingGeneration != nil {
 		keepGens[*m.status.DrainingGeneration] = true
 	}
-	for gen := range m.stses {
+	for gen := range m.api.stses {
 		if !keepGens[gen] {
-			delete(m.stses, gen)
+			delete(m.api.stses, gen)
 		}
 	}
-	for gen := range m.configMaps {
+	for gen := range m.api.configMaps {
 		if !keepGens[gen] {
-			delete(m.configMaps, gen)
+			delete(m.api.configMaps, gen)
 		}
 	}
-	for gen := range m.headlessSvcs {
+	for gen := range m.api.headlessSvcs {
 		if !keepGens[gen] {
-			delete(m.headlessSvcs, gen)
+			delete(m.api.headlessSvcs, gen)
 		}
 	}
 }
@@ -270,7 +328,7 @@ func (m *engineSim) CrashReconcile(t *rapid.T) {
 }
 
 // CrashAtPrefix simulates a crash after the k-th side effect of
-// applyEngineState, drawn uniformly from [1, 5]. CrashReconcile (k=5) is the
+// applyEngineState, drawn uniformly from [1, 4]. CrashReconcile (k=5) is the
 // final-prefix special case kept as a separate action for shrinking clarity;
 // CrashAtPrefix exercises the four earlier prefixes (k=1..4) that correspond
 // to the CrashAfter*Created / CrashAfter*Ensured points in crash_points.go.
@@ -284,6 +342,17 @@ func (m *engineSim) CrashAtPrefix(t *rapid.T) {
 	checkRequeue(t, &result)
 	k := rapid.IntRange(1, 4).Draw(t, "crashPrefix")
 	m.applyResultUpTo(&result, k)
+}
+
+// CacheCatchesUp models the informer cache observing the latest api state.
+// In production the cache is updated continuously via watch events; this
+// action is the explicit, atomic counterpart used by the harness. Until it
+// fires, the cache view stays at whatever snapshot it carried after the
+// previous CacheCatchesUp (or the test's initial state). No fairness
+// guarantee is needed because rapid's uniform action distribution means the
+// cache catches up within a bounded number of steps.
+func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
+	m.cache = m.api.snapshot()
 }
 
 // ApplySpecChange bumps the engine image tag, triggering spec drift detection.
@@ -312,13 +381,12 @@ func (m *engineSim) DrainCompletes(_ *rapid.T) {
 }
 
 // DeleteEngine simulates the CR being deleted mid-flight: wipes all tracked
-// resources and resets status to initial, mirroring reconcileDelete removing
-// all generation-scoped objects before stripping the finalizer.
+// resources from both api and cache views and resets status to initial,
+// mirroring reconcileDelete removing all generation-scoped objects before
+// stripping the finalizer.
 func (m *engineSim) DeleteEngine(_ *rapid.T) {
-	m.stses = make(map[int]*appsv1.StatefulSet)
-	m.configMaps = make(map[int]*corev1.ConfigMap)
-	m.headlessSvcs = make(map[int]*corev1.Service)
-	m.clusterSvc = nil
+	m.api = newClusterView()
+	m.cache = newClusterView()
 	m.podsReady = false
 	m.podsDrained = true
 	m.status = computev1alpha1.FireboltEngineStatus{
@@ -330,7 +398,9 @@ func (m *engineSim) DeleteEngine(_ *rapid.T) {
 
 // ---------- Invariant checks (mirrors formal/FireboltEngine.tla Safety) ----------
 
-// Check is called by rapid after every action.
+// Check is called by rapid after every action. All resource invariants run
+// against m.api (the api truth). The cache is only the controller's input;
+// transient cache/api divergence is the input space, not the bug surface.
 func (m *engineSim) Check(t *rapid.T) {
 	s := &m.status
 
@@ -347,7 +417,7 @@ func (m *engineSim) Check(t *rapid.T) {
 	}
 
 	// Inv_ActiveHasSTS: ActiveGeneration >= 0 => STS for that gen exists
-	if s.ActiveGeneration >= 0 && m.stses[s.ActiveGeneration] == nil {
+	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
 		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS in cluster",
 			s.ActiveGeneration)
 	}
@@ -355,8 +425,8 @@ func (m *engineSim) Check(t *rapid.T) {
 	// Inv_ServiceKnownGen + Inv_ServiceValid: once traffic is active, the
 	// cluster service selector points to a gen in {activeGen, currentGen}
 	// and that gen's STS exists.
-	if m.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.clusterSvc.Spec.Selector[LabelGeneration]
+	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
+		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
 		if !ok {
 			t.Fatalf("cluster service missing %s label", LabelGeneration)
 		}
@@ -368,7 +438,7 @@ func (m *engineSim) Check(t *rapid.T) {
 			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d ∉ {activeGen=%d, currentGen=%d}",
 				targetGen, s.ActiveGeneration, s.CurrentGeneration)
 		}
-		if m.stses[targetGen] == nil {
+		if m.api.stses[targetGen] == nil {
 			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS in cluster", targetGen)
 		}
 	}
@@ -377,19 +447,19 @@ func (m *engineSim) Check(t *rapid.T) {
 	// GC runs as part of Reconcile when phase is terminal, so any stale gens still
 	// present after a Reconcile call indicate a GC gap.
 	if isTerminalPhase(s.Phase) {
-		for gen := range m.stses {
+		for gen := range m.api.stses {
 			if gen != s.CurrentGeneration {
 				t.Fatalf("Inv_NoOrphanedResources: phase=%s but STS gen=%d survives (currentGen=%d)",
 					s.Phase, gen, s.CurrentGeneration)
 			}
 		}
-		for gen := range m.configMaps {
+		for gen := range m.api.configMaps {
 			if gen != s.CurrentGeneration {
 				t.Fatalf("Inv_NoOrphanedResources: phase=%s but ConfigMap gen=%d survives (currentGen=%d)",
 					s.Phase, gen, s.CurrentGeneration)
 			}
 		}
-		for gen := range m.headlessSvcs {
+		for gen := range m.api.headlessSvcs {
 			if gen != s.CurrentGeneration {
 				t.Fatalf("Inv_NoOrphanedResources: phase=%s but HeadlessSvc gen=%d survives (currentGen=%d)",
 					s.Phase, gen, s.CurrentGeneration)
@@ -407,10 +477,9 @@ func TestEngineStateMachine(t *testing.T) {
 				CurrentGeneration: 0,
 				ActiveGeneration:  -1,
 			},
-			stses:        make(map[int]*appsv1.StatefulSet),
-			configMaps:   make(map[int]*corev1.ConfigMap),
-			headlessSvcs: make(map[int]*corev1.Service),
-			podsDrained:  true,
+			api:         newClusterView(),
+			cache:       newClusterView(),
+			podsDrained: true,
 		}
 		t.Repeat(rapid.StateMachineActions(m))
 	})
