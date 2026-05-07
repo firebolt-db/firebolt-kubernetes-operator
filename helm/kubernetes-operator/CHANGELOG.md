@@ -1,3 +1,24 @@
+# 1.0.1
+
+appVersion: v2.0.0
+
+## [2.0.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v1.25.1...v2.0.0) (2026-05-07)
+
+### ⚠ BREAKING CHANGES
+
+* **helm:** (chart): the `podMonitor.operator.{enabled,interval}`
+values are removed and replaced by `serviceMonitor.operator.*`. Default
+remains disabled.
+
+### Features
+
+* split defaults.env into latest/dev image variants (FB-983) ([27573ad](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/27573ad8953c387ca80259ddec119e7940587063))
+
+### Bug Fixes
+
+* **helm:** scrape operator metrics via ServiceMonitor instead of PodMonitor (FB-840) ([f8c117b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f8c117b0f2386ea9fc32619a0c9c2c388dc5783f))
+
+
 # 1.0.0
 
 fix(helm): scrape operator metrics via ServiceMonitor instead of PodMonitor (FB-840)
