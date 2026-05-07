@@ -15,6 +15,12 @@ spec:
     - interval: {{ .Values.serviceMonitor.operator.interval }}
       path: /metrics
       port: {{ if .Values.metrics.secure }}https{{ else }}http{{ end }}
+      honorLabels: true
+      metricRelabelings:
+        - sourceLabels: [exported_namespace]
+          regex: '(.+)'
+          targetLabel: namespace
+          action: replace
       {{- if .Values.metrics.secure }}
       scheme: https
       {{- with .Values.serviceMonitor.operator.bearerTokenSecret }}
