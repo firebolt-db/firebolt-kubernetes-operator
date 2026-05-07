@@ -1,3 +1,14 @@
+# 1.0.2
+
+appVersion: v2.0.1
+
+## [2.0.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.0.0...v2.0.1) (2026-05-07)
+
+### Bug Fixes
+
+* **metrics:** record CR metrics on every reconcile path ([8fea266](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8fea2665cdd27b843b589f29f93dad592a2d5885))
+
+
 # 1.0.1
 
 appVersion: v2.0.0
