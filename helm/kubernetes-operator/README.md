@@ -50,7 +50,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | leaderElection.enabled | bool | `true` | Enable leader election for the controller manager. |
 | metrics.bindAddress | string | `":8443"` | Address the metrics endpoint binds to. Use ":8443" with secure: true (HTTPS) or ":8080" with secure: false (HTTP). |
 | metrics.enabled | bool | `true` | Enable the metrics Service. |
-| metrics.secure | bool | `true` | Serve metrics via HTTPS with authn/authz. When true, controller-runtime auto-generates self-signed TLS certs and enables Kubernetes authn/authz. The operator PodMonitor automatically adapts scheme and TLS config. |
+| metrics.secure | bool | `true` | Serve metrics via HTTPS with authn/authz. When true, controller-runtime auto-generates self-signed TLS certs and enables Kubernetes authn/authz. The operator ServiceMonitor automatically adapts scheme and TLS config. |
 | nameOverride | string | `""` | Override the chart name used in resource names. |
 | nodeSelector | object | `{}` | Node selector for the operator pod. |
 | podAnnotations | object | `{}` | Extra annotations added only to the operator pod. |
@@ -58,7 +58,6 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | podMonitor.allNamespaces | bool | `false` | When true, PodMonitors discover pods across all namespaces. Use when the operator watches multiple namespaces (watchNamespace is empty). When false, PodMonitors only discover pods in the release namespace. |
 | podMonitor.engines | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for engine pods (port 9090, /metrics). |
 | podMonitor.gateway | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for gateway pods (port 9090, /stats/prometheus). |
-| podMonitor.operator | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for the operator pod itself (controller-runtime metrics). |
 | podSecurityContext | object | `{"fsGroup":65532,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context. fsGroup matches the distroless-nonroot UID used by the default `controller` image so mounted Secret files (e.g. the webhook cert) are readable by the operator process. |
 | priorityClassName | string | `""` | Priority class name for the operator pod. |
 | rbac.create | bool | `true` | Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources. |
@@ -67,6 +66,8 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount (e.g. for IRSA / Workload Identity). |
 | serviceAccount.create | bool | `true` | Whether to create a ServiceAccount. |
 | serviceAccount.name | string | `""` | The name of the ServiceAccount to use. If empty, a name is generated from the fullname template. |
+| serviceMonitor.operator | object | `{"bearerTokenSecret":{"key":"token","name":""},"enabled":false,"interval":"15s"}` | Create a ServiceMonitor that scrapes the operator's controller-manager metrics Service (`<release>-metrics`). A ServiceMonitor is used (instead of a PodMonitor) because the secure path (`metrics.secure: true`) needs to authenticate to controller-runtime's built-in authn/authz, and only `ServiceMonitor.endpoint.authorization` exposes a credential reference. |
+| serviceMonitor.operator.bearerTokenSecret | object | {} | Secret holding the bearer token Prometheus presents to the operator's metrics endpoint. Required when `metrics.secure: true`. Bring your own Secret (e.g. an ESO/Vault-projected one, a `kubernetes.io/service-account-token` Secret bound to your scrape SA, or whatever your Prometheus install already uses); leave `name` empty to render no authorization (the secure endpoint will reject scrapes). |
 | tolerations | list | `[]` | Tolerations for the operator pod. |
 | topologySpreadConstraints | list | `[]` | Topology spread constraints for the operator pod. |
 | watchNamespace | string | `""` | Namespace to watch for FireboltEngine resources. Empty watches all namespaces. |

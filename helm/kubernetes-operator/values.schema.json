@@ -159,14 +159,26 @@
             "interval": { "type": "string" }
           }
         },
+        "allNamespaces": { "type": "boolean" }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "properties": {
         "operator": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
-            "interval": { "type": "string" }
+            "interval": { "type": "string" },
+            "bearerTokenSecret": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "key": { "type": "string" }
+              }
+            }
           }
-        },
-        "allNamespaces": { "type": "boolean" }
+        }
       }
     },
     "healthProbeBindAddress": {
