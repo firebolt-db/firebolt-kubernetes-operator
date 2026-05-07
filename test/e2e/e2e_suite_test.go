@@ -56,9 +56,17 @@ const (
 	pollInterval             = 1 * time.Second
 )
 
-// Image references for the E2E suite, sourced from config/images/defaults.env.
-// testTag/newImageTag MUST share the same engine build, differing only by the
-// release-/debug- prefix — see README.md "Bumping Default Image Versions".
+// Image references for the E2E suite, sourced from the variant-specific
+// config/images/defaults.<variant>.env file embedded into the images package
+// at compile time. With the implicit default (no extra build tag) the "dev"
+// variant is in effect: testTag is the mutable `dev` alias (the only
+// mutable alias currently published on the engine/metadata GHCR packages)
+// and newImageTag is a pinned build tag mirrored from defaults.latest.env,
+// so the suite exercises the `:dev → pinned` upgrade path. With the
+// `latest` build tag opted in, both testTag and newImageTag are pinned to
+// the same engine build differing only by the release-/debug- prefix —
+// see docs/SDLC.md "Default image bumps" and README.md "Bumping Default
+// Image Versions".
 var (
 	testImage      string
 	testTag        string
@@ -142,6 +150,12 @@ var _ = SynchronizedBeforeSuite(func() {
 
 	Expect(testTag).NotTo(Equal(newImageTag),
 		"TEST_ENGINE_TAG and TEST_ENGINE_NEW_TAG must differ; upgrade tests would be no-ops")
+
+	fmt.Fprintf(GinkgoWriter, "E2E image variant: %s (engine=%s, metadata=%s)\n",
+		images.Variant(),
+		testImage+":"+testTag,
+		metadataImage+":"+metadataTag,
+	)
 
 	By("Setting up Kubernetes client (proc 1)")
 	var err error

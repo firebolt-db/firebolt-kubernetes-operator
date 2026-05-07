@@ -10,8 +10,11 @@
 !go.mod
 !go.sum
 
-# Re-include files embedded via //go:embed directives in the Go source
-!config/images/defaults.env
+# Re-include files embedded via //go:embed directives in the Go source.
+# Both variants are included so the same build context can produce either
+# the default ("latest") binary or the `-tags=dev` binary.
+!config/images/defaults.latest.env
+!config/images/defaults.dev.env
 
 # Re-include pre-built binary (used by local Dockerfile)
 !bin/manager

@@ -509,7 +509,7 @@ Then run the tests (the operator starts in-process, no deployment needed):
 make test-e2e
 ```
 
-On subsequent runs, only `make test-e2e` is needed — it reuses the existing cluster. Re-run `make prepare-test-e2e` if you change the test images in `test/e2e/defaults.env`.
+On subsequent runs, only `make test-e2e` is needed — it reuses the existing cluster. Re-run `make prepare-test-e2e` if you change the test images in `config/images/defaults.dev.env` (or `defaults.latest.env` when running with `IMAGE_VARIANT=latest`).
 
 To run a subset of tests:
 
@@ -543,20 +543,25 @@ The `heavy` tag swaps in a stress-oriented query configuration. Use this for val
 
 | Tag | Effect |
 |-----|--------|
-| *(none)* | Unit tests only. `crash_points.go` compiles crash points as no-ops |
+| *(none)* | Unit tests only. `crash_points.go` compiles crash points as no-ops. `config/images/embed_dev.go` (the implicit default) embeds `defaults.dev.env`. |
 | `e2e` | Enables all e2e test files. Activates `crash_points_e2e.go` with real crash injection |
 | `e2e,heavy` | Same as `e2e`, but uses the heavy query configuration instead of the light one |
+| `latest` | Swaps the embedded defaults file to `defaults.latest.env` (pinned engine/metadata tags). Combine with `e2e` for the latest-variant E2E run. The default flips back to `latest` once the engine/metadata `:latest` GHCR aliases and the auto-PR that maintains `defaults.latest.env` are in place. |
 
 ### Bumping Default Image Versions
 
-The default engine and metadata image references live in [`config/images/defaults.env`](config/images/defaults.env). They are embedded into the operator binary and consumed by the E2E suite, so a bump here updates both runtime defaults and tests in lockstep.
+The default engine and metadata image references live in two side-by-side files:
 
-Conventions to follow when bumping:
+- [`config/images/defaults.dev.env`](config/images/defaults.dev.env) — the **implicit default** variant (no extra Go build tag). Current-side tags are the mutable `engine:dev` / `metadata:dev` aliases (the only mutable aliases currently published); upgrade-target tags mirror the pinned `_NEW_TAG` values in `defaults.latest.env`. Once `:latest` is also published on the engine/metadata GHCR packages, the current-side tags here flip to `:latest` so the dev variant exercises the full mutable `:latest → :dev` upgrade path. Because the current side is a mutable alias, `scripts/load-e2e-images.sh` always `docker pull`s rather than reusing local cache.
+- [`config/images/defaults.latest.env`](config/images/defaults.latest.env) — the **`latest`** variant. Both current and upgrade-target tags are pinned immutable builds. Selected with `IMAGE_VARIANT=latest` on `make build` / `make prepare-test-e2e` / `make test-e2e` (which adds the `latest` Go build tag). It is rewritten by an automated PR whenever a new stable engine/metadata release is published — see [docs/SDLC.md](docs/SDLC.md#default-image-bumps-auto-pr-on-stable-enginemetadata-releases). Once that auto-PR is wired up, this becomes what ships in the operator image and the Helm chart and the project default flips back to it.
+
+Conventions to follow when bumping `defaults.latest.env`:
 
 - **`ENGINE_TAG` and `ENGINE_NEW_TAG` must reference the same underlying engine build**, differing only by the `release-` vs `debug-` prefix. The "switch image without downtime" E2E test (`test/e2e/e2e_test.go`) flips between them, so keeping the underlying build identical means the test exercises only the operator's blue/green logic — not behavioural drift between two different engine versions.
 - **`METADATA_TAG` should track the same `<timestamp>.<sha>` build** as the engine, without a `release-`/`debug-` prefix (metadata has no such split).
 - **`METADATA_NEW_TAG` should be the short SHA** (last 12 chars) of the new build, since the metadata switch test (`test/e2e/instance_test.go`) only needs a tag distinct from `METADATA_TAG`.
 - **`ENGINE_TAG` and `ENGINE_NEW_TAG` must not be equal** — the E2E suite fails fast at startup if they are, since the upgrade test would be a no-op.
+- **Mirror the new `_NEW_TAG` values into `defaults.dev.env`** — the dev variant's upgrade target is the pinned build defined here, and both variants need to exercise the same upgrade target. The current-side tags (`ENGINE_TAG` / `METADATA_TAG`) in `defaults.dev.env` are mutable aliases and don't need to be touched.
 
 Example for build `4.32.0-pre.0.20260505103729.c1bdd880cb63`:
 
@@ -567,7 +572,7 @@ METADATA_TAG=4.32.0-pre.0.20260505103729.c1bdd880cb63
 METADATA_NEW_TAG=c1bdd880cb63
 ```
 
-After bumping, re-run `make prepare-test-e2e` so the new images are pulled and loaded into Kind, then `make test-e2e` to verify.
+After bumping, re-run `make prepare-test-e2e IMAGE_VARIANT=latest` so the new images are pulled and loaded into Kind, then `make test-e2e IMAGE_VARIANT=latest` to verify. The dev variant is the implicit default, so `make prepare-test-e2e && make test-e2e` already validates it.
 
 ### Linting
 
