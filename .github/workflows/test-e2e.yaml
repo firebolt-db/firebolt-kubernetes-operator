@@ -119,14 +119,30 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
-      - name: Prepare Kind cluster and images
+      # The E2E suite runs against the implicit-default `dev` image variant.
+      # The `latest` variant is intentionally NOT exercised in CI yet —
+      # until the engine/metadata `:latest` GHCR aliases (and the auto-PR
+      # that bumps `defaults.latest.env` off them) are in place, the
+      # `latest` variant would just validate a frozen-in-time pinned build
+      # that nobody is bumping. Once those land, flip the project default
+      # back to `latest` and add a matrix here so `prepare-test-e2e` and
+      # `test-e2e` run once per variant and both gate every PR.
+      - name: Prepare Kind cluster and images (default = dev variant)
+        # `pipefail` is documented as part of GitHub Actions' default Linux
+        # shell (`bash -eo pipefail`), but this runner actually invokes
+        # `/usr/bin/bash -e {0}` — without pipefail. Set it explicitly so a
+        # non-zero exit from `make prepare-test-e2e` actually fails the
+        # step instead of being masked by `tee`'s 0 exit; otherwise an
+        # image-pull regression in load-e2e-images.sh surfaces as a
+        # confusing test-suite failure several minutes later.
         run: |
+          set -o pipefail
           go mod tidy
           make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee test.log
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
-      - name: Run E2E tests
+      - name: Run E2E tests (default = dev variant)
         run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=6
         env:
           GOPRIVATE: github.com/firebolt-db/*

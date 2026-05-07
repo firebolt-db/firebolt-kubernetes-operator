@@ -34,7 +34,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Running Tests
+      # `make test` runs against the implicit-default `dev` image variant.
+      # The `latest` variant is intentionally NOT exercised in CI yet —
+      # until the engine/metadata `:latest` GHCR aliases (and the auto-PR
+      # that bumps `defaults.latest.env` off them) are in place, the
+      # `latest` variant would just validate a frozen-in-time pinned build
+      # that nobody is bumping. Once those land, flip the project default
+      # back to `latest` and add a matrix here so `make test` runs once
+      # per variant and both gate every PR.
+      - name: Running Tests (default = dev variant)
         run: |
           go mod tidy
           make test
