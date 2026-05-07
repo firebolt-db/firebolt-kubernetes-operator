@@ -1,3 +1,7 @@
+# 1.0.0
+
+fix(helm): scrape operator metrics via ServiceMonitor instead of PodMonitor (FB-840)
+
 # 0.1.35
 
 appVersion: v1.25.1
