@@ -1,3 +1,14 @@
+# 1.0.3
+
+appVersion: v2.0.2
+
+## [2.0.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.0.1...v2.0.2) (2026-05-07)
+
+### Bug Fixes
+
+* **helm:** missing RBAC in ClusterRole (FB-995) ([#39](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/39)) ([e09fddd](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e09fddd5a605e7d0c927ff285191b047c6c748b2))
+
+
 # 1.0.2
 
 appVersion: v2.0.1
