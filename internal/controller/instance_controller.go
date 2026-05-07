@@ -122,8 +122,21 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	if !instance.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, instance)
+		return ctrl.Result{}, r.reconcileDelete(ctx, instance)
 	}
+
+	// Record metrics on every return path beyond this point so that error
+	// branches (failWithCondition / status-update failures) still publish the
+	// current in-memory state. Without this, an instance that successfully
+	// reconciled once and then keeps hitting a transient failure would leave
+	// the firebolt_instance_* gauges empty in Prometheus, even though the CR
+	// still has its stable status conditions set. The deferred call reads
+	// `instance` at function-exit time so post-Update status changes are
+	// captured. Engine reconciler does the equivalent with a final-line
+	// MetricsRecorder.Record at the end of its main reconcile path; the
+	// instance reconciler has more error branches that bypass that call,
+	// hence defer here.
+	defer r.MetricsRecorder.Record(instance)
 
 	if instance.Status.Phase == "" {
 		instance.Status.Phase = computev1alpha1.InstancePhaseProvisioning
@@ -154,7 +167,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Reason/Message.
 	if instance.Spec.Metadata.Postgres == nil {
 		if err := r.ensurePostgreSQL(ctx, instance); err != nil {
-			return r.failWithCondition(ctx, instance,
+			return ctrl.Result{}, r.failWithCondition(ctx, instance,
 				computev1alpha1.InstanceConditionMetadataReady, "PostgresEnsureFailed", err)
 		}
 	} else {
@@ -167,21 +180,21 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if err := r.checkExternalPostgresSecret(ctx, instance); err != nil {
 			instance.Status.MetadataReady = false
 			instance.Status.MetadataEndpoint = ""
-			return r.failWithCondition(ctx, instance,
+			return ctrl.Result{}, r.failWithCondition(ctx, instance,
 				computev1alpha1.InstanceConditionMetadataReady, "PostgresSecretPreflightFailed", err)
 		}
 	}
 
 	// Step 2: Ensure metadata service (native Go resources)
 	if err := r.ensureMetadataResources(ctx, instance); err != nil {
-		return r.failWithCondition(ctx, instance,
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionMetadataReady, "EnsureFailed", err)
 	}
 
 	// Step 3: Check metadata readiness
 	ready, err := r.isMetadataServiceReady(ctx, instance)
 	if err != nil {
-		return r.failWithCondition(ctx, instance,
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionMetadataReady, "ProbeFailed", err)
 	}
 	if !ready {
@@ -202,13 +215,13 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Step 4: Ensure gateway (native Go resources)
 	if err := r.ensureGatewayResources(ctx, instance); err != nil {
-		return r.failWithCondition(ctx, instance,
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionGatewayReady, "EnsureFailed", err)
 	}
 
 	gwReady, err := r.isGatewayReady(ctx, instance)
 	if err != nil {
-		return r.failWithCondition(ctx, instance,
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionGatewayReady, "ProbeFailed", err)
 	}
 	instance.Status.GatewayReady = gwReady
@@ -232,12 +245,10 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	r.MetricsRecorder.Record(instance)
-
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
 
-func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instance *computev1alpha1.FireboltInstance) (ctrl.Result, error) {
+func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.Info("Handling instance deletion")
 
@@ -273,18 +284,18 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&rbacv1.RoleList{}, "Role")
 
 	if len(errs) > 0 {
-		return ctrl.Result{}, fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
+		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
 
 	controllerutil.RemoveFinalizer(instance, instanceFinalizerName)
 	if err := r.Update(ctx, instance); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.MetricsRecorder.Delete(instance.Namespace, instance.Name)
 
 	log.Info("Instance deletion complete")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // extractItems returns the individual objects from a typed list. This avoids
@@ -411,7 +422,6 @@ func (r *FireboltInstanceReconciler) writeStatusAndPoll(
 	if err := r.Status().Update(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	}
-	r.MetricsRecorder.Record(instance)
 	return ctrl.Result{RequeueAfter: every}, nil
 }
 
@@ -437,7 +447,7 @@ func (r *FireboltInstanceReconciler) failWithCondition(
 	instance *computev1alpha1.FireboltInstance,
 	condType, reason string,
 	err error,
-) (ctrl.Result, error) {
+) error {
 	log := logf.FromContext(ctx)
 	setInstanceCondition(instance, condType, metav1.ConditionFalse, reason, err.Error())
 	// Order matters: computePhase reads InstanceConditionReady, so the
@@ -448,7 +458,7 @@ func (r *FireboltInstanceReconciler) failWithCondition(
 		log.Error(updateErr, "Failed to persist failure condition",
 			"condition", condType, "reason", reason, "originalError", err.Error())
 	}
-	return ctrl.Result{}, fmt.Errorf("%s (%s): %w", condType, reason, err)
+	return fmt.Errorf("%s (%s): %w", condType, reason, err)
 }
 
 // setInstanceCondition writes a condition on the instance's status.

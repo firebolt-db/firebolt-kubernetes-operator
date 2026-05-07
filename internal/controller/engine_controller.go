@@ -115,8 +115,20 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if !engine.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, engine)
+		return ctrl.Result{}, r.reconcileDelete(ctx, engine)
 	}
+
+	// Record metrics on every return path beyond this point so error
+	// branches (getEngineState failure, instance-gate block, applyEngineState
+	// failure, status-update failure) still publish current in-memory state.
+	// The closure reads `current` at function exit; before getEngineState
+	// runs it stays zero-valued, which truthfully reflects "phase initialized
+	// but pod state not yet observed". Deletion is intentionally above this
+	// line because reconcileDelete owns the matching Delete call.
+	var current EngineState
+	defer func() {
+		r.MetricsRecorder.Record(engine, current.CurrentPodReady, current.CurrentPodTotal)
+	}()
 
 	if engine.Status.Phase == "" {
 		log.Info("Initializing engine status", "activeGeneration", -1)
@@ -249,8 +261,6 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
-	r.MetricsRecorder.Record(engine, current.CurrentPodReady, current.CurrentPodTotal)
-
 	if !r.DisableGC &&
 		(engine.Status.Phase == computev1alpha1.PhaseStable ||
 			engine.Status.Phase == computev1alpha1.PhaseStopped) {
@@ -280,7 +290,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 // reconcileDelete removes all generation-scoped resources owned by this engine
 // and then removes the finalizer to allow garbage collection.
-func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *computev1alpha1.FireboltEngine) (ctrl.Result, error) {
+func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *computev1alpha1.FireboltEngine) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 	log.Info("Handling engine deletion")
 
@@ -336,18 +346,18 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	}
 
 	if len(errs) > 0 {
-		return ctrl.Result{}, fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
+		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
 
 	controllerutil.RemoveFinalizer(engine, finalizerName)
 	if err := r.Update(ctx, engine); err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	r.MetricsRecorder.Delete(engine.Namespace, engine.Name)
 
 	log.Info("Finalizer removed, deletion complete")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // updateStatus writes engine.Status back to the cluster with a one-shot
