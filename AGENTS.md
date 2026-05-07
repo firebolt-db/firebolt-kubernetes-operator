@@ -52,6 +52,9 @@ After every code change: `make build && make lint`. Use `make lint-fix` to auto-
 
 Do not delete Docker images or kind clusters; assume the kind cluster is already set up.
 
+## RBAC changes
+When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/kubernetes-operator/templates/clusterrole.yaml`](helm/kubernetes-operator/templates/clusterrole.yaml) needs matching edits — it is hand-maintained separately from kubebuilder output.
+
 ## Testing
 
 **Unit tests** (`internal/controller/*_test.go`): use envtest (embedded K8s API server). Run with `make test`.

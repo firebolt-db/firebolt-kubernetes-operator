@@ -1,5 +1,20 @@
 # FireboltInstance with every supported field set. Most are optional;
 # the operator picks defaults when omitted.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metadata
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: metadata-postgres-credentials
+type: Opaque
+stringData:
+  username: testuser
+  password: testpass
+---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
@@ -30,7 +45,7 @@ spec:
     serviceAccountName: metadata
 
   gateway:
-    replicas: 3
+    replicas: 2
     resources:
       requests:
         cpu: 100m

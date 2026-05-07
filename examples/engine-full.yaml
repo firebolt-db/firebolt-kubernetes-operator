@@ -1,10 +1,3 @@
-apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltInstance
-metadata:
-  name: firebolt
-spec:
-  metadata: {}
-  gateway: {}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -18,7 +11,7 @@ metadata:
   name: engine
 spec:
   instanceRef: firebolt
-  replicas: 5
+  replicas: 2
 
   # Dedicated ServiceAccount for pods (see manifest above). Bind RBAC as needed.
   serviceAccountName: firebolt-engine
@@ -39,7 +32,7 @@ spec:
   # Per-replica PersistentVolumeClaim. Changing storage
   # triggers a blue-green rollout. Omit storage entirely for operator defaults (1Gi, ReadWriteOnce, cluster default StorageClass).
   storage:
-    size: 100Gi
+    size: 50Gi
     accessModes:
       - ReadWriteOnce
     # storageClassName: gp3-high-perf

@@ -248,6 +248,7 @@ local-deploy: docker-build-local kind-load-operator manifests ## Build, load, an
 		--set leaderElection.enabled=false \
 		--set additionalArgs='{--enable-webhooks=false}' \
 		--set-string podAnnotations.deploy-timestamp="$(shell date +%s)"
+	$(KUBECTL) rollout status deployment/kubernetes-operator -n default --timeout=30s
 
 .PHONY: local-undeploy
 local-undeploy: ## Remove the operator Helm release.
@@ -275,6 +276,20 @@ helm-lint: ## Lint the Helm charts.
 helm-template: ## Render Helm chart templates locally.
 	helm template firebolt-operator $(HELM_CHART_DIR)
 	helm template firebolt-crds $(HELM_CRD_CHART_DIR)
+
+.PHONY: helm-test
+HELM_TEST_BASIC_NS ?= helm-verify-basic
+HELM_TEST_FULL_NS ?= helm-verify-full
+HELM_TEST_CONTEXT ?= kind-$(KIND_CLUSTER)
+helm-test: ## Run Helm quickstart validation scripts against current cluster/operator.
+	@ctx="$$( $(KUBECTL) config current-context 2>/dev/null || true )"; \
+	if [ "$$ctx" != "$(HELM_TEST_CONTEXT)" ]; then \
+		echo "Refusing to run helm-test on kube context '$$ctx' (expected '$(HELM_TEST_CONTEXT)')." >&2; \
+		echo "Switch context or override HELM_TEST_CONTEXT / KIND_CLUSTER explicitly." >&2; \
+		exit 1; \
+	fi
+	./scripts/ci/verify-quickstart-basic.sh "$(HELM_TEST_BASIC_NS)"
+	./scripts/ci/verify-quickstart-full.sh "$(HELM_TEST_FULL_NS)"
 
 .PHONY: helm-package
 helm-package: ## Package the Helm charts into dist/.

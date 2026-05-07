@@ -1,0 +1,119 @@
+# Runs `make prepare-test-e2e` + `make local-deploy` from the PR
+# branch (operator binary + Helm chart on branch), then apply example manifests.
+# The unit tests and e2e test CI do not deploy the operator via Helm (E2E runs in-process with
+# cluster-admin), so chart RBAC/install regressions would otherwise slip through.
+name: Test Helm
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: test-helm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-helm:
+    name: test-helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    env:
+      KIND_CLUSTER: test-helm-quickstart
+    steps:
+      - name: Clean Up Disk Space on public GitHub Runner
+        if: runner.os == 'Linux'
+        run: |
+          # Space usage before cleanup
+          df -h /
+
+          # Remove unused tool caches (comment any required ones with #)
+          sudo rm -rf /usr/lib/jvm
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/share/swift
+
+          # Verify gains
+          df -h /
+
+      - name: Raise memlock limit for kind nodes (engine io_uring)
+        run: |
+          sudo mkdir -p /etc/systemd/system/docker.service.d
+          sudo tee /etc/systemd/system/docker.service.d/memlock.conf > /dev/null <<'EOF'
+          [Service]
+          LimitMEMLOCK=infinity
+          EOF
+          sudo mkdir -p /etc/docker
+          sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+          {
+            "default-ulimits": {
+              "memlock": { "Name": "memlock", "Hard": -1, "Soft": -1 }
+            }
+          }
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl restart docker
+
+      - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        id: app-token
+        with:
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
+
+      - name: Configure Git for private modules
+        env:
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install kind v0.31.0
+        run: |
+          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-$(go env GOARCH)"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
+
+      - name: Install yq
+        env:
+          YQ_VERSION: v4.44.3
+        run: |
+          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Prepare Kind cluster and workload images
+        run: |
+          go mod tidy
+          make prepare-test-e2e KIND_CLUSTER="${KIND_CLUSTER}"
+        env:
+          GOPRIVATE: github.com/firebolt-db/*
+
+      - name: Build operator image and Helm upgrade (branch chart + binary)
+        run: make local-deploy KIND_CLUSTER="${KIND_CLUSTER}"
+        env:
+          GOPRIVATE: github.com/firebolt-db/*
+
+      - name: Run helm-test target
+        run: make helm-test
