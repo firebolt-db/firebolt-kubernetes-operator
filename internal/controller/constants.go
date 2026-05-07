@@ -153,7 +153,8 @@ const (
 	EngineShutdownMarginSeconds = 5
 )
 
-// Default container images, sourced from config/images/defaults.env.
+// Default container images, sourced from the variant-specific
+// config/images/defaults.<variant>.env file embedded by the images package.
 var (
 	PostgresImage        = images.PostgresImage
 	DefaultMetadataImage = images.DefaultMetadata()

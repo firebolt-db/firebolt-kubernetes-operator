@@ -22,8 +22,8 @@ The published GHCR packages from the `firebolt-db/packdb` and `firebolt-db/fireb
 | `ghcr.io/firebolt-db/engine` | Firebolt engine (compute node) image | `firebolt-db/packdb` |
 | `ghcr.io/firebolt-db/metadata` | Metadata service | `firebolt-db/packdb` |
 
-These names appear in `README.md`, `examples/`, `config/images/defaults.env`,
-`helm/` values, and the operator's CD workflow.
+These names appear in `README.md`, `examples/`, `config/images/defaults.latest.env`,
+`config/images/defaults.dev.env`, `helm/` values, and the operator's CD workflow.
 
 ## Tag semantics
 
@@ -42,8 +42,10 @@ Rules:
   pointing at a development build.
 - `dev` MAY move at any time and MAY regress (e.g. revert).
 - Anything that pins for reproducibility — partner mirrors, customer
-  deployments, the operator's `config/images/defaults.env` — should pin to
-  an immutable tag or digest, never to `latest` or `dev`.
+  deployments, the operator's `config/images/defaults.latest.env` — should pin to
+  an immutable tag or digest, never to `latest` or `dev`. The `defaults.dev.env`
+  variant is the one exception: it uses the mutable `dev` alias for the current
+  engine/metadata defaults by design (see "Default image bumps" below).
 - **The Firebolt Operator Helm chart and the Firebolt Instance Helm chart MUST NOT ship `latest` or `dev`** in any of their
   versioned fields. `Chart.yaml`'s `appVersion`, `values.yaml`'s
   `image.tag` default, and any image tag the chart embeds at render time
@@ -91,6 +93,57 @@ When telling a partner "we shipped 1.17", point them at `kubernetes-operator:v1.
 We do GitHub releases for major, minor and patch versions. A GitHub release always references a git tag (see [tag semantics](#tag-semantics)). A GitHub release name MUST also use a leading `v` to match the git tag.
 
 Example: Release `v1.2.3` MUST reference git tag `v1.2.3`.
+
+## Default image bumps (auto-PR on stable engine/metadata releases)
+
+The operator embeds its hard-coded default engine and metadata image
+references in `config/images/defaults.latest.env`. Whenever a new
+**stable** engine or metadata release is published (i.e. a build
+that advances the `latest` alias on `ghcr.io/firebolt-db/engine` or
+`ghcr.io/firebolt-db/metadata`), an automated workflow opens a PR against
+this repository that rewrites `defaults.latest.env` to point at the new
+immutable build tag. The PR runs the full unit and E2E suite, so a bump
+that breaks the operator's contract surfaces before merge.
+
+Two default-env variants live side-by-side:
+
+| File | `ENGINE_TAG` / `METADATA_TAG` (current) | `ENGINE_NEW_TAG` / `METADATA_NEW_TAG` (upgrade-target) | When the suite uses it |
+|------|------------------------------------------|--------------------------------------------------------|------------------------|
+| `config/images/defaults.dev.env`    | Mutable `:dev` alias (the only mutable alias currently published) | Pinned immutable build tag (mirrors the value in `defaults.latest.env`) | **Implicit default**: picked up when no extra Go build tag is set. Exercises the `:dev → pinned-build` upgrade path; once `:latest` is also published, the "current" side here flips to `:latest` to exercise the full `:latest → :dev` mutable upgrade path partners would walk. |
+| `config/images/defaults.latest.env` | Pinned immutable build tag (advanced by the auto-PR) | Pinned immutable build tag | Opt-in (`-tags=latest`, i.e. `IMAGE_VARIANT=latest`). Once the auto-PR is wired up this becomes what ships in the operator image and the Helm chart, and the project default flips back to it. |
+
+The `dev` variant is the implicit default until the engine/metadata
+`:latest` GHCR aliases — and the auto-PR that bumps
+`defaults.latest.env` off them — are in place. With nothing currently
+advancing `:latest`, defaulting to the pinned `latest` variant would
+just exercise a frozen-in-time build that nobody is bumping; the dev
+variant follows the mutable `:dev` alias directly, so it stays
+meaningful and surfaces regressions on `:dev` before a partner pulling
+it sees the breakage. The `:dev` alias ≠ a pinned build tag, so the
+suite's `ENGINE_TAG != ENGINE_NEW_TAG` startup guard is happy.
+
+Because the dev variant's "current" side is a mutable alias,
+`scripts/load-e2e-images.sh` MUST `docker pull` on every run rather
+than reusing whatever happens to be cached locally; otherwise the
+suite would silently validate a stale snapshot of `:dev`. The
+"upgrade-target" side mirrors the pinned `_NEW_TAG` values in
+`defaults.latest.env`, so the stable-release auto-PR that bumps
+`defaults.latest.env` MUST also rewrite `defaults.dev.env`'s
+`ENGINE_NEW_TAG` / `METADATA_NEW_TAG` at the same time to keep both
+variants exercising the same upgrade target.
+
+Selecting a variant:
+
+- `make build` / `make test` / `make test-e2e` — implicit default is `dev`
+  (no extra Go build tag set). Until the `:latest` aliases land, this is
+  also what CI runs.
+- `make build IMAGE_VARIANT=latest`, `make test IMAGE_VARIANT=latest`,
+  `make prepare-test-e2e IMAGE_VARIANT=latest`, `make test-e2e IMAGE_VARIANT=latest` —
+  switches the operator binary's embedded defaults *and* the E2E
+  image-load step to `defaults.latest.env` via the `latest` Go build tag.
+  The two MUST be set the same way: the operator-built-in defaults and the
+  images loaded into Kind have to match, otherwise the suite asks Kind for
+  a tag it never loaded.
 
 ## Quickstart and README guidance
 

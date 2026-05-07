@@ -14,17 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package images embeds config/images/defaults.env and exposes the
-// image references used by both the operator controllers and E2E tests.
+// Package images embeds one of the variant-specific defaults files
+// (defaults.latest.env by default, defaults.dev.env when built with
+// `-tags=dev`) and exposes the image references used by both the operator
+// controllers and the E2E tests. The two variants must be consistent across
+// the operator binary, the gateway pod template it builds, and the E2E
+// suite — selecting them at compile time via a build tag is what enforces
+// that consistency.
 package images
 
 import (
-	_ "embed"
 	"strings"
 )
-
-//go:embed defaults.env
-var raw string
 
 var defaults = parse(raw)
 
@@ -43,7 +44,8 @@ func parse(data string) map[string]string {
 	return m
 }
 
-// Get returns the value for a key from defaults.env, or empty string if absent.
+// Get returns the value for a key from the embedded defaults file, or empty
+// string if absent.
 func Get(key string) string { return defaults[key] }
 
 // All returns a copy of the full defaults map.
@@ -55,7 +57,7 @@ func All() map[string]string {
 	return cp
 }
 
-// Operator default images, sourced from defaults.env.
+// Operator default images, sourced from the embedded defaults file.
 var (
 	PostgresImage = defaults["POSTGRES_IMAGE"]
 	MetadataImage = defaults["METADATA_IMAGE"]
@@ -74,3 +76,9 @@ func DefaultEnvoy() string { return EnvoyImage + ":" + EnvoyTag }
 
 // DefaultEngine returns "repo:tag" for the engine (firebolt-db) image.
 func DefaultEngine() string { return EngineImage + ":" + EngineTag }
+
+// Variant reports which defaults file is embedded in this build, "latest"
+// or "dev". The two variants must travel together across the operator
+// binary and the E2E suite, so this is exposed for diagnostics and for
+// the load-images script's pre-flight checks.
+func Variant() string { return variant }

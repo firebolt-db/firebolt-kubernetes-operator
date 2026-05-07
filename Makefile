@@ -3,6 +3,33 @@ IMG ?= controller:latest
 VERSION ?= dev
 LDFLAGS := -X main.version=$(VERSION)
 
+# IMAGE_VARIANT selects which config/images/defaults.<variant>.env file is
+# embedded into the operator binary and which images the E2E suite expects to
+# be loaded into Kind. "dev" (default) uses the mutable `latest` and `dev`
+# aliases on both sides of the upgrade test so CI exercises the full
+# latest→dev path partners would see; "latest" embeds the pinned stable
+# engine/metadata tags. "dev" is the default — and the absence of any extra
+# build tag selects it — until the engine/metadata `:latest` GHCR aliases
+# (and the auto-PR that bumps `defaults.latest.env`) are in place; once they
+# are, flip the default back to "latest". The operator binary, the gateway
+# pod template the operator stamps out, the image-load step, and the test
+# process all derive their defaults from the same variant — set
+# IMAGE_VARIANT consistently across `build`, `prepare-test-e2e`, and
+# `test-e2e`.
+IMAGE_VARIANT ?= dev
+
+ifeq ($(IMAGE_VARIANT),latest)
+GO_BUILD_TAGS_BASE := latest
+else ifeq ($(IMAGE_VARIANT),dev)
+GO_BUILD_TAGS_BASE :=
+else
+$(error Unsupported IMAGE_VARIANT=$(IMAGE_VARIANT); expected "latest" or "dev")
+endif
+
+# Comma-separated tag list passed to `go build -tags` / `go test -tags` /
+# `ginkgo --tags`. Empty when no extra tags apply.
+GO_BUILD_TAGS := $(GO_BUILD_TAGS_BASE)
+
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/kubernetes-operator
 HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
@@ -61,7 +88,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: test
 test: manifests generate setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 RAPID_CHECKS ?= 25
 
@@ -79,7 +106,7 @@ setup-kind: ## Create a Kind cluster if it does not exist
 
 .PHONY: load-test-images
 load-test-images: ## Load required Docker images into the Kind cluster
-	./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+	IMAGE_VARIANT=$(IMAGE_VARIANT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
 prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, load images
@@ -91,11 +118,21 @@ GINKGO_FOCUS ?=
 # command line (e.g. GINKGO_PROCS=1 for serial debugging).
 GINKGO_PROCS ?= $(shell n=$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2); p=$$((n / 2)); [ $$p -lt 1 ] && p=1; echo $$p)
 
+# GINKGO_TAGS is the full --tags value passed to ginkgo: always "e2e", plus
+# the variant-specific build tag (currently only "latest") so the embedded
+# defaults match the images that load-e2e-images.sh just pushed into Kind.
+# The "dev" variant carries no extra tag — it is the implicit default.
+ifeq ($(GO_BUILD_TAGS_BASE),)
+GINKGO_TAGS := e2e
+else
+GINKGO_TAGS := e2e,$(GO_BUILD_TAGS_BASE)
+endif
+
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
 		"$(GINKGO)" run \
-		--tags=e2e \
+		--tags=$(GINKGO_TAGS) \
 		-v \
 		--no-color \
 		--junit-report=e2e-report.xml \
@@ -112,7 +149,7 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
-	"$(GOLANGCI_LINT)" run
+	"$(GOLANGCI_LINT)" run $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
 
 ##@ Formal Verification
 
@@ -163,7 +200,7 @@ formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any g
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
-	"$(GOLANGCI_LINT)" run --fix
+	"$(GOLANGCI_LINT)" run --fix $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
@@ -174,11 +211,15 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 .PHONY: build
 build: manifests generate ## Build manager binary.
 	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) --secret id=gitconfig,src=$(HOME)/.gitconfig -f Dockerfile.ci -t ${IMG} .
+	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg IMAGE_VARIANT=$(IMAGE_VARIANT) \
+		--secret id=gitconfig,src=$(HOME)/.gitconfig \
+		-f Dockerfile.ci -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

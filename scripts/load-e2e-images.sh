@@ -2,7 +2,13 @@
 set -euo pipefail
 
 # Load required Docker images into Kind cluster for e2e testing.
-# All image values come from config/images/defaults.env (single source of truth).
+# All image values come from config/images/defaults.<variant>.env (single source
+# of truth, where <variant> is IMAGE_VARIANT, defaulting to "latest").
+#
+# IMAGE_VARIANT MUST match the build tag of the operator binary and the test
+# binary that will run after this script — otherwise the suite asks Kind for
+# images this script never loaded. The Makefile threads IMAGE_VARIANT through
+# `build`, `prepare-test-e2e`, and `test-e2e` to keep the two in sync.
 #
 # Images are pulled (if missing locally) and loaded into Kind in parallel.
 # Parallelism can be tuned via E2E_LOAD_PARALLELISM (default: 4). Each
@@ -12,10 +18,25 @@ set -euo pipefail
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
+IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
+
+case "${IMAGE_VARIANT}" in
+    latest|dev) ;;
+    *)
+        echo "Error: unsupported IMAGE_VARIANT='${IMAGE_VARIANT}' (expected 'latest' or 'dev')." >&2
+        exit 1
+        ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../config/images/defaults.env
-source "${SCRIPT_DIR}/../config/images/defaults.env"
+DEFAULTS_ENV="${SCRIPT_DIR}/../config/images/defaults.${IMAGE_VARIANT}.env"
+if [ ! -f "${DEFAULTS_ENV}" ]; then
+    echo "Error: defaults file not found at ${DEFAULTS_ENV}" >&2
+    exit 1
+fi
+echo "Sourcing defaults from ${DEFAULTS_ENV} (IMAGE_VARIANT=${IMAGE_VARIANT})"
+# shellcheck disable=SC1090
+source "${DEFAULTS_ENV}"
 
 # `kind load docker-image` creates multi-GB tarballs via `docker save` under
 # $TMPDIR. The default /tmp is tmpfs on many Linux distros (notably Ubuntu
@@ -41,32 +62,50 @@ fi
 # In CI, use docker/login-action with ghcr.io.
 # Locally, run: echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
 
+# Each entry encodes "image|policy". Policy is one of:
+#   pull   — registry-backed, always re-pull. Several tags we load are
+#            mutable aliases (engine/metadata `latest` or `dev`, curl
+#            `latest`); a stale local copy would silently make the suite
+#            validate an old build of the alias. `docker pull` on an
+#            up-to-date pinned tag is cheap (manifest check, no layer
+#            download), so applying the same policy uniformly is fine.
+#   local  — local-only build, never in a registry. Used for the operator
+#            image produced by `make docker-build`. Pulling it would 404.
 declare -a IMAGES=(
-    "${ENGINE_IMAGE}:${ENGINE_TAG}"
-    "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}"
-    "${METADATA_IMAGE}:${METADATA_TAG}"
-    "${METADATA_IMAGE}:${METADATA_NEW_TAG}"
-    "${POSTGRES_IMAGE}"
-    "${ENVOY_IMAGE}:${ENVOY_TAG}"
-    "${CURL_IMAGE}"
+    "${ENGINE_IMAGE}:${ENGINE_TAG}|pull"
+    "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}|pull"
+    "${METADATA_IMAGE}:${METADATA_TAG}|pull"
+    "${METADATA_IMAGE}:${METADATA_NEW_TAG}|pull"
+    "${POSTGRES_IMAGE}|pull"
+    "${ENVOY_IMAGE}:${ENVOY_TAG}|pull"
+    "${CURL_IMAGE}|pull"
 )
 
 if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
-    IMAGES+=("${OPERATOR_IMAGE}")
+    IMAGES+=("${OPERATOR_IMAGE}|local")
 else
     echo "Note: operator image '${OPERATOR_IMAGE}' not found locally (build with 'make docker-build' if needed)."
 fi
 
 load_one() {
-    local image="$1"
+    local entry="$1"
     local cluster="$2"
+    local image="${entry%|*}"
+    local policy="${entry##*|}"
 
-    if ! docker image inspect "${image}" &>/dev/null; then
-        echo ">>> [${image}] pulling"
-        docker pull "${image}"
-    else
-        echo ">>> [${image}] already present locally"
-    fi
+    case "${policy}" in
+        pull)
+            echo ">>> [${image}] pulling (force, refresh mutable aliases)"
+            docker pull "${image}"
+            ;;
+        local)
+            echo ">>> [${image}] using local image (built outside any registry, no pull)"
+            ;;
+        *)
+            echo "ERROR: unknown load policy '${policy}' for image '${image}'" >&2
+            exit 1
+            ;;
+    esac
 
     echo ">>> [${image}] loading into Kind"
     kind load docker-image "${image}" --name "${cluster}"
@@ -111,7 +150,7 @@ if [ "${image_arch}" != "${node_arch}" ]; then
     echo "       Inside a kind node, foreign-arch binaries are run via user-mode emulation." >&2
     echo "       On Apple Silicon (arm64 host, amd64 image), kind falls back to qemu-x86_64," >&2
     echo "       which lacks AVX2/BMI2/FMA -- the engine binary will SIGILL during startup." >&2
-    echo "       Fix: in config/images/defaults.env, drop any '-amd64' suffix on ENGINE_TAG /" >&2
+    echo "       Fix: in ${DEFAULTS_ENV}, drop any '-amd64' suffix on ENGINE_TAG /" >&2
     echo "       ENGINE_NEW_TAG so Docker resolves a manifest list and pulls the native" >&2
     echo "       '${node_arch}' variant. Or run on a host whose arch matches the image." >&2
     exit 1
