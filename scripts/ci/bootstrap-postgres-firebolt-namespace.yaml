@@ -1,0 +1,61 @@
+# Ephemeral Postgres for CI verify-quickstart: satisfies instance-full host
+# postgres.firebolt.svc (Service postgres in namespace firebolt).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: firebolt
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: firebolt
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: testuser
+            - name: POSTGRES_PASSWORD
+              value: testpass
+            - name: POSTGRES_DB
+              value: firebolt_metadata
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: firebolt
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: postgres

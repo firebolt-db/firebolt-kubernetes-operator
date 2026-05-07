@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+source "${SCRIPT_DIR}/lib/verify-quickstart.sh"
+# shellcheck source=../../config/images/defaults.env
+set -a
+source "${REPO_ROOT}/config/images/defaults.env"
+set +a
+
+NAMESPACE="${1:-helm-verify-full}"
+INSTANCE_NAME="${INSTANCE_NAME:-firebolt}"
+ENGINE_NAME="${ENGINE_NAME:-engine}"
+
+echo "=== verify-quickstart full (namespace=${NAMESPACE}) ==="
+echo "Bootstrapping external Postgres endpoint for instance-full..."
+kubectl apply -f "${REPO_ROOT}/scripts/ci/bootstrap-postgres-firebolt-namespace.yaml"
+kubectl rollout status deployment/postgres -n firebolt --timeout=300s
+
+echo "Labeling Kind nodes for instance-full scheduling..."
+kubectl label nodes --all firebolt.dev/pool=system --overwrite
+kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
+
+kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+echo "Applying instance-full with metadata image pinned from config/images/defaults.env..."
+yq eval '
+  (select(.kind == "FireboltInstance").spec.metadata.image.repository) = env(METADATA_IMAGE) |
+  (select(.kind == "FireboltInstance").spec.metadata.image.tag) = env(METADATA_TAG) |
+  (select(.kind == "FireboltInstance").spec.metadata.image.pullPolicy) = "IfNotPresent"
+' "${REPO_ROOT}/examples/instance-full.yaml" | kubectl apply -n "$NAMESPACE" -f -
+wait_instance_ready "$NAMESPACE" "$INSTANCE_NAME"
+
+echo "Relabeling Kind nodes for engine-full scheduling..."
+kubectl label nodes --all firebolt.dev/pool=engine --overwrite
+kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
+
+echo "Applying engine-full with CI overrides (storage.size=1Gi, memory=2Gi)..."
+yq eval '
+  (select(.kind == "FireboltEngine").spec.image.repository) = env(ENGINE_IMAGE) |
+  (select(.kind == "FireboltEngine").spec.image.tag) = env(ENGINE_TAG) |
+  (select(.kind == "FireboltEngine").spec.image.pullPolicy) = "IfNotPresent" |
+  (select(.kind == "FireboltEngine").spec.storage.size) = "500Mi" |
+  (select(.kind == "FireboltEngine").spec.resources.requests.cpu) = "250m" |
+  (select(.kind == "FireboltEngine").spec.resources.limits.cpu) = "250m" |
+  (select(.kind == "FireboltEngine").spec.resources.requests.memory) = "2Gi" |
+  (select(.kind == "FireboltEngine").spec.resources.limits.memory) = "2Gi"
+' "${REPO_ROOT}/examples/engine-full.yaml" | kubectl apply -n "$NAMESPACE" -f -
+wait_engine_ready "$NAMESPACE" "$ENGINE_NAME"
+
+echo "✅ verify-quickstart full passed (namespace=${NAMESPACE})"
+echo "Cleaning up namespace ${NAMESPACE}..."
+kubectl delete namespace "$NAMESPACE" --wait=false
