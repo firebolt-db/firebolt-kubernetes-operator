@@ -1,3 +1,15 @@
+# 1.0.4
+
+appVersion: v2.0.3
+
+## [2.0.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.0.2...v2.0.3) (2026-05-08)
+
+### Bug Fixes
+
+* **ci:** source defaults.<variant>.env in verify-quickstart-full (FB-983) ([aab4f34](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/aab4f34e53e737c3597416f4f504d1a3194d2a4e))
+* **helm:** preserve operator's intrinsic namespace label on scrape (FB-840) ([e70dcbd](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e70dcbd3d796c0659764f8f73ff6152702327d48))
+
+
 # 1.0.3
 
 appVersion: v2.0.2
