@@ -4,9 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/lib/verify-quickstart.sh"
-# shellcheck source=../../config/images/defaults.env
+# Honour the same IMAGE_VARIANT switch as the Makefile (default: dev) so this
+# script picks the matching defaults.<variant>.env that replaced the now-gone
+# defaults.env in commit 554d320.
+IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
+# shellcheck source=../../config/images/defaults.dev.env
 set -a
-source "${REPO_ROOT}/config/images/defaults.env"
+source "${REPO_ROOT}/config/images/defaults.${IMAGE_VARIANT}.env"
 set +a
 
 NAMESPACE="${1:-helm-verify-full}"
@@ -23,7 +27,7 @@ kubectl label nodes --all firebolt.dev/pool=system --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-echo "Applying instance-full with metadata image pinned from config/images/defaults.env..."
+echo "Applying instance-full with metadata image pinned from config/images/defaults.${IMAGE_VARIANT}.env..."
 yq eval '
   (select(.kind == "FireboltInstance").spec.metadata.image.repository) = env(METADATA_IMAGE) |
   (select(.kind == "FireboltInstance").spec.metadata.image.tag) = env(METADATA_TAG) |
