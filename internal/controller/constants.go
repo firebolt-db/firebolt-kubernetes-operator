@@ -172,12 +172,17 @@ var (
 // controller sets on each pod (GA in Kubernetes 1.28). On older clusters
 // the label is absent and POD_INDEX will be empty; in that case we fall
 // back to extracting the ordinal from HOSTNAME (<sts-name>-<ordinal>).
+//
+// `firebolt server` is the unified entrypoint introduced in packdb FB-914;
+// FIREBOLT_CORE_MODE=1 (set as a container env var) selects the legacy
+// firebolt-core code path so config.json is treated as authoritative and
+// not rewritten at startup.
 const EngineStartupScript = `
 set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-exec /firebolt-core/firebolt --node "$POD_INDEX"
+exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-core
 `
 
 // GetServicePorts returns the standard service ports for a Firebolt engine
