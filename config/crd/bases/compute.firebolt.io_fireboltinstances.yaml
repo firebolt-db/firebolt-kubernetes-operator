@@ -2223,6 +2223,14 @@ spec:
                         description: Port is the PostgreSQL server port.
                         format: int32
                         type: integer
+                      schema:
+                        default: public
+                        description: |-
+                          Schema is the PostgreSQL schema used by the metadata service.
+                          Defaults to "public".
+                        maxLength: 63
+                        minLength: 1
+                        type: string
                     required:
                     - credentialsSecretRef
                     - database

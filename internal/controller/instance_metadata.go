@@ -78,6 +78,10 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 	pgHost := pgResourceName(instance.Name) + "." + instance.Namespace + ".svc.cluster.local"
 	pgPort := int32(PostgresPort)
 	pgDatabase := PostgresDBName
+	// Internal Postgres is bootstrapped with the default "public" schema and is
+	// not user-configurable; only the external-postgres path honors a custom
+	// schema below.
+	pgSchema := PostgresDefaultSchema
 
 	if instance.Spec.Metadata.Postgres != nil {
 		pgHost = instance.Spec.Metadata.Postgres.Host
@@ -86,6 +90,12 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 			pgPort = int32(PostgresPort)
 		}
 		pgDatabase = instance.Spec.Metadata.Postgres.Database
+		// Fall back to the default schema when the field is empty so the
+		// controller stays correct on CRs created before the schema field
+		// existed, or when the defaulting admission path is bypassed.
+		if instance.Spec.Metadata.Postgres.Schema != "" {
+			pgSchema = instance.Spec.Metadata.Postgres.Schema
+		}
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0"?>
@@ -101,7 +111,7 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
         <host>%s</host>
         <port>%d</port>
         <database>%s</database>
-        <schema>public</schema>
+        <schema>%s</schema>
         <keepalive>
           <enabled>1</enabled>
           <idle_sec>120</idle_sec>
@@ -118,7 +128,7 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
     </metadata_storage>
   </pensieve_lite>
 </config>`,
-		instance.Spec.ID, MetadataServicePort, pgHost, pgPort, pgDatabase)
+		instance.Spec.ID, MetadataServicePort, pgHost, pgPort, pgDatabase, pgSchema)
 }
 
 func metadataConfigMapName(instanceName string) string {

@@ -86,6 +86,14 @@ type PostgresSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	Database string `json:"database"`
 
+	// Schema is the PostgreSQL schema used by the metadata service.
+	// Defaults to "public".
+	// +kubebuilder:default=public
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Schema string `json:"schema,omitempty"`
+
 	// CredentialsSecretRef references a Secret containing "username" and "password" keys.
 	CredentialsSecretRef corev1.LocalObjectReference `json:"credentialsSecretRef"`
 }
