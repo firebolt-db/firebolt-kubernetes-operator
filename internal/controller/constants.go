@@ -177,7 +177,7 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-exec /firebolt-core/firebolt-core --node "$POD_INDEX"
+exec /firebolt-core/firebolt --node "$POD_INDEX"
 `
 
 // GetServicePorts returns the standard service ports for a Firebolt engine
