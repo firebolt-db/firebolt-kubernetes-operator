@@ -93,6 +93,10 @@ const (
 	PostgresPort = 5432
 	// PostgresDBName is the database name for the internal PostgreSQL instance.
 	PostgresDBName = "firebolt_metadata"
+	// PostgresDefaultSchema is the schema used by the metadata service when
+	// the user does not specify spec.metadata.postgres.schema (and always for
+	// the internal Postgres deployment, which is created with this schema).
+	PostgresDefaultSchema = "public"
 	// PostgresUser is the database user for the internal PostgreSQL instance.
 	PostgresUser = "firebolt"
 	// PostgresPVCSize is the default PVC size for the internal PostgreSQL instance.
