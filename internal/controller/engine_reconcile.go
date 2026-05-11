@@ -594,6 +594,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									Name:  "FIREBOLT_ALLOW_AWS_IRSA",
 									Value: "true",
 								},
+								// Selects the legacy firebolt-core code path inside the unified
+								// `firebolt` binary (packdb FB-914): config.json is honored as-is
+								// and not rewritten at startup.
+								{
+									Name:  "FIREBOLT_CORE_MODE",
+									Value: "1",
+								},
 							},
 							Ports:        GetContainerPorts(),
 							Command:      []string{"/bin/bash", "-c"},
