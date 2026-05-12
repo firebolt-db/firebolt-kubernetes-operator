@@ -813,6 +813,30 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                  hostPath:
+                    description: |-
+                      HostPath backs /firebolt-core/volume with a directory on the node
+                      filesystem. Pods are implicitly node-pinned (the directory only
+                      exists where it was created); the path must pre-exist on every
+                      node Karpenter could schedule the engine onto, with permissions
+                      readable by the engine UID. Use to expose instance-store NVMe on
+                      the node.
+                    properties:
+                      path:
+                        description: Path is the absolute filesystem path on the host
+                          node.
+                        pattern: ^/.*
+                        type: string
+                      type:
+                        description: |-
+                          Type enforces a check on Path before mounting (Directory,
+                          DirectoryOrCreate, …). See
+                          https://kubernetes.io/docs/concepts/storage/volumes/#hostpath
+                          for the full enum. Leave nil to skip the check (kubelet default).
+                        type: string
+                    required:
+                    - path
+                    type: object
                   persistentVolumeClaim:
                     description: |-
                       PersistentVolumeClaim backs /firebolt-core/volume with a per-pod

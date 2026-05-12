@@ -583,6 +583,25 @@
               "type": "object",
               "additionalProperties": false
             },
+            "hostPath": {
+              "description": "HostPath backs /firebolt-core/volume with a directory on the node\nfilesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode Karpenter could schedule the engine onto, with permissions\nreadable by the engine UID. Use to expose instance-store NVMe on\nthe node.",
+              "properties": {
+                "path": {
+                  "description": "Path is the absolute filesystem path on the host node.",
+                  "pattern": "^/.*",
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Type enforces a check on Path before mounting (Directory,\nDirectoryOrCreate, \u2026). See\nhttps://kubernetes.io/docs/concepts/storage/volumes/#hostpath\nfor the full enum. Leave nil to skip the check (kubelet default).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object",
+              "additionalProperties": false
+            },
             "persistentVolumeClaim": {
               "description": "PersistentVolumeClaim backs /firebolt-core/volume with a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller from\na VolumeClaimTemplate. Omit the sub-struct to accept the operator's\ndefaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which\nmatches the pre-refactor behavior of an empty EngineStorageSpec.",
               "properties": {
