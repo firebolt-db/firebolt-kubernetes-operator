@@ -24,7 +24,13 @@ import (
 )
 
 // EngineStorageSpec configures the per-pod data volume mounted into each
-// engine container at /firebolt-core/volume.
+// engine container at /firebolt-core/volume. Exactly one of
+// PersistentVolumeClaim, EmptyDir, or HostPath should be set; if all
+// three are nil the operator backs the mount with a PersistentVolumeClaim
+// using its built-in defaults (1Gi, ReadWriteOnce, cluster-default
+// StorageClass). The CEL rule below makes this mutual exclusion an
+// admission-time error rather than a silent "first non-nil wins" race.
+// +kubebuilder:validation:XValidation:rule="(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1",message="storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive"
 type EngineStorageSpec struct {
 	// PersistentVolumeClaim backs /firebolt-core/volume with a per-pod
 	// PersistentVolumeClaim synthesized by the StatefulSet controller from
