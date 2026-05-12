@@ -525,22 +525,34 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			MountPath: DataMountPath,
 		},
 	}
-	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
-	volumeClaimTemplates := []corev1.PersistentVolumeClaim{{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   DataVolumeName,
-			Labels: labels,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: pvc.AccessModes,
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: pvc.Size,
-				},
+	// The "data" volume backing /firebolt-core/volume is currently always
+	// a per-pod PVC (the StatefulSet controller synthesizes the pod
+	// Volume from the VolumeClaimTemplate). Upcoming commits add
+	// emptyDir and hostPath backends as additional switch arms; the
+	// single-case switch is intentional infrastructure for that work.
+	var volumeClaimTemplates []corev1.PersistentVolumeClaim
+	switch resolveStorageBackend(spec.Storage) {
+	case BackendPersistentVolumeClaim:
+		pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
+		volumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   DataVolumeName,
+				Labels: labels,
 			},
-			StorageClassName: pvc.StorageClassName,
-		},
-	}}
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: pvc.AccessModes,
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: pvc.Size,
+					},
+				},
+				StorageClassName: pvc.StorageClassName,
+			},
+		}}
+	default:
+		// Unreachable while resolveStorageBackend has only one return value;
+		// future backends fill this in.
+	}
 	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
 	// during blue-green cleaning. WhenScaled stays Retain so a within-
 	// generation scale-down does not silently drop a node's data.
@@ -942,25 +954,54 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 // so any drift (resizing, switching access modes or storage class) must
 // trigger a new blue-green generation.
 func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
-	if len(sts.Spec.VolumeClaimTemplates) == 0 {
+	// Single-case switch today; upcoming commits add emptyDir and
+	// hostPath arms that need to compare against a different STS shape
+	// (no VCT, plus a pod-template Volume named DataVolumeName).
+	switch resolveStorageBackend(spec.Storage) {
+	case BackendPersistentVolumeClaim:
+		if len(sts.Spec.VolumeClaimTemplates) == 0 {
+			return false
+		}
+		pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
+		vct := sts.Spec.VolumeClaimTemplates[0]
+		if vct.Name != DataVolumeName {
+			return false
+		}
+		currentSize := vct.Spec.Resources.Requests[corev1.ResourceStorage]
+		if !currentSize.Equal(pvc.Size) {
+			return false
+		}
+		if !reflect.DeepEqual(vct.Spec.AccessModes, pvc.AccessModes) {
+			return false
+		}
+		return reflect.DeepEqual(vct.Spec.StorageClassName, pvc.StorageClassName)
+	default:
 		return false
 	}
-	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
-	vct := sts.Spec.VolumeClaimTemplates[0]
-	if vct.Name != DataVolumeName {
-		return false
-	}
+}
 
-	currentSize := vct.Spec.Resources.Requests[corev1.ResourceStorage]
-	if !currentSize.Equal(pvc.Size) {
-		return false
-	}
+// StorageBackend identifies which of the EngineStorageSpec sibling pointers
+// the operator should honor for a given FireboltEngine. The full enum is
+// declared up front (BackendEmptyDir / BackendHostPath are wired in
+// follow-up commits) so the switch infrastructure can settle separately
+// from the per-backend wiring.
+type StorageBackend string
 
-	if !reflect.DeepEqual(vct.Spec.AccessModes, pvc.AccessModes) {
-		return false
-	}
+// StorageBackend values, one per EngineStorageSpec sibling pointer.
+const (
+	BackendPersistentVolumeClaim StorageBackend = "PersistentVolumeClaim"
+	BackendEmptyDir              StorageBackend = "EmptyDir"
+	BackendHostPath              StorageBackend = "HostPath"
+)
 
-	return reflect.DeepEqual(vct.Spec.StorageClassName, pvc.StorageClassName)
+// resolveStorageBackend returns the effective backend for an
+// EngineStorageSpec. Today the EngineStorageSpec only exposes a
+// PersistentVolumeClaim sibling, so the resolver always returns
+// BackendPersistentVolumeClaim — the EmptyDir and HostPath siblings
+// are added in follow-up commits, at which point this resolver picks
+// up the corresponding branches.
+func resolveStorageBackend(_ computev1alpha1.EngineStorageSpec) StorageBackend {
+	return BackendPersistentVolumeClaim
 }
 
 // resolvePersistentVolumeClaimDefaults returns the effective per-pod PVC
