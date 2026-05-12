@@ -555,6 +555,34 @@
           "default": {},
           "description": "Storage configures the per-pod PersistentVolumeClaim mounted at\n/firebolt-core/volume. The PVC is always provisioned; omit the field\nto accept the operator's defaults (1Gi, ReadWriteOnce, cluster default\nStorageClass). Changes to any field force a new generation since\nVolumeClaimTemplates are immutable on a StatefulSet.",
           "properties": {
+            "emptyDir": {
+              "description": "EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir\nVolume. Data is lost on every pod restart \u2014 appropriate for engine\ncache, not for stateful workloads.",
+              "properties": {
+                "medium": {
+                  "description": "Medium is the storage medium backing the emptyDir. Leave empty\nfor the default node disk; set to \"Memory\" for a tmpfs-backed\nvolume sized against the pod's memory limit.",
+                  "enum": [
+                    "",
+                    "Memory"
+                  ],
+                  "type": "string"
+                },
+                "sizeLimit": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "SizeLimit caps the volume's growth. Optional; nil means\nunbounded (subject to node disk pressure or pod memory limits\nfor Memory medium).",
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "x-kubernetes-int-or-string": true
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
             "persistentVolumeClaim": {
               "description": "PersistentVolumeClaim backs /firebolt-core/volume with a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller from\na VolumeClaimTemplate. Omit the sub-struct to accept the operator's\ndefaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which\nmatches the pre-refactor behavior of an empty EngineStorageSpec.",
               "properties": {

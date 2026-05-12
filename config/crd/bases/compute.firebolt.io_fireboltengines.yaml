@@ -787,6 +787,32 @@ spec:
                   StorageClass). Changes to any field force a new generation since
                   VolumeClaimTemplates are immutable on a StatefulSet.
                 properties:
+                  emptyDir:
+                    description: |-
+                      EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir
+                      Volume. Data is lost on every pod restart — appropriate for engine
+                      cache, not for stateful workloads.
+                    properties:
+                      medium:
+                        description: |-
+                          Medium is the storage medium backing the emptyDir. Leave empty
+                          for the default node disk; set to "Memory" for a tmpfs-backed
+                          volume sized against the pod's memory limit.
+                        enum:
+                        - ""
+                        - Memory
+                        type: string
+                      sizeLimit:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: |-
+                          SizeLimit caps the volume's growth. Optional; nil means
+                          unbounded (subject to node disk pressure or pod memory limits
+                          for Memory medium).
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
                   persistentVolumeClaim:
                     description: |-
                       PersistentVolumeClaim backs /firebolt-core/volume with a per-pod

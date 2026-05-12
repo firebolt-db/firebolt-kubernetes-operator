@@ -24,10 +24,7 @@ import (
 )
 
 // EngineStorageSpec configures the per-pod data volume mounted into each
-// engine container at /firebolt-core/volume. Today only the
-// PersistentVolumeClaim backend is supported (the existing behavior);
-// follow-up commits add EmptyDir and HostPath siblings for clusters that
-// can't dynamically provision PVCs.
+// engine container at /firebolt-core/volume.
 type EngineStorageSpec struct {
 	// PersistentVolumeClaim backs /firebolt-core/volume with a per-pod
 	// PersistentVolumeClaim synthesized by the StatefulSet controller from
@@ -36,6 +33,12 @@ type EngineStorageSpec struct {
 	// matches the pre-refactor behavior of an empty EngineStorageSpec.
 	// +optional
 	PersistentVolumeClaim *EnginePersistentVolumeClaimSpec `json:"persistentVolumeClaim,omitempty"`
+
+	// EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir
+	// Volume. Data is lost on every pod restart — appropriate for engine
+	// cache, not for stateful workloads.
+	// +optional
+	EmptyDir *EngineEmptyDirSpec `json:"emptyDir,omitempty"`
 }
 
 // EnginePersistentVolumeClaimSpec configures the per-pod PersistentVolumeClaim
@@ -57,6 +60,22 @@ type EnginePersistentVolumeClaimSpec struct {
 	// the cluster default. An empty string disables dynamic provisioning.
 	// +optional
 	StorageClassName *string `json:"storageClassName,omitempty"`
+}
+
+// EngineEmptyDirSpec configures an emptyDir-backed engine data volume.
+type EngineEmptyDirSpec struct {
+	// Medium is the storage medium backing the emptyDir. Leave empty
+	// for the default node disk; set to "Memory" for a tmpfs-backed
+	// volume sized against the pod's memory limit.
+	// +kubebuilder:validation:Enum="";Memory
+	// +optional
+	Medium corev1.StorageMedium `json:"medium,omitempty"`
+
+	// SizeLimit caps the volume's growth. Optional; nil means
+	// unbounded (subject to node disk pressure or pod memory limits
+	// for Memory medium).
+	// +optional
+	SizeLimit *resource.Quantity `json:"sizeLimit,omitempty"`
 }
 
 // AutoscalingSpec configures replica autoscaling for a FireboltEngine.
