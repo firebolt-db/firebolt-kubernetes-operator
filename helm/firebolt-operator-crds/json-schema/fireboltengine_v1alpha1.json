@@ -639,6 +639,12 @@
             }
           },
           "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive",
+              "rule": "(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1"
+            }
+          ],
           "additionalProperties": false
         },
         "terminationGracePeriodSeconds": {
