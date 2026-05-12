@@ -78,7 +78,20 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	spec := testSpec()
 	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
-	storage := getEngineStorage(spec)
+	pvcSize := resource.MustParse(DefaultEngineStorageSize)
+	pvcAccessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	var pvcStorageClassName *string
+	if p := spec.Storage.PersistentVolumeClaim; p != nil {
+		if !p.Size.IsZero() {
+			pvcSize = p.Size
+		}
+		if len(p.AccessModes) > 0 {
+			pvcAccessModes = p.AccessModes
+		}
+		if p.StorageClassName != nil {
+			pvcStorageClassName = p.StorageClassName
+		}
+	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      genResourceName(engineName, gen, ""),
@@ -93,11 +106,11 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
 				ObjectMeta: metav1.ObjectMeta{Name: DataVolumeName},
 				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes: storage.AccessModes,
+					AccessModes: pvcAccessModes,
 					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceStorage: storage.Size},
+						Requests: corev1.ResourceList{corev1.ResourceStorage: pvcSize},
 					},
-					StorageClassName: storage.StorageClassName,
+					StorageClassName: pvcStorageClassName,
 				},
 			}},
 			Template: corev1.PodTemplateSpec{

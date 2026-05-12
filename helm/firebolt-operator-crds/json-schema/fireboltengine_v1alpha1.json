@@ -555,33 +555,40 @@
           "default": {},
           "description": "Storage configures the per-pod PersistentVolumeClaim mounted at\n/firebolt-core/volume. The PVC is always provisioned; omit the field\nto accept the operator's defaults (1Gi, ReadWriteOnce, cluster default\nStorageClass). Changes to any field force a new generation since\nVolumeClaimTemplates are immutable on a StatefulSet.",
           "properties": {
-            "accessModes": {
-              "default": [
-                "ReadWriteOnce"
-              ],
-              "description": "AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the\nper-pod ownership model used by the StatefulSet VolumeClaimTemplate.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "size": {
-              "anyOf": [
-                {
-                  "type": "integer"
+            "persistentVolumeClaim": {
+              "description": "PersistentVolumeClaim backs /firebolt-core/volume with a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller from\na VolumeClaimTemplate. Omit the sub-struct to accept the operator's\ndefaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which\nmatches the pre-refactor behavior of an empty EngineStorageSpec.",
+              "properties": {
+                "accessModes": {
+                  "default": [
+                    "ReadWriteOnce"
+                  ],
+                  "description": "AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the\nper-pod ownership model used by the StatefulSet VolumeClaimTemplate.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
-                {
+                "size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "default": "1Gi",
+                  "description": "Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.",
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "x-kubernetes-int-or-string": true
+                },
+                "storageClassName": {
+                  "description": "StorageClassName selects the StorageClass for the PVC. Leave nil to use\nthe cluster default. An empty string disables dynamic provisioning.",
                   "type": "string"
                 }
-              ],
-              "default": "1Gi",
-              "description": "Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.",
-              "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
-              "x-kubernetes-int-or-string": true
-            },
-            "storageClassName": {
-              "description": "StorageClassName selects the StorageClass for the PVC. Leave nil to use\nthe cluster default. An empty string disables dynamic provisioning.",
-              "type": "string"
+              },
+              "type": "object",
+              "additionalProperties": false
             }
           },
           "type": "object",
