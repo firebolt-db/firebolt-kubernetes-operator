@@ -527,9 +527,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	// The "data" volume backing /firebolt-core/volume is either a per-pod
 	// PVC (the default; the StatefulSet controller synthesizes the pod
-	// Volume from the VolumeClaimTemplate) or a node-local emptyDir
-	// that we add to pod.spec.volumes explicitly. The hostPath arm lands
-	// in a follow-up commit.
+	// Volume from the VolumeClaimTemplate) or a node-local emptyDir /
+	// hostPath that we add to pod.spec.volumes explicitly.
 	var (
 		volumeClaimTemplates []corev1.PersistentVolumeClaim
 		extraDataVolume      *corev1.Volume
@@ -543,6 +542,17 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 				EmptyDir: &corev1.EmptyDirVolumeSource{
 					Medium:    ed.Medium,
 					SizeLimit: ed.SizeLimit,
+				},
+			},
+		}
+	case BackendHostPath:
+		hp := spec.Storage.HostPath
+		extraDataVolume = &corev1.Volume{
+			Name: DataVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: hp.Path,
+					Type: hp.Type,
 				},
 			},
 		}
@@ -987,6 +997,18 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 			return false
 		}
 		return quantityPtrEqual(dataVol.EmptyDir.SizeLimit, ed.SizeLimit)
+	case BackendHostPath:
+		if len(sts.Spec.VolumeClaimTemplates) != 0 {
+			return false
+		}
+		if dataVol == nil || dataVol.HostPath == nil {
+			return false
+		}
+		hp := spec.Storage.HostPath
+		if dataVol.HostPath.Path != hp.Path {
+			return false
+		}
+		return reflect.DeepEqual(dataVol.HostPath.Type, hp.Type)
 	case BackendPersistentVolumeClaim:
 		if dataVol != nil {
 			return false
@@ -1051,12 +1073,15 @@ const (
 // resolveStorageBackend returns the effective backend for an
 // EngineStorageSpec. If no sibling pointer is set we default to
 // BackendPersistentVolumeClaim, which preserves today's behavior for
-// FireboltEngines that don't configure storage explicitly. The
-// BackendHostPath arm is wired in a follow-up commit.
+// FireboltEngines that don't configure storage explicitly. The CEL
+// XValidation rule added in a follow-up commit guarantees at most one
+// pointer is non-nil at admission time.
 func resolveStorageBackend(s computev1alpha1.EngineStorageSpec) StorageBackend {
 	switch {
 	case s.EmptyDir != nil:
 		return BackendEmptyDir
+	case s.HostPath != nil:
+		return BackendHostPath
 	default:
 		return BackendPersistentVolumeClaim
 	}
