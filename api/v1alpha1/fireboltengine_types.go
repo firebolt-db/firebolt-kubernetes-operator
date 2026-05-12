@@ -23,15 +23,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EngineStorageSpec configures the per-pod PersistentVolumeClaim mounted into
-// each engine container at /firebolt-core/volume. The PVC is always provisioned;
-// fields here override the operator's defaults.
-//
-// Changing any field triggers a new blue-green generation, since
-// VolumeClaimTemplates are immutable on a StatefulSet. The new generation
-// provisions fresh PVCs; the old generation's PVCs are reclaimed when the
-// old StatefulSet is deleted (whenDeleted=Delete on the retention policy).
+// EngineStorageSpec configures the per-pod data volume mounted into each
+// engine container at /firebolt-core/volume. Today only the
+// PersistentVolumeClaim backend is supported (the existing behavior);
+// follow-up commits add EmptyDir and HostPath siblings for clusters that
+// can't dynamically provision PVCs.
 type EngineStorageSpec struct {
+	// PersistentVolumeClaim backs /firebolt-core/volume with a per-pod
+	// PersistentVolumeClaim synthesized by the StatefulSet controller from
+	// a VolumeClaimTemplate. Omit the sub-struct to accept the operator's
+	// defaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which
+	// matches the pre-refactor behavior of an empty EngineStorageSpec.
+	// +optional
+	PersistentVolumeClaim *EnginePersistentVolumeClaimSpec `json:"persistentVolumeClaim,omitempty"`
+}
+
+// EnginePersistentVolumeClaimSpec configures the per-pod PersistentVolumeClaim
+// the StatefulSet controller synthesizes from the VolumeClaimTemplate. Each
+// field is optional; omit the whole struct to accept the operator's defaults.
+type EnginePersistentVolumeClaimSpec struct {
 	// Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.
 	// +kubebuilder:default="1Gi"
 	// +optional

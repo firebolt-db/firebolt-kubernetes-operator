@@ -510,7 +510,6 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
-	storage := getEngineStorage(spec)
 	podSecurityContext := getEnginePodSecurityContext(spec)
 	containerSecurityContext := getEngineContainerSecurityContext(spec)
 
@@ -526,19 +525,39 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			MountPath: DataMountPath,
 		},
 	}
+	// Resolve the per-pod PVC config with inline defaulting. The
+	// kubebuilder defaults on EnginePersistentVolumeClaimSpec only fire
+	// when the parent sub-struct is present in the user's manifest; for
+	// an omitted PersistentVolumeClaim the controller backfills 1Gi /
+	// ReadWriteOnce / cluster-default StorageClass to preserve today's
+	// behavior.
+	pvcSize := resource.MustParse(DefaultEngineStorageSize)
+	pvcAccessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	var pvcStorageClassName *string
+	if p := spec.Storage.PersistentVolumeClaim; p != nil {
+		if !p.Size.IsZero() {
+			pvcSize = p.Size
+		}
+		if len(p.AccessModes) > 0 {
+			pvcAccessModes = p.AccessModes
+		}
+		if p.StorageClassName != nil {
+			pvcStorageClassName = p.StorageClassName
+		}
+	}
 	volumeClaimTemplates := []corev1.PersistentVolumeClaim{{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   DataVolumeName,
 			Labels: labels,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: storage.AccessModes,
+			AccessModes: pvcAccessModes,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: storage.Size,
+					corev1.ResourceStorage: pvcSize,
 				},
 			},
-			StorageClassName: storage.StorageClassName,
+			StorageClassName: pvcStorageClassName,
 		},
 	}}
 	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
@@ -838,21 +857,6 @@ func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec)
 	return spec.SecurityContext.DeepCopy()
 }
 
-// getEngineStorage returns the resolved engine storage spec, applying the
-// operator's defaults to any unset fields. Mirrors the kubebuilder defaults
-// declared on EngineStorageSpec so unit tests building specs as Go literals
-// see the same values as CRD-loaded specs.
-func getEngineStorage(spec *computev1alpha1.FireboltEngineSpec) computev1alpha1.EngineStorageSpec {
-	s := spec.Storage
-	if s.Size.IsZero() {
-		s.Size = resource.MustParse(DefaultEngineStorageSize)
-	}
-	if len(s.AccessModes) == 0 {
-		s.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-	}
-	return s
-}
-
 func engineContainerResources(spec *computev1alpha1.FireboltEngineSpec) corev1.ResourceRequirements {
 	return *spec.Resources.DeepCopy()
 }
@@ -960,20 +964,33 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 	if len(sts.Spec.VolumeClaimTemplates) == 0 {
 		return false
 	}
-	storage := getEngineStorage(spec)
+	pvcSize := resource.MustParse(DefaultEngineStorageSize)
+	pvcAccessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	var pvcStorageClassName *string
+	if p := spec.Storage.PersistentVolumeClaim; p != nil {
+		if !p.Size.IsZero() {
+			pvcSize = p.Size
+		}
+		if len(p.AccessModes) > 0 {
+			pvcAccessModes = p.AccessModes
+		}
+		if p.StorageClassName != nil {
+			pvcStorageClassName = p.StorageClassName
+		}
+	}
 	vct := sts.Spec.VolumeClaimTemplates[0]
 	if vct.Name != DataVolumeName {
 		return false
 	}
 
 	currentSize := vct.Spec.Resources.Requests[corev1.ResourceStorage]
-	if !currentSize.Equal(storage.Size) {
+	if !currentSize.Equal(pvcSize) {
 		return false
 	}
 
-	if !reflect.DeepEqual(vct.Spec.AccessModes, storage.AccessModes) {
+	if !reflect.DeepEqual(vct.Spec.AccessModes, pvcAccessModes) {
 		return false
 	}
 
-	return reflect.DeepEqual(vct.Spec.StorageClassName, storage.StorageClassName)
+	return reflect.DeepEqual(vct.Spec.StorageClassName, pvcStorageClassName)
 }
