@@ -39,6 +39,15 @@ type EngineStorageSpec struct {
 	// cache, not for stateful workloads.
 	// +optional
 	EmptyDir *EngineEmptyDirSpec `json:"emptyDir,omitempty"`
+
+	// HostPath backs /firebolt-core/volume with a directory on the node
+	// filesystem. Pods are implicitly node-pinned (the directory only
+	// exists where it was created); the path must pre-exist on every
+	// node Karpenter could schedule the engine onto, with permissions
+	// readable by the engine UID. Use to expose instance-store NVMe on
+	// the node.
+	// +optional
+	HostPath *EngineHostPathSpec `json:"hostPath,omitempty"`
 }
 
 // EnginePersistentVolumeClaimSpec configures the per-pod PersistentVolumeClaim
@@ -76,6 +85,20 @@ type EngineEmptyDirSpec struct {
 	// for Memory medium).
 	// +optional
 	SizeLimit *resource.Quantity `json:"sizeLimit,omitempty"`
+}
+
+// EngineHostPathSpec configures a hostPath-backed engine data volume.
+type EngineHostPathSpec struct {
+	// Path is the absolute filesystem path on the host node.
+	// +kubebuilder:validation:Pattern=`^/.*`
+	Path string `json:"path"`
+
+	// Type enforces a check on Path before mounting (Directory,
+	// DirectoryOrCreate, …). See
+	// https://kubernetes.io/docs/concepts/storage/volumes/#hostpath
+	// for the full enum. Leave nil to skip the check (kubelet default).
+	// +optional
+	Type *corev1.HostPathType `json:"type,omitempty"`
 }
 
 // AutoscalingSpec configures replica autoscaling for a FireboltEngine.
