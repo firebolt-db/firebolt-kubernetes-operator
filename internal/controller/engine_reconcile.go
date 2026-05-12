@@ -525,39 +525,20 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			MountPath: DataMountPath,
 		},
 	}
-	// Resolve the per-pod PVC config with inline defaulting. The
-	// kubebuilder defaults on EnginePersistentVolumeClaimSpec only fire
-	// when the parent sub-struct is present in the user's manifest; for
-	// an omitted PersistentVolumeClaim the controller backfills 1Gi /
-	// ReadWriteOnce / cluster-default StorageClass to preserve today's
-	// behavior.
-	pvcSize := resource.MustParse(DefaultEngineStorageSize)
-	pvcAccessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-	var pvcStorageClassName *string
-	if p := spec.Storage.PersistentVolumeClaim; p != nil {
-		if !p.Size.IsZero() {
-			pvcSize = p.Size
-		}
-		if len(p.AccessModes) > 0 {
-			pvcAccessModes = p.AccessModes
-		}
-		if p.StorageClassName != nil {
-			pvcStorageClassName = p.StorageClassName
-		}
-	}
+	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
 	volumeClaimTemplates := []corev1.PersistentVolumeClaim{{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   DataVolumeName,
 			Labels: labels,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: pvcAccessModes,
+			AccessModes: pvc.AccessModes,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: pvcSize,
+					corev1.ResourceStorage: pvc.Size,
 				},
 			},
-			StorageClassName: pvcStorageClassName,
+			StorageClassName: pvc.StorageClassName,
 		},
 	}}
 	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
@@ -964,33 +945,49 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 	if len(sts.Spec.VolumeClaimTemplates) == 0 {
 		return false
 	}
-	pvcSize := resource.MustParse(DefaultEngineStorageSize)
-	pvcAccessModes := []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-	var pvcStorageClassName *string
-	if p := spec.Storage.PersistentVolumeClaim; p != nil {
-		if !p.Size.IsZero() {
-			pvcSize = p.Size
-		}
-		if len(p.AccessModes) > 0 {
-			pvcAccessModes = p.AccessModes
-		}
-		if p.StorageClassName != nil {
-			pvcStorageClassName = p.StorageClassName
-		}
-	}
+	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
 	vct := sts.Spec.VolumeClaimTemplates[0]
 	if vct.Name != DataVolumeName {
 		return false
 	}
 
 	currentSize := vct.Spec.Resources.Requests[corev1.ResourceStorage]
-	if !currentSize.Equal(pvcSize) {
+	if !currentSize.Equal(pvc.Size) {
 		return false
 	}
 
-	if !reflect.DeepEqual(vct.Spec.AccessModes, pvcAccessModes) {
+	if !reflect.DeepEqual(vct.Spec.AccessModes, pvc.AccessModes) {
 		return false
 	}
 
-	return reflect.DeepEqual(vct.Spec.StorageClassName, pvcStorageClassName)
+	return reflect.DeepEqual(vct.Spec.StorageClassName, pvc.StorageClassName)
+}
+
+// resolvePersistentVolumeClaimDefaults returns the effective per-pod PVC
+// configuration for the engine. nil input (no PersistentVolumeClaim sub-spec
+// set, or the whole EngineStorageSpec omitted) is treated as "accept all
+// defaults" — 1Gi, ReadWriteOnce, cluster-default StorageClass — which
+// preserves the operator's behavior for FireboltEngines that don't
+// configure storage explicitly. The kubebuilder defaults on
+// EnginePersistentVolumeClaimSpec only fire when the parent sub-struct is
+// present in the user's manifest, so the controller has to backfill them
+// for the implicit-default case.
+func resolvePersistentVolumeClaimDefaults(p *computev1alpha1.EnginePersistentVolumeClaimSpec) computev1alpha1.EnginePersistentVolumeClaimSpec {
+	out := computev1alpha1.EnginePersistentVolumeClaimSpec{
+		Size:        resource.MustParse(DefaultEngineStorageSize),
+		AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+	}
+	if p == nil {
+		return out
+	}
+	if !p.Size.IsZero() {
+		out.Size = p.Size
+	}
+	if len(p.AccessModes) > 0 {
+		out.AccessModes = p.AccessModes
+	}
+	if p.StorageClassName != nil {
+		out.StorageClassName = p.StorageClassName
+	}
+	return out
 }
