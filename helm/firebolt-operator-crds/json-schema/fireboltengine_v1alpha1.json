@@ -556,7 +556,7 @@
           "description": "Storage configures the per-pod PersistentVolumeClaim mounted at\n/firebolt-core/volume. The PVC is always provisioned; omit the field\nto accept the operator's defaults (1Gi, ReadWriteOnce, cluster default\nStorageClass). Changes to any field force a new generation since\nVolumeClaimTemplates are immutable on a StatefulSet.",
           "properties": {
             "emptyDir": {
-              "description": "EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir\nVolume. Data is lost on every pod restart \u2014 appropriate for engine\ncache, not for stateful workloads.",
+              "description": "EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir\nVolume. The mount holds regenerable cache only; authoritative\ndata lives in the metadata service and the managed-table S3\nbucket (see EngineStorageSpec for the full picture), so volume\ncontents being lost on pod restart is normal engine behavior\nrather than a durability regression.",
               "properties": {
                 "medium": {
                   "description": "Medium is the storage medium backing the emptyDir. Leave empty\nfor the default node disk; set to \"Memory\" for a tmpfs-backed\nvolume sized against the pod's memory limit.",
@@ -584,7 +584,7 @@
               "additionalProperties": false
             },
             "hostPath": {
-              "description": "HostPath backs /firebolt-core/volume with a directory on the node\nfilesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode Karpenter could schedule the engine onto, with permissions\nreadable by the engine UID. Use to expose instance-store NVMe on\nthe node.",
+              "description": "HostPath backs /firebolt-core/volume with a directory on the node\nfilesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode the engine pod could be scheduled onto, with permissions\nreadable by the engine UID. Use to expose instance-store NVMe on\nthe node.",
               "properties": {
                 "path": {
                   "description": "Path is the absolute filesystem path on the host node.",

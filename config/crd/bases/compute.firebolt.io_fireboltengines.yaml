@@ -790,8 +790,11 @@ spec:
                   emptyDir:
                     description: |-
                       EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir
-                      Volume. Data is lost on every pod restart — appropriate for engine
-                      cache, not for stateful workloads.
+                      Volume. The mount holds regenerable cache only; authoritative
+                      data lives in the metadata service and the managed-table S3
+                      bucket (see EngineStorageSpec for the full picture), so volume
+                      contents being lost on pod restart is normal engine behavior
+                      rather than a durability regression.
                     properties:
                       medium:
                         description: |-
@@ -818,7 +821,7 @@ spec:
                       HostPath backs /firebolt-core/volume with a directory on the node
                       filesystem. Pods are implicitly node-pinned (the directory only
                       exists where it was created); the path must pre-exist on every
-                      node Karpenter could schedule the engine onto, with permissions
+                      node the engine pod could be scheduled onto, with permissions
                       readable by the engine UID. Use to expose instance-store NVMe on
                       the node.
                     properties:
