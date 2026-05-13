@@ -1,3 +1,14 @@
+# 1.0.8
+
+appVersion: v2.4.0
+
+## [2.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.3.0...v2.4.0) (2026-05-13)
+
+### Features
+
+* **controller:** render engine config.yaml in new structured schema (FB-985) ([183dad3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/183dad3bebfa5a061a1a9e5522e407e759e781a5))
+
+
 # 1.0.7
 
 appVersion: v2.3.0
