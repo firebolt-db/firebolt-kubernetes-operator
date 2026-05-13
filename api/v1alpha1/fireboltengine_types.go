@@ -26,17 +26,24 @@ import (
 // EngineStorageSpec configures the per-pod data volume mounted into each
 // engine container at /firebolt-core/volume. Exactly one of
 // PersistentVolumeClaim, EmptyDir, or HostPath should be set; if all
-// three are nil the operator backs the mount with a PersistentVolumeClaim
-// using its built-in defaults (1Gi, ReadWriteOnce, cluster-default
-// StorageClass). The CEL rule below makes this mutual exclusion an
+// three are nil the operator backs the mount with an emptyDir. Engine
+// data at this mount is regenerable cache (authoritative state lives in
+// the metadata service and the managed-table S3 bucket), so an
+// ephemeral pod-local volume is the safe default and avoids a hard
+// dependency on a dynamic-provisioner StorageClass. Opt into a per-pod
+// PVC by setting persistentVolumeClaim (with or without explicit
+// fields). The CEL rule below makes the three-way mutual exclusion an
 // admission-time error rather than a silent "first non-nil wins" race.
 // +kubebuilder:validation:XValidation:rule="(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1",message="storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive"
 type EngineStorageSpec struct {
-	// PersistentVolumeClaim backs /firebolt-core/volume with a per-pod
-	// PersistentVolumeClaim synthesized by the StatefulSet controller from
-	// a VolumeClaimTemplate. Omit the sub-struct to accept the operator's
-	// defaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which
-	// matches the pre-refactor behavior of an empty EngineStorageSpec.
+	// PersistentVolumeClaim opts the engine into a per-pod
+	// PersistentVolumeClaim synthesized by the StatefulSet controller
+	// from a VolumeClaimTemplate. Set the field (even to an empty
+	// struct) to enable the PVC backend; the kubebuilder defaults
+	// (1Gi, ReadWriteOnce, cluster-default StorageClass) on
+	// EnginePersistentVolumeClaimSpec fill in any omitted inner field.
+	// When this field is nil the engine falls back to the default
+	// emptyDir backend (see the EngineStorageSpec doc above).
 	// +optional
 	PersistentVolumeClaim *EnginePersistentVolumeClaimSpec `json:"persistentVolumeClaim,omitempty"`
 

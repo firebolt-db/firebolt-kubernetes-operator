@@ -63,6 +63,16 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 				corev1.ResourceMemory: resource.MustParse("8Gi"),
 			},
 		},
+		// Pre-default-flip the storage suite assumed empty Storage
+		// meant "PVC with operator defaults". The default now resolves
+		// to emptyDir; pin testSpec to the PVC backend explicitly so
+		// the existing engine_reconcile_test.go fixtures (makeSTS, the
+		// outer-loop reconciler tests, etc.) keep exercising the PVC
+		// code path they were written for. Tests that specifically want
+		// emptyDir or hostPath override spec.Storage themselves.
+		Storage: computev1alpha1.EngineStorageSpec{
+			PersistentVolumeClaim: &computev1alpha1.EnginePersistentVolumeClaimSpec{},
+		},
 		Rollout: computev1alpha1.RolloutGraceful,
 	}
 }

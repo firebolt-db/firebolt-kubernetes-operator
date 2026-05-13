@@ -27,10 +27,11 @@ import (
 )
 
 // TestBuildStatefulSet_DataVolumeBackends guards FB-1085: the engine pod's
-// /firebolt-core/volume mount can be backed by the default per-pod PVC, an
-// emptyDir, or a hostPath. The PVC backend always emits a single
-// VolumeClaimTemplate (and no pod-level data Volume); emptyDir/hostPath
-// suppress the VCT and instead add a pod-level Volume named DataVolumeName.
+// /firebolt-core/volume mount can be backed by the default emptyDir, an
+// opt-in per-pod PVC, an explicit emptyDir with knobs, or a hostPath. The
+// PVC backend emits a single VolumeClaimTemplate (and no pod-level data
+// Volume); the other backends suppress the VCT and instead add a pod-level
+// Volume named DataVolumeName.
 func TestBuildStatefulSet_DataVolumeBackends(t *testing.T) {
 	gigi := resource.MustParse("1Gi")
 	dirType := corev1.HostPathDirectory
@@ -43,8 +44,25 @@ func TestBuildStatefulSet_DataVolumeBackends(t *testing.T) {
 		check          func(t *testing.T, v *corev1.Volume)
 	}{
 		{
-			name:           "default-resolves-to-PVC (empty EngineStorageSpec)",
+			name:           "default-resolves-to-emptyDir (empty EngineStorageSpec)",
 			storage:        computev1alpha1.EngineStorageSpec{},
+			wantVCT:        false,
+			wantPodVolType: "emptyDir",
+			check: func(t *testing.T, v *corev1.Volume) {
+				t.Helper()
+				if v.EmptyDir.Medium != "" {
+					t.Errorf("EmptyDir.Medium = %q, want \"\" (default)", v.EmptyDir.Medium)
+				}
+				if v.EmptyDir.SizeLimit != nil {
+					t.Errorf("EmptyDir.SizeLimit = %v, want nil (default)", v.EmptyDir.SizeLimit)
+				}
+			},
+		},
+		{
+			name: "explicit persistentVolumeClaim{} opts into PVC backend",
+			storage: computev1alpha1.EngineStorageSpec{
+				PersistentVolumeClaim: &computev1alpha1.EnginePersistentVolumeClaimSpec{},
+			},
 			wantVCT:        true,
 			wantPodVolType: "",
 		},
@@ -156,13 +174,13 @@ func TestBuildStatefulSet_DataVolumeBackends(t *testing.T) {
 // pushes the reconciler into a new blue-green generation, which is the
 // only safe way to swap the data-volume source (VolumeClaimTemplates are
 // immutable on a StatefulSet and the pod-template Volume differs across
-// backends).
+// backends). An empty EngineStorageSpec{} now resolves to BackendEmptyDir
+// (see resolveStorageBackend) — PVC specs must set PersistentVolumeClaim
+// explicitly.
 func TestStorageMatchesSpec_BackendSwitchBumpsGeneration(t *testing.T) {
-	pvcSpec := testSpec()
+	pvcSpec := testSpec() // testSpec() pins Storage to PVC opt-in; keep as-is.
 	emptyDirSpec := testSpec()
-	emptyDirSpec.Storage = computev1alpha1.EngineStorageSpec{
-		EmptyDir: &computev1alpha1.EngineEmptyDirSpec{},
-	}
+	emptyDirSpec.Storage = computev1alpha1.EngineStorageSpec{} // empty → default emptyDir
 	hostPathSpec := testSpec()
 	hostPathSpec.Storage = computev1alpha1.EngineStorageSpec{
 		HostPath: &computev1alpha1.EngineHostPathSpec{Path: "/mnt/nvme/firebolt"},
@@ -179,7 +197,7 @@ func TestStorageMatchesSpec_BackendSwitchBumpsGeneration(t *testing.T) {
 		want bool
 	}{
 		{"PVC sts vs PVC spec", pvcSts, pvcSpec, true},
-		{"EmptyDir sts vs EmptyDir spec", emptyDirSts, emptyDirSpec, true},
+		{"EmptyDir sts vs EmptyDir spec (both default)", emptyDirSts, emptyDirSpec, true},
 		{"HostPath sts vs HostPath spec", hostPathSts, hostPathSpec, true},
 		{"PVC sts vs EmptyDir spec", pvcSts, emptyDirSpec, false},
 		{"EmptyDir sts vs PVC spec", emptyDirSts, pvcSpec, false},
