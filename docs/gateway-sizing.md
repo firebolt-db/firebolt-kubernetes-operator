@@ -1,0 +1,10 @@
+# Gateway Sizing
+
+The Envoy gateway is the only zero-downtime entry point, so its replica count and memory limit have to absorb both steady-state traffic and the **retry amplification** introduced by the `X-Firebolt-Drained` shutdown path.
+
+The operator pins Envoy's `per_connection_buffer_limit_bytes` to **2 MiB** on both the listener and the dynamic-forward-proxy cluster. The value is intentionally not exposed on the CR (see the comment on `gatewayPerConnectionBufferLimitBytes` in `internal/controller/instance_gateway.go`): it sits at the centre of the operator's zero-downtime + memory-budget contract, and a per-instance override would invite settings that silently break either retry coverage or the gateway memory limit.
+
+Two consequences this fixed value imposes on operations:
+
+- **Memory budget.** Peak buffering per gateway pod is roughly `expected_concurrent_requests x (1 + retry_factor) x 2 MiB`, where `retry_factor` is the fraction of in-flight requests you expect to be retried during a cutover (typically small -- bounded by the active health-check interval and the size of the engine fleet behind a single authority). Raise `spec.gateway.replicas` and `spec.gateway.resources.limits.memory` together when expected concurrency grows; OOMKills here translate directly into client-visible failures because the gateway is the only zero-downtime entry point.
+- **Requests larger than 2 MiB are not retried.** Envoy can only replay a request whose body fits in the per-connection buffer. Anything bigger is dispatched without buffering, and any 503 it gets -- including a retry-safe `X-Firebolt-Drained` 503 from the engine's pre-work shutdown fence -- propagates to the client unretried. Workloads that send single requests above this threshold (multi-MiB COPY ingest, large multi-statement batches) are out of scope for the operator-managed zero-downtime path; split them client-side, or accept that those specific requests can fail during a cutover.
