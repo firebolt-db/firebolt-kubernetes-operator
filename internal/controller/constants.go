@@ -118,6 +118,19 @@ const (
 	// The operator scrapes firebolt_running_queries and firebolt_suspended_queries
 	// here via the Kubernetes pod-proxy subresource to drive the drain check.
 	MetricsPort = 9090
+	// AragogPort and friends are the per-node ports baked into both
+	// GetServicePorts and the rendered config.yaml so the engine's view of
+	// its peer ports cannot drift from the K8s Service exposing them.
+	// Values match packdb/programs/firebolt-core/FireboltCoreConfig.h
+	// (kAragogPort etc.) and the proto constants STORAGE_MANAGER_PORT=1717
+	// / STORAGE_AGENT_PORT=3434.
+	AragogPort = 5678
+	// ShufflepuffPort is the per-node shufflepuff data-plane port.
+	ShufflepuffPort = 16000
+	// StorageManagerPort is the per-node storage-manager gRPC port.
+	StorageManagerPort = 1717
+	// StorageAgentPort is the per-node storage-agent gRPC port.
+	StorageAgentPort = 3434
 	// MetricsPath is the HTTP path exposing Prometheus metrics on engine pods.
 	MetricsPath = "/metrics"
 	// MetricRunningQueries is the Prometheus metric name for in-flight queries.
@@ -191,13 +204,12 @@ exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-cor
 func GetServicePorts() []corev1.ServicePort {
 	return []corev1.ServicePort{
 		{Name: "http-query", Port: 3473, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(3473)},
-		{Name: "health", Port: 8122, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(8122)},
-		{Name: "execp", Port: 5678, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(5678)},
-		{Name: "datacp", Port: 16000, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(16000)},
-		{Name: "storage-manager", Port: 1717, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(1717)},
-		{Name: "storage-agent", Port: 3434, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(3434)},
-		{Name: "metadata", Port: 6500, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(6500)},
-		{Name: "metrics", Port: 9090, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(9090)},
+		{Name: "health", Port: HealthPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(HealthPort)},
+		{Name: "execp", Port: AragogPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(AragogPort)},
+		{Name: "datacp", Port: ShufflepuffPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(ShufflepuffPort)},
+		{Name: "storage-manager", Port: StorageManagerPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(StorageManagerPort)},
+		{Name: "storage-agent", Port: StorageAgentPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(StorageAgentPort)},
+		{Name: "metrics", Port: MetricsPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(MetricsPort)},
 	}
 }
 
@@ -205,12 +217,11 @@ func GetServicePorts() []corev1.ServicePort {
 func GetContainerPorts() []corev1.ContainerPort {
 	return []corev1.ContainerPort{
 		{Name: "http-query", ContainerPort: 3473, Protocol: corev1.ProtocolTCP},
-		{Name: "health", ContainerPort: 8122, Protocol: corev1.ProtocolTCP},
-		{Name: "execp", ContainerPort: 5678, Protocol: corev1.ProtocolTCP},
-		{Name: "datacp", ContainerPort: 16000, Protocol: corev1.ProtocolTCP},
-		{Name: "storage-manager", ContainerPort: 1717, Protocol: corev1.ProtocolTCP},
-		{Name: "storage-agent", ContainerPort: 3434, Protocol: corev1.ProtocolTCP},
-		{Name: "metadata", ContainerPort: 6500, Protocol: corev1.ProtocolTCP},
-		{Name: "metrics", ContainerPort: 9090, Protocol: corev1.ProtocolTCP},
+		{Name: "health", ContainerPort: HealthPort, Protocol: corev1.ProtocolTCP},
+		{Name: "execp", ContainerPort: AragogPort, Protocol: corev1.ProtocolTCP},
+		{Name: "datacp", ContainerPort: ShufflepuffPort, Protocol: corev1.ProtocolTCP},
+		{Name: "storage-manager", ContainerPort: StorageManagerPort, Protocol: corev1.ProtocolTCP},
+		{Name: "storage-agent", ContainerPort: StorageAgentPort, Protocol: corev1.ProtocolTCP},
+		{Name: "metrics", ContainerPort: MetricsPort, Protocol: corev1.ProtocolTCP},
 	}
 }
