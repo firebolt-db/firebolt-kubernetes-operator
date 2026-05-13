@@ -35,7 +35,7 @@
 | Condition | Meaning |
 |-----------|---------|
 | `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata. |
-| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / account ID. |
+| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / instance ID. |
 | `Ready=True, Reason=EngineReady` | Engine is serving traffic with all replicas ready. |
 | `Ready=False, Reason=Initializing` | First reconcile of a freshly created CR; transient. |
 | `Ready=False, Reason=Rolling` | A blue-green transition is in progress (`creating` / `switching` / `draining` / `cleaning`). |

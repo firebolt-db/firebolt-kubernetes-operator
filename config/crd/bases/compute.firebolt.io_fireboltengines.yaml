@@ -237,7 +237,7 @@ spec:
                   InstanceRef is the name of the FireboltInstance in the same namespace
                   that this engine depends on. The engine reconciler will not proceed
                   until the referenced instance has a populated metadata endpoint and
-                  account ID. This field is immutable after creation.
+                  instance ID. This field is immutable after creation.
                 minLength: 1
                 type: string
                 x-kubernetes-validations:

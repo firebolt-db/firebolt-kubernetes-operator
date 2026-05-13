@@ -174,14 +174,14 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Only PhaseStable, PhaseStopped, and PhaseCreating actually consume
-	// InstanceInfo (to render ConfigMaps with multi_engine_endpoint /
-	// account_id). Stopped is included because computeStable can
-	// re-materialize a missing ConfigMap in place at the current
-	// generation, which uses instanceInfo even when spec.Replicas is 0.
-	// Switching / Draining / Cleaning operate on already-rendered
-	// resources and are functionally independent of the FireboltInstance:
-	// draining an old-gen pod does not need a metadata endpoint, cleaning
-	// up our own resources does not need an account ID.
+	// InstanceInfo (to render ConfigMaps with instance.multi_engine.
+	// metadata_endpoint / instance.id). Stopped is included because
+	// computeStable can re-materialize a missing ConfigMap in place at
+	// the current generation, which uses instanceInfo even when
+	// spec.Replicas is 0. Switching / Draining / Cleaning operate on
+	// already-rendered resources and are functionally independent of the
+	// FireboltInstance: draining an old-gen pod does not need a metadata
+	// endpoint, cleaning up our own resources does not need an instance ID.
 	//
 	// We deliberately do NOT touch the FireboltInstance from those
 	// phases - not even to refresh ConditionInstanceReady. Reasons:
@@ -512,7 +512,7 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
-// spec.instanceRef and returns its metadata endpoint and account ID.
+// spec.instanceRef and returns its metadata endpoint and instance ID.
 // Reconciliation is blocked until the instance exists and has both fields populated.
 func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (InstanceInfo, error) {
 	inst := &computev1alpha1.FireboltInstance{}
@@ -533,7 +533,7 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 
 	return InstanceInfo{
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
-		AccountID:        inst.Spec.ID,
+		InstanceID:       inst.Spec.ID,
 	}, nil
 }
 
