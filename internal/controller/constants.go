@@ -118,19 +118,6 @@ const (
 	// The operator scrapes firebolt_running_queries and firebolt_suspended_queries
 	// here via the Kubernetes pod-proxy subresource to drive the drain check.
 	MetricsPort = 9090
-	// AragogPort and friends are the per-node ports baked into both
-	// GetServicePorts and the rendered config.yaml so the engine's view of
-	// its peer ports cannot drift from the K8s Service exposing them.
-	// Values match packdb/programs/firebolt-core/FireboltCoreConfig.h
-	// (kAragogPort etc.) and the proto constants STORAGE_MANAGER_PORT=1717
-	// / STORAGE_AGENT_PORT=3434.
-	AragogPort = 5678
-	// ShufflepuffPort is the per-node shufflepuff data-plane port.
-	ShufflepuffPort = 16000
-	// StorageManagerPort is the per-node storage-manager gRPC port.
-	StorageManagerPort = 1717
-	// StorageAgentPort is the per-node storage-agent gRPC port.
-	StorageAgentPort = 3434
 	// MetricsPath is the HTTP path exposing Prometheus metrics on engine pods.
 	MetricsPath = "/metrics"
 	// MetricRunningQueries is the Prometheus metric name for in-flight queries.
@@ -200,28 +187,28 @@ fi
 exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-core
 `
 
-// GetServicePorts returns the standard service ports for a Firebolt engine
+// GetServicePorts returns the externally-meaningful service ports for a
+// Firebolt engine. The aragog / shufflepuff / storage-manager / storage-
+// agent ports are intentionally omitted: they are intra-engine peer
+// traffic carried over the headless service's pod-IP DNS records, so they
+// don't need a Service port declaration to be reachable, and they are
+// never directly consumed by users or the gateway.
 func GetServicePorts() []corev1.ServicePort {
 	return []corev1.ServicePort{
 		{Name: "http-query", Port: 3473, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(3473)},
 		{Name: "health", Port: HealthPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(HealthPort)},
-		{Name: "execp", Port: AragogPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(AragogPort)},
-		{Name: "datacp", Port: ShufflepuffPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(ShufflepuffPort)},
-		{Name: "storage-manager", Port: StorageManagerPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(StorageManagerPort)},
-		{Name: "storage-agent", Port: StorageAgentPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(StorageAgentPort)},
 		{Name: "metrics", Port: MetricsPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(MetricsPort)},
 	}
 }
 
-// GetContainerPorts returns the container ports for the engine container
+// GetContainerPorts returns the container ports for the engine container.
+// Mirrors GetServicePorts (see its docstring): intra-engine peer ports are
+// omitted because ContainerPort declarations are informational only and
+// the engine binary opens those listeners regardless.
 func GetContainerPorts() []corev1.ContainerPort {
 	return []corev1.ContainerPort{
 		{Name: "http-query", ContainerPort: 3473, Protocol: corev1.ProtocolTCP},
 		{Name: "health", ContainerPort: HealthPort, Protocol: corev1.ProtocolTCP},
-		{Name: "execp", ContainerPort: AragogPort, Protocol: corev1.ProtocolTCP},
-		{Name: "datacp", ContainerPort: ShufflepuffPort, Protocol: corev1.ProtocolTCP},
-		{Name: "storage-manager", ContainerPort: StorageManagerPort, Protocol: corev1.ProtocolTCP},
-		{Name: "storage-agent", ContainerPort: StorageAgentPort, Protocol: corev1.ProtocolTCP},
 		{Name: "metrics", ContainerPort: MetricsPort, Protocol: corev1.ProtocolTCP},
 	}
 }
