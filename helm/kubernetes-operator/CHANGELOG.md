@@ -1,3 +1,19 @@
+# 1.0.5
+
+appVersion: v2.1.0
+
+## [2.1.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.0.3...v2.1.0) (2026-05-13)
+
+### Features
+
+* **api:** make postgres schema configurable (FB-1088) ([5fe61af](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5fe61afda1bd2eed28557beef134cf17436dc9f2))
+
+### Bug Fixes
+
+* **controller:** invoke engine via 'firebolt server' with FIREBOLT_CORE_MODE (FB-1088) ([a0ed274](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a0ed274e44cb40735d274c189a278ab8f5d8c9a8))
+* **controller:** rename engine binary path to /firebolt-core/firebolt (FB-1088) ([db0a632](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/db0a632dc4c9e2769d87c327b1f29d922ffbb65e))
+
+
 # 1.0.4
 
 appVersion: v2.0.3
