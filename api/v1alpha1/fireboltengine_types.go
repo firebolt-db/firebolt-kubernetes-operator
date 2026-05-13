@@ -23,17 +23,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EngineStorageSpec configures the per-pod data volume mounted into each
-// engine container at /firebolt-core/volume. Exactly one of
-// PersistentVolumeClaim, EmptyDir, or HostPath should be set; if all
-// three are nil the operator backs the mount with an emptyDir. Engine
-// data at this mount is regenerable cache (authoritative state lives in
-// the metadata service and the managed-table S3 bucket), so an
-// ephemeral pod-local volume is the safe default and avoids a hard
-// dependency on a dynamic-provisioner StorageClass. Opt into a per-pod
-// PVC by setting persistentVolumeClaim (with or without explicit
-// fields). The CEL rule below makes the three-way mutual exclusion an
-// admission-time error rather than a silent "first non-nil wins" race.
+// EngineStorageSpec configures the per-pod data volume mounted into the
+// engine container at the operator's data path (see the DataMountPath
+// constant for the current value). Exactly one of PersistentVolumeClaim,
+// EmptyDir, or HostPath should be set; if all three are nil the operator
+// backs the mount with an emptyDir. Engine data at this mount is
+// regenerable cache (authoritative state lives in the metadata service
+// and the managed-table S3 bucket), so an ephemeral pod-local volume is
+// the safe default and avoids a hard dependency on a dynamic-provisioner
+// StorageClass. Opt into a per-pod PVC by setting persistentVolumeClaim
+// (with or without explicit fields). The CEL rule below makes the
+// three-way mutual exclusion an admission-time error rather than a
+// silent "first non-nil wins" race.
 // +kubebuilder:validation:XValidation:rule="(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1",message="storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive"
 type EngineStorageSpec struct {
 	// PersistentVolumeClaim opts the engine into a per-pod
@@ -47,7 +48,7 @@ type EngineStorageSpec struct {
 	// +optional
 	PersistentVolumeClaim *EnginePersistentVolumeClaimSpec `json:"persistentVolumeClaim,omitempty"`
 
-	// EmptyDir backs /firebolt-core/volume with a pod-scoped emptyDir
+	// EmptyDir backs the engine's data mount with a pod-scoped emptyDir
 	// Volume. The mount holds regenerable cache only; authoritative
 	// data lives in the metadata service and the managed-table S3
 	// bucket (see EngineStorageSpec for the full picture), so volume
@@ -56,8 +57,8 @@ type EngineStorageSpec struct {
 	// +optional
 	EmptyDir *EngineEmptyDirSpec `json:"emptyDir,omitempty"`
 
-	// HostPath backs /firebolt-core/volume with a directory on the node
-	// filesystem. Pods are implicitly node-pinned (the directory only
+	// HostPath backs the engine's data mount with a directory on the
+	// node filesystem. Pods are implicitly node-pinned (the directory only
 	// exists where it was created); the path must pre-exist on every
 	// node the engine pod could be scheduled onto, with permissions
 	// readable by the engine UID. Use to expose instance-store NVMe on
@@ -335,11 +336,13 @@ type FireboltEngineSpec struct {
 	// +optional
 	MetadataEndpointOverride *string `json:"metadataEndpointOverride,omitempty"`
 
-	// Storage configures the per-pod PersistentVolumeClaim mounted at
-	// /firebolt-core/volume. The PVC is always provisioned; omit the field
-	// to accept the operator's defaults (1Gi, ReadWriteOnce, cluster default
-	// StorageClass). Changes to any field force a new generation since
-	// VolumeClaimTemplates are immutable on a StatefulSet.
+	// Storage configures the per-pod data volume mounted into each engine
+	// container. See EngineStorageSpec for the backend choice (emptyDir is
+	// the default; persistentVolumeClaim or hostPath are opt-ins). Changes
+	// to any field — including switching backends — force a new blue-green
+	// generation, because the StatefulSet's VolumeClaimTemplates are
+	// immutable and a backend swap necessarily reshapes the pod-template
+	// data Volume.
 	// +kubebuilder:default={}
 	// +optional
 	Storage EngineStorageSpec `json:"storage,omitempty"`
