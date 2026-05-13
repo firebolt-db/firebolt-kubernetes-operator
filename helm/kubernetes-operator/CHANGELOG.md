@@ -1,3 +1,23 @@
+# 1.0.6
+
+appVersion: v2.2.0
+
+## [2.2.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.1.0...v2.2.0) (2026-05-13)
+
+### Features
+
+* **api:** add EngineEmptyDirSpec sibling backend on EngineStorageSpec (FB-1085) ([9b705fa](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9b705fa71328e9b83a6426a16757e4fbe9b22ba4))
+* **api:** add EngineHostPathSpec sibling backend on EngineStorageSpec (FB-1085) ([51b76c0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/51b76c0d2d6dc74579465091cd3268e547f589e5))
+* **api:** enforce backend mutual-exclusion via CEL on EngineStorageSpec (FB-1085) ([91a29f2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/91a29f254fedd7ebba7d0ec19878c4e5e5464926))
+* **controller:** default engine storage to emptyDir when no backend specified (FB-1085) ([9ce972c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9ce972c199877f42eb97090788c62db7177bbad8))
+* **controller:** wire EmptyDir backend through buildStatefulSet and storageMatchesSpec (FB-1085) ([d93ffe5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d93ffe598d2b91b88c7f8d8e2b5ea411ff07527f))
+* **controller:** wire HostPath backend through buildStatefulSet and storageMatchesSpec (FB-1085) ([ec9694a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ec9694a1a635789558bc30b0f79f5f89075e6aba))
+
+### Bug Fixes
+
+* **examples:** migrate engine-full manifest and verify script to nested PVC schema (FB-1085) ([4ae0a0e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4ae0a0e96f45ba6f6b03094aea367fd5b419add8))
+
+
 # 1.0.5
 
 appVersion: v2.1.0
