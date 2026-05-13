@@ -44,7 +44,7 @@ yq eval '
   (select(.kind == "FireboltEngine").spec.image.repository) = env(ENGINE_IMAGE) |
   (select(.kind == "FireboltEngine").spec.image.tag) = env(ENGINE_TAG) |
   (select(.kind == "FireboltEngine").spec.image.pullPolicy) = "IfNotPresent" |
-  (select(.kind == "FireboltEngine").spec.storage.size) = "500Mi" |
+  (select(.kind == "FireboltEngine").spec.storage.persistentVolumeClaim.size) = "500Mi" |
   (select(.kind == "FireboltEngine").spec.resources.requests.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.resources.limits.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.resources.requests.memory) = "2Gi" |
