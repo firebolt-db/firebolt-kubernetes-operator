@@ -29,8 +29,12 @@ spec:
       cpu: "2"
       memory: 4Gi
 
-  # Per-replica PersistentVolumeClaim. Changing storage
-  # triggers a blue-green rollout. Omit storage entirely for operator defaults (1Gi, ReadWriteOnce, cluster default StorageClass).
+  # Per-replica engine data volume at /firebolt-core/volume. Changing storage
+  # triggers a blue-green rollout. Omit storage entirely (or set it to {}) to
+  # accept the operator default of an emptyDir; opt into a PersistentVolumeClaim
+  # by setting persistentVolumeClaim (with or without explicit fields). The
+  # three backends — persistentVolumeClaim, emptyDir, hostPath — are mutually
+  # exclusive.
   storage:
     persistentVolumeClaim:
       size: 50Gi

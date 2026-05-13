@@ -535,7 +535,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	)
 	switch resolveStorageBackend(spec.Storage) {
 	case BackendEmptyDir:
-		ed := spec.Storage.EmptyDir
+		// spec.Storage.EmptyDir may be nil when resolveStorageBackend
+		// fell through to the default (no backend set); render a
+		// bare emptyDir in that case.
+		var ed computev1alpha1.EngineEmptyDirSpec
+		if spec.Storage.EmptyDir != nil {
+			ed = *spec.Storage.EmptyDir
+		}
 		extraDataVolume = &corev1.Volume{
 			Name: DataVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -992,7 +998,13 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 		if dataVol == nil || dataVol.EmptyDir == nil {
 			return false
 		}
-		ed := spec.Storage.EmptyDir
+		// spec.Storage.EmptyDir may be nil when resolveStorageBackend
+		// fell through to the default (no backend set); compare
+		// against a bare EngineEmptyDirSpec{} in that case.
+		var ed computev1alpha1.EngineEmptyDirSpec
+		if spec.Storage.EmptyDir != nil {
+			ed = *spec.Storage.EmptyDir
+		}
 		if dataVol.EmptyDir.Medium != ed.Medium {
 			return false
 		}
@@ -1072,18 +1084,22 @@ const (
 
 // resolveStorageBackend returns the effective backend for an
 // EngineStorageSpec. If no sibling pointer is set we default to
-// BackendPersistentVolumeClaim, which preserves today's behavior for
-// FireboltEngines that don't configure storage explicitly. The CEL
-// XValidation rule added in a follow-up commit guarantees at most one
+// BackendEmptyDir: engine data at /firebolt-core/volume is regenerable
+// cache (authoritative state lives in the metadata service and the
+// managed-table S3 bucket), so an ephemeral pod-local volume is the
+// safe default and avoids a hard dependency on a dynamic-provisioner
+// StorageClass. FireboltEngines that want a durable PVC must opt in
+// explicitly via spec.storage.persistentVolumeClaim. The CEL
+// XValidation rule on EngineStorageSpec still guarantees at most one
 // pointer is non-nil at admission time.
 func resolveStorageBackend(s computev1alpha1.EngineStorageSpec) StorageBackend {
 	switch {
-	case s.EmptyDir != nil:
-		return BackendEmptyDir
+	case s.PersistentVolumeClaim != nil:
+		return BackendPersistentVolumeClaim
 	case s.HostPath != nil:
 		return BackendHostPath
 	default:
-		return BackendPersistentVolumeClaim
+		return BackendEmptyDir
 	}
 }
 

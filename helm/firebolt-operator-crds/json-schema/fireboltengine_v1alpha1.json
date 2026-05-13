@@ -603,7 +603,7 @@
               "additionalProperties": false
             },
             "persistentVolumeClaim": {
-              "description": "PersistentVolumeClaim backs /firebolt-core/volume with a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller from\na VolumeClaimTemplate. Omit the sub-struct to accept the operator's\ndefaults (1Gi, ReadWriteOnce, cluster-default StorageClass), which\nmatches the pre-refactor behavior of an empty EngineStorageSpec.",
+              "description": "PersistentVolumeClaim opts the engine into a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller\nfrom a VolumeClaimTemplate. Set the field (even to an empty\nstruct) to enable the PVC backend; the kubebuilder defaults\n(1Gi, ReadWriteOnce, cluster-default StorageClass) on\nEnginePersistentVolumeClaimSpec fill in any omitted inner field.\nWhen this field is nil the engine falls back to the default\nemptyDir backend (see the EngineStorageSpec doc above).",
               "properties": {
                 "accessModes": {
                   "default": [
