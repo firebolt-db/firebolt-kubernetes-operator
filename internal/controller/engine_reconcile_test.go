@@ -85,7 +85,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 	}
 }
 
-func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
+func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet {
 	spec := testSpec()
 	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
 	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
@@ -131,6 +131,112 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 	}
 }
 
+// makeEmptyDirSTS is the emptyDir sibling of makeSTS: it produces an STS
+// fixture whose data volume is a pod-template emptyDir Volume named
+// DataVolumeName instead of a VolumeClaimTemplate. Mirrors makeSTS's other
+// fields exactly so stsMatchesSpec sees only the data-volume shape change.
+// Used by reconciler tests parameterised over storageBackendCases.
+func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet {
+	spec := testSpec()
+	spec.Storage = computev1alpha1.EngineStorageSpec{}
+	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      genResourceName(engineName, gen, ""),
+			Namespace: testNamespace,
+			Labels: map[string]string{
+				LabelEngine:     engineName,
+				LabelGeneration: strconv.Itoa(gen),
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &replicas,
+			// No VolumeClaimTemplates for the emptyDir backend.
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName:            enginePodServiceAccountName(spec),
+					NodeSelector:                  spec.NodeSelector,
+					Tolerations:                   spec.Tolerations,
+					TerminationGracePeriodSeconds: &defaultTGPS,
+					SecurityContext:               getEnginePodSecurityContext(spec),
+					Containers: []corev1.Container{
+						{
+							Image:           image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Resources:       engineContainerResources(spec),
+							SecurityContext: getEngineContainerSecurityContext(spec),
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name:         DataVolumeName,
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// storageBackendCase parameterizes a reconciler test across the engine
+// storage backends. applySpec mutates testSpec()'s Storage in place to
+// select the backend; seedSTS builds the matching seed StatefulSet that
+// stsMatchesSpec must see as up-to-date; assertSTS asserts the
+// data-volume shape on a freshly built StatefulSet (used on the create
+// path where buildStatefulSet's output is the result).
+//
+// Currently scoped to pvc + emptyDir. hostPath isn't included because no
+// reconciler test currently load-bears on it; engine_storage_test.go
+// covers the hostPath rendering / matching code path directly.
+type storageBackendCase struct {
+	name      string
+	applySpec func(s *computev1alpha1.FireboltEngineSpec)
+	seedSTS   func(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet
+	assertSTS func(t *testing.T, sts *appsv1.StatefulSet)
+}
+
+var storageBackendCases = []storageBackendCase{
+	{
+		name: "pvc",
+		applySpec: func(s *computev1alpha1.FireboltEngineSpec) {
+			s.Storage = computev1alpha1.EngineStorageSpec{
+				PersistentVolumeClaim: &computev1alpha1.EnginePersistentVolumeClaimSpec{},
+			}
+		},
+		seedSTS: makeSTS,
+		assertSTS: func(t *testing.T, sts *appsv1.StatefulSet) {
+			t.Helper()
+			if got := len(sts.Spec.VolumeClaimTemplates); got != 1 {
+				t.Fatalf("VolumeClaimTemplates: got %d, want 1 (PVC backend)", got)
+			}
+			if v := findDataPodVolume(sts); v != nil {
+				t.Errorf("expected no pod-template data Volume for PVC backend, got %+v", v)
+			}
+		},
+	},
+	{
+		name: "emptyDir",
+		applySpec: func(s *computev1alpha1.FireboltEngineSpec) {
+			s.Storage = computev1alpha1.EngineStorageSpec{} // empty → emptyDir default
+		},
+		seedSTS: makeEmptyDirSTS,
+		assertSTS: func(t *testing.T, sts *appsv1.StatefulSet) {
+			t.Helper()
+			if got := len(sts.Spec.VolumeClaimTemplates); got != 0 {
+				t.Errorf("VolumeClaimTemplates: got %d, want 0 (emptyDir backend)", got)
+			}
+			v := findDataPodVolume(sts)
+			if v == nil {
+				t.Fatal("expected pod-template data Volume for emptyDir backend, got nil")
+			}
+			if v.EmptyDir == nil {
+				t.Fatalf("expected pod-template data Volume to be EmptyDir-backed, got %+v", v)
+			}
+		},
+	},
+}
+
 func makeClusterSvc(engineName string, gen int) *corev1.Service { //nolint:unparam // engineName is always testEngineName in tests but kept as param for readability
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -155,33 +261,39 @@ func makeClusterSvc(engineName string, gen int) *corev1.Service { //nolint:unpar
 // resources. This test mirrors that entry condition.
 
 func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
-	spec := testSpec()
-	status := &computev1alpha1.FireboltEngineStatus{
-		Phase:             computev1alpha1.PhaseCreating,
-		CurrentGeneration: 0,
-		ActiveGeneration:  -1,
-	}
-	current := EngineState{ClusterServiceTargetGen: -1}
+	for _, sc := range storageBackendCases {
+		t.Run(sc.name, func(t *testing.T) {
+			spec := testSpec()
+			sc.applySpec(spec)
+			status := &computev1alpha1.FireboltEngineStatus{
+				Phase:             computev1alpha1.PhaseCreating,
+				CurrentGeneration: 0,
+				ActiveGeneration:  -1,
+			}
+			current := EngineState{ClusterServiceTargetGen: -1}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
-	if result.Status.Phase != computev1alpha1.PhaseCreating {
-		t.Errorf("expected phase Creating, got %s", result.Status.Phase)
-	}
-	if result.Status.CurrentGeneration != 0 {
-		t.Errorf("expected generation 0, got %d", result.Status.CurrentGeneration)
-	}
-	if result.EnsureStatefulSet == nil {
-		t.Error("expected StatefulSet to be built on first Creating visit")
-	}
-	if result.EnsureConfigMap == nil {
-		t.Error("expected ConfigMap to be built on first Creating visit")
-	}
-	if result.EnsureHeadlessSvc == nil {
-		t.Error("expected headless Service to be built on first Creating visit")
-	}
-	if result.EnsureClusterSvc == nil {
-		t.Error("expected cluster Service to be built on first Creating visit")
+			if result.Status.Phase != computev1alpha1.PhaseCreating {
+				t.Errorf("expected phase Creating, got %s", result.Status.Phase)
+			}
+			if result.Status.CurrentGeneration != 0 {
+				t.Errorf("expected generation 0, got %d", result.Status.CurrentGeneration)
+			}
+			if result.EnsureStatefulSet == nil {
+				t.Fatal("expected StatefulSet to be built on first Creating visit")
+			}
+			sc.assertSTS(t, result.EnsureStatefulSet)
+			if result.EnsureConfigMap == nil {
+				t.Error("expected ConfigMap to be built on first Creating visit")
+			}
+			if result.EnsureHeadlessSvc == nil {
+				t.Error("expected headless Service to be built on first Creating visit")
+			}
+			if result.EnsureClusterSvc == nil {
+				t.Error("expected cluster Service to be built on first Creating visit")
+			}
+		})
 	}
 }
 
@@ -208,33 +320,44 @@ func TestComputeStable_PanicsOnNegativeActiveGeneration(t *testing.T) {
 // --- S2: Blue-green upgrade ---
 
 func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
-	spec := testSpec()
-	spec.Image.Tag = "v2.0"
-	status := stableStatus()
-	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
-		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
-		CurrentPodsReady:        true,
-		CurrentPodTotal:         3,
-		CurrentPodReady:         3,
-		ClusterService:          makeClusterSvc(testEngineName, 0),
-		ClusterServiceTargetGen: 0,
-	}
+	for _, sc := range storageBackendCases {
+		t.Run(sc.name, func(t *testing.T) {
+			spec := testSpec()
+			sc.applySpec(spec)
+			spec.Image.Tag = "v2.0"
+			// Build the seeded STS from a spec on the same backend so
+			// the storage shape is consistent — the gen bump under
+			// test must come from the image change, not from a
+			// backend mismatch the harness accidentally introduced.
+			seedSpec := testSpec()
+			sc.applySpec(seedSpec)
+			status := stableStatus()
+			current := EngineState{
+				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentConfigMap:        buildConfigMap(seedSpec, testEngineName, testNamespace, 0, testInstanceInfo()),
+				CurrentPodsReady:        true,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         3,
+				ClusterService:          makeClusterSvc(testEngineName, 0),
+				ClusterServiceTargetGen: 0,
+			}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
 
-	if result.Status.Phase != computev1alpha1.PhaseCreating {
-		t.Errorf("expected phase Creating, got %s", result.Status.Phase)
-	}
-	if result.Status.CurrentGeneration != 1 {
-		t.Errorf("expected generation 1, got %d", result.Status.CurrentGeneration)
-	}
-	if result.EnsureStatefulSet != nil {
-		t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
-	}
-	if !result.Requeue {
-		t.Error("expected Requeue=true")
+			if result.Status.Phase != computev1alpha1.PhaseCreating {
+				t.Errorf("expected phase Creating, got %s", result.Status.Phase)
+			}
+			if result.Status.CurrentGeneration != 1 {
+				t.Errorf("expected generation 1, got %d", result.Status.CurrentGeneration)
+			}
+			if result.EnsureStatefulSet != nil {
+				t.Error("expected no resource creation (intent-first: deferred to computeCreating)")
+			}
+			if !result.Requeue {
+				t.Error("expected Requeue=true")
+			}
+		})
 	}
 }
 
@@ -566,38 +689,43 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 // --- S7: No-op stable ---
 
 func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
-	spec := testSpec()
-	status := stableStatus()
-	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
-		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
-		CurrentPodsReady:        true,
-		CurrentPodTotal:         3,
-		CurrentPodReady:         3,
-		ClusterService:          makeClusterSvc(testEngineName, 0),
-		ClusterServiceTargetGen: 0,
-	}
+	for _, sc := range storageBackendCases {
+		t.Run(sc.name, func(t *testing.T) {
+			spec := testSpec()
+			sc.applySpec(spec)
+			status := stableStatus()
+			current := EngineState{
+				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+				CurrentPodsReady:        true,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         3,
+				ClusterService:          makeClusterSvc(testEngineName, 0),
+				ClusterServiceTargetGen: 0,
+			}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
 
-	if result.Status.Phase != computev1alpha1.PhaseStable {
-		t.Errorf("expected Stable, got %s", result.Status.Phase)
-	}
-	if result.EnsureStatefulSet != nil {
-		t.Error("expected no STS mutation")
-	}
-	if result.EnsureHeadlessSvc != nil {
-		t.Error("expected no headless svc mutation")
-	}
-	if result.Requeue {
-		t.Error("expected no immediate requeue")
-	}
-	if result.RequeueAfter != 30*time.Second {
-		t.Errorf("expected RequeueAfter 30s, got %v", result.RequeueAfter)
-	}
-	if result.Status.ObservedGeneration != 1 {
-		t.Errorf("expected ObservedGeneration 1, got %d", result.Status.ObservedGeneration)
+			if result.Status.Phase != computev1alpha1.PhaseStable {
+				t.Errorf("expected Stable, got %s", result.Status.Phase)
+			}
+			if result.EnsureStatefulSet != nil {
+				t.Error("expected no STS mutation")
+			}
+			if result.EnsureHeadlessSvc != nil {
+				t.Error("expected no headless svc mutation")
+			}
+			if result.Requeue {
+				t.Error("expected no immediate requeue")
+			}
+			if result.RequeueAfter != 30*time.Second {
+				t.Errorf("expected RequeueAfter 30s, got %v", result.RequeueAfter)
+			}
+			if result.Status.ObservedGeneration != 1 {
+				t.Errorf("expected ObservedGeneration 1, got %d", result.Status.ObservedGeneration)
+			}
+		})
 	}
 }
 
