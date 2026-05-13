@@ -32,10 +32,11 @@ spec:
   # Per-replica PersistentVolumeClaim. Changing storage
   # triggers a blue-green rollout. Omit storage entirely for operator defaults (1Gi, ReadWriteOnce, cluster default StorageClass).
   storage:
-    size: 50Gi
-    accessModes:
-      - ReadWriteOnce
-    # storageClassName: gp3-high-perf
+    persistentVolumeClaim:
+      size: 50Gi
+      accessModes:
+        - ReadWriteOnce
+      # storageClassName: gp3-high-perf
 
   # Rollout behaviour
   rollout: graceful                 # graceful (default) | recreate
