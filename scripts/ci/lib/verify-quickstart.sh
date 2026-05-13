@@ -22,6 +22,23 @@ dump_namespace_debug() {
     done <<< "${pending_pods}"
   fi
 
+  echo "[pod logs]"
+  # Capture current and previous container output for every pod in the
+  # namespace. The CI kind cluster is destroyed when the GitHub Actions job
+  # ends, so anything we don't print here is lost — engine/metadata/gateway
+  # logs in particular are essential for diagnosing startup failures.
+  pods=$(kubectl get pods -n "${namespace}" -o name 2>/dev/null || true)
+  while IFS= read -r pod; do
+    [[ -z "${pod}" ]] && continue
+    echo "### kubectl logs ${pod} -n ${namespace} --all-containers --tail=200"
+    kubectl logs "${pod}" -n "${namespace}" --all-containers --tail=200 2>&1 || true
+    prev=$(kubectl logs "${pod}" -n "${namespace}" --all-containers --previous --tail=200 2>/dev/null || true)
+    if [[ -n "${prev}" ]]; then
+      echo "### kubectl logs ${pod} -n ${namespace} --all-containers --previous --tail=200"
+      printf '%s\n' "${prev}"
+    fi
+  done <<< "${pods}"
+
   echo "[events]"
   kubectl get events -n "${namespace}" --sort-by=.metadata.creationTimestamp || true
   echo "----- END DEBUG: namespace ${namespace} -----"
