@@ -1,20 +1,17 @@
 # Engine with spec.customEngineConfig. The object is deep-merged into the
-# rendered engine config.json at the root: keys nested under `config:`
-# merge into the inner config block (overriding operator defaults for
-# account_name, organization_id, organization_name, cluster_id,
-# logger_formatting, logger_use_files), and any keys placed at the top
-# of customEngineConfig become siblings of `config` and `nodes` in the
-# rendered file.
+# rendered engine config.yaml at the root, following the structured schema
+# consumed by `firebolt server`. Keys placed under `logging:`, `auth:` etc.
+# merge into the corresponding section, overriding the operator's defaults.
 #
 # Operator-authoritative paths are silently stripped from user input and
 # cannot be overridden via this field:
-#   - nodes (root)
-#   - config.account_id
-#   - config.engine_id
-#   - config.engine_name
-#   - config.multi_engine_endpoint
-#   - config.multi_engine_mode_enabled
-#   - config.shutdown_wait_unfinished
+#   - schema_version
+#   - instance.id
+#   - instance.type
+#   - instance.multi_engine (entire subtree, including metadata_endpoint)
+#   - engine.id
+#   - engine.nodes
+#   - engine.termination_grace_period
 #
 # Changes to customEngineConfig trigger a new blue-green generation.
 apiVersion: compute.firebolt.io/v1alpha1
@@ -40,10 +37,6 @@ spec:
       cpu: "1"
       memory: 4Gi
   customEngineConfig:
-    config:
-      account_name: acme
-      organization_id: 01KP98J0000000000000000099
-      organization_name: acme-org
-      cluster_id: prod-cluster
-      logger_formatting: json
-      logger_use_files: false
+    logging:
+      level: debug
+      format: text

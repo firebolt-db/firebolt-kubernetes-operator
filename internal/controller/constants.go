@@ -125,8 +125,10 @@ const (
 	// MetricSuspendedQueries is the Prometheus metric name for suspended queries.
 	MetricSuspendedQueries = "firebolt_suspended_queries"
 
-	// ConfigMountPath is where the engine config.json is mounted in the container.
-	ConfigMountPath = "/firebolt-core/config.json"
+	// ConfigMountPath is where the engine config.yaml is mounted in the container.
+	// FireboltCoreServer reads <root>/config.yaml from its --data-dir when present,
+	// so the file must land at this path inside the container.
+	ConfigMountPath = "/firebolt-core/config.yaml"
 
 	// DataMountPath is where the engine's per-pod PVC is mounted. Matches the
 	// path the engine binary uses for its working data.
@@ -174,9 +176,9 @@ var (
 // back to extracting the ordinal from HOSTNAME (<sts-name>-<ordinal>).
 //
 // `firebolt server` is the unified entrypoint introduced in packdb FB-914;
-// FIREBOLT_CORE_MODE=1 (set as a container env var) selects the legacy
-// firebolt-core code path so config.json is treated as authoritative and
-// not rewritten at startup.
+// FIREBOLT_CORE_MODE=1 (set as a container env var) selects the firebolt-core
+// code path so the operator-rendered config (config.yaml at the data-dir root)
+// is treated as authoritative and not rewritten at startup.
 const EngineStartupScript = `
 set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
