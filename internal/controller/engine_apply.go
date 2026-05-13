@@ -159,7 +159,7 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 		return err
 	}
 
-	if existing.Data["config.json"] == want.Data["config.json"] {
+	if existing.Data[ConfigFileName] == want.Data[ConfigFileName] {
 		return nil
 	}
 	log.Info("Updating ConfigMap", "name", want.Name)

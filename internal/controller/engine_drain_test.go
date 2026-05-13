@@ -17,10 +17,10 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/json"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
@@ -137,15 +137,20 @@ func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 }
 
 func TestShutdownWaitUnfinished(t *testing.T) {
+	// engine.termination_grace_period in the rendered config.yaml is the
+	// engine's post-SIGTERM drain budget; FireboltCoreServer maps it onto
+	// the legacy `shutdown_wait_unfinished` Poco setting. Format is a
+	// duration string ("Ns") because the structured schema rejects bare
+	// integers for durations.
 	tests := []struct {
-		name     string
-		tgps     int64
-		wantWait int64
+		name string
+		tgps int64
+		want string
 	}{
-		{"default 60s", 60, 55},
-		{"custom 120s", 120, 115},
-		{"small 5s clamps to tgps-1", 5, 4},
-		{"very small 1s clamps to 1", 1, 1},
+		{"default 60s", 60, "55s"},
+		{"custom 120s", 120, "115s"},
+		{"small 5s clamps to tgps-1", 5, "4s"},
+		{"very small 1s clamps to 1", 1, "1s"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,15 +158,16 @@ func TestShutdownWaitUnfinished(t *testing.T) {
 			spec.TerminationGracePeriodSeconds = &tt.tgps
 			cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
 			var wrapper struct {
-				Config struct {
-					ShutdownWait int64 `json:"shutdown_wait_unfinished"`
-				} `json:"config"`
+				Engine struct {
+					TerminationGracePeriod string `json:"termination_grace_period"`
+				} `json:"engine"`
 			}
-			if err := json.Unmarshal([]byte(cm.Data["config.json"]), &wrapper); err != nil {
-				t.Fatalf("failed to parse config.json: %v", err)
+			if err := yaml.Unmarshal([]byte(cm.Data[ConfigFileName]), &wrapper); err != nil {
+				t.Fatalf("failed to parse config.yaml: %v", err)
 			}
-			if wrapper.Config.ShutdownWait != tt.wantWait {
-				t.Errorf("shutdown_wait_unfinished = %d, want %d", wrapper.Config.ShutdownWait, tt.wantWait)
+			if wrapper.Engine.TerminationGracePeriod != tt.want {
+				t.Errorf("engine.termination_grace_period = %q, want %q",
+					wrapper.Engine.TerminationGracePeriod, tt.want)
 			}
 		})
 	}

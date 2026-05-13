@@ -247,7 +247,7 @@ The headless service (`-hl` suffix) is a critical Kubernetes component required 
 
 2. **Pod-to-pod communication**: engine nodes need to discover and communicate with each other during cluster formation. The headless service provides the DNS resolution that allows pods to find their peers by name.
 
-3. **Pre-generated config**: The operator generates the config.json with all pod FQDNs before the StatefulSet is created. This is possible because the pod names and headless service name are deterministic.
+3. **Pre-generated config**: The operator generates the config.yaml with all pod FQDNs before the StatefulSet is created. This is possible because the pod names and headless service name are deterministic.
 
 4. **`publishNotReadyAddresses: true`**: This setting ensures DNS entries exist for pods even before they pass readiness checks. Without this, pods could not find each other during startup, causing cluster formation to fail.
 
@@ -284,32 +284,27 @@ metadata:
       kind: FireboltEngine
       name: engine-production
 data:
-  config.json: |
-    {
-      "config": {
-        "account_id": "01KP98J0000000000000000000",
-        "account_name": "default-account",
-        "organization_id": "01KP98J0000000000000000000",
-        "organization_name": "default-org",
-        "engine_id": "engine-production",
-        "engine_name": "engine-production",
-        "cluster_id": "default-cluster",
-        "multi_engine_endpoint": "firebolt-production-metadata.firebolt.svc.cluster.local:7000",
-        "multi_engine_mode_enabled": true,
-        "logger_formatting": "json",
-        "logger_use_files": false
-      },
-      "nodes": [
-        {"host": "engine-production-g2-0.engine-production-g2-hl.firebolt.svc"},
-        {"host": "engine-production-g2-1.engine-production-g2-hl.firebolt.svc"},
-        {"host": "engine-production-g2-2.engine-production-g2-hl.firebolt.svc"},
-        {"host": "engine-production-g2-3.engine-production-g2-hl.firebolt.svc"},
-        {"host": "engine-production-g2-4.engine-production-g2-hl.firebolt.svc"}
-      ]
-    }
+  config.yaml: |
+    schema_version: "1.0"
+    instance:
+      id: 01KP98J0000000000000000000
+      type: multi_engine
+      multi_engine:
+        metadata_endpoint: firebolt-production-metadata.firebolt.svc.cluster.local:7000
+    engine:
+      id: engine-production
+      nodes:
+      - host: engine-production-g2-0.engine-production-g2-hl.firebolt.svc
+      - host: engine-production-g2-1.engine-production-g2-hl.firebolt.svc
+      - host: engine-production-g2-2.engine-production-g2-hl.firebolt.svc
+      - host: engine-production-g2-3.engine-production-g2-hl.firebolt.svc
+      - host: engine-production-g2-4.engine-production-g2-hl.firebolt.svc
+      termination_grace_period: 55s
+    logging:
+      format: json
 ```
 
-The `config` section is populated from the parent `FireboltInstance` (`spec.id` as account ID, `status.metadataEndpoint`) and engine identity fields. The `multi_engine_endpoint` can be overridden per-engine via `spec.metadataEndpointOverride`.
+The `instance` section is populated from the parent `FireboltInstance` (`spec.id` becomes the `instance.id` ULID, `status.metadataEndpoint` becomes `instance.multi_engine.metadata_endpoint`). The metadata endpoint can be overridden per-engine via `spec.metadataEndpointOverride`.
 
 ### 4. Engine Service
 

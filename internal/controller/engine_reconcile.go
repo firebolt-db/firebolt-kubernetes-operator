@@ -30,9 +30,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// EngineConfigSchemaVersion is the schema_version stamped on the rendered
+// config.yaml. FireboltCoreServer rejects unknown versions at startup, so
+// bumping here requires a matching engine release.
+const EngineConfigSchemaVersion = "1.0"
+
+// ConfigFileName is the key under which the rendered engine configuration is
+// stored in the engine ConfigMap and the filename mounted into the pod. It
+// matches the path FireboltCoreServer looks for in its data-dir.
+const ConfigFileName = "config.yaml"
 
 // InstanceInfo holds the multi-engine endpoint and account ID resolved from
 // the FireboltInstance in the engine's namespace. These are injected into the
@@ -378,11 +389,11 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
 	stsName := genResourceName(engineName, gen, "")
 
-	nodes := make([]map[string]string, spec.Replicas)
+	nodes := make([]map[string]interface{}, spec.Replicas)
 	for i := int32(0); i < spec.Replicas; i++ {
 		podName := fmt.Sprintf("%s-%d", stsName, i)
 		host := fmt.Sprintf("%s.%s.%s.svc", podName, headlessSvcName, namespace)
-		nodes[i] = map[string]string{"host": host}
+		nodes[i] = map[string]interface{}{"host": host}
 	}
 
 	metadataEndpoint := instanceInfo.MetadataEndpoint
@@ -391,10 +402,11 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	}
 
 	gracePeriod := getTerminationGracePeriod(spec)
-	// shutdown_wait_unfinished is the engine's post-SIGTERM budget for
-	// draining in-flight queries. Without a preStop hook, SIGTERM arrives
-	// immediately; the engine uses this window before SIGKILL. The margin
-	// covers container runtime teardown after the process exits.
+	// engine.termination_grace_period is the engine's post-SIGTERM budget
+	// for draining in-flight queries (it maps to the legacy
+	// shutdown_wait_unfinished inside the engine). Without a preStop hook,
+	// SIGTERM arrives immediately; the engine uses this window before SIGKILL.
+	// The margin covers container runtime teardown after the process exits.
 	shutdownWait := gracePeriod - int64(EngineShutdownMarginSeconds)
 	if shutdownWait < 1 {
 		shutdownWait = gracePeriod - 1
@@ -402,30 +414,37 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	if shutdownWait < 1 {
 		shutdownWait = 1
 	}
-	// Canonical document seeded with operator-managed defaults. User input
-	// from spec.customEngineConfig is deep-merged into this at the root
-	// (see deepMergeJSON), so users may add/override keys at the root
-	// (siblings of `config` and `nodes`) and inside `config` itself.
-	// Operator-authoritative paths are stripped from user input before the
-	// merge (see stripProtectedEngineConfigPaths) so they cannot be
-	// overridden — silently, to keep the same spec portable across operator
-	// versions even if the protected set evolves.
+	// Canonical document seeded with operator-managed defaults, shaped to
+	// the structured YAML schema consumed by FireboltCoreServer (packdb
+	// `DB::Config::ApplicationConfig`). User input from spec.customEngineConfig
+	// is deep-merged into this at the root, so users may add/override keys
+	// in any top-level section (auth, engine, instance, logging). Operator-
+	// authoritative paths are stripped from user input before the merge (see
+	// stripProtectedEngineConfigPaths) so they cannot be overridden —
+	// silently, to keep the same spec portable across operator versions even
+	// if the protected set evolves.
+	//
+	// instance.id is a Ulid that the engine propagates to all four legacy
+	// identity fields (account_id, account_name, organization_id,
+	// organization_name); InstanceInfo.AccountID already carries the
+	// instance's ULID for this purpose.
 	coreConfig := map[string]interface{}{
-		"config": map[string]interface{}{
-			"account_name":              "default-account",
-			"organization_id":           "01KP98J0000000000000000000",
-			"organization_name":         "default-org",
-			"cluster_id":                "default-cluster",
-			"multi_engine_mode_enabled": true,
-			"logger_formatting":         "json",
-			"logger_use_files":          false,
-			"account_id":                instanceInfo.AccountID,
-			"engine_id":                 engineName,
-			"engine_name":               engineName,
-			"multi_engine_endpoint":     metadataEndpoint,
-			"shutdown_wait_unfinished":  shutdownWait,
+		"schema_version": EngineConfigSchemaVersion,
+		"instance": map[string]interface{}{
+			"id":   instanceInfo.AccountID,
+			"type": "multi_engine",
+			"multi_engine": map[string]interface{}{
+				"metadata_endpoint": metadataEndpoint,
+			},
 		},
-		"nodes": nodes,
+		"engine": map[string]interface{}{
+			"id":                       engineName,
+			"nodes":                    nodes,
+			"termination_grace_period": fmt.Sprintf("%ds", shutdownWait),
+		},
+		"logging": map[string]interface{}{
+			"format": "json",
+		},
 	}
 
 	if spec.CustomEngineConfig != nil && len(spec.CustomEngineConfig.Raw) > 0 {
@@ -440,9 +459,9 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		}
 	}
 
-	configJSON, err := json.MarshalIndent(coreConfig, "", "  ")
+	configYAML, err := yaml.Marshal(coreConfig)
 	if err != nil {
-		panic(fmt.Sprintf("BUG: failed to marshal config.json: %v", err))
+		panic(fmt.Sprintf("BUG: failed to marshal config.yaml: %v", err))
 	}
 
 	return &corev1.ConfigMap{
@@ -455,7 +474,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 			},
 		},
 		Data: map[string]string{
-			"config.json": string(configJSON),
+			ConfigFileName: string(configYAML),
 		},
 	}
 }
@@ -517,7 +536,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		{
 			Name:      "nodes-config",
 			MountPath: ConfigMountPath,
-			SubPath:   "config.json",
+			SubPath:   ConfigFileName,
 			ReadOnly:  true,
 		},
 		{
@@ -652,8 +671,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 									Name:  "FIREBOLT_ALLOW_AWS_IRSA",
 									Value: "true",
 								},
-								// Selects the legacy firebolt-core code path inside the unified
-								// `firebolt` binary (packdb FB-914): config.json is honored as-is
+								// Selects the firebolt-core code path inside the unified
+								// `firebolt` binary (packdb FB-914): the operator-rendered
+								// config (config.yaml at the data-dir root) is honored as-is
 								// and not rewritten at startup.
 								{
 									Name:  "FIREBOLT_CORE_MODE",
@@ -810,23 +830,28 @@ func deepMergeJSON(dst, src map[string]interface{}) {
 // same spec portable across operator versions even if the protected set
 // changes.
 //
-// When user.config is not a JSON object (string, number, array, …) the
-// whole key is dropped: deepMergeJSON would otherwise replace the
-// operator-built config map wholesale with the user's scalar, losing every
-// authoritative key.
+// When a top-level section (`instance`, `engine`) is not a JSON object the
+// whole key is dropped: deepMergeJSON would otherwise replace the operator-
+// built section wholesale with the user's scalar, losing every authoritative
+// key.
 func stripProtectedEngineConfigPaths(m map[string]interface{}) {
-	delete(m, "nodes")
-	cfg, ok := m["config"].(map[string]interface{})
-	if !ok {
-		delete(m, "config")
-		return
+	delete(m, "schema_version")
+
+	if instance, ok := m["instance"].(map[string]interface{}); ok {
+		delete(instance, "id")
+		delete(instance, "type")
+		delete(instance, "multi_engine")
+	} else {
+		delete(m, "instance")
 	}
-	delete(cfg, "account_id")
-	delete(cfg, "engine_id")
-	delete(cfg, "engine_name")
-	delete(cfg, "multi_engine_endpoint")
-	delete(cfg, "multi_engine_mode_enabled")
-	delete(cfg, "shutdown_wait_unfinished")
+
+	if engine, ok := m["engine"].(map[string]interface{}); ok {
+		delete(engine, "id")
+		delete(engine, "nodes")
+		delete(engine, "termination_grace_period")
+	} else {
+		delete(m, "engine")
+	}
 }
 
 // customEngineConfigHash returns a stable hash of spec.customEngineConfig
