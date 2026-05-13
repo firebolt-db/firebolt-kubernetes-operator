@@ -128,6 +128,7 @@ jobs:
       # back to `latest` and add a matrix here so `prepare-test-e2e` and
       # `test-e2e` run once per variant and both gate every PR.
       - name: Prepare Kind cluster and images (default = dev variant)
+        id: prepare-kind
         # `pipefail` is documented as part of GitHub Actions' default Linux
         # shell (`bash -eo pipefail`), but this runner actually invokes
         # `/usr/bin/bash -e {0}` — without pipefail. Set it explicitly so a
@@ -135,15 +136,25 @@ jobs:
         # step instead of being masked by `tee`'s 0 exit; otherwise an
         # image-pull regression in load-e2e-images.sh surfaces as a
         # confusing test-suite failure several minutes later.
+        #
+        # The log file is named after this step's id so the upload-artifact
+        # bundle below makes the source step obvious, and so adding more
+        # tee'd steps later is mechanical.
         run: |
           set -o pipefail
           go mod tidy
-          make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee test.log
+          make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee prepare-kind.log
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
       - name: Run E2E tests (default = dev variant)
-        run: make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=6
+        id: run-e2e
+        # Same pipefail rationale as `prepare-kind`: tee would otherwise
+        # mask a non-zero exit from `make test-e2e` and we'd lose the
+        # connection between the failing step and its log file.
+        run: |
+          set -o pipefail
+          make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=6 2>&1 | tee run-e2e.log
         env:
           GOPRIVATE: github.com/firebolt-db/*
           E2E_ARTIFACT_DIR: ${{ github.workspace }}
@@ -159,6 +170,7 @@ jobs:
           name: e2e-report
           path: |
             e2e-report.xml
-            test.log
+            prepare-kind.log
+            run-e2e.log
             pod-logs/
-          retention-days: 7
+          retention-days: 30

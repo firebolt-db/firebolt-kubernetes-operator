@@ -35,6 +35,7 @@ go.work
 # Test artifacts
 e2e-report.xml
 e2e-report/
+e2e-reports/
 test/e2e/pod-logs
 
 # Formal-verification artifacts (regenerated via `make formal-dump`)
