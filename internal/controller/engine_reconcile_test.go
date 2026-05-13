@@ -35,13 +35,13 @@ const (
 	testEngineName       = "test-engine"
 	testNamespace        = "default"
 	testMetadataEndpoint = "test-instance-metadata.default.svc.cluster.local:7000"
-	testAccountID        = "test-account-id"
+	testInstanceID       = "test-instance-id"
 )
 
 func testInstanceInfo() InstanceInfo {
 	return InstanceInfo{
 		MetadataEndpoint: testMetadataEndpoint,
-		AccountID:        testAccountID,
+		InstanceID:       testInstanceID,
 	}
 }
 
@@ -1531,8 +1531,8 @@ func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
 	}
 
 	instance := nestedMap(t, root, "instance")
-	if instance["id"] != testAccountID {
-		t.Errorf("instance.id = %v, want %v", instance["id"], testAccountID)
+	if instance["id"] != testInstanceID {
+		t.Errorf("instance.id = %v, want %v", instance["id"], testInstanceID)
 	}
 	if instance["type"] != "multi_engine" {
 		t.Errorf("instance.type = %v, want multi_engine", instance["type"])
@@ -1574,7 +1574,7 @@ func TestBuildConfigMap_NestedSectionOverridesUserDefaults(t *testing.T) {
 
 	// Operator-controlled sections should be untouched.
 	instance := nestedMap(t, root, "instance")
-	if instance["id"] != testAccountID {
+	if instance["id"] != testInstanceID {
 		t.Errorf("instance.id was clobbered: got %v", instance["id"])
 	}
 }
@@ -1590,8 +1590,41 @@ func TestBuildConfigMap_RootKeysAddedAsSiblings(t *testing.T) {
 		t.Errorf("root.auth.mode = %v, want disabled", auth["mode"])
 	}
 	instance := nestedMap(t, root, "instance")
-	if instance["id"] != testAccountID {
+	if instance["id"] != testInstanceID {
 		t.Errorf("instance.id was clobbered: got %v", instance["id"])
+	}
+}
+
+func TestBuildConfigMap_UserOverridesNonAuthoritativeFields(t *testing.T) {
+	// Sibling keys inside `engine` and `instance` (outside the operator-
+	// owned paths) must round-trip while the operator-set siblings remain
+	// intact. This covers the partial-extension case the full-section-
+	// override and root-sibling tests miss. The `instance.multi_engine`
+	// subtree is entirely operator-owned and tested separately.
+	custom := `{
+		"engine": {"extra_setting": 7},
+		"instance": {"display_name": "prod"}
+	}`
+	root := renderConfig(t, custom)
+
+	engine := nestedMap(t, root, "engine")
+	if engine["extra_setting"] != float64(7) {
+		t.Errorf("engine.extra_setting = %v, want 7", engine["extra_setting"])
+	}
+	if engine["id"] != testEngineName {
+		t.Errorf("engine.id was clobbered: %v", engine["id"])
+	}
+
+	instance := nestedMap(t, root, "instance")
+	if instance["display_name"] != "prod" {
+		t.Errorf("instance.display_name = %v, want prod", instance["display_name"])
+	}
+	if instance["id"] != testInstanceID {
+		t.Errorf("instance.id was clobbered: %v", instance["id"])
+	}
+	multi := nestedMap(t, instance, "multi_engine")
+	if multi["metadata_endpoint"] != testMetadataEndpoint {
+		t.Errorf("instance.multi_engine.metadata_endpoint was clobbered: %v", multi["metadata_endpoint"])
 	}
 }
 
@@ -1615,8 +1648,8 @@ func TestBuildConfigMap_ProtectedPathsStripped(t *testing.T) {
 			root["schema_version"], EngineConfigSchemaVersion)
 	}
 	instance := nestedMap(t, root, "instance")
-	if instance["id"] != testAccountID {
-		t.Errorf("instance.id = %v, want %v (operator-authoritative)", instance["id"], testAccountID)
+	if instance["id"] != testInstanceID {
+		t.Errorf("instance.id = %v, want %v (operator-authoritative)", instance["id"], testInstanceID)
 	}
 	if instance["type"] != "multi_engine" {
 		t.Errorf("instance.type = %v, want multi_engine", instance["type"])
@@ -1664,7 +1697,7 @@ func TestBuildConfigMap_NonMapSectionsDropped(t *testing.T) {
 		t.Run(custom, func(t *testing.T) {
 			root := renderConfig(t, custom)
 			instance := nestedMap(t, root, "instance")
-			if instance["id"] != testAccountID {
+			if instance["id"] != testInstanceID {
 				t.Errorf("operator-authoritative instance.id lost: got %v", instance["id"])
 			}
 			engine := nestedMap(t, root, "engine")
@@ -1686,7 +1719,7 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 		t.Fatalf("rendered config.yaml is not valid YAML: %v", err)
 	}
 	instance := root["instance"].(map[string]interface{})
-	if instance["id"] != testAccountID {
+	if instance["id"] != testInstanceID {
 		t.Errorf("invalid customEngineConfig should be ignored, but defaults were touched: %v", instance)
 	}
 }

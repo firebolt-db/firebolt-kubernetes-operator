@@ -148,7 +148,7 @@
           "additionalProperties": false
         },
         "instanceRef": {
-          "description": "InstanceRef is the name of the FireboltInstance in the same namespace\nthat this engine depends on. The engine reconciler will not proceed\nuntil the referenced instance has a populated metadata endpoint and\naccount ID. This field is immutable after creation.",
+          "description": "InstanceRef is the name of the FireboltInstance in the same namespace\nthat this engine depends on. The engine reconciler will not proceed\nuntil the referenced instance has a populated metadata endpoint and\ninstance ID. This field is immutable after creation.",
           "minLength": 1,
           "type": "string",
           "x-kubernetes-validations": [

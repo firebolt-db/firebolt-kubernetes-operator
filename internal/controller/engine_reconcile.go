@@ -45,12 +45,13 @@ const EngineConfigSchemaVersion = "1.0"
 // matches the path FireboltCoreServer looks for in its data-dir.
 const ConfigFileName = "config.yaml"
 
-// InstanceInfo holds the multi-engine endpoint and account ID resolved from
-// the FireboltInstance in the engine's namespace. These are injected into the
-// engine ConfigMap so engine nodes can connect to the metadata service.
+// InstanceInfo holds the multi-engine endpoint and instance ID (a ULID)
+// resolved from the FireboltInstance in the engine's namespace. These are
+// injected into the engine ConfigMap so engine nodes can connect to the
+// metadata service and stamp the correct identity.
 type InstanceInfo struct {
 	MetadataEndpoint string
-	AccountID        string
+	InstanceID       string
 }
 
 // computeEngineReconcile determines what resources need to be created, updated,
@@ -426,12 +427,12 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	//
 	// instance.id is a Ulid that the engine propagates to all four legacy
 	// identity fields (account_id, account_name, organization_id,
-	// organization_name); InstanceInfo.AccountID already carries the
-	// instance's ULID for this purpose.
+	// organization_name); InstanceInfo.InstanceID already carries the
+	// FireboltInstance's ULID for this purpose.
 	coreConfig := map[string]interface{}{
 		"schema_version": EngineConfigSchemaVersion,
 		"instance": map[string]interface{}{
-			"id":   instanceInfo.AccountID,
+			"id":   instanceInfo.InstanceID,
 			"type": "multi_engine",
 			"multi_engine": map[string]interface{}{
 				"metadata_endpoint": metadataEndpoint,

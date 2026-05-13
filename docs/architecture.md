@@ -117,7 +117,7 @@ The engine reconciler is split into three layers, with instance resolution as a 
 | Compute | `engine_reconcile.go` | None | Pure unit tests |
 | Write | `engine_apply.go` | Yes (K8s API writes) | Requires envtest |
 
-The instance gate runs after the read layer but before the compute layer. It only blocks for phases that may build ConfigMaps containing `metadata_endpoint` and `account_id`: **stable**, **stopped**, and **creating**. `stopped` is included because if a ConfigMap is missing at zero replicas, the reconciler re-materializes it in place using live instance info — the same recovery path as `stable`. Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call — there is no separate status write for conditions.
+The instance gate runs after the read layer but before the compute layer. It only blocks for phases that may build ConfigMaps containing `instance.multi_engine.metadata_endpoint` and `instance.id`: **stable**, **stopped**, and **creating**. `stopped` is included because if a ConfigMap is missing at zero replicas, the reconciler re-materializes it in place using live instance info — the same recovery path as `stable`. Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call — there is no separate status write for conditions.
 
 The compute layer is the core of the operator. It is a pure function with no side effects, making it easy to test exhaustively without a running cluster.
 
@@ -435,7 +435,7 @@ When the instance gate blocks, it sets the `InstanceReady=False` condition on th
 
 The engine controller watches `FireboltInstance` resources via `Watches()` with a mapper that enqueues all engines referencing the changed instance by name. This means engines react within seconds when their parent instance becomes ready, rather than waiting for error-driven backoff to expire.
 
-The `spec.metadataEndpointOverride` field on the engine overrides the instance-derived endpoint (but not the account ID), supporting cross-cluster scenarios where the engine connects to a metadata service via private link.
+The `spec.metadataEndpointOverride` field on the engine overrides the instance-derived endpoint (but not the instance ID), supporting cross-cluster scenarios where the engine connects to a metadata service via private link.
 
 ### Instance resource ownership
 
