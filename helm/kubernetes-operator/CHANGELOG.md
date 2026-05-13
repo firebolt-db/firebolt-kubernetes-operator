@@ -1,3 +1,14 @@
+# 1.0.7
+
+appVersion: v2.3.0
+
+## [2.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.2.0...v2.3.0) (2026-05-13)
+
+### Features
+
+* add debug-e2e skill and adjust CI for consistency (FB-1141) ([#50](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/50)) ([6e1c6fe](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6e1c6fe01d332e13b583d3e20dabeed4f32f117d))
+
+
 # 1.0.6
 
 appVersion: v2.2.0
