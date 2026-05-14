@@ -72,9 +72,21 @@ const (
 )
 
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
+//
+// The string fields below are interpolated into the XML config the operator
+// renders for the metadata service (see buildMetadataConfigXML). The
+// controller XML-escapes user input at render time, but the patterns here
+// reject XML metacharacters at admission time as defense-in-depth so a
+// malformed CR is rejected at apply rather than producing a config that
+// only works because the controller scrubs it (FB-1163).
 type PostgresSpec struct {
-	// Host is the PostgreSQL server hostname or IP.
+	// Host is the PostgreSQL server hostname or IP. Allowed characters are
+	// letters, digits, ".", "-", ":", "[", and "]" (the last three for IPv6
+	// literals like "[::1]"). XML metacharacters are rejected at admission
+	// time to prevent injection into the rendered metadata config.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9.\-:\[\]]+$`
 	Host string `json:"host"`
 
 	// Port is the PostgreSQL server port.
@@ -82,15 +94,23 @@ type PostgresSpec struct {
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
-	// Database is the PostgreSQL database name.
+	// Database is the PostgreSQL database name. Allowed characters are
+	// letters, digits, "_", ".", and "-". XML metacharacters are rejected
+	// at admission time to prevent injection into the rendered metadata
+	// config.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.\-]+$`
 	Database string `json:"database"`
 
 	// Schema is the PostgreSQL schema used by the metadata service.
-	// Defaults to "public".
+	// Defaults to "public". Allowed characters are letters, digits, "_",
+	// ".", and "-". XML metacharacters are rejected at admission time to
+	// prevent injection into the rendered metadata config.
 	// +kubebuilder:default=public
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.\-]+$`
 	// +optional
 	Schema string `json:"schema,omitempty"`
 

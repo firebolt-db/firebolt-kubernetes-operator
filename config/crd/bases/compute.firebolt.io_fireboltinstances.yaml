@@ -2211,12 +2211,24 @@ spec:
                         type: object
                         x-kubernetes-map-type: atomic
                       database:
-                        description: Database is the PostgreSQL database name.
+                        description: |-
+                          Database is the PostgreSQL database name. Allowed characters are
+                          letters, digits, "_", ".", and "-". XML metacharacters are rejected
+                          at admission time to prevent injection into the rendered metadata
+                          config.
+                        maxLength: 63
                         minLength: 1
+                        pattern: ^[A-Za-z0-9_.\-]+$
                         type: string
                       host:
-                        description: Host is the PostgreSQL server hostname or IP.
+                        description: |-
+                          Host is the PostgreSQL server hostname or IP. Allowed characters are
+                          letters, digits, ".", "-", ":", "[", and "]" (the last three for IPv6
+                          literals like "[::1]"). XML metacharacters are rejected at admission
+                          time to prevent injection into the rendered metadata config.
+                        maxLength: 253
                         minLength: 1
+                        pattern: ^[A-Za-z0-9.\-:\[\]]+$
                         type: string
                       port:
                         default: 5432
@@ -2227,9 +2239,12 @@ spec:
                         default: public
                         description: |-
                           Schema is the PostgreSQL schema used by the metadata service.
-                          Defaults to "public".
+                          Defaults to "public". Allowed characters are letters, digits, "_",
+                          ".", and "-". XML metacharacters are rejected at admission time to
+                          prevent injection into the rendered metadata config.
                         maxLength: 63
                         minLength: 1
+                        pattern: ^[A-Za-z0-9_.\-]+$
                         type: string
                     required:
                     - credentialsSecretRef
