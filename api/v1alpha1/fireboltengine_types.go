@@ -322,6 +322,15 @@ type FireboltEngineSpec struct {
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 
+	// PodLabels are additional labels to apply to engine pods. The operator
+	// reserves "firebolt.io/engine" and "firebolt.io/generation" for its own
+	// use; user-provided values for these keys are silently ignored. All other
+	// labels are passed through verbatim.
+	//
+	// Changes to this field trigger a new blue-green generation.
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
 	// ServiceAccountName is the name of the ServiceAccount to run engine pods as.
 	// If unset, StatefulSet pods use the namespace default ServiceAccount.
 	// Changing this value triggers a new blue-green generation (see stsMatchesSpec).
