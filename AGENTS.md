@@ -115,7 +115,7 @@ Code is not done until it is covered by tests where tests are reasonable.
 
 ## Known issues
 
-*No known issues at this time.*
+- **envtest's `kube-apiserver` ignores SIGTERM on macOS.** The embedded apiserver (>=1.35) does not act on SIGTERM on Darwin -- lease-renewal logs continue right up until envtest's SIGKILL fallback fires. Etcd handles SIGTERM cleanly, so this is apiserver-specific, not an envtest signalling bug. We can't fix it from this side; the workaround lives in two places: (1) `Makefile` sets `KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT=5s` only when `uname -s` reports `Darwin`, so SIGKILL fires fast instead of after the 20s upstream default; (2) `internal/controller/suite_test.go`'s `AfterSuite` swallows the resulting "timeout waiting for process kube-apiserver to stop" error, but only on `runtime.GOOS == "darwin"` and only for that exact error string. Linux/CI behaviour is unchanged -- a real teardown failure there still fails the suite. See controller-runtime#1571 / #2560 for upstream context.
 
 ## Project-specific rules
 
