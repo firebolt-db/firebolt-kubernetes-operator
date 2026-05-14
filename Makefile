@@ -86,15 +86,26 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CustomR
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
+# envtest's embedded kube-apiserver does not honour SIGTERM on macOS; it only
+# exits when envtest's SIGKILL fallback fires after the stop timeout. Shrink
+# the timeout on Darwin so AfterSuite reaps it in ~5s instead of waiting the
+# upstream default 20s. The resulting "timeout waiting for process" error is
+# tolerated in suite_test.go (Darwin-only). Linux/CI is untouched.
+# See controller-runtime#1571 / #2560.
+ENVTEST_STOP_TIMEOUT_ENV :=
+ifeq ($(shell uname -s),Darwin)
+ENVTEST_STOP_TIMEOUT_ENV := KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT=5s
+endif
+
 .PHONY: test
 test: manifests generate setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	$(ENVTEST_STOP_TIMEOUT_ENV) KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -tags "$(GO_BUILD_TAGS)" $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 RAPID_CHECKS ?= 25
 
 .PHONY: test-property
 test-property: manifests generate setup-envtest ## Run the outer-Reconcile rapid harness (Phase 9). Override RAPID_CHECKS for deeper runs.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+	$(ENVTEST_STOP_TIMEOUT_ENV) KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -tags outerharness -run TestEngineOuterStateMachine -count=1 \
 		./internal/controller/... -args -rapid.checks=$(RAPID_CHECKS)
 

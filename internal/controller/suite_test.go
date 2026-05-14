@@ -18,8 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -88,8 +91,30 @@ var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	cancel()
 	err := testEnv.Stop()
+	if isBenignDarwinAPIServerStopTimeout(err) {
+		// kube-apiserver (>=1.35) does not act on SIGTERM on Darwin, so envtest
+		// always reports a stop timeout even though SIGKILL successfully reaps
+		// the process. The Makefile shrinks KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT
+		// on Darwin so this fails fast (~5s). On Linux/CI the same hang has
+		// never been observed, so we still treat any error as fatal there.
+		// See controller-runtime#1571 / #2560.
+		fmt.Fprintf(GinkgoWriter, "envtest stop timed out on darwin (process was SIGKILLed, no leak): %v\n", err)
+		return
+	}
 	Expect(err).NotTo(HaveOccurred())
 })
+
+// isBenignDarwinAPIServerStopTimeout returns true when err is the well-known
+// "timeout waiting for process kube-apiserver to stop" emitted by envtest on
+// macOS, where kube-apiserver ignores SIGTERM but is still reaped by the
+// envtest SIGKILL fallback. Scoped to GOOS=darwin so a real teardown failure
+// on Linux still fails the suite.
+func isBenignDarwinAPIServerStopTimeout(err error) bool {
+	if err == nil || runtime.GOOS != "darwin" {
+		return false
+	}
+	return strings.Contains(err.Error(), "timeout waiting for process kube-apiserver to stop")
+}
 
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by
