@@ -57,3 +57,30 @@ spec:
       operator: Equal
       value: engine
       effect: NoSchedule
+  # Affinity supports the full corev1.Affinity shape. Changes trigger a rollout.
+  # Note: matchLabels values below reference this CR's metadata.name ("engine");
+  # rename the engine and you MUST update them, or the selectors match no pods.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: firebolt.dev/pool
+                operator: In
+                values: ["engine"]
+    # Preferred (not required): required podAffinity on the pod's own label
+    # deadlocks ParallelPodManagement — neither parallel pod has a peer yet.
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: topology.kubernetes.io/zone
+            labelSelector:
+              matchLabels:
+                firebolt.io/engine: engine
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              firebolt.io/engine: engine

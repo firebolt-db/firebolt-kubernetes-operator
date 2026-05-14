@@ -299,6 +299,9 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 	if !reflect.DeepEqual(a.Spec.Template.Spec.Tolerations, b.Spec.Template.Spec.Tolerations) {
 		return false
 	}
+	if !reflect.DeepEqual(a.Spec.Template.Spec.Affinity, b.Spec.Template.Spec.Affinity) {
+		return false
+	}
 
 	if a.Spec.Template.Spec.ServiceAccountName != b.Spec.Template.Spec.ServiceAccountName {
 		return false

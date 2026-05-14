@@ -647,6 +647,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
+					Affinity:                      spec.Affinity,
 					TerminationGracePeriodSeconds: &gracePeriod,
 					SecurityContext:               podSecurityContext,
 					Containers: []corev1.Container{
@@ -970,6 +971,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Tolerations, spec.Tolerations) {
+		return false
+	}
+
+	if !reflect.DeepEqual(podSpec.Affinity, spec.Affinity) {
 		return false
 	}
 

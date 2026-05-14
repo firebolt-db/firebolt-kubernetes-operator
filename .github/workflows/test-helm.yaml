@@ -29,18 +29,32 @@ jobs:
       - name: Clean Up Disk Space on public GitHub Runner
         if: runner.os == 'Linux'
         run: |
-          # Space usage before cleanup
           df -h /
 
-          # Remove unused tool caches (comment any required ones with #)
+          # Unused tool caches (comment any required ones with #)
           sudo rm -rf /usr/lib/jvm
           sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/julia* /usr/share/miniconda /usr/local/share/boost
 
-          # Verify gains
+          # Browsers + drivers + playwright cache
+          sudo apt-get purge -y --auto-remove \
+            firefox google-chrome-stable microsoft-edge-stable || true
+          sudo rm -rf \
+            /usr/local/share/chromedriver-linux64 \
+            /usr/local/share/chromium \
+            /root/.cache/ms-playwright \
+            /home/runner/.cache/ms-playwright
+
+          # Preinstalled Docker images and build cache
+          docker image prune -af || true
+          docker builder prune -af || true
+
           df -h /
 
       - name: Raise memlock limit for kind nodes (engine io_uring)
@@ -104,9 +118,13 @@ jobs:
           yq --version
 
       - name: Prepare Kind cluster and workload images
+        # helm-test only exercises the current-side (:dev) images. Skip the
+        # upgrade-target tags (ENGINE_NEW_TAG / METADATA_NEW_TAG) that only the
+        # E2E upgrade specs need — that's ~6 GB of image weight unloaded per
+        # kind node.
         run: |
           go mod tidy
-          make prepare-test-e2e KIND_CLUSTER="${KIND_CLUSTER}"
+          make prepare-test-e2e KIND_CLUSTER="${KIND_CLUSTER}" LOAD_UPGRADE_TARGETS=false
         env:
           GOPRIVATE: github.com/firebolt-db/*
 

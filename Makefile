@@ -104,9 +104,15 @@ KIND_CLUSTER ?= operator-test-e2e
 setup-kind: ## Create a Kind cluster if it does not exist
 	@./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
 
+# LOAD_UPGRADE_TARGETS controls whether the pinned upgrade-target images
+# (ENGINE_NEW_TAG / METADATA_NEW_TAG) are loaded. Default true so the E2E
+# upgrade specs see both sides; set to false from workflows that only need
+# the current side (e.g. helm-test) to save ~6 GB of image weight.
+LOAD_UPGRADE_TARGETS ?= true
+
 .PHONY: load-test-images
 load-test-images: ## Load required Docker images into the Kind cluster
-	IMAGE_VARIANT=$(IMAGE_VARIANT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+	IMAGE_VARIANT=$(IMAGE_VARIANT) LOAD_UPGRADE_TARGETS=$(LOAD_UPGRADE_TARGETS) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
 prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, load images

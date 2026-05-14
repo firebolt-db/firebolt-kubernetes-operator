@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -929,6 +930,164 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for resources to be deleted")
+			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	// Test 11: nodeSelector + tolerations + affinity mutated together
+	// trigger one blue-green re-roll, propagate to the pod template, and
+	// keep gateway queries error-free. Rules pin to kubernetes.io/os=linux
+	// and an unused taint key so the test exercises propagation without
+	// depending on cluster topology.
+	Describe("Scheduling Fields Trigger Blue-Green", Ordered, func() {
+		var (
+			instanceName = "inst-sched" + queryConfig.Suffix
+			engineName   = "test-sched" + queryConfig.Suffix + "-engine"
+			clientPod    = "client-sched" + queryConfig.Suffix
+			lc           *TestInstanceLifecycle
+			bgRunner     *GatewayBackgroundQueryRunner
+		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
+
+		BeforeAll(func() {
+			By("Setting up FireboltInstance for scheduling-fields test")
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName)
+			Expect(err).NotTo(HaveOccurred())
+			By("Creating client pod")
+			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			By("Cleaning up scheduling-fields test")
+			DeleteClientPod(ctx, clientPod)
+			_ = DeleteEngine(ctx, engineName)
+			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			TeardownTestInstance(ctx, lc)
+		})
+
+		It("should re-roll the STS when nodeSelector, tolerations, and affinity are set together", func() {
+			By("Creating engine with 2 replicas and no scheduling fields")
+			err := CreateEngine(ctx, instanceName, engineName, 2)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for initial engine to become ready")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for engine status to be stable")
+			err = WaitForEngineStable(ctx, engineName, clusterReadyTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Recording initial generation")
+			initialGen, initialActiveGen, err := GetEngineGeneration(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(initialGen).To(Equal(initialActiveGen),
+				"engine should be stable (current == active) before scheduling update")
+
+			By("Running baseline query")
+			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
+			Expect(err).NotTo(HaveOccurred())
+			result, err := ParseQueryResult(output)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(queryConfig.Validator(result)).To(BeTrue(), "baseline query result validation failed")
+
+			By("Starting background query runner")
+			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
+			bgRunner.Start(ctx)
+
+			nodeSelector := map[string]string{"kubernetes.io/os": "linux"}
+			tolerations := []corev1.Toleration{{
+				Key:      "firebolt.io/e2e-scheduling",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			}}
+			affinity := &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+							MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      "kubernetes.io/os",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"linux"},
+							}},
+						}},
+					},
+				},
+			}
+
+			By("Setting nodeSelector + tolerations + affinity in a single spec update")
+			err = UpdateEngineScheduling(ctx, engineName, nodeSelector, tolerations, affinity)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for blue-green to complete (engine ready and stable on the new generation)")
+			err = WaitForEngineReady(ctx, engineName, 2, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+			err = WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Asserting the engine actually re-rolled to a new generation")
+			newGen, newActiveGen, err := GetEngineGeneration(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newGen).To(BeNumerically(">", initialGen),
+				"scheduling-field change must advance CurrentGeneration; was %d, still %d", initialGen, newGen)
+			Expect(newActiveGen).To(Equal(newGen),
+				"after stable, ActiveGeneration must equal CurrentGeneration")
+
+			By("Verifying the live StatefulSet's pod template carries all three scheduling fields")
+			// The controller transitions to stable immediately after issuing the
+			// Delete on the old generation's STS; Kubernetes' foregroundDeletion
+			// propagation then removes the object asynchronously once owned pods
+			// are gone. Poll briefly so we don't race that GC window — STSs with
+			// a non-nil DeletionTimestamp are mid-removal and don't count.
+			var podSpec corev1.PodSpec
+			Eventually(func(g Gomega) {
+				stsList, err := k8sClient.AppsV1().StatefulSets(testNamespace).List(ctx, metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("firebolt.io/engine=%s", engineName),
+				})
+				g.Expect(err).NotTo(HaveOccurred())
+				var active []int
+				for i := range stsList.Items {
+					if stsList.Items[i].DeletionTimestamp == nil {
+						active = append(active, i)
+					}
+				}
+				g.Expect(active).To(HaveLen(1),
+					"after stable, exactly one active engine STS (the active generation) must remain")
+				podSpec = stsList.Items[active[0]].Spec.Template.Spec
+			}, 15*time.Second, pollInterval).Should(Succeed())
+			Expect(podSpec.NodeSelector).To(Equal(nodeSelector),
+				"nodeSelector must propagate to the live pod template")
+			Expect(podSpec.Tolerations).To(Equal(tolerations),
+				"tolerations must propagate to the live pod template")
+			Expect(podSpec.Affinity).To(Equal(affinity),
+				"affinity must propagate to the live pod template")
+
+			By("Running query on the re-rolled engine")
+			output, err = RunQuery(ctx, clientPod, engineName, queryConfig.Query)
+			Expect(err).NotTo(HaveOccurred())
+			result, err = ParseQueryResult(output)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(queryConfig.Validator(result)).To(BeTrue(), "post-reroll query result validation failed")
+
+			By("Stopping background query runner")
+			bgRunner.Stop()
+
+			successes, failures := bgRunner.GetStats()
+			fmt.Fprintf(GinkgoWriter, "Background queries: %d successes, %d failures\n", successes, failures)
+			if failures > 0 {
+				bgRunner.PrintFailureSummary()
+			}
+
+			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scheduling-fields blue-green")
+			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+
+			By("Deleting engine")
+			err = DeleteEngine(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for all resources to be deleted")
 			err = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
 			Expect(err).NotTo(HaveOccurred())
 		})
