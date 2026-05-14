@@ -1,3 +1,14 @@
+# 1.0.10
+
+appVersion: v2.5.0
+
+## [2.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.4.1...v2.5.0) (2026-05-14)
+
+### Features
+
+* support node and pod affinity (FB-905) ([#51](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/51)) ([2461722](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2461722cc26934d5bdf5cca10c1e1e467e651e6e))
+
+
 # 1.0.9
 
 appVersion: v2.4.1
