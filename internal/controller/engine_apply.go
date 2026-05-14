@@ -303,6 +303,10 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	if !reflect.DeepEqual(a.Spec.Template.Labels, b.Spec.Template.Labels) {
+		return false
+	}
+
 	if a.Spec.Template.Spec.ServiceAccountName != b.Spec.Template.Spec.ServiceAccountName {
 		return false
 	}

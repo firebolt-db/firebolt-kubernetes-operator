@@ -502,6 +502,23 @@ func buildHeadlessService(engineName, namespace string, gen int) *corev1.Service
 	}
 }
 
+// enginePodLabels merges the base operator-managed labels (engine name and
+// generation) with user-provided PodLabels from the spec. Reserved labels
+// are always owned by the operator; user values for firebolt.io/engine or
+// firebolt.io/generation are silently ignored.
+func enginePodLabels(spec *computev1alpha1.FireboltEngineSpec, engineName string, gen int) map[string]string {
+	labels := map[string]string{
+		LabelEngine:     engineName,
+		LabelGeneration: strconv.Itoa(gen),
+	}
+	for k, v := range spec.PodLabels {
+		if k != LabelEngine && k != LabelGeneration {
+			labels[k] = v
+		}
+	}
+	return labels
+}
+
 func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int) *appsv1.StatefulSet {
 	name := genResourceName(engineName, gen, "")
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
@@ -511,6 +528,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		LabelEngine:     engineName,
 		LabelGeneration: strconv.Itoa(gen),
 	}
+
+	podLabels := enginePodLabels(spec, engineName, gen)
 
 	annotations := map[string]string{}
 	if spec.MetadataEndpointOverride != nil {
@@ -642,7 +661,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			VolumeClaimTemplates:                 volumeClaimTemplates,
 			PersistentVolumeClaimRetentionPolicy: pvcRetentionPolicy,
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
@@ -975,6 +994,24 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Affinity, spec.Affinity) {
+		return false
+	}
+
+	// Check pod template labels. The StatefulSet has the base labels plus
+	// any user-provided PodLabels. We need to extract the engine name and
+	// generation from the StatefulSet's own labels to reconstruct the
+	// expected merged label set.
+	engineName, hasEngineName := sts.Labels[LabelEngine]
+	genStr, hasGenLabel := sts.Labels[LabelGeneration]
+	if !hasEngineName || !hasGenLabel {
+		return false
+	}
+	gen, err := strconv.Atoi(genStr)
+	if err != nil {
+		return false
+	}
+	expectedPodLabels := enginePodLabels(spec, engineName, gen)
+	if !reflect.DeepEqual(sts.Spec.Template.Labels, expectedPodLabels) {
 		return false
 	}
 

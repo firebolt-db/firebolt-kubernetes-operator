@@ -111,6 +111,12 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 				},
 			}},
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						LabelEngine:     engineName,
+						LabelGeneration: strconv.Itoa(gen),
+					},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
@@ -154,6 +160,12 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *
 			Replicas: &replicas,
 			// No VolumeClaimTemplates for the emptyDir backend.
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						LabelEngine:     engineName,
+						LabelGeneration: strconv.Itoa(gen),
+					},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
@@ -1381,6 +1393,40 @@ func TestStsSpecEqual(t *testing.T) {
 			t.Fatal("stsSpecEqual() want true for matching Affinity")
 		}
 	})
+
+	t.Run("pod labels mismatch is detected", func(t *testing.T) {
+		a := base()
+		b := base()
+		b.Spec.Template.Labels = map[string]string{
+			LabelEngine:     testEngineName,
+			LabelGeneration: "0",
+			"custom":        "value",
+		}
+		if stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want false when pod labels differ")
+		}
+	})
+
+	t.Run("matching pod labels are equal", func(t *testing.T) {
+		a := base()
+		b := base()
+		labels := map[string]string{
+			LabelEngine:     testEngineName,
+			LabelGeneration: "0",
+			"app":           "packdb",
+			"team":          "control-plane",
+		}
+		a.Spec.Template.Labels = labels
+		b.Spec.Template.Labels = map[string]string{
+			LabelEngine:     testEngineName,
+			LabelGeneration: "0",
+			"app":           "packdb",
+			"team":          "control-plane",
+		}
+		if !stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want true for matching pod labels")
+		}
+	})
 }
 
 func TestBuildStatefulSet_Affinity(t *testing.T) {
@@ -1487,6 +1533,116 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 		}
 		if stsMatchesSpec(sts, spec) {
 			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
+		}
+	})
+}
+
+func TestBuildStatefulSet_PodLabels(t *testing.T) {
+	t.Run("base labels always present", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodLabels = nil
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2)
+		labels := sts.Spec.Template.Labels
+		if labels[LabelEngine] != testEngineName {
+			t.Errorf("expected %s label = %q, got %q", LabelEngine, testEngineName, labels[LabelEngine])
+		}
+		if labels[LabelGeneration] != "2" {
+			t.Errorf("expected %s label = %q, got %q", LabelGeneration, "2", labels[LabelGeneration])
+		}
+	})
+
+	t.Run("user labels merged with base labels", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodLabels = map[string]string{
+			"app":         "packdb",
+			"environment": "prod",
+			"team":        "control-plane",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1)
+		labels := sts.Spec.Template.Labels
+		// Base labels must be present.
+		if labels[LabelEngine] != testEngineName {
+			t.Errorf("expected %s label = %q, got %q", LabelEngine, testEngineName, labels[LabelEngine])
+		}
+		if labels[LabelGeneration] != "1" {
+			t.Errorf("expected %s label = %q, got %q", LabelGeneration, "1", labels[LabelGeneration])
+		}
+		// User labels must be present.
+		if labels["app"] != "packdb" {
+			t.Errorf("expected user label app = packdb, got %q", labels["app"])
+		}
+		if labels["environment"] != "prod" {
+			t.Errorf("expected user label environment = prod, got %q", labels["environment"])
+		}
+		if labels["team"] != "control-plane" {
+			t.Errorf("expected user label team = control-plane, got %q", labels["team"])
+		}
+	})
+
+	t.Run("reserved labels cannot be overridden", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodLabels = map[string]string{
+			LabelEngine:     "user-engine-override",
+			LabelGeneration: "999",
+			"custom":        "value",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5)
+		labels := sts.Spec.Template.Labels
+		// Reserved labels must be operator-owned.
+		if labels[LabelEngine] != testEngineName {
+			t.Errorf("expected %s label = %q (not user override), got %q", LabelEngine, testEngineName, labels[LabelEngine])
+		}
+		if labels[LabelGeneration] != "5" {
+			t.Errorf("expected %s label = %q (not user override), got %q", LabelGeneration, "5", labels[LabelGeneration])
+		}
+		// Non-reserved user labels are still applied.
+		if labels["custom"] != "value" {
+			t.Errorf("expected user label custom = value, got %q", labels["custom"])
+		}
+	})
+
+	t.Run("pod labels drift detected by stsMatchesSpec", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodLabels = map[string]string{
+			"version": "1.0",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		if !stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want true for matching pod labels")
+		}
+		// Remove label from spec — STS is now drifted.
+		specNoLabels := testSpec()
+		if stsMatchesSpec(sts, specNoLabels) {
+			t.Fatal("stsMatchesSpec() want false when spec pod labels removed but STS still has them")
+		}
+	})
+
+	t.Run("adding pod labels to spec is detected as drift", func(t *testing.T) {
+		// STS built without extra pod labels.
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		// Spec now has extra labels — STS must be re-rolled.
+		spec := testSpec()
+		spec.PodLabels = map[string]string{
+			"new-label": "new-value",
+		}
+		if stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want false when pod labels added to spec but STS has none")
+		}
+	})
+
+	t.Run("changing pod label value is detected as drift", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodLabels = map[string]string{
+			"version": "1.0",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		// Change the label value.
+		specChanged := testSpec()
+		specChanged.PodLabels = map[string]string{
+			"version": "2.0",
+		}
+		if stsMatchesSpec(sts, specChanged) {
+			t.Fatal("stsMatchesSpec() want false when pod label value changed")
 		}
 	})
 }

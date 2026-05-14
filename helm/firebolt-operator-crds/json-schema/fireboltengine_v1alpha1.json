@@ -958,6 +958,13 @@
           "description": "NodeSelector constrains which nodes the engine pods can be scheduled on.",
           "type": "object"
         },
+        "podLabels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "PodLabels are additional labels to apply to engine pods. The operator\nreserves \"firebolt.io/engine\" and \"firebolt.io/generation\" for its own\nuse; user-provided values for these keys are silently ignored. All other\nlabels are passed through verbatim.\n\nChanges to this field trigger a new blue-green generation.",
+          "type": "object"
+        },
         "podSecurityContext": {
           "description": "PodSecurityContext sets pod-level security attributes stamped on the\nengine pod template. The operator unconditionally applies an fsGroup\n(3473) so the kernel chowns the per-pod data PVC for the engine\nprocess; setting fsGroup here overrides that default. All other fields\nare passed through verbatim.\n\nChanges to this field trigger a new blue-green generation.",
           "properties": {
