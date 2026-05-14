@@ -1,3 +1,14 @@
+# 1.0.11
+
+appVersion: v2.6.0
+
+## [2.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.5.0...v2.6.0) (2026-05-14)
+
+### Features
+
+* **api:** add pod labels support to FireboltEngineSpec (FB-1149) ([#52](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/52)) ([5172ca2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5172ca27ca971f90a5de3f3cea86100c801425ed))
+
+
 # 1.0.10
 
 appVersion: v2.5.0
