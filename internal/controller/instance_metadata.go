@@ -17,9 +17,11 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -98,6 +100,12 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 		}
 	}
 
+	// All string fields interpolated below originate from user-controlled
+	// CRD inputs (spec.id, spec.metadata.postgres.{host,database,schema})
+	// and MUST be XML-escaped to prevent injection of additional XML
+	// elements that would alter the pensieve configuration. The CRD also
+	// applies a Pattern admission check on host/database/schema as
+	// defense-in-depth (FB-1163).
 	return fmt.Sprintf(`<?xml version="1.0"?>
 <config>
   <pensieve_lite>
@@ -128,7 +136,20 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
     </metadata_storage>
   </pensieve_lite>
 </config>`,
-		instance.Spec.ID, MetadataServicePort, pgHost, pgPort, pgDatabase, pgSchema)
+		xmlEscape(instance.Spec.ID), MetadataServicePort,
+		xmlEscape(pgHost), pgPort, xmlEscape(pgDatabase), xmlEscape(pgSchema))
+}
+
+// xmlEscape returns s with XML metacharacters replaced by their entity
+// references, suitable for safe interpolation as element content. Used
+// for every user-controlled field that buildMetadataConfigXML pastes
+// into the pensieve config template.
+func xmlEscape(s string) string {
+	var buf bytes.Buffer
+	// xml.EscapeText only fails when the writer fails; bytes.Buffer
+	// never returns an error from Write, so the error is unreachable.
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
 }
 
 func metadataConfigMapName(instanceName string) string {

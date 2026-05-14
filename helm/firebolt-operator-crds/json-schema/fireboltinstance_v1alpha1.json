@@ -1921,13 +1921,17 @@
                   "additionalProperties": false
                 },
                 "database": {
-                  "description": "Database is the PostgreSQL database name.",
+                  "description": "Database is the PostgreSQL database name. Allowed characters are\nletters, digits, \"_\", \".\", and \"-\". XML metacharacters are rejected\nat admission time to prevent injection into the rendered metadata\nconfig.",
+                  "maxLength": 63,
                   "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_.\\-]+$",
                   "type": "string"
                 },
                 "host": {
-                  "description": "Host is the PostgreSQL server hostname or IP.",
+                  "description": "Host is the PostgreSQL server hostname or IP. Allowed characters are\nletters, digits, \".\", \"-\", \":\", \"[\", and \"]\" (the last three for IPv6\nliterals like \"[::1]\"). XML metacharacters are rejected at admission\ntime to prevent injection into the rendered metadata config.",
+                  "maxLength": 253,
                   "minLength": 1,
+                  "pattern": "^[A-Za-z0-9.\\-:\\[\\]]+$",
                   "type": "string"
                 },
                 "port": {
@@ -1938,9 +1942,10 @@
                 },
                 "schema": {
                   "default": "public",
-                  "description": "Schema is the PostgreSQL schema used by the metadata service.\nDefaults to \"public\".",
+                  "description": "Schema is the PostgreSQL schema used by the metadata service.\nDefaults to \"public\". Allowed characters are letters, digits, \"_\",\n\".\", and \"-\". XML metacharacters are rejected at admission time to\nprevent injection into the rendered metadata config.",
                   "maxLength": 63,
                   "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_.\\-]+$",
                   "type": "string"
                 }
               },
