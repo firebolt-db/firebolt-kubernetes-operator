@@ -115,6 +115,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
+					Affinity:                      spec.Affinity,
 					TerminationGracePeriodSeconds: &defaultTGPS,
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
@@ -157,6 +158,7 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
 					Tolerations:                   spec.Tolerations,
+					Affinity:                      spec.Affinity,
 					TerminationGracePeriodSeconds: &defaultTGPS,
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
@@ -1102,6 +1104,21 @@ func TestStsMatchesSpec(t *testing.T) {
 		}), false},
 		{"nil replicas", mutate(func(s *appsv1.StatefulSet) { s.Spec.Replicas = nil }), false},
 		{"no containers", mutate(func(s *appsv1.StatefulSet) { s.Spec.Template.Spec.Containers = nil }), false},
+		{"affinity mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+							MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      "pool",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"engine"},
+							}},
+						}},
+					},
+				},
+			}
+		}), false},
 	}
 
 	for _, tt := range tests {
@@ -1299,6 +1316,177 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("getEngineContainerSecurityContext returns nil when unset", func(t *testing.T) {
 		if got := getEngineContainerSecurityContext(testSpec()); got != nil {
 			t.Fatalf("expected nil container SecurityContext when unset, got %+v", got)
+		}
+	})
+}
+
+func TestStsSpecEqual(t *testing.T) {
+	base := func() *appsv1.StatefulSet { return makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0") }
+
+	t.Run("identical StatefulSets are equal", func(t *testing.T) {
+		if !stsSpecEqual(base(), base()) {
+			t.Fatal("stsSpecEqual() want true for identical StatefulSets")
+		}
+	})
+
+	t.Run("affinity mismatch is detected", func(t *testing.T) {
+		a := base()
+		b := base()
+		b.Spec.Template.Spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "pool",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"engine"},
+						}},
+					}},
+				},
+			},
+		}
+		if stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want false when Affinity differs")
+		}
+	})
+
+	t.Run("nil vs non-nil affinity is detected", func(t *testing.T) {
+		a := base()
+		b := base()
+		b.Spec.Template.Spec.Affinity = &corev1.Affinity{}
+		if stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want false when one Affinity is nil and the other is non-nil")
+		}
+	})
+
+	t.Run("matching affinity is equal", func(t *testing.T) {
+		affinity := &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "pool",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"engine"},
+						}},
+					}},
+				},
+			},
+		}
+		a := base()
+		b := base()
+		a.Spec.Template.Spec.Affinity = affinity
+		b.Spec.Template.Spec.Affinity = affinity.DeepCopy()
+		if !stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want true for matching Affinity")
+		}
+	})
+}
+
+func TestBuildStatefulSet_Affinity(t *testing.T) {
+	t.Run("nodeAffinity propagates to pod template", func(t *testing.T) {
+		spec := testSpec()
+		spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "pool",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"engine"},
+						}},
+					}},
+				},
+			},
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		got := sts.Spec.Template.Spec.Affinity
+		if got == nil || got.NodeAffinity == nil {
+			t.Fatal("expected NodeAffinity to be propagated to pod template")
+		}
+		terms := got.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+		if len(terms) != 1 || terms[0].MatchExpressions[0].Key != "pool" {
+			t.Fatalf("unexpected NodeAffinity content: %+v", got.NodeAffinity)
+		}
+	})
+
+	t.Run("podAntiAffinity propagates to pod template", func(t *testing.T) {
+		spec := testSpec()
+		spec.Affinity = &corev1.Affinity{
+			PodAntiAffinity: &corev1.PodAntiAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					TopologyKey: "kubernetes.io/hostname",
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "firebolt-engine"},
+					},
+				}},
+			},
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		got := sts.Spec.Template.Spec.Affinity
+		if got == nil || got.PodAntiAffinity == nil {
+			t.Fatal("expected PodAntiAffinity to be propagated to pod template")
+		}
+		terms := got.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		if len(terms) != 1 || terms[0].TopologyKey != "kubernetes.io/hostname" {
+			t.Fatalf("unexpected PodAntiAffinity content: %+v", got.PodAntiAffinity)
+		}
+	})
+
+	t.Run("nil affinity produces nil pod template affinity", func(t *testing.T) {
+		spec := testSpec()
+		spec.Affinity = nil
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		if sts.Spec.Template.Spec.Affinity != nil {
+			t.Fatalf("expected nil Affinity in pod template, got %+v", sts.Spec.Template.Spec.Affinity)
+		}
+	})
+
+	t.Run("affinity drift detected by stsMatchesSpec", func(t *testing.T) {
+		spec := testSpec()
+		spec.Affinity = &corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+					TopologyKey: "topology.kubernetes.io/zone",
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"firebolt.io/engine": testEngineName},
+					},
+				}},
+			},
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		// The STS matches spec because we built it from spec.
+		if !stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want true for matching affinity")
+		}
+		// Remove affinity from spec — now the STS is ahead of spec and must be
+		// detected as drifted.
+		specNoAffinity := testSpec()
+		if stsMatchesSpec(sts, specNoAffinity) {
+			t.Fatal("stsMatchesSpec() want false when spec affinity removed but STS still has it")
+		}
+	})
+
+	t.Run("adding affinity to spec is detected as drift", func(t *testing.T) {
+		// STS built without affinity.
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		// Spec now requires nodeAffinity — STS must be re-rolled.
+		spec := testSpec()
+		spec.Affinity = &corev1.Affinity{
+			NodeAffinity: &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+						MatchExpressions: []corev1.NodeSelectorRequirement{{
+							Key:      "pool",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"engine"},
+						}},
+					}},
+				},
+			},
+		}
+		if stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
 		}
 	})
 }

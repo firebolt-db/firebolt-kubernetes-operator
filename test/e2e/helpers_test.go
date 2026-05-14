@@ -268,6 +268,41 @@ func UpdateEngineImageTag(ctx context.Context, name string, tag string) error {
 	})
 }
 
+// UpdateEngineScheduling sets NodeSelector, Tolerations, and Affinity on the
+// engine CR in a single update (with retry on conflict). All three fields are
+// pod-scheduling knobs documented to trigger a new blue-green generation when
+// they change. Passing a nil value clears that field.
+func UpdateEngineScheduling(
+	ctx context.Context,
+	name string,
+	nodeSelector map[string]string,
+	tolerations []corev1.Toleration,
+	affinity *corev1.Affinity,
+) error {
+	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
+		engine.Spec.NodeSelector = nodeSelector
+		engine.Spec.Tolerations = tolerations
+		engine.Spec.Affinity = affinity
+	})
+}
+
+// GetEngineGeneration reads CurrentGeneration / ActiveGeneration from the
+// engine status. Tests that mutate fields documented to trigger a new
+// blue-green generation use this to assert the generation actually advanced
+// rather than relying on phase observation alone (which can also be reached
+// without a re-roll, e.g. for a no-op update).
+func GetEngineGeneration(ctx context.Context, name string) (currentGen, activeGen int, err error) {
+	cl, err := getCRDClient()
+	if err != nil {
+		return 0, 0, err
+	}
+	engine := &computev1alpha1.FireboltEngine{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, engine); err != nil {
+		return 0, 0, err
+	}
+	return engine.Status.CurrentGeneration, engine.Status.ActiveGeneration, nil
+}
+
 // retryOnConflict retries an update on conflict errors
 func retryOnConflict(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltEngine)) error {
 	cl, err := getCRDClient()

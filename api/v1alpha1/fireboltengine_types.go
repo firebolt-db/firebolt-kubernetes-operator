@@ -315,6 +315,13 @@ type FireboltEngineSpec struct {
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
+	// Affinity defines scheduling affinity rules for engine pods. Supports the
+	// full Kubernetes corev1.Affinity shape: nodeAffinity, podAffinity, and
+	// podAntiAffinity. Changes to this field trigger a new blue-green generation
+	// (see stsMatchesSpec).
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
 	// ServiceAccountName is the name of the ServiceAccount to run engine pods as.
 	// If unset, StatefulSet pods use the namespace default ServiceAccount.
 	// Changing this value triggers a new blue-green generation (see stsMatchesSpec).

@@ -19,11 +19,24 @@ set -euo pipefail
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
 IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
+# LOAD_UPGRADE_TARGETS controls whether the pinned upgrade-target images
+# (ENGINE_NEW_TAG / METADATA_NEW_TAG) are loaded. The E2E suite's upgrade
+# specs need both sides of the upgrade path, but `helm-test` only exercises
+# the current side and can skip ~6 GB of unused image weight.
+LOAD_UPGRADE_TARGETS="${LOAD_UPGRADE_TARGETS:-true}"
 
 case "${IMAGE_VARIANT}" in
     latest|dev) ;;
     *)
         echo "Error: unsupported IMAGE_VARIANT='${IMAGE_VARIANT}' (expected 'latest' or 'dev')." >&2
+        exit 1
+        ;;
+esac
+
+case "${LOAD_UPGRADE_TARGETS}" in
+    true|false) ;;
+    *)
+        echo "Error: unsupported LOAD_UPGRADE_TARGETS='${LOAD_UPGRADE_TARGETS}' (expected 'true' or 'false')." >&2
         exit 1
         ;;
 esac
@@ -73,13 +86,20 @@ fi
 #            image produced by `make docker-build`. Pulling it would 404.
 declare -a IMAGES=(
     "${ENGINE_IMAGE}:${ENGINE_TAG}|pull"
-    "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}|pull"
     "${METADATA_IMAGE}:${METADATA_TAG}|pull"
-    "${METADATA_IMAGE}:${METADATA_NEW_TAG}|pull"
     "${POSTGRES_IMAGE}|pull"
     "${ENVOY_IMAGE}:${ENVOY_TAG}|pull"
     "${CURL_IMAGE}|pull"
 )
+
+if [ "${LOAD_UPGRADE_TARGETS}" = "true" ]; then
+    IMAGES+=(
+        "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}|pull"
+        "${METADATA_IMAGE}:${METADATA_NEW_TAG}|pull"
+    )
+else
+    echo "Skipping upgrade-target images (LOAD_UPGRADE_TARGETS=false): ${ENGINE_IMAGE}:${ENGINE_NEW_TAG}, ${METADATA_IMAGE}:${METADATA_NEW_TAG}"
+fi
 
 if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
     IMAGES+=("${OPERATOR_IMAGE}|local")
