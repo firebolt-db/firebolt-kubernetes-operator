@@ -1,3 +1,14 @@
+# 1.0.9
+
+appVersion: v2.4.1
+
+## [2.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.4.0...v2.4.1) (2026-05-14)
+
+### Bug Fixes
+
+* xml injection bug (FB-1163) ([#53](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/53)) ([592210c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/592210c042c283cf6052afd95d967e58cdc4eb89))
+
+
 # 1.0.8
 
 appVersion: v2.4.0
