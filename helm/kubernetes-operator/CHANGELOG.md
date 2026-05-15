@@ -1,3 +1,14 @@
+# 1.0.12
+
+appVersion: v2.7.0
+
+## [2.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.6.0...v2.7.0) (2026-05-15)
+
+### Features
+
+* add support for pod annotations (FB-1148) ([#58](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/58)) ([18bad6c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/18bad6c9fe3a6d872803dfb44ea33a2d0f996c0d))
+
+
 # 1.0.11
 
 appVersion: v2.6.0
