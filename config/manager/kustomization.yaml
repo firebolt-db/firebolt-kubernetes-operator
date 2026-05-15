@@ -1,8 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Minimal entry-point kept so the kubebuilder/kustomize layer at
+# `config/default/` (which references `../manager`) still resolves. The
+# operator image is set directly in manager.yaml; production deploys go
+# through helm/, not kustomize.
 resources:
 - manager.yaml
-images:
-- name: controller
-  newName: ghcr.io/firebolt-db/kubernetes-operator
-  newTag: latest

@@ -98,7 +98,9 @@ var _ = AfterSuite(func() {
 		// on Darwin so this fails fast (~5s). On Linux/CI the same hang has
 		// never been observed, so we still treat any error as fatal there.
 		// See controller-runtime#1571 / #2560.
-		fmt.Fprintf(GinkgoWriter, "envtest stop timed out on darwin (process was SIGKILLed, no leak): %v\n", err)
+		// Fire-and-forget log to GinkgoWriter; a write failure here is not
+		// actionable from a teardown swallow, so the returns are discarded.
+		_, _ = fmt.Fprintf(GinkgoWriter, "envtest stop timed out on darwin (process was SIGKILLed, no leak): %v\n", err)
 		return
 	}
 	Expect(err).NotTo(HaveOccurred())
