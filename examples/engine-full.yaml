@@ -48,6 +48,17 @@ spec:
   drainCheckInterval: 10s
   terminationGracePeriodSeconds: 60
 
+  # Pod annotations. Forwarded to .spec.template.metadata.annotations on the
+  # generated StatefulSet. Use these for integrations that key off pod
+  # metadata: Prometheus scrape config, vertical-pod-autoscaler / Karpenter
+  # disruption hints, mesh sidecar opt-in, cost allocation, policy engines.
+  # Operator-managed annotations always win against user-provided values with
+  # the same key. Changes here trigger a blue-green rollout.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    karpenter.sh/do-not-disrupt: "true"
+
   # Scheduling
   nodeSelector:
     firebolt.dev/pool: engine

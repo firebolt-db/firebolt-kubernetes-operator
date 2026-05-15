@@ -331,6 +331,15 @@ type FireboltEngineSpec struct {
 	// +optional
 	PodLabels map[string]string `json:"podLabels,omitempty"`
 
+	// PodAnnotations are additional annotations to apply to engine pods.
+	// Operator-managed pod annotations always win over user-provided values
+	// with the same key, so user input cannot accidentally drop or shadow
+	// them. All other annotations are passed through verbatim.
+	//
+	// Changes to this field trigger a new blue-green generation.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
 	// ServiceAccountName is the name of the ServiceAccount to run engine pods as.
 	// If unset, StatefulSet pods use the namespace default ServiceAccount.
 	// Changing this value triggers a new blue-green generation (see stsMatchesSpec).

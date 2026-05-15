@@ -347,6 +347,13 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.PodAnnotations != nil {
+		in, out := &in.PodAnnotations, &out.PodAnnotations
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.ServiceAccountName != nil {
 		in, out := &in.ServiceAccountName, &out.ServiceAccountName
 		*out = new(string)

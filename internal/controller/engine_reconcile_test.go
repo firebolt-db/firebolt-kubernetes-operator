@@ -1427,6 +1427,43 @@ func TestStsSpecEqual(t *testing.T) {
 			t.Fatal("stsSpecEqual() want true for matching pod labels")
 		}
 	})
+
+	t.Run("pod annotations mismatch is detected", func(t *testing.T) {
+		a := base()
+		b := base()
+		b.Spec.Template.Annotations = map[string]string{
+			"prometheus.io/scrape": "true",
+		}
+		if stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want false when pod template annotations differ")
+		}
+	})
+
+	t.Run("nil and empty pod annotations are equal", func(t *testing.T) {
+		a := base()
+		b := base()
+		a.Spec.Template.Annotations = nil
+		b.Spec.Template.Annotations = map[string]string{}
+		if !stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want true when one side is nil and the other is an empty map")
+		}
+	})
+
+	t.Run("matching pod annotations are equal", func(t *testing.T) {
+		a := base()
+		b := base()
+		a.Spec.Template.Annotations = map[string]string{
+			"prometheus.io/scrape": "true",
+			"prometheus.io/port":   "9090",
+		}
+		b.Spec.Template.Annotations = map[string]string{
+			"prometheus.io/scrape": "true",
+			"prometheus.io/port":   "9090",
+		}
+		if !stsSpecEqual(a, b) {
+			t.Fatal("stsSpecEqual() want true for matching pod annotations")
+		}
+	})
 }
 
 func TestBuildStatefulSet_Affinity(t *testing.T) {
@@ -1645,6 +1682,168 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 			t.Fatal("stsMatchesSpec() want false when pod label value changed")
 		}
 	})
+}
+
+func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
+	t.Run("nil pod annotations produce no pod template annotations", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodAnnotations = nil
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		// We intentionally render no annotations on the pod template
+		// when the spec contributes none, so existing StatefulSets
+		// stay byte-identical across upgrades that introduce this
+		// field.
+		if got := sts.Spec.Template.Annotations; len(got) != 0 {
+			t.Fatalf("expected no pod template annotations when spec.PodAnnotations is nil, got %v", got)
+		}
+	})
+
+	t.Run("user annotations propagate to pod template", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodAnnotations = map[string]string{
+			"prometheus.io/scrape":        "true",
+			"prometheus.io/port":          "9090",
+			"firebolt.dev/cost-center":    "analytics",
+			"karpenter.sh/do-not-disrupt": "true",
+			"kubernetes.io/description":   "engine pod",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1)
+		got := sts.Spec.Template.Annotations
+		for k, want := range spec.PodAnnotations {
+			if got[k] != want {
+				t.Errorf("expected annotation %q = %q, got %q", k, want, got[k])
+			}
+		}
+	})
+
+	t.Run("operator-managed StatefulSet annotations are not affected by PodAnnotations", func(t *testing.T) {
+		// AnnotationMetadataOverride lives on the StatefulSet's own
+		// ObjectMeta, not on the pod template. User pod annotations
+		// must never leak there, and operator-managed STS
+		// annotations must keep their values regardless of user
+		// pod-annotation input that happens to use the same key.
+		override := "metadata.example.com:7000"
+		spec := testSpec()
+		spec.MetadataEndpointOverride = &override
+		spec.PodAnnotations = map[string]string{
+			AnnotationMetadataOverride: "user-override-should-not-take-effect",
+			"unrelated":                "value",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+
+		if got := sts.Annotations[AnnotationMetadataOverride]; got != override {
+			t.Errorf("expected STS-level %s = %q (operator-owned), got %q",
+				AnnotationMetadataOverride, override, got)
+		}
+		if _, ok := sts.Annotations["unrelated"]; ok {
+			t.Error("user pod annotation must not leak onto the StatefulSet's own ObjectMeta")
+		}
+		// User annotations land on the pod template.
+		if got := sts.Spec.Template.Annotations["unrelated"]; got != "value" {
+			t.Errorf("expected pod-template annotation unrelated = %q, got %q", "value", got)
+		}
+	})
+
+	t.Run("pod annotations drift detected by stsMatchesSpec", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodAnnotations = map[string]string{
+			"prometheus.io/scrape": "true",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		if !stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want true for matching pod annotations")
+		}
+		specNoAnnotations := testSpec()
+		if stsMatchesSpec(sts, specNoAnnotations) {
+			t.Fatal("stsMatchesSpec() want false when spec pod annotations removed but STS still has them")
+		}
+	})
+
+	t.Run("adding pod annotations to spec is detected as drift", func(t *testing.T) {
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		spec := testSpec()
+		spec.PodAnnotations = map[string]string{
+			"new-annotation": "new-value",
+		}
+		if stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want false when pod annotations added to spec but STS has none")
+		}
+	})
+
+	t.Run("changing pod annotation value is detected as drift", func(t *testing.T) {
+		spec := testSpec()
+		spec.PodAnnotations = map[string]string{
+			"version": "1.0",
+		}
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		specChanged := testSpec()
+		specChanged.PodAnnotations = map[string]string{
+			"version": "2.0",
+		}
+		if stsMatchesSpec(sts, specChanged) {
+			t.Fatal("stsMatchesSpec() want false when pod annotation value changed")
+		}
+	})
+
+	t.Run("empty map and nil are equal for stsMatchesSpec", func(t *testing.T) {
+		// Round-tripping through the API server can normalise an
+		// empty annotation map to nil (json:omitempty). Treat them
+		// as identical so we don't churn StatefulSets on no-op
+		// changes.
+		spec := testSpec()
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts.Spec.Template.Annotations = map[string]string{}
+		if !stsMatchesSpec(sts, spec) {
+			t.Fatal("stsMatchesSpec() want true when pod template annotations is empty map and spec.PodAnnotations is nil")
+		}
+	})
+}
+
+func TestEnginePodAnnotations(t *testing.T) {
+	t.Run("nil input returns nil", func(t *testing.T) {
+		got := enginePodAnnotations(&computev1alpha1.FireboltEngineSpec{})
+		if got != nil {
+			t.Fatalf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("returns a copy, not the spec reference", func(t *testing.T) {
+		// Mutating the returned map must not bleed into the spec.
+		// buildStatefulSet might otherwise share state across
+		// generations if future code grows the map in place.
+		spec := &computev1alpha1.FireboltEngineSpec{
+			PodAnnotations: map[string]string{"k": "v"},
+		}
+		got := enginePodAnnotations(spec)
+		got["mutated"] = "yes"
+		if _, ok := spec.PodAnnotations["mutated"]; ok {
+			t.Fatal("enginePodAnnotations must return a copy, not the underlying spec map")
+		}
+	})
+}
+
+func TestAnnotationsEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b map[string]string
+		want bool
+	}{
+		{"both nil", nil, nil, true},
+		{"nil and empty are equal", nil, map[string]string{}, true},
+		{"empty and nil are equal", map[string]string{}, nil, true},
+		{"both empty", map[string]string{}, map[string]string{}, true},
+		{"identical maps", map[string]string{"a": "1", "b": "2"}, map[string]string{"a": "1", "b": "2"}, true},
+		{"different value", map[string]string{"a": "1"}, map[string]string{"a": "2"}, false},
+		{"different key", map[string]string{"a": "1"}, map[string]string{"b": "1"}, false},
+		{"different length", map[string]string{"a": "1"}, map[string]string{"a": "1", "b": "2"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := annotationsEqual(tt.a, tt.b); got != tt.want {
+				t.Errorf("annotationsEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {

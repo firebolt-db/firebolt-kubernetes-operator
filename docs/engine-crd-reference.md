@@ -17,6 +17,7 @@
 | `spec.terminationGracePeriodSeconds` | No | `60` | Grace period between SIGTERM and SIGKILL for engine pods. The engine waits up to `grace - 5s` for in-flight queries after SIGTERM; raise this for workloads with long-running queries. |
 | `spec.nodeSelector` | No | - | Node selector for engine pods |
 | `spec.tolerations` | No | - | Tolerations for engine pods |
+| `spec.podAnnotations` | No | - | Annotations applied to engine pod templates. Operator-managed annotations always win against user-provided values with the same key. Changes trigger a new blue-green generation. |
 | `spec.metadataEndpointOverride` | No | - | Override the instance-derived metadata endpoint (for cross-cluster setups) |
 
 ## Engine Phases
