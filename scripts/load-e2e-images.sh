@@ -61,8 +61,6 @@ KIND_LOAD_TMPDIR="$(cd "${KIND_LOAD_TMPDIR}" && pwd)"
 export TMPDIR="${KIND_LOAD_TMPDIR}"
 trap 'rm -rf "${KIND_LOAD_TMPDIR:?}"/images-tar* 2>/dev/null || true' EXIT
 
-OPERATOR_IMAGE="controller:latest"
-
 echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} (parallelism=${LOAD_PARALLELISM}) ==="
 
 if ! kind get nodes --name "${CLUSTER_NAME}" &>/dev/null; then
@@ -82,8 +80,11 @@ fi
 #            validate an old build of the alias. `docker pull` on an
 #            up-to-date pinned tag is cheap (manifest check, no layer
 #            download), so applying the same policy uniformly is fine.
-#   local  — local-only build, never in a registry. Used for the operator
-#            image produced by `make docker-build`. Pulling it would 404.
+#   local  — reserved for local-only images built outside any registry
+#            (pulling them would 404). Currently unused: the operator runs
+#            in-process during E2E, so no operator image needs loading
+#            here. The Helm-based local-deploy path uses its own
+#            `make kind-load-operator` target.
 declare -a IMAGES=(
     "${ENGINE_IMAGE}:${ENGINE_TAG}|pull"
     "${METADATA_IMAGE}:${METADATA_TAG}|pull"
@@ -99,12 +100,6 @@ if [ "${LOAD_UPGRADE_TARGETS}" = "true" ]; then
     )
 else
     echo "Skipping upgrade-target images (LOAD_UPGRADE_TARGETS=false): ${ENGINE_IMAGE}:${ENGINE_NEW_TAG}, ${METADATA_IMAGE}:${METADATA_NEW_TAG}"
-fi
-
-if docker image inspect "${OPERATOR_IMAGE}" &>/dev/null; then
-    IMAGES+=("${OPERATOR_IMAGE}|local")
-else
-    echo "Note: operator image '${OPERATOR_IMAGE}' not found locally (build with 'make docker-build' if needed)."
 fi
 
 load_one() {

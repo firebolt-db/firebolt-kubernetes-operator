@@ -156,7 +156,7 @@ Ask before creating or amending commits.
 
 Types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
 
-Scope is optional but encouraged. Common scopes: `api`, `controller`, `helm`, `e2e`, `build`.
+Scope is optional but encouraged. Common scopes: `api`, `controller`, `helm`, `e2e`.
 
 Rules:
 
