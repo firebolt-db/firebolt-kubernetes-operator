@@ -303,6 +303,44 @@ func GetEngineGeneration(ctx context.Context, name string) (currentGen, activeGe
 	return engine.Status.CurrentGeneration, engine.Status.ActiveGeneration, nil
 }
 
+// WaitForEngineSpecObserved waits until the controller has fully reconciled
+// the engine's current spec — i.e. until engine.Status.ObservedGeneration
+// catches up to the metadata.Generation captured at call time. The controller
+// only advances ObservedGeneration inside computeStable, so a match implies
+// both that the new spec was observed and that the resulting rollout reached
+// stable.
+//
+// Use this after any spec mutation that does NOT change replica count
+// (image-tag swap, scheduling fields, etc.). Polling Phase==Stable alone is
+// unsafe right after such a mutation: the engine is still in the previous
+// PhaseStable from before the change, so a fast read returns immediately
+// without the controller ever having observed the update. Replica-changing
+// mutations are self-synchronizing because WaitForEngineReady's pod-count
+// gate cannot be satisfied until the new generation has rolled out.
+func WaitForEngineSpecObserved(ctx context.Context, name string, timeout time.Duration) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	engine := &computev1alpha1.FireboltEngine{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, engine); err != nil {
+		return fmt.Errorf("WaitForEngineSpecObserved: initial Get for %s: %w", name, err)
+	}
+	target := engine.Generation
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, engine); err == nil {
+			if engine.Status.ObservedGeneration >= target {
+				return nil
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for engine %s to observe spec (target metadata.generation=%d, last Status.ObservedGeneration=%d)",
+		name, target, engine.Status.ObservedGeneration)
+}
+
 // retryOnConflict retries an update on conflict errors
 func retryOnConflict(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltEngine)) error {
 	cl, err := getCRDClient()

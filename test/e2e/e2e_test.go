@@ -558,6 +558,10 @@ var _ = Describe("Firebolt Engine", func() {
 			err = UpdateEngineImageTag(ctx, engineName, newImageTag)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Waiting for controller to observe the new spec (avoid racing the pre-mutation PhaseStable)")
+			err = WaitForEngineSpecObserved(ctx, engineName, clusterTransitionTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
 			By("Waiting for engine to complete image switch")
 			err = WaitForEngineReady(ctx, engineName, 3, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
@@ -1019,6 +1023,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 			By("Setting nodeSelector + tolerations + affinity in a single spec update")
 			err = UpdateEngineScheduling(ctx, engineName, nodeSelector, tolerations, affinity)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for controller to observe the new spec (avoid racing the pre-mutation PhaseStable)")
+			err = WaitForEngineSpecObserved(ctx, engineName, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for blue-green to complete (engine ready and stable on the new generation)")
