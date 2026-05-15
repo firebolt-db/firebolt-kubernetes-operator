@@ -118,13 +118,9 @@ jobs:
           yq --version
 
       - name: Prepare Kind cluster and workload images
-        # helm-test only exercises the current-side (:dev) images. Skip the
-        # upgrade-target tags (ENGINE_NEW_TAG / METADATA_NEW_TAG) that only the
-        # E2E upgrade specs need — that's ~6 GB of image weight unloaded per
-        # kind node.
         run: |
           go mod tidy
-          make prepare-test-e2e KIND_CLUSTER="${KIND_CLUSTER}" LOAD_UPGRADE_TARGETS=false
+          make prepare-test-e2e KIND_CLUSTER="${KIND_CLUSTER}"
         env:
           GOPRIVATE: github.com/firebolt-db/*
 

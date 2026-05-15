@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Load required Docker images into Kind cluster for e2e testing.
 # All image values come from config/images/defaults.<variant>.env (single source
-# of truth, where <variant> is IMAGE_VARIANT, defaulting to "latest").
+# of truth, where <variant> is IMAGE_VARIANT, defaulting to "dev").
 #
 # IMAGE_VARIANT MUST match the build tag of the operator binary and the test
 # binary that will run after this script — otherwise the suite asks Kind for
@@ -15,28 +15,22 @@ set -euo pipefail
 # `kind load docker-image` invocation streams `docker save` into containerd
 # on the control-plane node; these imports are independent and safe to run
 # concurrently.
+#
+# Upgrade-target images: the E2E image-switch tests need a DIFFERENT tag
+# string than the loaded one, but not different image content. Rather than
+# publishing and loading a second image (which would double the engine /
+# metadata disk footprint per kind node), the suite re-tags the already-
+# loaded image inside containerd at startup. See
+# test/e2e/e2e_suite_test.go for the re-tag step.
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
 IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
-# LOAD_UPGRADE_TARGETS controls whether the pinned upgrade-target images
-# (ENGINE_NEW_TAG / METADATA_NEW_TAG) are loaded. The E2E suite's upgrade
-# specs need both sides of the upgrade path, but `helm-test` only exercises
-# the current side and can skip ~6 GB of unused image weight.
-LOAD_UPGRADE_TARGETS="${LOAD_UPGRADE_TARGETS:-true}"
 
 case "${IMAGE_VARIANT}" in
     latest|dev) ;;
     *)
         echo "Error: unsupported IMAGE_VARIANT='${IMAGE_VARIANT}' (expected 'latest' or 'dev')." >&2
-        exit 1
-        ;;
-esac
-
-case "${LOAD_UPGRADE_TARGETS}" in
-    true|false) ;;
-    *)
-        echo "Error: unsupported LOAD_UPGRADE_TARGETS='${LOAD_UPGRADE_TARGETS}' (expected 'true' or 'false')." >&2
         exit 1
         ;;
 esac
@@ -74,12 +68,12 @@ fi
 # Locally, run: echo $GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
 
 # Each entry encodes "image|policy". Policy is one of:
-#   pull   — registry-backed, always re-pull. Several tags we load are
-#            mutable aliases (engine/metadata `latest` or `dev`, curl
-#            `latest`); a stale local copy would silently make the suite
-#            validate an old build of the alias. `docker pull` on an
-#            up-to-date pinned tag is cheap (manifest check, no layer
-#            download), so applying the same policy uniformly is fine.
+#   pull   — registry-backed, always re-pull. The dev variant's
+#            ENGINE_TAG / METADATA_TAG are mutable `:dev` aliases, so a
+#            stale local copy would silently make the suite validate an
+#            old build of the alias. `docker pull` on a pinned release tag
+#            is cheap (manifest check, no layer download), so applying the
+#            same policy uniformly to the latest variant is fine.
 #   local  — reserved for local-only images built outside any registry
 #            (pulling them would 404). Currently unused: the operator runs
 #            in-process during E2E, so no operator image needs loading
@@ -92,15 +86,6 @@ declare -a IMAGES=(
     "${ENVOY_IMAGE}:${ENVOY_TAG}|pull"
     "${CURL_IMAGE}|pull"
 )
-
-if [ "${LOAD_UPGRADE_TARGETS}" = "true" ]; then
-    IMAGES+=(
-        "${ENGINE_IMAGE}:${ENGINE_NEW_TAG}|pull"
-        "${METADATA_IMAGE}:${METADATA_NEW_TAG}|pull"
-    )
-else
-    echo "Skipping upgrade-target images (LOAD_UPGRADE_TARGETS=false): ${ENGINE_IMAGE}:${ENGINE_NEW_TAG}, ${METADATA_IMAGE}:${METADATA_NEW_TAG}"
-fi
 
 load_one() {
     local entry="$1"
@@ -165,9 +150,9 @@ if [ "${image_arch}" != "${node_arch}" ]; then
     echo "       Inside a kind node, foreign-arch binaries are run via user-mode emulation." >&2
     echo "       On Apple Silicon (arm64 host, amd64 image), kind falls back to qemu-x86_64," >&2
     echo "       which lacks AVX2/BMI2/FMA -- the engine binary will SIGILL during startup." >&2
-    echo "       Fix: in ${DEFAULTS_ENV}, drop any '-amd64' suffix on ENGINE_TAG /" >&2
-    echo "       ENGINE_NEW_TAG so Docker resolves a manifest list and pulls the native" >&2
-    echo "       '${node_arch}' variant. Or run on a host whose arch matches the image." >&2
+    echo "       Fix: in ${DEFAULTS_ENV}, drop any '-amd64' suffix on ENGINE_TAG so Docker" >&2
+    echo "       resolves a manifest list and pulls the native '${node_arch}' variant. Or run" >&2
+    echo "       on a host whose arch matches the image." >&2
     exit 1
 fi
 

@@ -5,17 +5,16 @@ LDFLAGS := -X main.version=$(VERSION)
 
 # IMAGE_VARIANT selects which config/images/defaults.<variant>.env file is
 # embedded into the operator binary and which images the E2E suite expects to
-# be loaded into Kind. "dev" (default) uses the mutable `latest` and `dev`
-# aliases on both sides of the upgrade test so CI exercises the full
-# latest→dev path partners would see; "latest" embeds the pinned stable
-# engine/metadata tags. "dev" is the default — and the absence of any extra
-# build tag selects it — until the engine/metadata `:latest` GHCR aliases
-# (and the auto-PR that bumps `defaults.latest.env`) are in place; once they
-# are, flip the default back to "latest". The operator binary, the gateway
-# pod template the operator stamps out, the image-load step, and the test
-# process all derive their defaults from the same variant — set
-# IMAGE_VARIANT consistently across `build`, `prepare-test-e2e`, and
-# `test-e2e`.
+# be loaded into Kind. "dev" (default) tracks the mutable `:dev` aliases on
+# the engine/metadata GHCR packages so a regression on `:dev` surfaces in CI
+# before a partner pulling `:dev` sees it; "latest" pins to release-* build
+# tags. "dev" stays the implicit default until the engine/metadata `:latest`
+# GHCR aliases (and the auto-PR that bumps `defaults.latest.env`) are in
+# place; once they land, flip the default back to "latest". The operator
+# binary, the gateway pod template the operator stamps out, the image-load
+# step, and the test process all derive their defaults from the same
+# variant — set IMAGE_VARIANT consistently across `build`,
+# `prepare-test-e2e`, and `test-e2e`.
 IMAGE_VARIANT ?= dev
 
 ifeq ($(IMAGE_VARIANT),latest)
@@ -115,15 +114,9 @@ KIND_CLUSTER ?= operator-test-e2e
 setup-kind: ## Create a Kind cluster if it does not exist
 	@./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
 
-# LOAD_UPGRADE_TARGETS controls whether the pinned upgrade-target images
-# (ENGINE_NEW_TAG / METADATA_NEW_TAG) are loaded. Default true so the E2E
-# upgrade specs see both sides; set to false from workflows that only need
-# the current side (e.g. helm-test) to save ~6 GB of image weight.
-LOAD_UPGRADE_TARGETS ?= true
-
 .PHONY: load-test-images
 load-test-images: ## Load required Docker images into the Kind cluster
-	IMAGE_VARIANT=$(IMAGE_VARIANT) LOAD_UPGRADE_TARGETS=$(LOAD_UPGRADE_TARGETS) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+	IMAGE_VARIANT=$(IMAGE_VARIANT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
 prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, load images

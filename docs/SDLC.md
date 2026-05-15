@@ -115,30 +115,27 @@ that breaks the operator's contract surfaces before merge.
 
 Two default-env variants live side-by-side:
 
-| File | `ENGINE_TAG` / `METADATA_TAG` (current) | `ENGINE_NEW_TAG` / `METADATA_NEW_TAG` (upgrade-target) | When the suite uses it |
-|------|------------------------------------------|--------------------------------------------------------|------------------------|
-| `config/images/defaults.dev.env`    | Mutable `:dev` alias (the only mutable alias currently published) | Pinned immutable build tag (mirrors the value in `defaults.latest.env`) | **Implicit default**: picked up when no extra Go build tag is set. Exercises the `:dev → pinned-build` upgrade path; once `:latest` is also published, the "current" side here flips to `:latest` to exercise the full `:latest → :dev` mutable upgrade path partners would walk. |
-| `config/images/defaults.latest.env` | Pinned immutable build tag (advanced by the auto-PR) | Pinned immutable build tag | Opt-in (`-tags=latest`, i.e. `IMAGE_VARIANT=latest`). Once the auto-PR is wired up this becomes what ships in the operator image and the Helm chart, and the project default flips back to it. |
+| File | `ENGINE_TAG` / `METADATA_TAG` | When the suite uses it |
+|------|--------------------------------|------------------------|
+| `config/images/defaults.dev.env`    | Mutable `:dev` alias (release-flavored builds of the dev branch — NOT debug builds) | **Implicit default**: picked up when no extra Go build tag is set. Surfaces `:dev` regressions in CI before a partner pulling `:dev` sees them. |
+| `config/images/defaults.latest.env` | Pinned immutable release-* build tag (advanced by the auto-PR) | Opt-in (`-tags=latest`, i.e. `IMAGE_VARIANT=latest`). Once the auto-PR is wired up this becomes what ships in the operator image and the Helm chart, and the project default flips back to it. |
 
-The `dev` variant is the implicit default until the engine/metadata
-`:latest` GHCR aliases — and the auto-PR that bumps
-`defaults.latest.env` off them — are in place. With nothing currently
-advancing `:latest`, defaulting to the pinned `latest` variant would
-just exercise a frozen-in-time build that nobody is bumping; the dev
-variant follows the mutable `:dev` alias directly, so it stays
-meaningful and surfaces regressions on `:dev` before a partner pulling
-it sees the breakage. The `:dev` alias ≠ a pinned build tag, so the
-suite's `ENGINE_TAG != ENGINE_NEW_TAG` startup guard is happy.
+Both variants pin to **release-build** images. The E2E suite no longer relies
+on a separately-published upgrade-target tag — the image-switch specs flip
+the pod template to a synthetic tag derived from the loaded tag plus the
+`upgradeTagSuffix` constant in `test/e2e/e2e_suite_test.go`, and the suite
+re-tags the already-loaded image inside each kind node's containerd at
+`SynchronizedBeforeSuite` time. `ctr image tag` is a metadata-only operation,
+so this adds zero on-disk image weight compared to loading a second image.
+A consequence: the stable-release auto-PR only needs to rewrite
+`ENGINE_TAG` / `METADATA_TAG` — there is no longer an `_NEW_TAG` field to
+keep in sync, and `defaults.dev.env` carries no mirrored pin to bump.
 
-Because the dev variant's "current" side is a mutable alias,
-`scripts/load-e2e-images.sh` MUST `docker pull` on every run rather
-than reusing whatever happens to be cached locally; otherwise the
-suite would silently validate a stale snapshot of `:dev`. The
-"upgrade-target" side mirrors the pinned `_NEW_TAG` values in
-`defaults.latest.env`, so the stable-release auto-PR that bumps
-`defaults.latest.env` MUST also rewrite `defaults.dev.env`'s
-`ENGINE_NEW_TAG` / `METADATA_NEW_TAG` at the same time to keep both
-variants exercising the same upgrade target.
+Because the dev variant's current side is a mutable alias,
+`scripts/load-e2e-images.sh` MUST `docker pull` on every run rather than
+reusing a stale local cache; otherwise the suite would silently validate
+an old snapshot of `:dev`. The script applies the same policy to pinned
+release tags too, where `docker pull` is a cheap manifest check.
 
 Selecting a variant:
 
