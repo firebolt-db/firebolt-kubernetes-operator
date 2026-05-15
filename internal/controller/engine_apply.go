@@ -307,6 +307,10 @@ func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
 		return false
 	}
 
+	if !annotationsEqual(a.Spec.Template.Annotations, b.Spec.Template.Annotations) {
+		return false
+	}
+
 	if a.Spec.Template.Spec.ServiceAccountName != b.Spec.Template.Spec.ServiceAccountName {
 		return false
 	}

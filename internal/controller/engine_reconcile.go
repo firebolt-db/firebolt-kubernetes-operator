@@ -519,6 +519,30 @@ func enginePodLabels(spec *computev1alpha1.FireboltEngineSpec, engineName string
 	return labels
 }
 
+// enginePodAnnotations returns the pod-template annotations to set on an
+// engine StatefulSet. User-provided PodAnnotations are passed through
+// verbatim, then any operator-managed annotations are layered on top so
+// they always win against user collisions. Returns nil when neither
+// source contributes an entry, to keep the rendered pod template
+// byte-identical to its pre-feature shape (avoids a spurious StatefulSet
+// rewrite on upgrade).
+//
+// The operator currently sets no annotations on the pod template itself
+// (only on the StatefulSet's own ObjectMeta), so this helper passes
+// PodAnnotations through unchanged today. The structure exists so that
+// any future operator-owned pod-template annotation can be added in one
+// place without re-opening the override-protection question.
+func enginePodAnnotations(spec *computev1alpha1.FireboltEngineSpec) map[string]string {
+	if len(spec.PodAnnotations) == 0 {
+		return nil
+	}
+	annotations := make(map[string]string, len(spec.PodAnnotations))
+	for k, v := range spec.PodAnnotations {
+		annotations[k] = v
+	}
+	return annotations
+}
+
 func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int) *appsv1.StatefulSet {
 	name := genResourceName(engineName, gen, "")
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
@@ -530,6 +554,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 
 	podLabels := enginePodLabels(spec, engineName, gen)
+	podAnnotations := enginePodAnnotations(spec)
 
 	annotations := map[string]string{}
 	if spec.MetadataEndpointOverride != nil {
@@ -661,7 +686,10 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			VolumeClaimTemplates:                 volumeClaimTemplates,
 			PersistentVolumeClaimRetentionPolicy: pvcRetentionPolicy,
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      podLabels,
+					Annotations: podAnnotations,
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
 					NodeSelector:                  spec.NodeSelector,
@@ -954,6 +982,23 @@ func resourceListEqual(actual, desired corev1.ResourceList) bool {
 	return true
 }
 
+// annotationsEqual compares two annotation maps for equality, treating a
+// nil map as identical to an empty map. ObjectMeta.Annotations is
+// json:"annotations,omitempty", so a round-trip through the API server
+// can flip an empty map to nil or vice versa; reflect.DeepEqual would
+// then report drift where there is none.
+func annotationsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
 // stsMatchesSpec returns true if the StatefulSet matches all mutable fields
 // in the engine spec. A mismatch triggers a new blue-green generation.
 func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
@@ -1012,6 +1057,15 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 	expectedPodLabels := enginePodLabels(spec, engineName, gen)
 	if !reflect.DeepEqual(sts.Spec.Template.Labels, expectedPodLabels) {
+		return false
+	}
+
+	// Pod-template annotations follow the same drift rule: any add /
+	// remove / value change against the merged operator+user map forces a
+	// new generation. enginePodAnnotations returns nil when the spec
+	// contributes nothing, which compares equal to a freshly-built
+	// StatefulSet whose pod template has no annotations.
+	if !annotationsEqual(sts.Spec.Template.Annotations, enginePodAnnotations(spec)) {
 		return false
 	}
 

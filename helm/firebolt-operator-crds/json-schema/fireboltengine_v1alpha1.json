@@ -958,6 +958,13 @@
           "description": "NodeSelector constrains which nodes the engine pods can be scheduled on.",
           "type": "object"
         },
+        "podAnnotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "PodAnnotations are additional annotations to apply to engine pods.\nOperator-managed pod annotations always win over user-provided values\nwith the same key, so user input cannot accidentally drop or shadow\nthem. All other annotations are passed through verbatim.\n\nChanges to this field trigger a new blue-green generation.",
+          "type": "object"
+        },
         "podLabels": {
           "additionalProperties": {
             "type": "string"
