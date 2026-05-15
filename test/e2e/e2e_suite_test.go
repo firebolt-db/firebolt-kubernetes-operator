@@ -59,14 +59,22 @@ const (
 // Image references for the E2E suite, sourced from the variant-specific
 // config/images/defaults.<variant>.env file embedded into the images package
 // at compile time. With the implicit default (no extra build tag) the "dev"
-// variant is in effect: testTag is the mutable `dev` alias (the only
-// mutable alias currently published on the engine/metadata GHCR packages)
-// and newImageTag is a pinned build tag mirrored from defaults.latest.env,
-// so the suite exercises the `:dev → pinned` upgrade path. With the
-// `latest` build tag opted in, both testTag and newImageTag are pinned to
-// the same engine build differing only by the release-/debug- prefix —
-// see docs/SDLC.md "Default image bumps" and README.md "Bumping Default
-// Image Versions".
+// variant is in effect: testTag / metadataTag track the mutable `:dev`
+// aliases (release-flavored builds of the dev branch). With `IMAGE_VARIANT=
+// latest` they pin to release-* build tags. Either way the suite operates
+// on release builds — the previous separately-published debug-flavored
+// upgrade-target image is gone.
+//
+// newImageTag / newMetadataTag are NOT loaded from a registry — they are
+// synthetic tag strings derived from the loaded image's tag with
+// upgradeTagSuffix appended, materialised inside each kind node by re-
+// tagging the already-loaded image during SynchronizedBeforeSuite. That
+// keeps the disk footprint to a single load per image while preserving a
+// distinct tag string for the image-switch specs to flip the pod template
+// to. See docs/SDLC.md "Default image bumps" and README.md "Bumping
+// Default Image Versions" for the variant rules.
+const upgradeTagSuffix = "-uptest"
+
 var (
 	testImage      string
 	testTag        string
@@ -83,10 +91,10 @@ var (
 func init() {
 	testImage = images.Get("ENGINE_IMAGE")
 	testTag = images.Get("ENGINE_TAG")
-	newImageTag = images.Get("ENGINE_NEW_TAG")
+	newImageTag = testTag + upgradeTagSuffix
 	metadataImage = images.Get("METADATA_IMAGE")
 	metadataTag = images.Get("METADATA_TAG")
-	newMetadataTag = images.Get("METADATA_NEW_TAG")
+	newMetadataTag = metadataTag + upgradeTagSuffix
 	postgresImage = images.Get("POSTGRES_IMAGE")
 	envoyImage = images.Get("ENVOY_IMAGE")
 	envoyTag = images.Get("ENVOY_TAG")
@@ -149,12 +157,15 @@ var _ = SynchronizedBeforeSuite(func() {
 	ctx, cancelFunc = context.WithCancel(context.Background())
 
 	Expect(testTag).NotTo(Equal(newImageTag),
-		"TEST_ENGINE_TAG and TEST_ENGINE_NEW_TAG must differ; upgrade tests would be no-ops")
+		"testTag and newImageTag must differ; upgrade tests would be no-ops")
+	Expect(metadataTag).NotTo(Equal(newMetadataTag),
+		"metadataTag and newMetadataTag must differ; upgrade tests would be no-ops")
 
-	fmt.Fprintf(GinkgoWriter, "E2E image variant: %s (engine=%s, metadata=%s)\n",
+	fmt.Fprintf(GinkgoWriter, "E2E image variant: %s (engine=%s, metadata=%s, upgrade-tag suffix=%q)\n",
 		images.Variant(),
 		testImage+":"+testTag,
 		metadataImage+":"+metadataTag,
+		upgradeTagSuffix,
 	)
 
 	By("Setting up Kubernetes client (proc 1)")
@@ -216,9 +227,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	kindNode := kindCluster + "-control-plane"
 	requiredImages := []string{
 		testImage + ":" + testTag,
-		testImage + ":" + newImageTag,
 		metadataImage + ":" + metadataTag,
-		metadataImage + ":" + newMetadataTag,
 		postgresImage,
 		envoyImage + ":" + envoyTag,
 		curlImage,
@@ -231,6 +240,40 @@ var _ = SynchronizedBeforeSuite(func() {
 				"Load it with: kind load docker-image %s --name %s", img, kindCluster, img, kindCluster))
 		}
 		fmt.Fprintf(GinkgoWriter, "Verified image %s is available\n", img)
+	}
+
+	By("Re-tagging engine/metadata images to materialise the upgrade-target tags")
+	// The image-switch specs (engine + metadata) flip the pod template to a
+	// different tag string to trigger a rollout. We do not load that tag
+	// from a registry — instead, re-tag the already-loaded image inside
+	// each kind node's containerd. ctr's tag is a metadata-only operation,
+	// so this adds zero on-disk image weight compared to loading a second
+	// image (which on the engine side is multiple GB). Must run on every
+	// node, not just the control-plane, because kubelet/CRI resolves
+	// images node-locally.
+	retagPairs := [][2]string{
+		{testImage + ":" + testTag, testImage + ":" + newImageTag},
+		{metadataImage + ":" + metadataTag, metadataImage + ":" + newMetadataTag},
+	}
+	nodesOut, err := exec.Command("kind", "get", "nodes", "--name", kindCluster).CombinedOutput()
+	if err != nil {
+		Fail(fmt.Sprintf("Failed to list kind nodes for cluster %q: %s", kindCluster, strings.TrimSpace(string(nodesOut))))
+	}
+	nodes := strings.Fields(strings.TrimSpace(string(nodesOut)))
+	Expect(nodes).NotTo(BeEmpty(), "kind reported no nodes for cluster %s", kindCluster)
+	for _, node := range nodes {
+		for _, pair := range retagPairs {
+			src, dst := pair[0], pair[1]
+			out, err := exec.Command(
+				"docker", "exec", node,
+				"ctr", "-n", "k8s.io", "image", "tag", "--force", src, dst,
+			).CombinedOutput()
+			if err != nil {
+				Fail(fmt.Sprintf("Failed to re-tag %s -> %s on node %s: %s",
+					src, dst, node, strings.TrimSpace(string(out))))
+			}
+			fmt.Fprintf(GinkgoWriter, "Re-tagged %s -> %s on node %s\n", src, dst, node)
+		}
 	}
 }, func() {
 	// Runs on every parallel process (including proc 1). Build a client and
