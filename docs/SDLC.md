@@ -89,6 +89,10 @@ Inside `Chart.yaml` itself, both spellings co-exist:
 
 When telling a partner "we shipped 1.17", point them at `kubernetes-operator:v1.17.0` (image) **and** at the chart version that carries `appVersion: v1.17.0`, not at a chart whose own `version` happens to be `1.17.0`.
 
+### `:latest` for the operator image
+
+The `:latest` alias on `ghcr.io/firebolt-db/kubernetes-operator` is produced by the CD workflow `.github/workflows/app-release-cd.yaml`: on every semantic-release from `main` it re-tags the just-built `:v<semver>` image as `:latest` and pushes both. `.releaserc.json` lists only `main` as a release branch (no pre-release branches), so every build that advances `:latest` is a stable release by definition — consistent with the [Tag semantics](#tag-semantics) rule that `:latest` tracks the latest stable release.
+
 ## GitHub Releases
 We do GitHub releases for major, minor and patch versions. A GitHub release always references a git tag (see [tag semantics](#tag-semantics)). A GitHub release name MUST also use a leading `v` to match the git tag.
 
