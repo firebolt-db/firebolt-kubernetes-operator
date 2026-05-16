@@ -2266,3 +2266,60 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 		t.Errorf("invalid customEngineConfig should be ignored, but defaults were touched: %v", instance)
 	}
 }
+
+// TestBuildStatefulSet_PartialImageOverride pins the contract end to
+// end: a spec.Image that sets only repository or only tag must produce a
+// pod container image that combines the user-supplied half with the
+// operator default for the other half, and stsMatchesSpec must accept the
+// resulting STS without triggering a new blue-green generation.
+func TestBuildStatefulSet_PartialImageOverride(t *testing.T) {
+	tests := []struct {
+		name      string
+		image     *computev1alpha1.ImageSpec
+		wantImage string
+	}{
+		{
+			name:      "nil spec uses default reference",
+			image:     nil,
+			wantImage: DefaultEngineImage,
+		},
+		{
+			name:      "repository-only override keeps default tag",
+			image:     &computev1alpha1.ImageSpec{Repository: "mirror.example.com/engine"},
+			wantImage: "mirror.example.com/engine:" + DefaultEngineTag,
+		},
+		{
+			name:      "tag-only override keeps default repository",
+			image:     &computev1alpha1.ImageSpec{Tag: "v9.9.9"},
+			wantImage: DefaultEngineRepository + ":v9.9.9",
+		},
+		{
+			name: "both fields override completely",
+			image: &computev1alpha1.ImageSpec{
+				Repository: "mirror.example.com/engine",
+				Tag:        "v9.9.9",
+			},
+			wantImage: "mirror.example.com/engine:v9.9.9",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := testSpec()
+			spec.Image = tc.image
+
+			sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+			got := sts.Spec.Template.Spec.Containers[0].Image
+			if got != tc.wantImage {
+				t.Errorf("container image = %q, want %q", got, tc.wantImage)
+			}
+
+			// stsMatchesSpec must accept the just-built STS so a partial
+			// override does not perpetually trigger a new blue-green
+			// generation.
+			if !stsMatchesSpec(sts, spec) {
+				t.Error("stsMatchesSpec returned false for a freshly built STS")
+			}
+		})
+	}
+}

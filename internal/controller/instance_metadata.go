@@ -221,15 +221,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		replicas = *instance.Spec.Metadata.Replicas
 	}
 
-	image := DefaultMetadataImage
-	pullPolicy := corev1.PullIfNotPresent
-	if spec.Image != nil {
-		image = spec.Image.Repository + ":" + spec.Image.Tag
-		pullPolicy = spec.Image.PullPolicy
-		if pullPolicy == "" {
-			pullPolicy = corev1.PullIfNotPresent
-		}
-	}
+	image := resolveImageRef(spec.Image, DefaultMetadataRepository, DefaultMetadataTag)
+	pullPolicy := resolveImagePullPolicy(spec.Image)
 
 	configHash := contentHash(configXML)
 

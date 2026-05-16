@@ -21,14 +21,28 @@ import (
 )
 
 // ImageSpec defines the container image configuration.
+//
+// Both Repository and Tag are optional. Any field left empty falls back to
+// the corresponding operator default (see the Default*Repository /
+// Default*Tag constants in internal/controller), so users may override only
+// the repository (to pull from a mirror) or only the tag (to pin a version)
+// without restating the other half. An empty struct is equivalent to
+// omitting the field entirely: defaults are applied to every dimension.
 type ImageSpec struct {
-	// Repository is the container image repository.
+	// Repository is the container image repository. When empty, the
+	// operator's default repository for this component is used; pair with
+	// Tag to override the full reference, or set on its own to pull the
+	// operator-default tag from a different repository (e.g. a mirror).
 	// +kubebuilder:validation:MinLength=1
-	Repository string `json:"repository"`
+	// +optional
+	Repository string `json:"repository,omitempty"`
 
-	// Tag is the container image tag.
+	// Tag is the container image tag. When empty, the operator's default
+	// tag for this component is used; set on its own to pin a specific
+	// version while keeping the operator-default repository.
 	// +kubebuilder:validation:MinLength=1
-	Tag string `json:"tag"`
+	// +optional
+	Tag string `json:"tag,omitempty"`
 
 	// PullPolicy defines when to pull the image.
 	// +kubebuilder:validation:Enum=Always;Never;IfNotPresent

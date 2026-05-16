@@ -583,15 +583,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *spec.Replicas
 	}
 
-	image := DefaultEnvoyImage
-	pullPolicy := corev1.PullIfNotPresent
-	if spec.Image != nil {
-		image = spec.Image.Repository + ":" + spec.Image.Tag
-		pullPolicy = spec.Image.PullPolicy
-		if pullPolicy == "" {
-			pullPolicy = corev1.PullIfNotPresent
-		}
-	}
+	image := resolveImageRef(spec.Image, DefaultEnvoyRepository, DefaultEnvoyTag)
+	pullPolicy := resolveImagePullPolicy(spec.Image)
 
 	configHash := contentHash(envoyYAML)
 

@@ -22,6 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
 )
 
@@ -169,12 +170,55 @@ const (
 
 // Default container images, sourced from the variant-specific
 // config/images/defaults.<variant>.env file embedded by the images package.
+//
+// The Default*Image strings are the convenience "repository:tag" form used
+// when comparing or stamping a fully-resolved reference; the matching
+// Default*Repository / Default*Tag pairs are exposed separately so the
+// resolveImageRef helper can fall back to either half independently when a
+// user supplies a partial ImageSpec override.
 var (
-	PostgresImage        = images.PostgresImage
-	DefaultMetadataImage = images.DefaultMetadata()
-	DefaultEnvoyImage    = images.DefaultEnvoy()
-	DefaultEngineImage   = images.DefaultEngine()
+	PostgresImage             = images.PostgresImage
+	DefaultMetadataImage      = images.DefaultMetadata()
+	DefaultMetadataRepository = images.MetadataImage
+	DefaultMetadataTag        = images.MetadataTag
+	DefaultEnvoyImage         = images.DefaultEnvoy()
+	DefaultEnvoyRepository    = images.EnvoyImage
+	DefaultEnvoyTag           = images.EnvoyTag
+	DefaultEngineImage        = images.DefaultEngine()
+	DefaultEngineRepository   = images.EngineImage
+	DefaultEngineTag          = images.EngineTag
 )
+
+// resolveImageRef returns "repository:tag" for a component, using fields from
+// the user-supplied ImageSpec when present and falling back to the supplied
+// component defaults otherwise. A nil spec, an empty repository, or an empty
+// tag each independently fall back to the corresponding default, so users may
+// override only the repository (to pull from a mirror) or only the tag (to
+// pin a version) without restating the other half.
+func resolveImageRef(spec *computev1alpha1.ImageSpec, defaultRepo, defaultTag string) string {
+	repo := defaultRepo
+	tag := defaultTag
+	if spec != nil {
+		if spec.Repository != "" {
+			repo = spec.Repository
+		}
+		if spec.Tag != "" {
+			tag = spec.Tag
+		}
+	}
+	return repo + ":" + tag
+}
+
+// resolveImagePullPolicy returns the pull policy from the user-supplied
+// ImageSpec when set, or IfNotPresent otherwise. The API server defaults
+// pullPolicy to IfNotPresent on admission, so this fallback only matters for
+// unit tests that build specs directly without going through the API server.
+func resolveImagePullPolicy(spec *computev1alpha1.ImageSpec) corev1.PullPolicy {
+	if spec != nil && spec.PullPolicy != "" {
+		return spec.PullPolicy
+	}
+	return corev1.PullIfNotPresent
+}
 
 // EngineStartupScript is the script used to start the engine process.
 // POD_INDEX is injected via the downward API in buildStatefulSet, sourced

@@ -1137,16 +1137,20 @@ spec:
                     - IfNotPresent
                     type: string
                   repository:
-                    description: Repository is the container image repository.
+                    description: |-
+                      Repository is the container image repository. When empty, the
+                      operator's default repository for this component is used; pair with
+                      Tag to override the full reference, or set on its own to pull the
+                      operator-default tag from a different repository (e.g. a mirror).
                     minLength: 1
                     type: string
                   tag:
-                    description: Tag is the container image tag.
+                    description: |-
+                      Tag is the container image tag. When empty, the operator's default
+                      tag for this component is used; set on its own to pin a specific
+                      version while keeping the operator-default repository.
                     minLength: 1
                     type: string
-                required:
-                - repository
-                - tag
                 type: object
               instanceRef:
                 description: |-

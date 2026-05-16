@@ -564,14 +564,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		annotations[AnnotationCustomEngineConfigHash] = h
 	}
 
-	image := DefaultEngineImage
-	pullPolicy := corev1.PullIfNotPresent
-	if spec.Image != nil {
-		image = fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
-		if spec.Image.PullPolicy != "" {
-			pullPolicy = spec.Image.PullPolicy
-		}
-	}
+	image := resolveImageRef(spec.Image, DefaultEngineRepository, DefaultEngineTag)
+	pullPolicy := resolveImagePullPolicy(spec.Image)
 
 	gracePeriod := getTerminationGracePeriod(spec)
 	podSecurityContext := getEnginePodSecurityContext(spec)
@@ -1011,14 +1005,8 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 	container := podSpec.Containers[0]
 
-	expectedImage := DefaultEngineImage
-	expectedPullPolicy := corev1.PullIfNotPresent
-	if spec.Image != nil {
-		expectedImage = fmt.Sprintf("%s:%s", spec.Image.Repository, spec.Image.Tag)
-		if spec.Image.PullPolicy != "" {
-			expectedPullPolicy = spec.Image.PullPolicy
-		}
-	}
+	expectedImage := resolveImageRef(spec.Image, DefaultEngineRepository, DefaultEngineTag)
+	expectedPullPolicy := resolveImagePullPolicy(spec.Image)
 	if container.Image != expectedImage {
 		return false
 	}
