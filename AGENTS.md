@@ -49,10 +49,12 @@ Unit tests live alongside their source files in `internal/controller/` and `inte
 - `make helm-lint` -- lint both Helm charts
 - `make helm-template` -- render Helm templates locally
 - `make helm-docs` -- regenerate Helm chart READMEs from `values.yaml` comments
-- `make prepare-test-e2e` -- create Kind cluster and load test images
+- `make setup-local-registry` -- start the local Docker registry that kind nodes mirror through (idempotent)
+- `make flush-local-registry` -- drop and recreate the local registry (clears cached images)
+- `make prepare-test-e2e` -- create Kind cluster and publish test images to the local registry
 - `make local-deploy` -- build operator, load into Kind, deploy via Helm
 - `make local-undeploy` -- remove the operator Helm release
-- `make cleanup-test-e2e` -- delete the Kind cluster
+- `make cleanup-test-e2e` -- delete the Kind cluster (local registry is left running)
 
 After every code change: `make build && make lint`. Use `make lint-fix` to auto-fix where possible.
 
@@ -132,11 +134,30 @@ Before touching the engine reconciler -- especially `engine_reconcile.go`, `engi
 
 When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/kubernetes-operator/templates/clusterrole.yaml`](helm/kubernetes-operator/templates/clusterrole.yaml) needs matching edits -- it is hand-maintained separately from kubebuilder output.
 
+### Local image-loading mechanism
+
+E2E and helm-test workflows publish workload images (engine, metadata, postgres, envoy, curl) to a **local Docker registry container** rather than copying each image into every kind node's containerd snapshotter via `kind load docker-image`. The legacy `kind load` flow duplicates the multi-GB engine image per node and overflows Docker Desktop's default ~64 GB VM disk on multi-node clusters.
+
+Layout:
+
+- Container: `kind-registry` (image `registry:2`), exposed on `127.0.0.1:5001`, attached to the `kind` Docker network so kind nodes resolve it as `kind-registry:5000`.
+- Each kind node has `containerdConfigPatches` pointing at `/etc/containerd/certs.d`, plus per-host `hosts.toml` files written by `scripts/setup-kind-cluster.sh` that alias `ghcr.io` and `docker.io` to `http://kind-registry:5000`. Containerd hot-reloads `certs.d`, no daemon restart.
+- `scripts/load-e2e-images.sh` does `docker pull -> docker tag -> docker push -> docker rmi` per image so Docker's local content store stays empty after publishing.
+- The image-switch E2E specs need a synthetic `<tag>-uptest` reference; the load script publishes the same engine / metadata content under both `${TAG}` and `${TAG}-uptest`. OCI registries dedupe by digest, so the second tag is just a manifest write. Keep `upgradeTagSuffix` in `test/e2e/e2e_suite_test.go` in sync with `UPGRADE_TAG_SUFFIX` in the load script.
+
+Operations:
+
+- Start / repair: `make setup-local-registry` (idempotent; called transitively by `make setup-kind`).
+- Flush stale cache: `make flush-local-registry` (`docker rm -f kind-registry` + recreate). Use after a kind upgrade changes the network, or when a malformed push is masking a real bump.
+- Verify: `curl http://localhost:5001/v2/_catalog`.
+
+The registry persists across `make cleanup-test-e2e` (which only deletes the kind cluster) so the next `make prepare-test-e2e` reuses cached layers. `kind-load-operator` (used by `make local-deploy`) still uses `kind load docker-image` because the operator binary image is small and built locally — not worth registry-ifying.
+
 ### Testing rules
 
 **Unit tests** (`internal/controller/*_test.go`): use envtest (embedded K8s API server). Run with `make test`.
 
-**E2E tests** (`test/e2e/`): require a Kind cluster with images loaded. Build tag `e2e`; heavy stress tests use tag `e2e,heavy`. The operator runs **in-process** during E2E -- it is not deployed into the cluster.
+**E2E tests** (`test/e2e/`): require a Kind cluster with images published to the local registry (see "Local image-loading mechanism"). Build tag `e2e`; heavy stress tests use tag `e2e,heavy`. The operator runs **in-process** during E2E -- it is not deployed into the cluster.
 
 E2E rules:
 

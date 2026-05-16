@@ -22,6 +22,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,14 +66,21 @@ const (
 // on release builds — the previous separately-published debug-flavored
 // upgrade-target image is gone.
 //
-// newImageTag / newMetadataTag are NOT loaded from a registry — they are
+// newImageTag / newMetadataTag are NOT separate image content — they are
 // synthetic tag strings derived from the loaded image's tag with
-// upgradeTagSuffix appended, materialised inside each kind node by re-
-// tagging the already-loaded image during SynchronizedBeforeSuite. That
-// keeps the disk footprint to a single load per image while preserving a
-// distinct tag string for the image-switch specs to flip the pod template
-// to. See docs/SDLC.md "Default image bumps" and README.md "Bumping
-// Default Image Versions" for the variant rules.
+// upgradeTagSuffix appended. scripts/load-e2e-images.sh pushes the same
+// engine / metadata content under both ${TAG} and ${TAG}-uptest into the
+// local kind-registry; an OCI registry stores the second tag as a manifest
+// pointing at existing blobs, so there is no extra layer transfer or kind
+// node disk usage. Kind nodes resolve both tags transparently through the
+// containerd hosts.toml mirror written by setup-kind-cluster.sh.
+//
+// upgradeTagSuffix MUST stay in sync with UPGRADE_TAG_SUFFIX in
+// scripts/load-e2e-images.sh — the script is what materialises this tag
+// in the registry, and a mismatch surfaces as an opaque ImagePullBackOff.
+//
+// See docs/SDLC.md "Default image bumps" and README.md "Bumping Default
+// Image Versions" for the variant rules.
 const upgradeTagSuffix = "-uptest"
 
 var (
@@ -219,61 +227,34 @@ var _ = SynchronizedBeforeSuite(func() {
 	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	By("Verifying required container images are loaded in Kind cluster")
-	kindCluster := os.Getenv("KIND_CLUSTER")
-	if kindCluster == "" {
-		kindCluster = "operator-test-e2e"
-	}
-	kindNode := kindCluster + "-control-plane"
+	By("Verifying required container images are published to the kind-registry mirror")
+	// kind nodes mirror ghcr.io / docker.io through the local registry
+	// started by scripts/setup-local-registry.sh. We verify image
+	// availability by hitting the registry's manifest endpoint from the
+	// host (where this test process runs). The previous `crictl inspecti`
+	// check ran against the kind node's containerd content store, which
+	// is empty at suite start under the registry-mirror flow — content
+	// only lands on a node when a pod actually pulls.
 	requiredImages := []string{
 		testImage + ":" + testTag,
+		testImage + ":" + newImageTag,
 		metadataImage + ":" + metadataTag,
+		metadataImage + ":" + newMetadataTag,
 		postgresImage,
 		envoyImage + ":" + envoyTag,
 		curlImage,
 	}
+	registryEndpoint := os.Getenv("REGISTRY_HOST_ENDPOINT")
+	if registryEndpoint == "" {
+		registryEndpoint = "localhost:5001"
+	}
 	for _, img := range requiredImages {
-		out, err := exec.Command("docker", "exec", kindNode, "crictl", "inspecti", img).CombinedOutput()
-		if err != nil {
-			fmt.Fprintf(GinkgoWriter, "crictl inspecti output for %s: %s\n", img, strings.TrimSpace(string(out)))
-			Fail(fmt.Sprintf("Required image %q is not loaded in Kind cluster %q. "+
-				"Load it with: kind load docker-image %s --name %s", img, kindCluster, img, kindCluster))
+		if err := verifyImageInRegistry(registryEndpoint, img); err != nil {
+			Fail(fmt.Sprintf("Required image %q is not available via registry %s: %v. "+
+				"Run `make load-test-images` to (re-)publish images.",
+				img, registryEndpoint, err))
 		}
-		fmt.Fprintf(GinkgoWriter, "Verified image %s is available\n", img)
-	}
-
-	By("Re-tagging engine/metadata images to materialise the upgrade-target tags")
-	// The image-switch specs (engine + metadata) flip the pod template to a
-	// different tag string to trigger a rollout. We do not load that tag
-	// from a registry — instead, re-tag the already-loaded image inside
-	// each kind node's containerd. ctr's tag is a metadata-only operation,
-	// so this adds zero on-disk image weight compared to loading a second
-	// image (which on the engine side is multiple GB). Must run on every
-	// node, not just the control-plane, because kubelet/CRI resolves
-	// images node-locally.
-	retagPairs := [][2]string{
-		{testImage + ":" + testTag, testImage + ":" + newImageTag},
-		{metadataImage + ":" + metadataTag, metadataImage + ":" + newMetadataTag},
-	}
-	nodesOut, err := exec.Command("kind", "get", "nodes", "--name", kindCluster).CombinedOutput()
-	if err != nil {
-		Fail(fmt.Sprintf("Failed to list kind nodes for cluster %q: %s", kindCluster, strings.TrimSpace(string(nodesOut))))
-	}
-	nodes := strings.Fields(strings.TrimSpace(string(nodesOut)))
-	Expect(nodes).NotTo(BeEmpty(), "kind reported no nodes for cluster %s", kindCluster)
-	for _, node := range nodes {
-		for _, pair := range retagPairs {
-			src, dst := pair[0], pair[1]
-			out, err := exec.Command(
-				"docker", "exec", node,
-				"ctr", "-n", "k8s.io", "image", "tag", "--force", src, dst,
-			).CombinedOutput()
-			if err != nil {
-				Fail(fmt.Sprintf("Failed to re-tag %s -> %s on node %s: %s",
-					src, dst, node, strings.TrimSpace(string(out))))
-			}
-			fmt.Fprintf(GinkgoWriter, "Re-tagged %s -> %s on node %s\n", src, dst, node)
-		}
+		fmt.Fprintf(GinkgoWriter, "Verified image %s is available in registry %s\n", img, registryEndpoint)
 	}
 }, func() {
 	// Runs on every parallel process (including proc 1). Build a client and
@@ -417,5 +398,79 @@ func cleanupStaleResources(ctx context.Context) {
 	err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
+	}
+}
+
+// verifyImageInRegistry checks that an image (in "[host/]repo[:tag]" form) is
+// available via the local kind-registry by HEADing the manifest endpoint. The
+// path translation matches scripts/load-e2e-images.sh's `to_registry_path`:
+// strip an explicit registry host, prepend "library/" for bare Docker Hub
+// names. Any non-2xx response is treated as missing.
+func verifyImageInRegistry(registryEndpoint, image string) error {
+	repoPath, tag := registryRepoPathAndTag(image)
+	url := fmt.Sprintf("http://%s/v2/%s/manifests/%s", registryEndpoint, repoPath, tag)
+
+	req, err := http.NewRequest(http.MethodHead, url, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	// Accept multiple manifest media types so the registry doesn't 404 a
+	// well-formed manifest for which we forgot to advertise an Accept.
+	for _, mt := range []string{
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.oci.image.index.v1+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+	} {
+		req.Header.Add("Accept", mt)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("HEAD %s: %w", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("HEAD %s returned HTTP %d", url, resp.StatusCode)
+	}
+	return nil
+}
+
+// registryRepoPathAndTag splits "[host/]repo[:tag]" into (repoPath, tag),
+// applying Docker's image normalisation so the result matches what
+// scripts/load-e2e-images.sh pushes into the local registry. Tag defaults to
+// "latest" when absent (matching Docker's resolution rules).
+func registryRepoPathAndTag(image string) (string, string) {
+	tag := "latest"
+	repo := image
+	// Split off the tag at the LAST colon so a host:port prefix like
+	// "localhost:5001/foo:tag" parses correctly. We use the last "/" to
+	// decide whether the colon belongs to a host:port (no "/" after it
+	// means no path component, i.e. host:port) — but in practice this
+	// helper is fed bare references like "ghcr.io/firebolt-db/engine:dev",
+	// "postgres:16-alpine", or "envoyproxy/envoy:v1.37.2" where the last
+	// colon is always the tag separator.
+	if idx := strings.LastIndex(image, ":"); idx > strings.LastIndex(image, "/") {
+		repo = image[:idx]
+		tag = image[idx+1:]
+	}
+
+	firstSeg := repo
+	if i := strings.Index(repo, "/"); i >= 0 {
+		firstSeg = repo[:i]
+	}
+	switch {
+	case strings.Contains(repo, "/") &&
+		(strings.Contains(firstSeg, ".") || strings.Contains(firstSeg, ":") || firstSeg == "localhost"):
+		// Has explicit host: strip it.
+		return repo[strings.Index(repo, "/")+1:], tag
+	case strings.Contains(repo, "/"):
+		// org/name on Docker Hub: keep as is.
+		return repo, tag
+	default:
+		// Bare name on Docker Hub: prepend library/.
+		return "library/" + repo, tag
 	}
 }

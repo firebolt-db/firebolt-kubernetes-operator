@@ -1,31 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Load required Docker images into Kind cluster for e2e testing.
+# Publish required workload images to the local Docker registry that kind
+# nodes mirror through (started by scripts/setup-local-registry.sh, wired
+# into containerd by scripts/setup-kind-cluster.sh).
+#
 # All image values come from config/images/defaults.<variant>.env (single source
 # of truth, where <variant> is IMAGE_VARIANT, defaulting to "dev").
 #
 # IMAGE_VARIANT MUST match the build tag of the operator binary and the test
 # binary that will run after this script — otherwise the suite asks Kind for
-# images this script never loaded. The Makefile threads IMAGE_VARIANT through
-# `build`, `prepare-test-e2e`, and `test-e2e` to keep the two in sync.
+# images this script never published. The Makefile threads IMAGE_VARIANT
+# through `build`, `prepare-test-e2e`, and `test-e2e` to keep the two in sync.
 #
-# Images are pulled (if missing locally) and loaded into Kind in parallel.
-# Parallelism can be tuned via E2E_LOAD_PARALLELISM (default: 4). Each
-# `kind load docker-image` invocation streams `docker save` into containerd
-# on the control-plane node; these imports are independent and safe to run
-# concurrently.
+# Why a registry, not `kind load docker-image`:
+# `kind load` copies each image into every kind node's containerd snapshotter,
+# which on a multi-node cluster (we run 1 control-plane + 1+ workers) means
+# the engine image (~5 GB) is duplicated per node and Docker Desktop's
+# default ~64 GB VM disk fills up. The registry stores each image once;
+# kind nodes pull only the layers they actually run.
+# https://kind.sigs.k8s.io/docs/user/local-registry/
 #
 # Upgrade-target images: the E2E image-switch tests need a DIFFERENT tag
 # string than the loaded one, but not different image content. Rather than
-# publishing and loading a second image (which would double the engine /
-# metadata disk footprint per kind node), the suite re-tags the already-
-# loaded image inside containerd at startup. See
-# test/e2e/e2e_suite_test.go for the re-tag step.
+# publishing a separately-built upgrade image, this script pushes the same
+# engine / metadata content under both ${TAG} and ${TAG}-uptest. A second
+# tag in an OCI registry is just a manifest pointing at existing blobs, so
+# there is no extra layer transfer or disk usage. Keep
+# `upgradeTagSuffix = "-uptest"` in test/e2e/e2e_suite_test.go in sync with
+# UPGRADE_TAG_SUFFIX below.
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
 IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
+
+# Local registry endpoints. The host-side endpoint is what `docker push`
+# talks to; the in-cluster endpoint is what containerd resolves through the
+# /etc/containerd/certs.d hosts.toml files written by setup-kind-cluster.sh.
+REGISTRY_NAME="${REGISTRY_NAME:-kind-registry}"
+REGISTRY_PORT="${REGISTRY_PORT:-5001}"
+REGISTRY_HOST_ENDPOINT="localhost:${REGISTRY_PORT}"
+
+# Suffix for the synthetic upgrade-target tag. Must match
+# test/e2e/e2e_suite_test.go's `upgradeTagSuffix`.
+UPGRADE_TAG_SUFFIX="${UPGRADE_TAG_SUFFIX:--uptest}"
 
 case "${IMAGE_VARIANT}" in
     latest|dev) ;;
@@ -45,23 +63,17 @@ echo "Sourcing defaults from ${DEFAULTS_ENV} (IMAGE_VARIANT=${IMAGE_VARIANT})"
 # shellcheck disable=SC1090
 source "${DEFAULTS_ENV}"
 
-# `kind load docker-image` creates multi-GB tarballs via `docker save` under
-# $TMPDIR. The default /tmp is tmpfs on many Linux distros (notably Ubuntu
-# 24.04+) and fills up quickly with concurrent loads. Redirect to a
-# workspace-local disk-backed directory so we don't compete for tmpfs.
-KIND_LOAD_TMPDIR="${KIND_LOAD_TMPDIR:-/var/tmp}"
-mkdir -p "${KIND_LOAD_TMPDIR}"
-KIND_LOAD_TMPDIR="$(cd "${KIND_LOAD_TMPDIR}" && pwd)"
-export TMPDIR="${KIND_LOAD_TMPDIR}"
-trap 'rm -rf "${KIND_LOAD_TMPDIR:?}"/images-tar* 2>/dev/null || true' EXIT
-
-echo "=== Loading images into Kind cluster: ${CLUSTER_NAME} (parallelism=${LOAD_PARALLELISM}) ==="
+echo "=== Publishing images to local registry ${REGISTRY_HOST_ENDPOINT} (parallelism=${LOAD_PARALLELISM}) ==="
 
 if ! kind get nodes --name "${CLUSTER_NAME}" &>/dev/null; then
     echo "Error: Kind cluster '${CLUSTER_NAME}' does not exist."
     echo "Run 'make setup-kind' first."
     exit 1
 fi
+
+# Pre-flight: registry must be up and reachable on the host. Provides a
+# clearer error than `docker push` failing with "connection refused".
+"${SCRIPT_DIR}/setup-local-registry.sh" >/dev/null
 
 # NOTE: GHCR authentication should be done before running this script.
 # In CI, use docker/login-action with ghcr.io.
@@ -87,9 +99,34 @@ declare -a IMAGES=(
     "${CURL_IMAGE}|pull"
 )
 
-load_one() {
+# Translate a Docker image reference (possibly without explicit registry
+# host, possibly without organisation) to the path the kind-registry
+# mirror expects. The transformation matches Docker's implicit image
+# normalisation:
+#   ghcr.io/firebolt-db/engine:dev   -> firebolt-db/engine:dev   (strip explicit host)
+#   envoyproxy/envoy:v1.37.2         -> envoyproxy/envoy:v1.37.2 (org/name; keep)
+#   postgres:16-alpine               -> library/postgres:16-alpine (official Docker Hub)
+# The kind nodes' containerd hosts.toml maps both ghcr.io and docker.io to
+# the local registry, so a single push under each upstream's path makes the
+# image resolvable without changing the operator-baked image references.
+to_registry_path() {
+    local image="$1"
+    local first_seg="${image%%/*}"
+    if [[ "${image}" == */* ]] && \
+       [[ "${first_seg}" == *"."* || "${first_seg}" == *":"* || "${first_seg}" == "localhost" ]]; then
+        # Has explicit host: strip it.
+        printf '%s\n' "${image#*/}"
+    elif [[ "${image}" == */* ]]; then
+        # Has org but no host (Docker Hub user/org image): keep as is.
+        printf '%s\n' "${image}"
+    else
+        # Bare name (Docker Hub official image): prepend library/.
+        printf '%s\n' "library/${image}"
+    fi
+}
+
+publish_one() {
     local entry="$1"
-    local cluster="$2"
     local image="${entry%|*}"
     local policy="${entry##*|}"
 
@@ -107,25 +144,52 @@ load_one() {
             ;;
     esac
 
-    echo ">>> [${image}] loading into Kind"
-    kind load docker-image "${image}" --name "${cluster}"
+    local repo_path
+    repo_path=$(to_registry_path "${image}")
+    local registry_ref="${REGISTRY_HOST_ENDPOINT}/${repo_path}"
+
+    echo ">>> [${image}] tagging -> ${registry_ref}"
+    docker tag "${image}" "${registry_ref}"
+
+    echo ">>> [${image}] pushing -> ${registry_ref}"
+    docker push "${registry_ref}"
+
+    # Engine and metadata are referenced by the E2E image-switch specs
+    # under a synthetic upgrade tag. Push the same content under that tag
+    # so kind nodes can resolve it via the same mirror without storing a
+    # second copy of the layers (OCI registries dedupe by digest).
+    case "${image}" in
+        "${ENGINE_IMAGE}:${ENGINE_TAG}"|"${METADATA_IMAGE}:${METADATA_TAG}")
+            local tagless="${image%:*}"
+            local original_tag="${image##*:}"
+            local upgrade_tag="${original_tag}${UPGRADE_TAG_SUFFIX}"
+            local upgrade_repo_path
+            upgrade_repo_path=$(to_registry_path "${tagless}:${upgrade_tag}")
+            local upgrade_ref="${REGISTRY_HOST_ENDPOINT}/${upgrade_repo_path}"
+            echo ">>> [${image}] tagging -> ${upgrade_ref} (upgrade-target alias)"
+            docker tag "${image}" "${upgrade_ref}"
+            echo ">>> [${image}] pushing -> ${upgrade_ref}"
+            docker push "${upgrade_ref}"
+            # Drop the local Docker tag of the upgrade alias once pushed;
+            # registry retains it.
+            docker rmi "${upgrade_ref}" >/dev/null 2>&1 || true
+            ;;
+    esac
+
+    # Free Docker's local content store on the host. Pulled image bytes
+    # live in the registry now; keeping a second copy on the host's
+    # overlay graph driver is what blew past 64 GB on Docker Desktop.
+    # The source tag is removed first; the registry-side tag is removed
+    # alongside it. Both `rmi`s tolerate "image is being used by stopped
+    # container" / "no such image" because of `|| true`.
+    docker rmi "${registry_ref}" >/dev/null 2>&1 || true
+    docker rmi "${image}" >/dev/null 2>&1 || true
+
     echo ">>> [${image}] done"
 }
-export -f load_one
-
-# xargs -P runs up to N children concurrently; if any child exits non-zero,
-# xargs continues the rest but returns non-zero itself, which (combined with
-# `set -e` and `pipefail`) fails the script. Each child runs under
-# `bash -eo pipefail` so intra-child failures propagate correctly.
-printf '%s\n' "${IMAGES[@]}" \
-    | xargs -n1 -P "${LOAD_PARALLELISM}" -I{} \
-        bash -eo pipefail -c 'load_one "$1" "$2"' _ {} "${CLUSTER_NAME}"
-
-echo ""
-echo "=== Image loading complete ==="
-echo ""
-echo "Loaded images in Kind cluster:"
-docker exec "${CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | head -20 || true
+export -f publish_one to_registry_path
+export REGISTRY_HOST_ENDPOINT UPGRADE_TAG_SUFFIX
+export ENGINE_IMAGE ENGINE_TAG METADATA_IMAGE METADATA_TAG
 
 # Pre-flight: ensure the engine image's architecture matches the kind node's
 # architecture. Otherwise the engine binary will run via the kind node's
@@ -133,10 +197,15 @@ docker exec "${CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | head -20
 # propagated into nested kind containers) is qemu-x86_64. qemu-x86_64 lacks
 # AVX2/BMI2/FMA, so x86-64-v3 binaries SIGILL during startup -- and the
 # failure surfaces ~6 minutes later as an opaque startup-probe timeout.
-echo ""
-echo "=== Pre-flight: verify ${ENGINE_IMAGE}:${ENGINE_TAG} arch matches kind node ==="
-
+#
+# We do this BEFORE the parallel push/rmi pass because publish_one removes
+# the source image from the host once pushed; `docker image inspect` would
+# then 404. Pulling here (single-shot, foreground) doubles as a sanity
+# check that GHCR auth is configured before we kick off the parallel work.
 ENGINE_REF="${ENGINE_IMAGE}:${ENGINE_TAG}"
+echo ""
+echo "=== Pre-flight: pull ${ENGINE_REF} and verify arch matches kind node ==="
+docker pull "${ENGINE_REF}"
 image_arch=$(docker image inspect "${ENGINE_REF}" --format '{{.Architecture}}' 2>/dev/null || echo "unknown")
 node_arch_kernel=$(docker exec "${CLUSTER_NAME}-control-plane" uname -m 2>/dev/null || echo "unknown")
 case "${node_arch_kernel}" in
@@ -157,3 +226,18 @@ if [ "${image_arch}" != "${node_arch}" ]; then
 fi
 
 echo ">>> Engine image arch '${image_arch}' matches kind node arch '${node_arch}'."
+
+# xargs -P runs up to N children concurrently; if any child exits non-zero,
+# xargs continues the rest but returns non-zero itself, which (combined with
+# `set -e` and `pipefail`) fails the script. Each child runs under
+# `bash -eo pipefail` so intra-child failures propagate correctly.
+printf '%s\n' "${IMAGES[@]}" \
+    | xargs -n1 -P "${LOAD_PARALLELISM}" -I{} \
+        bash -eo pipefail -c 'publish_one "$1"' _ {}
+
+echo ""
+echo "=== Image publishing complete ==="
+echo ""
+echo "Catalog of repositories in local registry ${REGISTRY_HOST_ENDPOINT}:"
+curl -fsS "http://${REGISTRY_HOST_ENDPOINT}/v2/_catalog" | head -c 4096 || true
+echo ""
