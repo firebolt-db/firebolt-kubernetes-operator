@@ -110,16 +110,35 @@ test-property: manifests generate setup-envtest ## Run the outer-Reconcile rapid
 
 KIND_CLUSTER ?= operator-test-e2e
 
+# Local Docker registry that kind nodes mirror through (avoids per-node
+# duplication of multi-GB images on multi-node clusters). Override
+# REGISTRY_PORT / REGISTRY_NAME if 5001 / kind-registry collide with another
+# tool. The same defaults are baked into scripts/setup-local-registry.sh.
+REGISTRY_NAME ?= kind-registry
+REGISTRY_PORT ?= 5001
+
+.PHONY: setup-local-registry
+setup-local-registry: ## Start the local Docker registry that kind nodes mirror through.
+	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-local-registry.sh
+
+.PHONY: cleanup-local-registry
+cleanup-local-registry: ## Stop and remove the local Docker registry container (cached images are lost).
+	@docker rm -f $(REGISTRY_NAME) >/dev/null 2>&1 || true
+	@echo "Removed local registry '$(REGISTRY_NAME)' (if it existed). Re-run 'make setup-local-registry' to recreate."
+
+.PHONY: flush-local-registry
+flush-local-registry: cleanup-local-registry setup-local-registry ## Recreate the local registry from scratch (drops cached images).
+
 .PHONY: setup-kind
-setup-kind: ## Create a Kind cluster if it does not exist
-	@./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
+setup-kind: setup-local-registry ## Create a Kind cluster if it does not exist (also starts the local registry).
+	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
 
 .PHONY: load-test-images
-load-test-images: ## Load required Docker images into the Kind cluster
-	IMAGE_VARIANT=$(IMAGE_VARIANT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+load-test-images: ## Publish required Docker images to the local registry (via mirror, kind nodes pull on demand).
+	IMAGE_VARIANT=$(IMAGE_VARIANT) REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
-prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, load images
+prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, publish images
 
 GINKGO_FOCUS ?=
 
@@ -141,6 +160,7 @@ endif
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+		REGISTRY_HOST_ENDPOINT="localhost:$(REGISTRY_PORT)" \
 		"$(GINKGO)" run \
 		--tags=$(GINKGO_TAGS) \
 		-v \

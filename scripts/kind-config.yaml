@@ -2,6 +2,15 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 # Two schedulable nodes (control-plane + 1 worker) so engine-full's required
 # podAntiAffinity on kubernetes.io/hostname can place replicas=2.
+#
+# `containerdConfigPatches` switches every node's containerd to look up
+# per-host pull configuration under /etc/containerd/certs.d/<host>/hosts.toml.
+# scripts/setup-kind-cluster.sh writes those files post-create to alias
+# ghcr.io / docker.io to the local OCI registry started by
+# scripts/setup-local-registry.sh, so we never duplicate the engine image
+# (~5 GB) into every kind node's containerd snapshotter.
+#
+# https://kind.sigs.k8s.io/docs/user/local-registry/
 nodes:
 - role: control-plane
   kubeadmConfigPatches:
@@ -17,3 +26,7 @@ nodes:
   - |
     kind: KubeletConfiguration
     maxPods: 250
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

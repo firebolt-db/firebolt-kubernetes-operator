@@ -29,9 +29,11 @@ helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/k
 **Local development (Kind):**
 
 ```bash
-make prepare-test-e2e   # one-time: creates Kind cluster + loads test images
+make prepare-test-e2e   # one-time: creates Kind cluster + publishes test images
 make local-deploy       # builds operator, loads into Kind, deploys via Helm
 ```
+
+`make prepare-test-e2e` starts a local Docker registry container (`kind-registry` on `127.0.0.1:5001`) and configures every kind node to mirror `ghcr.io` and `docker.io` through it. Workload images are pushed to that registry once and pulled on demand by each node, so the multi-GB engine image is no longer duplicated per kind node. To recreate the registry from scratch (e.g. after a stale push), run `make flush-local-registry`.
 
 ### Create a FireboltInstance
 
