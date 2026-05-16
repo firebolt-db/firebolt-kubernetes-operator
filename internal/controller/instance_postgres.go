@@ -100,12 +100,57 @@ func (r *FireboltInstanceReconciler) ensurePostgresSecret(ctx context.Context, i
 }
 
 func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	desired := buildPostgresStatefulSet(instance)
+
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	existing := &appsv1.StatefulSet{}
+	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Drift propagation: re-apply the fields we own on the pod template.
+	// Pod-level SecurityContext and Volumes are propagated alongside
+	// Containers because the container security hardening relies on them
+	// (RunAsNonRoot=true requires FSGroup ownership of the data PVC; the
+	// container's read-only root filesystem requires writable emptyDir
+	// volumes mounted at /var/run/postgresql and /tmp). If we propagated
+	// only Containers we would silently leave older StatefulSets running
+	// without the new hardening, or break the pod by mounting a volume
+	// that is not declared at the pod level.
+	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
+	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
+	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
+	return r.Update(ctx, existing)
+}
+
+// buildPostgresStatefulSet returns the desired StatefulSet for the
+// per-namespace internal PostgreSQL instance. Kept as a pure function so
+// the security-hardened pod template can be unit-tested without envtest.
+//
+// The pod is hardened to run as the postgres image's built-in non-root
+// user (UID 70 in the alpine variant; see PostgresUID) with a read-only
+// root filesystem and all Linux capabilities dropped. Two emptyDir
+// volumes back the writable paths the postgres entrypoint requires:
+// `/var/run/postgresql` (the unix-socket directory and postmaster.pid
+// location) and `/tmp` (initdb scratch space). The data directory is a
+// PVC, mounted via the StatefulSet's volumeClaimTemplate and chowned to
+// the postgres group at mount time via the pod-level FSGroup.
+func buildPostgresStatefulSet(instance *computev1alpha1.FireboltInstance) *appsv1.StatefulSet {
 	name := pgResourceName(instance.Name)
 	secretName := pgCredentialsSecretName(instance.Name)
 	labels := instanceLabels(instance.Name, "postgres")
 	var replicas int32 = 1
 
-	desired := &appsv1.StatefulSet{
+	pgUID := PostgresUID
+
+	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -118,6 +163,15 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: boolPtr(true),
+						RunAsUser:    &pgUID,
+						RunAsGroup:   &pgUID,
+						FSGroup:      &pgUID,
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{{
 						Name:            "postgresql",
 						Image:           PostgresImage,
@@ -129,6 +183,24 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 							envFromSecret("POSTGRES_USER", secretName, "username"),
 							envFromSecret("POSTGRES_PASSWORD", secretName, "password"),
 							envFromSecret("POSTGRES_DB", secretName, "database"),
+							// PGDATA must be a sub-directory of the
+							// mounted PVC, not the mount point itself.
+							// kubelet's FSGroup recursive chgrp does
+							// not propagate ownership to the volume's
+							// mount point (it stays root-owned with
+							// only the group set to FSGroup), so
+							// initdb's `chmod 0700 $PGDATA` would fail
+							// with EPERM on a non-root pod
+							// (kubernetes/kubernetes#57923). Pointing
+							// PGDATA at a sub-directory the postgres
+							// process creates itself sidesteps this:
+							// the new directory is owned by UID
+							// PostgresUID and chmod succeeds. The
+							// on-disk layout inside the PVC is
+							// unchanged (data still lives under
+							// `pgdata/`) so existing PVCs migrate
+							// cleanly when this StatefulSet is rolled.
+							{Name: "PGDATA", Value: "/var/lib/postgresql/data/pgdata"},
 						},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
@@ -140,8 +212,29 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 								corev1.ResourceMemory: resource.MustParse("256Mi"),
 							},
 						},
+						SecurityContext: &corev1.SecurityContext{
+							RunAsNonRoot:             boolPtr(true),
+							RunAsUser:                &pgUID,
+							ReadOnlyRootFilesystem:   boolPtr(true),
+							AllowPrivilegeEscalation: boolPtr(false),
+							Capabilities: &corev1.Capabilities{
+								Drop: []corev1.Capability{"ALL"},
+							},
+						},
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: "data", MountPath: "/var/lib/postgresql/data", SubPath: "pgdata"},
+							// Mount the PVC root, not a SubPath: see
+							// the PGDATA env var above for why.
+							{Name: "data", MountPath: "/var/lib/postgresql/data"},
+							// Backing for the unix-domain socket and
+							// postmaster.pid; the postgres entrypoint
+							// writes both here. Cannot live on the
+							// read-only root fs.
+							{Name: "run-postgresql", MountPath: "/var/run/postgresql"},
+							// initdb and the postgres process write
+							// transient files to /tmp; an emptyDir
+							// keeps that compatible with a read-only
+							// root fs without leaking onto the data PVC.
+							{Name: "tmp", MountPath: "/tmp"},
 						},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
@@ -162,6 +255,16 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 							PeriodSeconds:       10,
 						},
 					}},
+					Volumes: []corev1.Volume{
+						{
+							Name:         "run-postgresql",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+						{
+							Name:         "tmp",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						},
+					},
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
@@ -180,22 +283,6 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 			}},
 		},
 	}
-
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-
-	existing := &appsv1.StatefulSet{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
-	return r.Update(ctx, existing)
 }
 
 func (r *FireboltInstanceReconciler) ensurePostgresService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
