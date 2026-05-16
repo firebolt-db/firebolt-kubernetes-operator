@@ -11,12 +11,12 @@
 | `spec.metadata.postgres.port` | No | `5432` | PostgreSQL port |
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
-| `spec.metadata.image` | No | (operator default) | Override the metadata service container image |
+| `spec.metadata.image` | No | (operator default) | Override the metadata service container image. `repository` and `tag` are independently optional -- set either alone to override just that dimension. |
 | `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported) |
 | `spec.metadata.resources` | No | (operator default) | CPU/memory for metadata service pods |
 | `spec.metadata.nodeSelector` | No | - | Node selector for metadata service pods |
 | `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
-| `spec.gateway.image` | No | `envoyproxy/envoy:v1.37.2` | Override the Envoy container image |
+| `spec.gateway.image` | No | `envoyproxy/envoy:v1.37.2` | Override the Envoy container image. `repository` and `tag` are independently optional -- set either alone to override just that dimension. |
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods. See [sizing guidance](#gateway-sizing) -- replicas + memory must absorb both steady-state traffic and the retry amplification produced by the X-Firebolt-Drained shutdown path. |
 | `spec.gateway.resources` | No | (operator default) | CPU/memory for gateway pods. See [sizing guidance](#gateway-sizing). |
 | `spec.gateway.nodeSelector` | No | - | Node selector for gateway pods |

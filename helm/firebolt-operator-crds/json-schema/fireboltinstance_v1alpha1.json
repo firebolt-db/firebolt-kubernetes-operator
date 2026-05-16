@@ -888,20 +888,16 @@
                   "type": "string"
                 },
                 "repository": {
-                  "description": "Repository is the container image repository.",
+                  "description": "Repository is the container image repository. When empty, the\noperator's default repository for this component is used; pair with\nTag to override the full reference, or set on its own to pull the\noperator-default tag from a different repository (e.g. a mirror).",
                   "minLength": 1,
                   "type": "string"
                 },
                 "tag": {
-                  "description": "Tag is the container image tag.",
+                  "description": "Tag is the container image tag. When empty, the operator's default\ntag for this component is used; set on its own to pin a specific\nversion while keeping the operator-default repository.",
                   "minLength": 1,
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
               "type": "object",
               "additionalProperties": false
             },
@@ -1865,20 +1861,16 @@
                   "type": "string"
                 },
                 "repository": {
-                  "description": "Repository is the container image repository.",
+                  "description": "Repository is the container image repository. When empty, the\noperator's default repository for this component is used; pair with\nTag to override the full reference, or set on its own to pull the\noperator-default tag from a different repository (e.g. a mirror).",
                   "minLength": 1,
                   "type": "string"
                 },
                 "tag": {
-                  "description": "Tag is the container image tag.",
+                  "description": "Tag is the container image tag. When empty, the operator's default\ntag for this component is used; set on its own to pin a specific\nversion while keeping the operator-default repository.",
                   "minLength": 1,
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
               "type": "object",
               "additionalProperties": false
             },

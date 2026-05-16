@@ -6,8 +6,8 @@
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine (the CR is preserved; see [Stop and Resume](../README.md#stop-and-resume)). |
-| `spec.image.repository` | **Yes** | - | Container image repository |
-| `spec.image.tag` | **Yes** | - | Container image tag |
+| `spec.image.repository` | No | (operator default) | Container image repository. Override on its own to pull from a mirror while keeping the operator-default tag. |
+| `spec.image.tag` | No | (operator default) | Container image tag. Override on its own to pin a version while keeping the operator-default repository. |
 | `spec.image.pullPolicy` | No | `IfNotPresent` | Image pull policy |
 | `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory` |
 | `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory` |
