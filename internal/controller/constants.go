@@ -101,6 +101,14 @@ const (
 	PostgresUser = "firebolt"
 	// PostgresPVCSize is the default PVC size for the internal PostgreSQL instance.
 	PostgresPVCSize = "10Gi"
+	// PostgresUID is the numeric UID/GID of the built-in `postgres` user in
+	// the `postgres:16-alpine` image. We pin RunAsUser/RunAsGroup/FSGroup to
+	// this value so the pod-level SecurityContext can enforce RunAsNonRoot=true
+	// and the kubelet chowns the per-pod data PVC to a UID the postgres
+	// process actually runs as. The Debian-flavored `postgres` images use
+	// UID 999 instead; if PostgresImage is ever switched off Alpine this
+	// constant must be revisited.
+	PostgresUID int64 = 70
 
 	// ContainerNameEngine is the container name inside engine StatefulSet pods.
 	ContainerNameEngine = "core"
