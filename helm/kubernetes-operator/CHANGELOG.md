@@ -1,3 +1,14 @@
+# 1.0.13
+
+appVersion: v2.7.1
+
+## [2.7.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.7.0...v2.7.1) (2026-05-16)
+
+### Bug Fixes
+
+* **controller:** harden internal PostgreSQL pod security context (FB-1164) ([#62](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/62)) ([1a5e5d1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1a5e5d1f202c35ca2f4e6cb11f71af9a25850c9d))
+
+
 # 1.0.12
 
 appVersion: v2.7.0
