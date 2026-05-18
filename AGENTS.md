@@ -2,7 +2,7 @@
 
 ## What this project does
 
-Firebolt Kubernetes Operator manages two CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway) and **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments). Built with Go and controller-runtime.
+Firebolt Kubernetes Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **EngineClass** (optional cluster-scoped pod-template fragment shared by multiple engines; modeled on Kubernetes' StorageClass / GatewayClass). Built with Go and controller-runtime.
 
 Engines require a ready instance. See [docs/architecture.md](docs/architecture.md) for the full design.
 
@@ -125,6 +125,8 @@ Code is not done until it is covered by tests where tests are reasonable.
 
 - **`make lint` silently runs a degraded analyzer set when the golangci-lint cache (`~/Library/Caches/golangci-lint/` on macOS, `~/.cache/golangci-lint/` on Linux) is not writable.** Symptom: `make lint` exits `0 issues` locally but CI fails the same revision on a `goconst` / `gocritic` / `gosec` / similar finding. Cause: any agent harness that sandboxes filesystem writes (Cursor's default sandbox is one) blocks the cache writes; golangci-lint emits warnings like `level=warning msg="[linters_context/goanalysis] Failed to persist facts to cache: ... operation not permitted"` followed by `level=error msg="[pkgcache] cache close: ..."`, then proceeds with incremental fact-cache-dependent analyzers as no-ops. Those warnings are NOT benign — they mean the lint pass is incomplete. Resolution: when running `make lint` from inside a sandbox, request full filesystem access (in Cursor: `required_permissions: ["all"]` on the Shell tool call). The presence of any `Failed to persist facts to cache` or `[pkgcache] cache close` line in lint output means the result cannot be trusted and the command must be re-run with cache writes allowed before declaring the change green.
 
+- **`controller-gen` DeepCopy fails on structs with `client.Reader` fields.** The `FireboltEngineCustomValidator` and similar validators hold a `client.Reader` interface so admission can do live API reads. controller-gen's `object` generator tries to synthesise `DeepCopyInto` for every type in the `api/v1alpha1` package, panics on the interface field, and fails the whole `make generate` run. Workaround: annotate the validator struct with `// +kubebuilder:object:generate=false` to opt it out of DeepCopy generation. See `api/v1alpha1/fireboltengine_webhook.go` for the canonical placement; apply the same marker to any future validator that needs a runtime client.
+
 ## Project-specific rules
 
 ### Engine reconciler and blue-green state machine
@@ -133,6 +135,14 @@ Before touching the engine reconciler -- especially `engine_reconcile.go`, `engi
 
 - The blue-green state machine (`creating -> switching -> draining -> cleaning`) is formalised in [formal/FireboltEngine.tla](formal/FireboltEngine.tla). A change in one belongs in both, and `make formal-verify` is the CI guard.
 - Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.md` document the chain and call out a previously-removed design (FB-661) that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
+
+### EngineClass merge layer
+
+EngineClass holds a reusable pod-template fragment that engines reference via `spec.engineClassRef`. The merge runs inside `buildStatefulSet`, with the resolved class hash stamped on the StatefulSet as `firebolt.io/engine-class-hash` so `stsMatchesSpec` detects class drift (either an in-place class spec edit or a flip to a different class).
+
+- Centralised in the `effective*` helpers (`engine_reconcile.go`): `effectiveServiceAccountName`, `effectiveNodeSelector`, `effectiveTolerations`, `effectiveAffinity`, `effectivePodLabels`, `effectivePodAnnotations`, `effectiveEngineImage`, `engineClassSidecars`, `engineClassInitContainers`. Every helper has the same shape: takes `(spec, classInfo)` and returns the merged value. `buildStatefulSet` and `stsMatchesSpec` MUST consume the same helper for any given field — divergence produces phantom drift (rebuilds-without-changes, infinite rollouts).
+- The operator-owned set on `EngineClass.spec.template` lives in `api/v1alpha1/operatorauthority.go` (`ValidateOperatorOwnedPodTemplate`). The validating webhook returns those `field.Forbidden` errors verbatim; the EngineClass status controller re-runs the same check as a defense-in-depth `Ready=False/OperatorOwnedFieldSet` signal. Adding a new operator-owned field belongs in `ValidateOperatorOwnedPodTemplate` and propagates everywhere automatically.
+- Image and pull-policy on the engine container were intentionally moved out of `FireboltEngineSpec.Image` into the EngineClass template (FB-1145). There is no per-engine image override; rolling a new image is done by mutating the referenced class. The e2e Image Switching test in `test/e2e/e2e_test.go` is the canonical pattern.
 
 ### RBAC changes
 

@@ -4,12 +4,13 @@ A Kubernetes operator that manages Firebolt infrastructure: metadata services, a
 
 ## Overview
 
-The operator manages two custom resources:
+The operator manages three custom resources:
 
 - **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, and an Envoy gateway proxy.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
+- **EngineClass** *(optional, cluster-scoped)* holds a reusable pod-template fragment that multiple engines can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Modeled on Kubernetes' `StorageClass` and `GatewayClass`.
 
-When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it.
+When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `EngineClass` triggers the same blue-green flow on every consumer engine.
 
 ## Prerequisites
 
@@ -163,6 +164,7 @@ make lint               # golangci-lint
 
 - [docs/instance-crd-reference.md](docs/instance-crd-reference.md) -- FireboltInstance spec, phases, and monitoring
 - [docs/engine-crd-reference.md](docs/engine-crd-reference.md) -- FireboltEngine spec, phases, conditions, and managed resources
+- [docs/engineclass-crd-reference.md](docs/engineclass-crd-reference.md) -- EngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
 - [docs/gateway-sizing.md](docs/gateway-sizing.md) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
 - [docs/troubleshooting.md](docs/troubleshooting.md) -- common issues with instances and engines
 - [docs/monitoring.md](docs/monitoring.md) -- observability and metrics
