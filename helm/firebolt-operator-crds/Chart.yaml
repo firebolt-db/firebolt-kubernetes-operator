@@ -2,8 +2,8 @@ apiVersion: v2
 name: firebolt-operator-crds
 description: CRDs for the Firebolt Kubernetes Operator
 type: application
-version: 0.1.43
-appVersion: "v2.8.1"
+version: 0.1.44
+appVersion: "v2.9.0"
 maintainers:
   - name: firebolt-db
 keywords:
