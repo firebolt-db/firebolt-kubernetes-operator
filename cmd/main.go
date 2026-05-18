@@ -225,6 +225,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)
 	}
+
+	if err := (&controller.EngineClassReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EngineClass")
+		os.Exit(1)
+	}
 	if enableWebhooks {
 		if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
