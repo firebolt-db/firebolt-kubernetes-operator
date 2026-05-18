@@ -355,13 +355,15 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 	m.cache = m.api.snapshot()
 }
 
-// ApplySpecChange bumps the engine image tag, triggering spec drift detection.
+// ApplySpecChange mutates a pod-template-affecting spec field, triggering
+// spec drift detection. ServiceAccountName is used as the carrier because
+// it is single-valued, lives on FireboltEngineSpec, and participates in
+// stsMatchesSpec — same drift semantics the previous image-tag carrier
+// produced before image moved out of FireboltEngineSpec into EngineClass.
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
-	v := rapid.IntRange(1, 99).Draw(t, "imageVersion")
-	m.spec.Image = &computev1alpha1.ImageSpec{
-		Repository: "firebolt/engine",
-		Tag:        fmt.Sprintf("v%d.0", v),
-	}
+	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
+	sa := fmt.Sprintf("sa-v%d", v)
+	m.spec.ServiceAccountName = &sa
 }
 
 // ScaleReplicas changes the replica count, also triggering spec drift.

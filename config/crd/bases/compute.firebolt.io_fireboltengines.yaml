@@ -1123,35 +1123,26 @@ spec:
                   DrainCheckInterval controls how often to check if old pods have finished serving queries.
                   Only used when drainCheckEnabled is true.
                 type: string
-              image:
+              engineClassRef:
                 description: |-
-                  Image defines the container image to use.
-                  If not specified, defaults to the engine image embedded in the operator binary.
-                properties:
-                  pullPolicy:
-                    default: IfNotPresent
-                    description: PullPolicy defines when to pull the image.
-                    enum:
-                    - Always
-                    - Never
-                    - IfNotPresent
-                    type: string
-                  repository:
-                    description: |-
-                      Repository is the container image repository. When empty, the
-                      operator's default repository for this component is used; pair with
-                      Tag to override the full reference, or set on its own to pull the
-                      operator-default tag from a different repository (e.g. a mirror).
-                    minLength: 1
-                    type: string
-                  tag:
-                    description: |-
-                      Tag is the container image tag. When empty, the operator's default
-                      tag for this component is used; set on its own to pin a specific
-                      version while keeping the operator-default repository.
-                    minLength: 1
-                    type: string
-                type: object
+                  EngineClassRef is the name of a cluster-scoped EngineClass whose
+                  pod template is merged underneath this engine's pod template when
+                  the engine's StatefulSet is built. Engine spec fields take
+                  precedence over class fields; operator defaults sit beneath both.
+
+                  Mutable: changing the reference (or editing the referenced class's
+                  spec) triggers a new blue-green generation, just like any other
+                  pod-template-affecting spec change. The change participates in
+                  stsMatchesSpec via an annotation hash so drift is detected
+                  deterministically.
+
+                  The validating webhook rejects Create and Update when the
+                  referenced class does not exist, so users see the typo immediately
+                  instead of via engine status. Apply ordering matters: GitOps
+                  tooling must apply the EngineClass before any engine that
+                  references it (Argo sync-waves / Flux dependsOn).
+                minLength: 1
+                type: string
               initContainers:
                 description: |-
                   InitContainers are additional init containers stamped on the engine pod

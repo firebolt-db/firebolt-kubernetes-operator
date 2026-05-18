@@ -171,11 +171,9 @@ func (m *outerEngineSim) ApplySpecChange(t *rapid.T) {
 	if !eng.DeletionTimestamp.IsZero() {
 		return
 	}
-	v := rapid.IntRange(1, 99).Draw(t, "imageVersion")
-	eng.Spec.Image = &computev1alpha1.ImageSpec{
-		Repository: "firebolt/engine",
-		Tag:        fmt.Sprintf("v%d.0", v),
-	}
+	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
+	sa := fmt.Sprintf("sa-v%d", v)
+	eng.Spec.ServiceAccountName = &sa
 	if err := m.env.cli.Update(m.ctx, eng); err != nil {
 		// Conflicts are benign here: another action (e.g. a Reconcile that
 		// wrote status) bumped the resource version. The next Reconcile will
@@ -420,10 +418,6 @@ func TestEngineOuterStateMachine(t *testing.T) {
 				InstanceRef:       outerInstanceName,
 				Replicas:          0,
 				DrainCheckEnabled: &falseVal,
-				Image: &computev1alpha1.ImageSpec{
-					Repository: "firebolt/engine",
-					Tag:        "v0.0",
-				},
 			},
 		}
 		if err := env.cli.Create(ctx, engine); err != nil {

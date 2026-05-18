@@ -49,10 +49,6 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 	return &computev1alpha1.FireboltEngineSpec{
 		InstanceRef: "test-instance",
 		Replicas:    3,
-		Image: &computev1alpha1.ImageSpec{
-			Repository: "firebolt/engine",
-			Tag:        "v1.0",
-		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("2"),
@@ -85,7 +81,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 	}
 }
 
-func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet {
+func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
 	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
 	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
@@ -126,7 +122,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
 						{
-							Image:           image,
+							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Resources:       engineContainerResources(spec),
 							SecurityContext: getEngineContainerSecurityContext(spec),
@@ -143,7 +139,7 @@ func makeSTS(engineName string, gen int, replicas int32, image string) *appsv1.S
 // DataVolumeName instead of a VolumeClaimTemplate. Mirrors makeSTS's other
 // fields exactly so stsMatchesSpec sees only the data-volume shape change.
 // Used by reconciler tests parameterised over storageBackendCases.
-func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet {
+func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
 	spec.Storage = computev1alpha1.EngineStorageSpec{}
 	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
@@ -175,7 +171,7 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
 						{
-							Image:           image,
+							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Resources:       engineContainerResources(spec),
 							SecurityContext: getEngineContainerSecurityContext(spec),
@@ -206,7 +202,7 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32, image string) *
 type storageBackendCase struct {
 	name      string
 	applySpec func(s *computev1alpha1.FireboltEngineSpec)
-	seedSTS   func(engineName string, gen int, replicas int32, image string) *appsv1.StatefulSet
+	seedSTS   func(engineName string, gen int, replicas int32) *appsv1.StatefulSet
 	assertSTS func(t *testing.T, sts *appsv1.StatefulSet)
 }
 
@@ -338,16 +334,20 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			spec := testSpec()
 			sc.applySpec(spec)
-			spec.Image.Tag = "v2.0"
+			// Trigger pod-template drift via a spec field that lives on
+			// FireboltEngineSpec. The image is no longer engine-owned, so
+			// we use ServiceAccountName (also drift-affecting via
+			// stsMatchesSpec).
+			spec.ServiceAccountName = ptr("sa-v2")
 			// Build the seeded STS from a spec on the same backend so
 			// the storage shape is consistent — the gen bump under
-			// test must come from the image change, not from a
+			// test must come from the spec change, not from a
 			// backend mismatch the harness accidentally introduced.
 			seedSpec := testSpec()
 			sc.applySpec(seedSpec)
 			status := stableStatus()
 			current := EngineState{
-				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3),
 				CurrentHeadlessSvc:      &corev1.Service{},
 				CurrentConfigMap:        buildConfigMap(seedSpec, testEngineName, testNamespace, 0, testInstanceInfo()),
 				CurrentPodsReady:        true,
@@ -385,7 +385,7 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -413,7 +413,7 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 		ActiveGeneration:  0,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
 		CurrentPodTotal:         1,
@@ -511,7 +511,7 @@ func TestComputeEngineReconcile_S3_DrainingWait(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3),
 		DrainingPodsDrained: false,
 	}
 
@@ -535,7 +535,7 @@ func TestComputeEngineReconcile_S3_DrainingComplete(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3),
 		DrainingPodsDrained: true,
 	}
 
@@ -578,7 +578,7 @@ func TestComputeEngineReconcile_S3_DrainingCustomInterval(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3),
 		DrainingPodsDrained: false,
 	}
 
@@ -598,7 +598,7 @@ func TestComputeEngineReconcile_S3_CleaningDeletesOldResources(t *testing.T) {
 		ActiveGeneration:   1,
 		DrainingGeneration: &drainingGen,
 	}
-	oldSTS := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+	oldSTS := makeSTS(testEngineName, 0, 3)
 	oldSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: genResourceName(testEngineName, 0, SuffixHL)}}
 	oldCM := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: genResourceName(testEngineName, 0, SuffixConfig)}}
 	current := EngineState{
@@ -653,7 +653,7 @@ func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 	status := stableStatus()
 	// The existing STS was built without an override annotation.
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -677,7 +677,7 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -709,7 +709,7 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 			sc.applySpec(spec)
 			status := stableStatus()
 			current := EngineState{
-				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3),
 				CurrentHeadlessSvc:      &corev1.Service{},
 				CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 				CurrentPodsReady:        true,
@@ -749,7 +749,7 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -778,7 +778,7 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 	drainingGen := 0
 	spec := testSpec()
-	spec.Image.Tag = "v3.0"
+	spec.ServiceAccountName = ptr("sa-v3")
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:              computev1alpha1.PhaseDraining,
 		CurrentGeneration:  1,
@@ -786,7 +786,7 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS:         makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		DrainingSTS:         makeSTS(testEngineName, 0, 3),
 		DrainingPodsDrained: false,
 	}
 
@@ -804,13 +804,13 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 
 func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 	spec := testSpec()
-	spec.Image.Tag = "v3.0"
+	spec.ServiceAccountName = ptr("sa-v3")
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:             computev1alpha1.PhaseCreating,
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
-	sts := makeSTS(testEngineName, 1, 3, "firebolt/engine:v2.0")
+	sts := makeSTS(testEngineName, 1, 3)
 	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
@@ -848,7 +848,7 @@ func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
 		ActiveGeneration:  -1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentPodsReady:        false,
 		CurrentPodTotal:         1,
@@ -893,7 +893,7 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -924,7 +924,7 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      nil,
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -971,7 +971,7 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 	spec := testSpec()
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        nil,
 		CurrentPodsReady:        true,
@@ -1037,13 +1037,13 @@ func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {
 
 func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 	spec := testSpec()
-	spec.Image.Tag = "v3.0"
+	spec.ServiceAccountName = ptr("sa-v3")
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:             computev1alpha1.PhaseCreating,
 		CurrentGeneration: 1,
 		ActiveGeneration:  0,
 	}
-	sts := makeSTS(testEngineName, 1, 3, "firebolt/engine:v2.0")
+	sts := makeSTS(testEngineName, 1, 3)
 	hlSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-hl", Namespace: testNamespace}}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "test-engine-g1-config", Namespace: testNamespace}}
 	current := EngineState{
@@ -1079,7 +1079,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	spec := testSpec()
 
 	mutate := func(fn func(*appsv1.StatefulSet)) *appsv1.StatefulSet {
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		fn(sts)
 		return sts
 	}
@@ -1089,9 +1089,11 @@ func TestStsMatchesSpec(t *testing.T) {
 		sts   *appsv1.StatefulSet
 		match bool
 	}{
-		{"matching", makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"), true},
-		{"replica mismatch", makeSTS(testEngineName, 0, 5, "firebolt/engine:v1.0"), false},
-		{"image mismatch", makeSTS(testEngineName, 0, 3, "firebolt/engine:v2.0"), false},
+		{"matching", makeSTS(testEngineName, 0, 3), true},
+		{"replica mismatch", makeSTS(testEngineName, 0, 5), false},
+		{"image mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.Containers[0].Image = "other/engine:tag"
+		}), false},
 		{"pull policy mismatch", mutate(func(s *appsv1.StatefulSet) {
 			s.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullAlways
 		}), false},
@@ -1151,7 +1153,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("no resources matches empty container resources", func(t *testing.T) {
 		customSpec := testSpec()
 		customSpec.Resources = corev1.ResourceRequirements{}
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for omitted resources")
@@ -1166,7 +1168,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			},
 		}
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for requests-only resources")
@@ -1181,7 +1183,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("2Gi"),
 			},
 		}
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for limits-only resources")
@@ -1198,7 +1200,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("2Gi"),
 			},
 		}
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for partial resource requirements")
@@ -1206,7 +1208,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	})
 
 	t.Run("limit drift triggers mismatch", func(t *testing.T) {
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceMemory] = resource.MustParse("16Gi")
 		if stsMatchesSpec(sts, testSpec()) {
 			t.Fatal("stsMatchesSpec() want false when a resource limit drifts")
@@ -1215,7 +1217,7 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("removed resources trigger mismatch", func(t *testing.T) {
 		customSpec := testSpec()
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
 		if stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want false when resources are removed")
@@ -1229,7 +1231,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			},
 		}
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceMemory: resource.MustParse("1024Mi"),
@@ -1244,7 +1246,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		sa := "custom-sa"
 		customSpec.ServiceAccountName = &sa
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.ServiceAccountName = sa
 		if !stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
@@ -1252,7 +1254,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	})
 
 	t.Run("pod security context drift triggers mismatch", func(t *testing.T) {
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		// Drop fsGroup to simulate an STS built before the default existed:
 		// the spec resolves to fsGroup=3473, so the comparison must fail.
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
@@ -1268,7 +1270,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 		// STS still has the old (nil) container SC, so a spec change must
 		// not be silently absorbed by an in-place update.
-		sts := makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0")
+		sts := makeSTS(testEngineName, 0, 3)
 		if stsMatchesSpec(sts, customSpec) {
 			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
 		}
@@ -1339,7 +1341,7 @@ func TestStsMatchesSpec(t *testing.T) {
 }
 
 func TestStsSpecEqual(t *testing.T) {
-	base := func() *appsv1.StatefulSet { return makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0") }
+	base := func() *appsv1.StatefulSet { return makeSTS(testEngineName, 0, 3) }
 
 	t.Run("identical StatefulSets are equal", func(t *testing.T) {
 		if !stsSpecEqual(base(), base()) {
@@ -1919,7 +1921,7 @@ func TestComputeEngineReconcile_Stop_StableToCreating(t *testing.T) {
 	spec.Replicas = 0
 	status := stableStatus()
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -1950,7 +1952,7 @@ func TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero
 		ActiveGeneration:  1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 0),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -2009,7 +2011,7 @@ func TestComputeEngineReconcile_Stop_CleaningToStopped(t *testing.T) {
 		DrainingGeneration: &drainingGen,
 	}
 	current := EngineState{
-		DrainingSTS: makeSTS(testEngineName, 0, 3, "firebolt/engine:v1.0"),
+		DrainingSTS: makeSTS(testEngineName, 0, 3),
 	}
 
 	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
@@ -2039,7 +2041,7 @@ func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
 		ActiveGeneration:  1,
 	}
 	current := EngineState{
-		CurrentSTS:              makeSTS(testEngineName, 1, 0, "firebolt/engine:v1.0"),
+		CurrentSTS:              makeSTS(testEngineName, 1, 0),
 		CurrentHeadlessSvc:      &corev1.Service{},
 		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
 		CurrentPodsReady:        true,
@@ -2286,60 +2288,23 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 	}
 }
 
-// TestBuildStatefulSet_PartialImageOverride pins the contract end to
-// end: a spec.Image that sets only repository or only tag must produce a
-// pod container image that combines the user-supplied half with the
-// operator default for the other half, and stsMatchesSpec must accept the
-// resulting STS without triggering a new blue-green generation.
-func TestBuildStatefulSet_PartialImageOverride(t *testing.T) {
-	tests := []struct {
-		name      string
-		image     *computev1alpha1.ImageSpec
-		wantImage string
-	}{
-		{
-			name:      "nil spec uses default reference",
-			image:     nil,
-			wantImage: DefaultEngineImage,
-		},
-		{
-			name:      "repository-only override keeps default tag",
-			image:     &computev1alpha1.ImageSpec{Repository: "mirror.example.com/engine"},
-			wantImage: "mirror.example.com/engine:" + DefaultEngineTag,
-		},
-		{
-			name:      "tag-only override keeps default repository",
-			image:     &computev1alpha1.ImageSpec{Tag: "v9.9.9"},
-			wantImage: DefaultEngineRepository + ":v9.9.9",
-		},
-		{
-			name: "both fields override completely",
-			image: &computev1alpha1.ImageSpec{
-				Repository: "mirror.example.com/engine",
-				Tag:        "v9.9.9",
-			},
-			wantImage: "mirror.example.com/engine:v9.9.9",
-		},
+// TestBuildStatefulSet_DefaultImage pins the operator-default image as the
+// only image source for the engine container. Per-engine image overrides
+// were removed when EngineClass-based template merging became the single
+// source of truth for the pod template's image. constants_test.go covers
+// the resolveImageRef partial-override semantics that still apply to
+// instance components (gateway, metadata) where the ImageSpec field
+// remains.
+func TestBuildStatefulSet_DefaultImage(t *testing.T) {
+	spec := testSpec()
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	got := sts.Spec.Template.Spec.Containers[0].Image
+	want := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+	if got != want {
+		t.Errorf("container image = %q, want %q (operator default)", got, want)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			spec := testSpec()
-			spec.Image = tc.image
-
-			sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
-			got := sts.Spec.Template.Spec.Containers[0].Image
-			if got != tc.wantImage {
-				t.Errorf("container image = %q, want %q", got, tc.wantImage)
-			}
-
-			// stsMatchesSpec must accept the just-built STS so a partial
-			// override does not perpetually trigger a new blue-green
-			// generation.
-			if !stsMatchesSpec(sts, spec) {
-				t.Error("stsMatchesSpec returned false for a freshly built STS")
-			}
-		})
+	if !stsMatchesSpec(sts, spec) {
+		t.Error("stsMatchesSpec returned false for a freshly built STS")
 	}
 }
 

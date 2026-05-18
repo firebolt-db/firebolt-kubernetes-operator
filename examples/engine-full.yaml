@@ -16,11 +16,12 @@ spec:
   # Dedicated ServiceAccount for pods (see manifest above). Bind RBAC as needed.
   serviceAccountName: firebolt-engine
 
-  # Image override. When omitted, the operator's embedded default is used.
-  image:
-    repository: ghcr.io/firebolt-db/engine
-    tag: latest
-    pullPolicy: Always
+  # Image is sourced from the operator-default at install time or from a
+  # referenced EngineClass's pod template (spec.engineClassRef). There is
+  # no per-engine image override on FireboltEngine — engine-level
+  # configuration that varies per workload (replicas, resources, scheduling)
+  # stays here; image is governed at the operator / class level so
+  # platform teams can audit image rollouts in one place.
   resources:
     requests:
       cpu: "2"

@@ -564,8 +564,11 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		annotations[AnnotationCustomEngineConfigHash] = h
 	}
 
-	image := resolveImageRef(spec.Image, DefaultEngineRepository, DefaultEngineTag)
-	pullPolicy := resolveImagePullPolicy(spec.Image)
+	// Engine image flows from the operator default only. A future commit
+	// adds EngineClass merging that may override the image; until then the
+	// operator default is the single source.
+	image := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+	pullPolicy := resolveImagePullPolicy(nil)
 
 	gracePeriod := getTerminationGracePeriod(spec)
 	podSecurityContext := getEnginePodSecurityContext(spec)
@@ -882,27 +885,30 @@ func deepMergeJSON(dst, src map[string]interface{}) {
 // same spec portable across operator versions even if the protected set
 // changes.
 //
-// When a top-level section (`instance`, `engine`) is not a JSON object the
-// whole key is dropped: deepMergeJSON would otherwise replace the operator-
-// built section wholesale with the user's scalar, losing every authoritative
-// key.
+// When a top-level section (e.g. `instance`, `engine`) is not a JSON object
+// the whole key is dropped: deepMergeJSON would otherwise replace the
+// operator-built section wholesale with the user's scalar, losing every
+// authoritative key.
+//
+// The owned-path set lives in
+// computev1alpha1.OperatorOwnedEngineConfigPaths so that every templating
+// surface (this function, the EngineClass webhook) reads from one
+// declaration.
 func stripProtectedEngineConfigPaths(m map[string]interface{}) {
-	delete(m, "schema_version")
-
-	if instance, ok := m["instance"].(map[string]interface{}); ok {
-		delete(instance, "id")
-		delete(instance, "type")
-		delete(instance, "multi_engine")
-	} else {
-		delete(m, "instance")
-	}
-
-	if engine, ok := m["engine"].(map[string]interface{}); ok {
-		delete(engine, "id")
-		delete(engine, "nodes")
-		delete(engine, "termination_grace_period")
-	} else {
-		delete(m, "engine")
+	for _, owned := range computev1alpha1.OperatorOwnedEngineConfigPaths {
+		if owned.Section == "" {
+			for _, k := range owned.Keys {
+				delete(m, k)
+			}
+			continue
+		}
+		if sub, ok := m[owned.Section].(map[string]interface{}); ok {
+			for _, k := range owned.Keys {
+				delete(sub, k)
+			}
+			continue
+		}
+		delete(m, owned.Section)
 	}
 }
 
@@ -1069,8 +1075,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 	container := podSpec.Containers[0]
 
-	expectedImage := resolveImageRef(spec.Image, DefaultEngineRepository, DefaultEngineTag)
-	expectedPullPolicy := resolveImagePullPolicy(spec.Image)
+	// Mirrors buildStatefulSet: image comes from operator default until
+	// EngineClass merging is wired in.
+	expectedImage := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+	expectedPullPolicy := resolveImagePullPolicy(nil)
 	if container.Image != expectedImage {
 		return false
 	}

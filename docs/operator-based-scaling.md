@@ -113,10 +113,11 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: firebolt-production
+  # Engine container image lives on an EngineClass (FB-1145); the engine
+  # references the class by name. Mutating the class' container image
+  # is the canonical path for runtime version upgrades.
+  engineClassRef: engine-default
   replicas: 5
-  image:
-    repository: ghcr.io/firebolt-db/engine
-    tag: dev
   resources:
     requests:
       cpu: "2"

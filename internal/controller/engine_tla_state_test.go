@@ -39,21 +39,20 @@ import (
 )
 
 // tlaSpecForState builds a FireboltEngineSpec consistent with the TLA+ state's
-// (specVer, specWantsStop). specVer is encoded into the image tag so
+// (specVer, specWantsStop). specVer is encoded into ServiceAccountName so
 // stsMatchesSpec correctly tracks per-generation drift — the same convention
-// used by ApplySpecChange in the rapid property test.
+// used by ApplySpecChange in the rapid property test. (The image tag carried
+// this role until FireboltEngineSpec.Image moved into EngineClass.)
 func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 	replicas := int32(3)
 	if s.SpecWantsStop {
 		replicas = 0
 	}
+	sa := fmt.Sprintf("sa-v%d", s.SpecVer)
 	return computev1alpha1.FireboltEngineSpec{
-		InstanceRef: "test-instance",
-		Replicas:    replicas,
-		Image: &computev1alpha1.ImageSpec{
-			Repository: "firebolt/engine",
-			Tag:        fmt.Sprintf("v%d.0", s.SpecVer),
-		},
+		InstanceRef:        "test-instance",
+		Replicas:           replicas,
+		ServiceAccountName: &sa,
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("2"),
@@ -72,14 +71,13 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 // is constructed with the same buildStatefulSet the real reconciler uses, so
 // every field stsMatchesSpec inspects (ServiceAccountName, security contexts,
 // annotations, VolumeClaimTemplates, …) is consistent with the spec. The
-// container image is then overridden so the TLA+ relation
+// pod-template ServiceAccountName is then overridden so the TLA+ relation
 // `StsMatchesSpec(g) ⟺ stsSpecVer[g] = specVer` matches Go's stsMatchesSpec.
+// (Previously this used the container image; the image moved out of
+// FireboltEngineSpec into EngineClass, so SA is the carrier now.)
 func tlaMakeSTS(spec *computev1alpha1.FireboltEngineSpec, gen, stsSpecVer int) *appsv1.StatefulSet {
 	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen)
-	overrideImage := fmt.Sprintf("%s:v%d.0", spec.Image.Repository, stsSpecVer)
-	for i := range sts.Spec.Template.Spec.Containers {
-		sts.Spec.Template.Spec.Containers[i].Image = overrideImage
-	}
+	sts.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", stsSpecVer)
 	return sts
 }
 
@@ -175,7 +173,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		CurrentGen:    m.status.CurrentGeneration,
 		ActiveGen:     m.status.ActiveGeneration,
 		DrainingGen:   -1,
-		SpecVer:       parseImageTagVer(m.spec.Image),
+		SpecVer:       parseSAVer(m.spec.ServiceAccountName),
 		SpecWantsStop: m.spec.Replicas == 0,
 		SvcTargetGen:  -1,
 		PodsReady:     m.podsReady,
@@ -195,7 +193,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		if len(sts.Spec.Template.Spec.Containers) == 0 {
 			continue
 		}
-		st.StsSpecVer[g] = parseImageVer(sts.Spec.Template.Spec.Containers[0].Image)
+		st.StsSpecVer[g] = parseSANameVer(sts.Spec.Template.Spec.ServiceAccountName)
 	}
 	if m.api.clusterSvc != nil {
 		if v, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]; ok {
@@ -207,40 +205,37 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 	return st
 }
 
-// parseImageTagVer extracts the integer N from an ImageSpec with tag "vN.0".
-// Returns -1 if the tag does not parse — in practice every test state uses
-// the canonical "v<N>.0" form so this is a defensive guard, not a behavior.
-func parseImageTagVer(img *computev1alpha1.ImageSpec) int {
-	if img == nil {
+// parseSAVer extracts the integer N from a "sa-v<N>" ServiceAccountName
+// pointer used by the TLA+ harness to encode specVer. Returns -1 if the
+// pointer is nil or the name does not parse — every test state uses the
+// canonical form so this is a defensive guard, not a behavior.
+func parseSAVer(sa *string) int {
+	if sa == nil {
 		return -1
 	}
-	return parseVTag(img.Tag)
+	return parseSAToken(*sa)
 }
 
-// parseImageVer extracts N from a container image string "<repo>:vN.0".
-func parseImageVer(image string) int {
-	for i := len(image) - 1; i >= 0; i-- {
-		if image[i] == ':' {
-			return parseVTag(image[i+1:])
-		}
-	}
-	return parseVTag(image)
-}
-
-func parseVTag(tag string) int {
-	if len(tag) < 3 || tag[0] != 'v' {
+// parseSANameVer is the StatefulSet-side counterpart of parseSAVer: the
+// pod template's ServiceAccountName is a plain string, not a pointer.
+func parseSANameVer(sa string) int {
+	if sa == "" {
 		return -1
 	}
-	for i := 1; i < len(tag); i++ {
-		if tag[i] == '.' {
-			n, err := strconv.Atoi(tag[1:i])
-			if err != nil {
-				return -1
-			}
-			return n
-		}
+	return parseSAToken(sa)
+}
+
+// parseSAToken parses "sa-v<N>" and returns N (-1 on malformed input).
+func parseSAToken(s string) int {
+	const prefix = "sa-v"
+	if len(s) <= len(prefix) || s[:len(prefix)] != prefix {
+		return -1
 	}
-	return -1
+	n, err := strconv.Atoi(s[len(prefix):])
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // tlaShouldGateOut returns true when the outer Reconcile method's instance gate

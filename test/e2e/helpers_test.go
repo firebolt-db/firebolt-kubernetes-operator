@@ -231,11 +231,11 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 		Spec: computev1alpha1.FireboltEngineSpec{
 			InstanceRef: instanceName,
 			Replicas:    int32(replicas),
-			Image: &computev1alpha1.ImageSpec{
-				Repository: testImage,
-				Tag:        testTag,
-				PullPolicy: corev1.PullIfNotPresent,
-			},
+			// Image flows from the operator's embedded default
+			// (DefaultEngineRepository / DefaultEngineTag) — equivalent
+			// to testImage:testTag at e2e build time — until EngineClass
+			// template merging is wired in. Engine-level overrides were
+			// removed when image became class-only (FB-1145).
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -290,11 +290,19 @@ func UpdateEngineReplicas(ctx context.Context, name string, replicas int) error 
 	})
 }
 
-// UpdateEngineImageTag updates the image tag in the engine CR (with retry on conflict)
+// UpdateEngineImageTag previously bumped the engine image tag to trigger
+// a blue-green roll. FireboltEngineSpec.Image was removed when image
+// became EngineClass-only; this helper now fails fast so the upgrade
+// e2e tests are surfaced as todo until EngineClass merging lands and the
+// upgrade flow is rewritten in terms of class mutation.
+//
+// TODO(FB-1145): switch upgrade e2e tests to mutate the referenced
+// EngineClass's container image and remove this stub.
 func UpdateEngineImageTag(ctx context.Context, name string, tag string) error {
-	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
-		engine.Spec.Image.Tag = tag
-	})
+	_ = ctx
+	_ = name
+	_ = tag
+	return fmt.Errorf("UpdateEngineImageTag is a no-op until EngineClass image override lands (FB-1145)")
 }
 
 // UpdateEngineScheduling sets NodeSelector, Tolerations, and Affinity on the

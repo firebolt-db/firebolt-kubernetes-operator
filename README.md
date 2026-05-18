@@ -58,9 +58,21 @@ kubectl get fi -n firebolt
 
 ### Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it. See the [FireboltEngine CRD Reference](docs/engine-crd-reference.md) for all fields, phases, conditions, rollout strategies, and examples.
+Once the instance is `Ready`, create an engine that references it. The engine container image lives on an `EngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. See the [FireboltEngine CRD Reference](docs/engine-crd-reference.md) and the [EngineClass CRD Reference](docs/engineclass-crd-reference.md) for the full field surface.
 
 ```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: default
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:dev
+---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
@@ -68,10 +80,8 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: production
+  engineClassRef: default
   replicas: 3
-  image:
-    repository: "ghcr.io/firebolt-db/engine"
-    tag: "dev"
   resources:
     requests:
       cpu: "2"
