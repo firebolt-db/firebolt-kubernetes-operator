@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -515,6 +514,10 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 		return 0, true
 	}
 
+	// Build the scrape transport once per poll, not once per pod. See
+	// checkDrainComplete for the same reasoning on the drain side.
+	scraper := r.newPodMetricScraper(ctx, engine)
+
 	var total int64
 	sawRunning := false
 	for i := range podList.Items {
@@ -523,7 +526,7 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 			continue
 		}
 		sawRunning = true
-		n, err := r.scrapePodActiveQueries(ctx, pod)
+		n, err := scrapePodActiveQueries(ctx, scraper, pod)
 		if err != nil {
 			log.Info("Pod scrape failed, treating poll as activity",
 				"pod", pod.Name, "error", err.Error())
@@ -538,23 +541,18 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 }
 
 // scrapePodActiveQueries fetches firebolt_running_queries +
-// firebolt_suspended_queries from a single pod via the API server's
-// /proxy subresource. Mirrors isPodDrained so the autoscaler shares the
-// drain check's RBAC and reachability story.
-func (r *FireboltEngineReconciler) scrapePodActiveQueries(ctx context.Context, pod *corev1.Pod) (int64, error) {
-	if r.Clientset == nil {
-		return 0, errors.New("clientset not initialized")
-	}
-
-	raw, err := r.Clientset.CoreV1().RESTClient().Get().
-		Namespace(pod.Namespace).
-		Resource("pods").
-		Name(fmt.Sprintf("%s:%d", pod.Name, MetricsPort)).
-		SubResource("proxy").
-		Suffix(MetricsPath).
-		DoRaw(ctx)
+// firebolt_suspended_queries from a single pod through the supplied
+// scraper. Mirrors isPodDrained so the autoscaler and the drain probe
+// share the same reachability story; both delegate the transport
+// decision to the scraper their callers built.
+//
+// Free function for the same reason as isPodDrained: no Reconciler
+// fields are read here, only the scraper and the pod, which makes it
+// trivially unit-testable with a fake scraper.
+func scrapePodActiveQueries(ctx context.Context, scraper podMetricScraper, pod *corev1.Pod) (int64, error) {
+	raw, err := scraper.Scrape(ctx, pod)
 	if err != nil {
-		return 0, fmt.Errorf("scraping metrics from pod %s: %w", pod.Name, err)
+		return 0, fmt.Errorf("scraping metrics from pod %s (mode=%s): %w", pod.Name, scraper.Mode(), err)
 	}
 
 	running, runningOK := parsePrometheusGauge(raw, MetricRunningQueries)

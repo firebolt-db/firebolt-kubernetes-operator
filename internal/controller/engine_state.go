@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -336,13 +335,19 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 		return true, nil
 	}
 
+	// Build the scrape transport once per drain check, not once per
+	// pod. The mode is a property of the parent FireboltInstance and is
+	// the same for every pod in this generation; resolving inside the
+	// per-pod loop would do N redundant cache reads with no upside.
+	scraper := r.newPodMetricScraper(ctx, engine)
+
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
 
-		drained, err := r.isPodDrained(ctx, pod)
+		drained, err := isPodDrained(ctx, scraper, pod)
 		if err != nil {
 			// Surface the probe failure. See DrainProbeError - the
 			// caller turns this into a ConditionReady=False with
@@ -363,17 +368,13 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 
 // isPodDrained reports whether the engine pod has finished serving queries.
 //
-// It scrapes the pod's Prometheus /metrics endpoint via the Kubernetes
-// pod-proxy subresource (not the pod IP directly), which:
-//   - works whether the operator runs in-cluster or externally (make run / e2e),
-//     because the request is routed through the API server;
-//   - does not require pod-level exec (no fb CLI in the image, no SPDY);
-//   - is covered by the same RBAC we already have on "pods/proxy".
-//
-// The signal we trust is firebolt_running_queries + firebolt_suspended_queries
-// == 0. Both gauges are exported by the engine; suspended queries count
-// queries that are idle waiting on a client but still holding a session,
-// so we wait for those too before cutting the generation over.
+// It scrapes the pod's Prometheus /metrics endpoint through scraper,
+// which encapsulates the transport (direct PodIP HTTP or apiserver
+// pods/proxy, selected once by the caller). The signal we trust is
+// firebolt_running_queries + firebolt_suspended_queries == 0. Both
+// gauges are exported by the engine; suspended queries count queries
+// that are idle waiting on a client but still holding a session, so we
+// wait for those too before cutting the generation over.
 //
 // Errors (pod unreachable, metrics missing, scrape failure) are returned
 // to the caller - checkDrainComplete wraps them as a DrainProbeError so
@@ -381,23 +382,19 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 // Reason=DrainCheckFailing. Returning (false, nil) here would make a
 // broken /metrics endpoint look like an engine that just happens to
 // still be busy, and the blue-green would stall silently forever.
-func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	if r.Clientset == nil {
-		return false, errors.New("clientset not initialized")
-	}
+//
+// isPodDrained is a free function rather than a Reconciler method
+// because it does no I/O on the cluster directly: it delegates the
+// fetch to scraper and parses the result. Keeping it method-free lets
+// tests drive it with a fake scraper without standing up a Reconciler.
+func isPodDrained(ctx context.Context, scraper podMetricScraper, pod *corev1.Pod) (bool, error) {
 	if pod.Status.Phase != corev1.PodRunning {
 		return true, nil
 	}
 
-	raw, err := r.Clientset.CoreV1().RESTClient().Get().
-		Namespace(pod.Namespace).
-		Resource("pods").
-		Name(fmt.Sprintf("%s:%d", pod.Name, MetricsPort)).
-		SubResource("proxy").
-		Suffix(MetricsPath).
-		DoRaw(ctx)
+	raw, err := scraper.Scrape(ctx, pod)
 	if err != nil {
-		return false, fmt.Errorf("scraping metrics from pod %s: %w", pod.Name, err)
+		return false, fmt.Errorf("scraping metrics from pod %s (mode=%s): %w", pod.Name, scraper.Mode(), err)
 	}
 
 	running, runningOK := parsePrometheusGauge(raw, MetricRunningQueries)
