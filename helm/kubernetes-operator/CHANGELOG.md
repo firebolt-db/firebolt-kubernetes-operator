@@ -1,3 +1,14 @@
+# 1.0.16
+
+appVersion: v2.9.0
+
+## [2.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.8.1...v2.9.0) (2026-05-18)
+
+### Features
+
+* **controller:** surface StatefulSet warning events on engine Ready condition (FB-872) ([#68](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/68)) ([2140525](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2140525f9766f4156cfca852ffe662403dd640ed)), closes [#2](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/2)
+
+
 # 1.0.15
 
 appVersion: v2.8.1
