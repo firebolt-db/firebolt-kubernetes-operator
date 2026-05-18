@@ -115,6 +115,13 @@ type engineSim struct {
 	// buildState. Lags behind api until CacheCatchesUp fires.
 	cache clusterView
 
+	// classInfo carries the resolved EngineClass template when the engine
+	// has spec.engineClassRef set. nil here models "no class referenced";
+	// ApplyClassChange flips it between nil, classA, classB, … to
+	// exercise the stsMatchesSpec class-hash drift path. The Go-side
+	// equivalent of a class spec edit at runtime.
+	classInfo *EngineClassInfo
+
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
 	// Reset to false whenever currentGen is bumped.
 	podsReady bool
@@ -306,7 +313,7 @@ func checkRequeue(t *rapid.T, result *EngineReconcileResult) {
 func (m *engineSim) Reconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
-		propEngineName, propNamespace, 0, testInstanceInfo(),
+		propEngineName, propNamespace, 0, testInstanceInfo(), m.classInfo,
 	)
 	checkRequeue(t, &result)
 	m.applyResult(&result, true)
@@ -321,7 +328,7 @@ func (m *engineSim) Reconcile(t *rapid.T) {
 func (m *engineSim) CrashReconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
-		propEngineName, propNamespace, 0, testInstanceInfo(),
+		propEngineName, propNamespace, 0, testInstanceInfo(), m.classInfo,
 	)
 	checkRequeue(t, &result)
 	m.applyResult(&result, false)
@@ -337,7 +344,7 @@ func (m *engineSim) CrashReconcile(t *rapid.T) {
 func (m *engineSim) CrashAtPrefix(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
-		propEngineName, propNamespace, 0, testInstanceInfo(),
+		propEngineName, propNamespace, 0, testInstanceInfo(), m.classInfo,
 	)
 	checkRequeue(t, &result)
 	k := rapid.IntRange(1, 4).Draw(t, "crashPrefix")
@@ -364,6 +371,31 @@ func (m *engineSim) ApplySpecChange(t *rapid.T) {
 	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
 	sa := fmt.Sprintf("sa-v%d", v)
 	m.spec.ServiceAccountName = &sa
+}
+
+// ApplyClassChange mutates the resolved EngineClass that this engine
+// references. Models a real EngineClass spec edit OR a flip of
+// spec.engineClassRef to a different class — both surface in the
+// reconciler as a fresh classInfo with a new content hash. Drawing a
+// nil class (no engineClassRef) is included so the harness exercises
+// the on/off transitions too. The same drift detection mechanism
+// stsMatchesSpec uses for engine spec edits applies here via the
+// AnnotationEngineClassHash comparison.
+func (m *engineSim) ApplyClassChange(t *rapid.T) {
+	v := rapid.IntRange(0, 99).Draw(t, "classVersion")
+	if v == 0 {
+		m.classInfo = nil
+		return
+	}
+	m.classInfo = &EngineClassInfo{
+		Name: fmt.Sprintf("class-v%d", v),
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				ServiceAccountName: fmt.Sprintf("class-sa-v%d", v),
+			},
+		},
+		Hash: fmt.Sprintf("class-hash-v%d", v),
+	}
 }
 
 // ScaleReplicas changes the replica count, also triggering spec drift.

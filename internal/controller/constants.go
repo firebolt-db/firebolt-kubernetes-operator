@@ -42,6 +42,14 @@ const (
 	// detect changes that require a new generation.
 	AnnotationMetadataOverride = "firebolt.io/metadata-override"
 
+	// AnnotationEngineClassHash records a content-hash of the resolved
+	// EngineClass.spec.template merged into the engine pod spec. Absent
+	// when spec.engineClassRef is nil. stsMatchesSpec compares the
+	// annotation to the freshly resolved class hash and rolls a new
+	// blue-green generation on any mismatch — covers both
+	// engineClassRef changes and in-place edits to the referenced class.
+	AnnotationEngineClassHash = "firebolt.io/engine-class-hash"
+
 	// AnnotationCustomEngineConfigHash records a content-hash of the
 	// spec.customEngineConfig payload baked into the engine ConfigMap.
 	// stsMatchesSpec compares against this to detect changes that require

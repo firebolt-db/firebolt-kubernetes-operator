@@ -130,7 +130,7 @@ func TestBuildStatefulSet_DataVolumeBackends(t *testing.T) {
 			spec := testSpec()
 			spec.Storage = tc.storage
 
-			sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+			sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
 			if tc.wantVCT {
 				if len(sts.Spec.VolumeClaimTemplates) != 1 {
@@ -186,9 +186,9 @@ func TestStorageMatchesSpec_BackendSwitchBumpsGeneration(t *testing.T) {
 		HostPath: &computev1alpha1.EngineHostPathSpec{Path: "/mnt/nvme/firebolt"},
 	}
 
-	pvcSts := buildStatefulSet(pvcSpec, testEngineName, testNamespace, 0)
-	emptyDirSts := buildStatefulSet(emptyDirSpec, testEngineName, testNamespace, 0)
-	hostPathSts := buildStatefulSet(hostPathSpec, testEngineName, testNamespace, 0)
+	pvcSts := buildStatefulSet(pvcSpec, testEngineName, testNamespace, 0, nil)
+	emptyDirSts := buildStatefulSet(emptyDirSpec, testEngineName, testNamespace, 0, nil)
+	hostPathSts := buildStatefulSet(hostPathSpec, testEngineName, testNamespace, 0, nil)
 
 	cases := []struct {
 		name string
