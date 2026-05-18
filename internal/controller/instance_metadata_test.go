@@ -280,3 +280,16 @@ func TestBuildMetadataDeploymentWritableTmpVolume(t *testing.T) {
 		t.Errorf(`container missing /tmp mount of the "tmp" emptyDir; mounts: %+v`, pod.Containers[0].VolumeMounts)
 	}
 }
+
+// Pensieve is a Quarkus app that maps env vars to MicroProfile config keys
+// by lowercasing and dot-separating, so a kubelet-injected service-link var
+// could shadow a real config key (cf. floci's `FLOCI_PORT` collision). The
+// floci incident motivated turning the legacy service-link env block off
+// across every operator-managed PodSpec; this test is the lock-in.
+func TestBuildMetadataDeploymentDisablesServiceLinks(t *testing.T) {
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	esl := dep.Spec.Template.Spec.EnableServiceLinks
+	if esl == nil || *esl {
+		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
+	}
+}

@@ -127,6 +127,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
 	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
 	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
+	existing.Spec.Template.Spec.EnableServiceLinks = desired.Spec.Template.Spec.EnableServiceLinks
 	return r.Update(ctx, existing)
 }
 
@@ -163,6 +164,10 @@ func buildPostgresStatefulSet(instance *computev1alpha1.FireboltInstance) *appsv
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					// See the equivalent comment in engine_reconcile.go's
+					// PodSpec: kill legacy service-link env injection, DNS
+					// is the only service-discovery channel here.
+					EnableServiceLinks: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: boolPtr(true),
 						RunAsUser:    &pgUID,

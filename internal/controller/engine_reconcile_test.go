@@ -1864,6 +1864,19 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 	}
 }
 
+// Engine pods must not get the kubelet's legacy Docker-link env block —
+// the FIREBOLT_* prefix is owned by the engine's own config schema and a
+// future Service named `firebolt-*` could shadow a real config key the
+// way floci's `FLOCI_PORT` did in FB-1215. DNS is the only service-
+// discovery channel the engine needs.
+func TestBuildStatefulSet_DisablesServiceLinks(t *testing.T) {
+	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+	esl := sts.Spec.Template.Spec.EnableServiceLinks
+	if esl == nil || *esl {
+		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
+	}
+}
+
 // --- Scale to zero / Stopped phase ---
 
 // TestTerminalPhase verifies the single-point selector: replicas==0 ->

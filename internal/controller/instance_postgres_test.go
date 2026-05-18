@@ -203,3 +203,17 @@ func TestBuildPostgresStatefulSetPGDataLayout(t *testing.T) {
 		t.Errorf("PGDATA: got %q, want /var/lib/postgresql/data/pgdata (sub-directory of the data mount)", pgdata)
 	}
 }
+
+// Disable the legacy Docker-link env block on the postgres pod so the
+// kubelet does not inject `<SVC>_PORT=tcp://...` style vars for every
+// Service in the namespace. DNS is the only service-discovery channel
+// the postgres container needs, and the auto-injected vars risk
+// shadowing real config keys in colocated workloads (cf. floci's
+// `FLOCI_PORT` collision in FB-1215).
+func TestBuildPostgresStatefulSetDisablesServiceLinks(t *testing.T) {
+	sts := buildPostgresStatefulSet(mkPostgresInstance())
+	esl := sts.Spec.Template.Spec.EnableServiceLinks
+	if esl == nil || *esl {
+		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
+	}
+}

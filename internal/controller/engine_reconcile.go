@@ -691,6 +691,14 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					Affinity:                      spec.Affinity,
 					TerminationGracePeriodSeconds: &gracePeriod,
 					SecurityContext:               podSecurityContext,
+					// Suppress legacy Docker-link env vars (`<SVC>_SERVICE_HOST`,
+					// `<SVC>_PORT=tcp://...`, etc.) the kubelet would otherwise
+					// inject for every Service in the namespace. DNS is the
+					// real service-discovery channel here; the auto-injected
+					// vars are dead weight that also risks colliding with
+					// firebolt-core's own config keys (cf. floci's
+					// `FLOCI_PORT` collision in FB-1215).
+					EnableServiceLinks: boolPtr(false),
 					Containers: []corev1.Container{
 						{
 							Name:            ContainerNameEngine,
