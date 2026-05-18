@@ -227,6 +227,15 @@ var _ = SynchronizedBeforeSuite(func() {
 	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
+	By("Deploying floci (S3 emulator) and pre-creating the engine bucket")
+	// The engine refuses to start without managed_storage pointing at object
+	// storage when dedicated-pensieve mode is on. Stand up floci once for the
+	// whole suite; engines created by CreateEngineWithRollout target it via
+	// spec.customEngineConfig.firebolt.managed_storage.
+	flociCtx, flociCancel := context.WithTimeout(ctx, flociSetupTimeout)
+	defer flociCancel()
+	Expect(setupFloci(flociCtx, testNamespace)).To(Succeed())
+
 	By("Verifying required container images are published to the kind-registry mirror")
 	// kind nodes mirror ghcr.io / docker.io through the local registry
 	// started by scripts/setup-local-registry.sh. We verify image

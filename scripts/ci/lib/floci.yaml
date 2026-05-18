@@ -1,0 +1,70 @@
+# Floci local S3-compatible object storage (https://github.com/floci-io/floci).
+# Deployed alongside a FireboltInstance to satisfy the engine's "dedicated
+# pensieve requires object storage" check (managed tablets cannot live on a
+# local filesystem when pensieve is enabled). The engine's customEngineConfig
+# points firebolt.managed_storage at the Service below; bucket creation is a
+# separate step performed by scripts/ci/lib/setup-floci.sh.
+#
+# Floci is zero-auth: requests must still be SigV4-signed but credentials are
+# not validated, so any dummy access-key/secret pair works.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: floci
+  labels:
+    app: floci
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: floci
+  template:
+    metadata:
+      labels:
+        app: floci
+    spec:
+      containers:
+        - name: floci
+          image: floci/floci:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: api
+              containerPort: 4566
+              protocol: TCP
+          env:
+            - name: FLOCI_DEFAULT_REGION
+              value: us-east-1
+          readinessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: floci
+  labels:
+    app: floci
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 4566
+      targetPort: 4566
+      protocol: TCP
+  selector:
+    app: floci
