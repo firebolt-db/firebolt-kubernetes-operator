@@ -162,3 +162,121 @@ func TestBuildMetadataConfigXML_EscapesUserFields(t *testing.T) {
 		t.Errorf("default_account_id round-trip: got %q, want %q", got, want)
 	}
 }
+
+// The metadata (pensieve) pod has the same security posture as the
+// internal PostgreSQL and Envoy gateway pods: built-in non-root user,
+// read-only rootfs, all capabilities dropped, RuntimeDefault seccomp, and
+// no auto-mounted service account token. These tests are the regression
+// guard against any of those fields silently disappearing.
+
+func mkMetadataInstance() *computev1alpha1.FireboltInstance {
+	return &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			ID: "acc-1",
+		},
+	}
+}
+
+func TestBuildMetadataDeploymentPodSecurityContext(t *testing.T) {
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+
+	psc := dep.Spec.Template.Spec.SecurityContext
+	if psc == nil {
+		t.Fatal("expected a pod-level SecurityContext to be set")
+	}
+	if psc.RunAsNonRoot == nil || !*psc.RunAsNonRoot {
+		t.Errorf("RunAsNonRoot: got %+v, want *true", psc.RunAsNonRoot)
+	}
+	for name, ptr := range map[string]*int64{
+		"RunAsUser":  psc.RunAsUser,
+		"RunAsGroup": psc.RunAsGroup,
+	} {
+		if ptr == nil {
+			t.Errorf("%s: nil; want *%d", name, MetadataUID)
+			continue
+		}
+		if *ptr != MetadataUID {
+			t.Errorf("%s: got %d, want %d", name, *ptr, MetadataUID)
+		}
+	}
+	if psc.SeccompProfile == nil || psc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Errorf("SeccompProfile: got %+v, want type=%s", psc.SeccompProfile, corev1.SeccompProfileTypeRuntimeDefault)
+	}
+
+	if amt := dep.Spec.Template.Spec.AutomountServiceAccountToken; amt == nil || *amt {
+		t.Errorf("AutomountServiceAccountToken: got %+v, want *false (pensieve does not call the Kubernetes API)", amt)
+	}
+}
+
+func TestBuildMetadataDeploymentContainerSecurityContext(t *testing.T) {
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+
+	if got, want := len(dep.Spec.Template.Spec.Containers), 1; got != want {
+		t.Fatalf("containers: got %d, want %d", got, want)
+	}
+	c := dep.Spec.Template.Spec.Containers[0]
+	csc := c.SecurityContext
+	if csc == nil {
+		t.Fatal("expected a container-level SecurityContext to be set")
+	}
+
+	if csc.RunAsNonRoot == nil || !*csc.RunAsNonRoot {
+		t.Errorf("RunAsNonRoot: got %+v, want *true", csc.RunAsNonRoot)
+	}
+	if csc.RunAsUser == nil || *csc.RunAsUser != MetadataUID {
+		t.Errorf("RunAsUser: got %v, want *%d", csc.RunAsUser, MetadataUID)
+	}
+	if csc.ReadOnlyRootFilesystem == nil || !*csc.ReadOnlyRootFilesystem {
+		t.Errorf("ReadOnlyRootFilesystem: got %+v, want *true", csc.ReadOnlyRootFilesystem)
+	}
+	if csc.AllowPrivilegeEscalation == nil || *csc.AllowPrivilegeEscalation {
+		t.Errorf("AllowPrivilegeEscalation: got %+v, want *false", csc.AllowPrivilegeEscalation)
+	}
+	if csc.Capabilities == nil {
+		t.Fatal("Capabilities: nil; want Drop=[ALL]")
+	}
+	if got, want := len(csc.Capabilities.Drop), 1; got != want {
+		t.Fatalf("Capabilities.Drop: got %d entries, want %d", got, want)
+	}
+	if csc.Capabilities.Drop[0] != corev1.Capability("ALL") {
+		t.Errorf("Capabilities.Drop[0]: got %q, want %q", csc.Capabilities.Drop[0], "ALL")
+	}
+	if len(csc.Capabilities.Add) != 0 {
+		t.Errorf("Capabilities.Add: got %v, want empty", csc.Capabilities.Add)
+	}
+}
+
+// Read-only-rootfs pods need a writable emptyDir backing /tmp. The
+// pensieve binary has not been audited for filesystem writes, so /tmp
+// is backed defensively; without an emptyDir mount there, any runtime
+// write under /tmp would fail on a read-only fs.
+func TestBuildMetadataDeploymentWritableTmpVolume(t *testing.T) {
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	pod := dep.Spec.Template.Spec
+
+	var tmp *corev1.Volume
+	for i := range pod.Volumes {
+		if pod.Volumes[i].Name == "tmp" {
+			tmp = &pod.Volumes[i]
+			break
+		}
+	}
+	if tmp == nil {
+		t.Fatal(`expected a "tmp" volume on the pod`)
+	}
+	if tmp.EmptyDir == nil {
+		t.Errorf(`"tmp" volume must be an EmptyDir, got %+v`, tmp.VolumeSource)
+	}
+
+	var mounted bool
+	for _, m := range pod.Containers[0].VolumeMounts {
+		if m.Name == "tmp" && m.MountPath == "/tmp" {
+			mounted = true
+			break
+		}
+	}
+	if !mounted {
+		t.Errorf(`container missing /tmp mount of the "tmp" emptyDir; mounts: %+v`, pod.Containers[0].VolumeMounts)
+	}
+}
