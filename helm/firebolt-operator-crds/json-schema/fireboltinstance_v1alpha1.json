@@ -2064,6 +2064,15 @@
             }
           ],
           "additionalProperties": false
+        },
+        "metricScrapeMode": {
+          "default": "PodIP",
+          "description": "MetricScrapeMode selects the transport the operator uses to scrape\nthe Prometheus /metrics endpoint exposed by engine pods. The\nresulting samples drive the drain probe (which gates blue-green\ncutover until firebolt_running_queries + firebolt_suspended_queries\nreach zero) and the autoscaler activity poll. Both probes use\nwhatever value is set here; the field is read fresh on every\nscrape so it can be flipped without restarting the controller.\n\nDefaults to PodIP: the controller pod opens a direct HTTP\nconnection to the engine pod IP on MetricsPort. This is the\npattern every standard in-cluster scraper uses (Prometheus\nPodMonitor, metrics-server, OpenTelemetry, kube-state-metrics)\nand it does not depend on apiserver->node SG rules that EKS /\nkubeadm do not open by default. ApiserverProxy is an opt-in\nfallback for clusters where the controller cannot reach pod IPs\n(out-of-cluster `make run`, or networks that explicitly forbid\nnode-to-node on MetricsPort while allowing the apiserver to\nproxy); it costs extra apiserver request load and widens the\nblast radius of pods/proxy RBAC, so opt in only when the default\nis structurally infeasible.",
+          "enum": [
+            "PodIP",
+            "ApiserverProxy"
+          ],
+          "type": "string"
         }
       },
       "required": [
