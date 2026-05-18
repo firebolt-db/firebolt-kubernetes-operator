@@ -33,95 +33,46 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// MetricScrapeModeDefault is the mode used when the referenced
-// FireboltInstance is missing, unreachable, or carries an empty
-// spec.metricScrapeMode. Centralized so test fixtures and production
-// agree on the fallback. See the docstring on
-// FireboltInstanceSpec.MetricScrapeMode for why PodIP is the right
-// default.
+// MetricScrapeModeDefault is the fallback when the parent FireboltInstance
+// is missing or carries an empty spec.metricScrapeMode. See the docstring
+// on FireboltInstanceSpec.MetricScrapeMode for why PodIP is the default.
 const MetricScrapeModeDefault = computev1alpha1.MetricScrapeModePodIP
 
-// scrapeTimeout bounds a single pod metric scrape end-to-end (connect +
-// request + body read). The drain probe and autoscaler are both wrapped
-// in the controller-runtime reconcile context which already has its own
-// deadline, but a per-scrape timeout protects the controller from a pod
-// that accepts the TCP handshake and then stalls indefinitely (the
-// classic "metrics handler holds a sync.Mutex during shutdown" failure
-// mode). 10s is generous for /metrics, which is single-digit KB.
+// scrapeTimeout bounds a single pod scrape end-to-end. The reconcile
+// context already has its own deadline; this is defense against a pod
+// that accepts the TCP handshake then stalls (metrics handler holding a
+// sync.Mutex during shutdown is the classic case).
 const scrapeTimeout = 10 * time.Second
 
-// metricsHTTPClient is the http.Client used for direct PodIP scrapes.
-// Package-level so the dial pool is shared across reconciles instead of
-// being re-created on every scrape; controller-runtime tends to fan many
-// reconciles out on the same controller, so a per-call client would burn
-// ephemeral ports under heavy churn.
+// metricsHTTPClient is shared across reconciles so we don't burn
+// ephemeral ports building a client per call. DisableKeepAlives because
+// pod IPs are reused across rollouts and a cached idle conn can land on
+// a different pod than the one we just listed.
 var metricsHTTPClient = &http.Client{
 	Timeout: scrapeTimeout,
 	Transport: &http.Transport{
-		// Disable keep-alives: pod IPs are ephemeral across rollouts and
-		// a stale idle connection to a recycled IP can hit a totally
-		// different pod. The scrape rate per pod is low (one per
-		// reconcile, with the autoscaler poll on top of that, both on
-		// the order of seconds), so the lost keep-alive savings are
-		// negligible compared to the correctness risk.
-		DisableKeepAlives: true,
-		DialContext: (&net.Dialer{
-			Timeout: 3 * time.Second,
-		}).DialContext,
+		DisableKeepAlives:     true,
+		DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
 		ResponseHeaderTimeout: 3 * time.Second,
 	},
 }
 
-// podMetricScraper fetches the raw Prometheus /metrics body from a
-// single engine pod. The interface hides the transport mode (direct
-// PodIP HTTP vs apiserver pods/proxy subresource) so consumers
-// (checkDrainComplete, scrapeActiveQueries) iterate pods without
-// repeating the mode switch on every call site.
-//
-// A scraper is intended to be constructed once per reconcile pass via
-// FireboltEngineReconciler.newPodMetricScraper, which resolves the mode
-// from the parent FireboltInstance. The same scraper is then handed to
-// every pod-level helper that needs to read /metrics; the mode is
-// already baked in, so those helpers do not see it.
-//
-// Implementations must be safe for concurrent use only within a single
-// reconcile (we do not currently scrape pods in parallel, but factoring
-// the contract as method-on-instance keeps that option open without
-// retrofitting locks).
+// podMetricScraper fetches the raw Prometheus /metrics body from one
+// pod. The interface hides the transport (direct PodIP HTTP vs apiserver
+// pods/proxy) so consumers iterate pods without repeating the mode
+// switch. Build one per reconcile via newPodMetricScraper.
 type podMetricScraper interface {
-	// Scrape returns the raw bytes of the /metrics response from pod,
-	// or an error describing why the fetch could not be completed. A
-	// non-2xx response from the pod is surfaced as an error.
 	Scrape(ctx context.Context, pod *corev1.Pod) ([]byte, error)
-
-	// Mode reports which transport this scraper implements. Used only
-	// for diagnostics (log lines, error messages); the dispatch happens
-	// inside Scrape.
+	// Mode is used only for diagnostics; dispatch happens inside Scrape.
 	Mode() computev1alpha1.MetricScrapeMode
 }
 
-// resolveMetricScrapeMode returns the metric scrape transport configured on
-// the FireboltInstance referenced by engine.spec.instanceRef. The lookup
-// goes through the controller-runtime cached client, so it does not add
-// real apiserver traffic per scrape — both the engine and the instance
-// are already watched.
-//
-// Behavior on missing / unset:
-//
-//   - Instance not found, or any other Get error -> default mode. We do
-//     not propagate the error: a transient cache miss should not turn a
-//     drain probe into a DrainProbeError. The instance gate in Reconcile
-//     handles "instance truly missing" by blocking reconcile before the
-//     scrape paths are reached for the phases that actually need the
-//     instance; for PhaseDraining (which does not gate on instance) the
-//     mode lookup is purely advisory, so the default is the right
-//     fallback.
-//   - Instance found but spec.metricScrapeMode == "" -> default mode.
-//     This covers existing CRs created before the field existed.
-//
-// The default is intentionally MetricScrapeModePodIP, matching the CRD
-// default and the in-cluster scraper convention. See the docstring on
-// FireboltInstanceSpec.MetricScrapeMode for why.
+// resolveMetricScrapeMode reads spec.metricScrapeMode from the parent
+// FireboltInstance via the cached client. Any Get error or empty value
+// returns MetricScrapeModeDefault; we deliberately do not propagate the
+// error because a transient cache miss must not surface as a
+// DrainProbeError. The instance gate in Reconcile is the right place to
+// block on a truly missing instance.
 func (r *FireboltEngineReconciler) resolveMetricScrapeMode(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
@@ -137,14 +88,9 @@ func (r *FireboltEngineReconciler) resolveMetricScrapeMode(
 	return inst.Spec.MetricScrapeMode
 }
 
-// newPodMetricScraper builds the per-reconcile scraper for an engine by
-// resolving the transport mode once. Callers iterate pods against the
-// returned scraper without re-resolving on every call.
-//
-// Returns a noopScraper on an unrecognized mode rather than nil so
-// callers do not need a nil-check. The CRD enum validation makes this
-// path unreachable in production; the safety net is for tests or
-// hand-edited resources that bypass admission.
+// newPodMetricScraper resolves the mode once and returns the matching
+// implementation. Never returns nil; unrecognized modes and missing
+// dependencies map to unknownModeScraper so callers can skip nil-checks.
 func (r *FireboltEngineReconciler) newPodMetricScraper(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
@@ -152,6 +98,14 @@ func (r *FireboltEngineReconciler) newPodMetricScraper(
 	mode := r.resolveMetricScrapeMode(ctx, engine)
 	switch mode {
 	case computev1alpha1.MetricScrapeModeApiserverProxy:
+		// Guard the typed nil here, where r.Clientset is still
+		// *kubernetes.Clientset and the nil check actually fires.
+		if r.Clientset == nil {
+			return &unknownModeScraper{
+				mode:   mode,
+				reason: "clientset not initialized for ApiserverProxy mode",
+			}
+		}
 		return &apiserverProxyScraper{clientset: r.Clientset}
 	case computev1alpha1.MetricScrapeModePodIP, "":
 		return &podIPScraper{client: metricsHTTPClient}
@@ -160,11 +114,9 @@ func (r *FireboltEngineReconciler) newPodMetricScraper(
 	}
 }
 
-// podIPScraper opens a direct HTTP connection from the controller pod
-// to pod.Status.PodIP:MetricsPort. Requires the controller to run
-// in-cluster on the pod network. This is the default transport and
-// matches every standard in-cluster scraper (Prometheus PodMonitor,
-// metrics-server, OpenTelemetry collector, kube-state-metrics).
+// podIPScraper dials pod.Status.PodIP:MetricsPort directly. Requires
+// the controller to run in-cluster on the pod network — the default
+// path, matching Prometheus / metrics-server / OpenTelemetry / KSM.
 type podIPScraper struct {
 	client *http.Client
 }
@@ -177,9 +129,8 @@ func (s *podIPScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]byte, err
 	if pod.Status.PodIP == "" {
 		return nil, fmt.Errorf("pod %s has no PodIP yet", pod.Name)
 	}
-	// Engine /metrics is plain HTTP on MetricsPort; there is no TLS
-	// material in the engine pod and Prometheus/PodMonitor scrapes it
-	// the same way. The revive nolint here is deliberate.
+	// Engine /metrics is plain HTTP; Prometheus PodMonitor scrapes it
+	// the same way. nolint:revive deliberate.
 	url := fmt.Sprintf("http://%s/%s", net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(MetricsPort)), //nolint:revive // engine metrics endpoint is plain HTTP by design
 		trimLeadingSlash(MetricsPath))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
@@ -194,9 +145,7 @@ func (s *podIPScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]byte, err
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode != http.StatusOK {
-		// Read up to a small bounded slice of the body for the
-		// diagnostic. We do not want to read megabytes from a
-		// misbehaving endpoint into a controller log line.
+		// Bounded body read so a misbehaving endpoint cannot flood the log.
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("scrape from pod %s returned %s: %s",
 			pod.Name, resp.Status, string(body))
@@ -205,12 +154,15 @@ func (s *podIPScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]byte, err
 }
 
 // apiserverProxyScraper routes the GET through the apiserver pods/proxy
-// subresource. The apiserver enforces pods/proxy RBAC and dials the pod
-// from its own ENI; this requires the cluster network to allow that
-// path, which on EKS is NOT the default for MetricsPort. See the
-// docstring on MetricScrapeModeApiserverProxy for when to use it.
+// subresource. Opt-in via spec.metricScrapeMode=ApiserverProxy.
+//
+// clientset is the concrete *kubernetes.Clientset and NOT
+// kubernetes.Interface. A typed-nil pointer boxed into an interface is
+// not == nil (the classic Go gotcha), so widening this would turn the
+// construction-time and runtime nil checks into no-ops and a missing
+// clientset would panic on CoreV1() instead of returning an error.
 type apiserverProxyScraper struct {
-	clientset kubernetes.Interface
+	clientset *kubernetes.Clientset
 }
 
 func (s *apiserverProxyScraper) Mode() computev1alpha1.MetricScrapeMode {
@@ -230,13 +182,13 @@ func (s *apiserverProxyScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]
 		DoRaw(ctx)
 }
 
-// unknownModeScraper is the fail-closed branch for an unrecognized
-// MetricScrapeMode. Production paths cannot reach this (CRD admission
-// rejects unknown enum values) — it exists so a hand-edited or
-// fixture-built FireboltInstance produces a loud error instead of being
-// silently coerced into one of the real modes.
+// unknownModeScraper is the fail-closed branch: every Scrape call errors.
+// Used for unrecognized modes (unreachable under CRD validation) and for
+// modes whose preconditions failed (e.g. ApiserverProxy without a
+// clientset). reason is appended to the error when set.
 type unknownModeScraper struct {
-	mode computev1alpha1.MetricScrapeMode
+	mode   computev1alpha1.MetricScrapeMode
+	reason string
 }
 
 func (s *unknownModeScraper) Mode() computev1alpha1.MetricScrapeMode {
@@ -244,13 +196,14 @@ func (s *unknownModeScraper) Mode() computev1alpha1.MetricScrapeMode {
 }
 
 func (s *unknownModeScraper) Scrape(_ context.Context, _ *corev1.Pod) ([]byte, error) {
+	if s.reason != "" {
+		return nil, fmt.Errorf("unsupported MetricScrapeMode %q: %s", s.mode, s.reason)
+	}
 	return nil, fmt.Errorf("unknown MetricScrapeMode %q", s.mode)
 }
 
-// trimLeadingSlash strips a single leading '/'. Used to normalize
-// MetricsPath when concatenating into a base URL — MetricsPath has a
-// leading slash by convention but we already emit one when joining
-// host:port, so we drop the duplicate to avoid "http://...//metrics".
+// trimLeadingSlash drops one leading '/' so MetricsPath joined onto a
+// host:port URL doesn't emit "http://...//metrics".
 func trimLeadingSlash(s string) string {
 	if s != "" && s[0] == '/' {
 		return s[1:]

@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,10 +38,8 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
-// fakeScraper is a podMetricScraper stub for unit-testing the consumers
-// (isPodDrained, scrapePodActiveQueries) without standing up a network
-// server. Tests that exercise the actual transports use httptest
-// directly against podIPScraper.
+// fakeScraper drives the consumers (isPodDrained, scrapePodActiveQueries)
+// without standing up a network server.
 type fakeScraper struct {
 	mode computev1alpha1.MetricScrapeMode
 	resp []byte
@@ -57,14 +56,6 @@ func (f *fakeScraper) Scrape(_ context.Context, _ *corev1.Pod) ([]byte, error) {
 	return f.resp, f.err
 }
 
-// hostPortFromURL splits an "http://host:port" URL into its host and
-// numeric port components. The httptest server picks a random loopback
-// port; tests need it to point the production podIPScraper at a Pod
-// with PodIP=loopback and override MetricsPort indirectly by hosting
-// the listener on the URL's port. Since podIPScraper hard-codes
-// MetricsPort, we instead host the test server at MetricsPort directly
-// when possible; tests that cannot bind that port use the override
-// dial path provided by httptest's URL.
 func hostPortFromURL(t *testing.T, u string) (string, int) {
 	t.Helper()
 	u = strings.TrimPrefix(u, "http://")
@@ -79,12 +70,9 @@ func hostPortFromURL(t *testing.T, u string) (string, int) {
 	return h, pn
 }
 
-// fixedPortPodIPScraper builds a podIPScraper whose http.Client is
-// hijacked to dial a specific tcp endpoint regardless of the host:port
-// in the request URL. This lets tests exercise the full URL-building
-// path of the production Scrape method (host=PodIP, port=MetricsPort,
-// path=MetricsPath) while still routing the request to httptest's
-// random port.
+// fixedPortPodIPScraper hijacks the http.Transport dialer so the
+// production Scrape URL (PodIP:MetricsPort/MetricsPath) actually
+// connects to httptest's random port.
 func fixedPortPodIPScraper(realAddr string) *podIPScraper {
 	transport := &http.Transport{
 		DisableKeepAlives: true,
@@ -175,11 +163,9 @@ func TestTrimLeadingSlash(t *testing.T) {
 	}
 }
 
-// TestResolveMetricScrapeMode covers the three branches of the resolver:
-// instance with an explicit mode, instance with an empty mode, instance
-// missing entirely. The default is asserted via MetricScrapeModeDefault
-// so a change to the default shows up as a single-line diff rather than
-// a fan-out across tests.
+// TestResolveMetricScrapeMode covers explicit, empty, and missing
+// instance. The default is asserted via MetricScrapeModeDefault so a
+// change to the default doesn't fan out across tests.
 func TestResolveMetricScrapeMode(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
@@ -244,12 +230,8 @@ func TestResolveMetricScrapeMode(t *testing.T) {
 	}
 }
 
-// TestNewPodMetricScraperDispatch covers the factory: it must produce
-// the right concrete scraper for each mode and fall closed (with the
-// error-bearing scraper) on an unrecognized value. CRD enum validation
-// makes the unknown branch unreachable in production, but the safety
-// net is asserted so a future refactor cannot silently change the
-// fallback to "default mode" and hide a typo.
+// TestNewPodMetricScraperDispatch pins the factory's mode -> concrete
+// type mapping, including the fail-closed branch for unknown values.
 func TestNewPodMetricScraperDispatch(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
@@ -268,6 +250,10 @@ func TestNewPodMetricScraperDispatch(t *testing.T) {
 			Spec:       computev1alpha1.FireboltInstanceSpec{MetricScrapeMode: mode},
 		}
 	}
+
+	// A zero-valued *kubernetes.Clientset is enough — we only assert
+	// the returned type. The nil-clientset path is in its own test.
+	clientset := &kubernetes.Clientset{}
 
 	tests := []struct {
 		name    string
@@ -288,6 +274,7 @@ func TestNewPodMetricScraperDispatch(t *testing.T) {
 			r := &FireboltEngineReconciler{
 				Client:          fc,
 				Scheme:          scheme,
+				Clientset:       clientset,
 				MetricsRecorder: metrics.NoOpEngineRecorder{},
 			}
 			s := r.newPodMetricScraper(context.Background(), engine)
@@ -308,10 +295,60 @@ func TestUnknownModeScraperFailsClosed(t *testing.T) {
 	}
 }
 
-// TestIsPodDrained_FakeScraper exercises the consumer wiring without
-// touching the network: a fake scraper feeds canned bytes through the
-// same parse path production uses. The two cases pin the boundary
-// (suspended + running == 0 -> drained, anything > 0 -> not drained).
+// TestUnknownModeScraperCarriesReason asserts the error includes both
+// the mode token (so a CRD typo is visible) and the reason.
+func TestUnknownModeScraperCarriesReason(t *testing.T) {
+	s := &unknownModeScraper{mode: "ApiserverProxy", reason: "clientset not initialized"}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "ns"}}
+	_, err := s.Scrape(context.Background(), pod)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ApiserverProxy") || !strings.Contains(err.Error(), "clientset") {
+		t.Errorf("error should name both the mode and the reason, got %v", err)
+	}
+}
+
+// TestNewPodMetricScraper_NilClientsetGuard regression-tests the
+// typed-nil-in-interface gotcha: ApiserverProxy + nil Clientset must
+// produce a fail-closed scraper whose Scrape errors cleanly rather
+// than panicking on CoreV1().
+func TestNewPodMetricScraper_NilClientsetGuard(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	const ns = "ns"
+	const instName = "instance"
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: ns},
+		Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: instName},
+	}
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{MetricScrapeMode: computev1alpha1.MetricScrapeModeApiserverProxy},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(engine, inst).Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          fc,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+		// Clientset intentionally left nil.
+	}
+	s := r.newPodMetricScraper(context.Background(), engine)
+	if _, ok := s.(*unknownModeScraper); !ok {
+		t.Fatalf("want *unknownModeScraper for nil Clientset, got %T", s)
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: ns}}
+	if _, err := s.Scrape(context.Background(), pod); err == nil {
+		t.Fatal("expected error from fail-closed scraper, got nil")
+	}
+}
+
+// TestIsPodDrained_FakeScraper pins the drained boundary: running +
+// suspended == 0 -> drained, anything else -> not drained.
 func TestIsPodDrained_FakeScraper(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "engine-0", Namespace: "ns"},

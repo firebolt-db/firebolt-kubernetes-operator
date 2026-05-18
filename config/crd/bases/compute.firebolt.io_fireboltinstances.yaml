@@ -2379,25 +2379,12 @@ spec:
                 default: PodIP
                 description: |-
                   MetricScrapeMode selects the transport the operator uses to scrape
-                  the Prometheus /metrics endpoint exposed by engine pods. The
-                  resulting samples drive the drain probe (which gates blue-green
-                  cutover until firebolt_running_queries + firebolt_suspended_queries
-                  reach zero) and the autoscaler activity poll. Both probes use
-                  whatever value is set here; the field is read fresh on every
-                  scrape so it can be flipped without restarting the controller.
-
-                  Defaults to PodIP: the controller pod opens a direct HTTP
-                  connection to the engine pod IP on MetricsPort. This is the
-                  pattern every standard in-cluster scraper uses (Prometheus
-                  PodMonitor, metrics-server, OpenTelemetry, kube-state-metrics)
-                  and it does not depend on apiserver->node SG rules that EKS /
-                  kubeadm do not open by default. ApiserverProxy is an opt-in
-                  fallback for clusters where the controller cannot reach pod IPs
-                  (out-of-cluster `make run`, or networks that explicitly forbid
-                  node-to-node on MetricsPort while allowing the apiserver to
-                  proxy); it costs extra apiserver request load and widens the
-                  blast radius of pods/proxy RBAC, so opt in only when the default
-                  is structurally infeasible.
+                  engine pod /metrics for the drain probe and autoscaler activity
+                  poll. Read fresh on every scrape so it can be flipped without a
+                  controller restart. Defaults to PodIP; flip to ApiserverProxy
+                  only when in-cluster pod IPs aren't reachable from the controller
+                  (out-of-cluster `make run`, or networks that block node-to-node
+                  on MetricsPort but allow apiserver-proxy).
                 enum:
                 - PodIP
                 - ApiserverProxy

@@ -335,10 +335,8 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 		return true, nil
 	}
 
-	// Build the scrape transport once per drain check, not once per
-	// pod. The mode is a property of the parent FireboltInstance and is
-	// the same for every pod in this generation; resolving inside the
-	// per-pod loop would do N redundant cache reads with no upside.
+	// Build once per drain check; the mode is identical for every pod
+	// in this generation.
 	scraper := r.newPodMetricScraper(ctx, engine)
 
 	for i := range podList.Items {
@@ -366,27 +364,18 @@ func (r *FireboltEngineReconciler) checkDrainComplete(ctx context.Context, engin
 	return true, nil
 }
 
-// isPodDrained reports whether the engine pod has finished serving queries.
+// isPodDrained reports whether the engine pod has finished serving
+// queries. The signal is firebolt_running_queries +
+// firebolt_suspended_queries == 0 (suspended counts idle sessions still
+// holding state, so we wait for both before cutting over).
 //
-// It scrapes the pod's Prometheus /metrics endpoint through scraper,
-// which encapsulates the transport (direct PodIP HTTP or apiserver
-// pods/proxy, selected once by the caller). The signal we trust is
-// firebolt_running_queries + firebolt_suspended_queries == 0. Both
-// gauges are exported by the engine; suspended queries count queries
-// that are idle waiting on a client but still holding a session, so we
-// wait for those too before cutting the generation over.
+// Scrape errors propagate; checkDrainComplete wraps them as a
+// DrainProbeError so Reconcile can surface ConditionReady=False with
+// Reason=DrainCheckFailing. Returning (false, nil) on a broken endpoint
+// would stall the blue-green silently forever.
 //
-// Errors (pod unreachable, metrics missing, scrape failure) are returned
-// to the caller - checkDrainComplete wraps them as a DrainProbeError so
-// Reconcile can surface them as ConditionReady=False with
-// Reason=DrainCheckFailing. Returning (false, nil) here would make a
-// broken /metrics endpoint look like an engine that just happens to
-// still be busy, and the blue-green would stall silently forever.
-//
-// isPodDrained is a free function rather than a Reconciler method
-// because it does no I/O on the cluster directly: it delegates the
-// fetch to scraper and parses the result. Keeping it method-free lets
-// tests drive it with a fake scraper without standing up a Reconciler.
+// Free function (not a method) so tests can drive it with a fake
+// scraper without a Reconciler.
 func isPodDrained(ctx context.Context, scraper podMetricScraper, pod *corev1.Pod) (bool, error) {
 	if pod.Status.Phase != corev1.PodRunning {
 		return true, nil
