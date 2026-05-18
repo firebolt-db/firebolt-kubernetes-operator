@@ -48,11 +48,25 @@ echo "Relabeling Kind nodes for engine-full scheduling..."
 kubectl label nodes --all firebolt.dev/pool=engine --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
+echo "Creating EngineClass that pins the CI engine image (replaces the v1alpha0 spec.image field)..."
+ENGINE_CLASS_NAME="${ENGINE_NAME}-ci-class"
+cat <<EOF | kubectl apply -f -
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: ${ENGINE_CLASS_NAME}
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: ${ENGINE_IMAGE}:${ENGINE_TAG}
+          imagePullPolicy: IfNotPresent
+EOF
+
 echo "Applying engine-full with CI overrides (storage.size=1Gi, memory=2Gi) and floci managed_storage..."
-BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" yq eval '
-  (select(.kind == "FireboltEngine").spec.image.repository) = env(ENGINE_IMAGE) |
-  (select(.kind == "FireboltEngine").spec.image.tag) = env(ENGINE_TAG) |
-  (select(.kind == "FireboltEngine").spec.image.pullPolicy) = "IfNotPresent" |
+BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" CLASS="$ENGINE_CLASS_NAME" yq eval '
+  (select(.kind == "FireboltEngine").spec.engineClassRef) = env(CLASS) |
   (select(.kind == "FireboltEngine").spec.storage.persistentVolumeClaim.size) = "500Mi" |
   (select(.kind == "FireboltEngine").spec.resources.requests.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.resources.limits.cpu) = "250m" |

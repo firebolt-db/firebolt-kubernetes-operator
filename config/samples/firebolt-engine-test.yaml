@@ -10,9 +10,8 @@ metadata:
   namespace: firebolt
 spec:
   replicas: 1
-  image:
-    repository: "ghcr.io/firebolt-db/engine"
-    tag: "dev"
+  # Image flows from the operator-default (or an EngineClass when set via
+  # spec.engineClassRef); no per-engine image override.
   resources:
     requests:
       cpu: "1"

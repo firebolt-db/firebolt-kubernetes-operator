@@ -192,12 +192,19 @@ var _ = SynchronizedBeforeSuite(func() {
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
 	crds := []string{
+		"compute.firebolt.io_engineclasses.yaml",
 		"compute.firebolt.io_fireboltengines.yaml",
 		"compute.firebolt.io_fireboltinstances.yaml",
 	}
 	for _, crd := range crds {
 		crdPath := filepath.Join(projectRoot, "config", "crd", "bases", crd)
-		output, err := exec.Command("kubectl", "apply", "-f", crdPath).CombinedOutput()
+		// --server-side: the EngineClass CRD is >600KB (the embedded
+		// PodTemplateSpec schema), well past the 256KB cap kubectl's
+		// client-side apply writes into the
+		// last-applied-configuration annotation. Server-side apply does
+		// not stamp that annotation, so it works at any size and is the
+		// recommended path for large CRDs anyway.
+		output, err := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts", "-f", crdPath).CombinedOutput()
 		if err != nil {
 			fmt.Fprintf(GinkgoWriter, "CRD install output for %s: %s\n", crd, string(output))
 		}

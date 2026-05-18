@@ -502,8 +502,12 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 	})
 
-	// Test 6: Image switching
-	Describe("Image Switching", Ordered, func() {
+	// Test 6: Image switching.
+	// Skipped until EngineClass-based image override lands (FB-1145):
+	// FireboltEngineSpec.Image was removed; image lives on the referenced
+	// EngineClass template. This Describe will be re-enabled and rewritten
+	// to switch images by mutating the engine's referenced EngineClass.
+	XDescribe("Image Switching", Ordered, func() {
 		var (
 			instanceName = "inst-image" + queryConfig.Suffix
 			engineName   = "test-image" + queryConfig.Suffix + "-engine"

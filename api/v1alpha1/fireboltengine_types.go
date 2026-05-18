@@ -276,6 +276,26 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="instanceRef is immutable"
 	InstanceRef string `json:"instanceRef"`
 
+	// EngineClassRef is the name of a cluster-scoped EngineClass whose
+	// pod template is merged underneath this engine's pod template when
+	// the engine's StatefulSet is built. Engine spec fields take
+	// precedence over class fields; operator defaults sit beneath both.
+	//
+	// Mutable: changing the reference (or editing the referenced class's
+	// spec) triggers a new blue-green generation, just like any other
+	// pod-template-affecting spec change. The change participates in
+	// stsMatchesSpec via an annotation hash so drift is detected
+	// deterministically.
+	//
+	// The validating webhook rejects Create and Update when the
+	// referenced class does not exist, so users see the typo immediately
+	// instead of via engine status. Apply ordering matters: GitOps
+	// tooling must apply the EngineClass before any engine that
+	// references it (Argo sync-waves / Flux dependsOn).
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	EngineClassRef *string `json:"engineClassRef,omitempty"`
+
 	// Replicas is the number of engine nodes. Set to 0 to stop the
 	// engine: the operator tears down the active generation (honoring
 	// spec.rollout for drain behavior) and leaves the CR in the
@@ -284,10 +304,13 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
-	// Image defines the container image to use.
-	// If not specified, defaults to the engine image embedded in the operator binary.
-	// +optional
-	Image *ImageSpec `json:"image,omitempty"`
+	// The engine container image is sourced from the referenced EngineClass
+	// template (spec.template.containers[name=="engine"].image) when set, or
+	// from the operator's embedded default otherwise. There is no per-engine
+	// image override on this CR: image is a class-level concern so that
+	// platform teams can audit image rollouts through EngineClass changes
+	// rather than across N FireboltEngine CRs. Override the operator default
+	// at install time via Helm values.
 
 	// Resources defines the Kubernetes resource requests and limits for engine pods.
 	// +optional

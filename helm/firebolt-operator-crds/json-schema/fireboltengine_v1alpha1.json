@@ -905,32 +905,10 @@
           "description": "DrainCheckInterval controls how often to check if old pods have finished serving queries.\nOnly used when drainCheckEnabled is true.",
           "type": "string"
         },
-        "image": {
-          "description": "Image defines the container image to use.\nIf not specified, defaults to the engine image embedded in the operator binary.",
-          "properties": {
-            "pullPolicy": {
-              "default": "IfNotPresent",
-              "description": "PullPolicy defines when to pull the image.",
-              "enum": [
-                "Always",
-                "Never",
-                "IfNotPresent"
-              ],
-              "type": "string"
-            },
-            "repository": {
-              "description": "Repository is the container image repository. When empty, the\noperator's default repository for this component is used; pair with\nTag to override the full reference, or set on its own to pull the\noperator-default tag from a different repository (e.g. a mirror).",
-              "minLength": 1,
-              "type": "string"
-            },
-            "tag": {
-              "description": "Tag is the container image tag. When empty, the operator's default\ntag for this component is used; set on its own to pin a specific\nversion while keeping the operator-default repository.",
-              "minLength": 1,
-              "type": "string"
-            }
-          },
-          "type": "object",
-          "additionalProperties": false
+        "engineClassRef": {
+          "description": "EngineClassRef is the name of a cluster-scoped EngineClass whose\npod template is merged underneath this engine's pod template when\nthe engine's StatefulSet is built. Engine spec fields take\nprecedence over class fields; operator defaults sit beneath both.\n\nMutable: changing the reference (or editing the referenced class's\nspec) triggers a new blue-green generation, just like any other\npod-template-affecting spec change. The change participates in\nstsMatchesSpec via an annotation hash so drift is detected\ndeterministically.\n\nThe validating webhook rejects Create and Update when the\nreferenced class does not exist, so users see the typo immediately\ninstead of via engine status. Apply ordering matters: GitOps\ntooling must apply the EngineClass before any engine that\nreferences it (Argo sync-waves / Flux dependsOn).",
+          "minLength": 1,
+          "type": "string"
         },
         "initContainers": {
           "description": "InitContainers are additional init containers stamped on the engine pod\ntemplate before the engine container starts. Use this for node-local data\nprep (for example chown on a hostPath volume at the data mount path).\nInit containers must mount pod volumes explicitly (typically the \"data\"\nvolume at /firebolt-core/volume). The operator does not inject volume\nmounts or mutate container definitions.\n\nChanges to this field trigger a new blue-green generation.",
