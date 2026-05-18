@@ -514,8 +514,7 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 		return 0, true
 	}
 
-	// Build the scrape transport once per poll, not once per pod. See
-	// checkDrainComplete for the same reasoning on the drain side.
+	// Build once per poll; see checkDrainComplete for the rationale.
 	scraper := r.newPodMetricScraper(ctx, engine)
 
 	var total int64
@@ -540,15 +539,10 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 	return total, false
 }
 
-// scrapePodActiveQueries fetches firebolt_running_queries +
-// firebolt_suspended_queries from a single pod through the supplied
-// scraper. Mirrors isPodDrained so the autoscaler and the drain probe
-// share the same reachability story; both delegate the transport
-// decision to the scraper their callers built.
-//
-// Free function for the same reason as isPodDrained: no Reconciler
-// fields are read here, only the scraper and the pod, which makes it
-// trivially unit-testable with a fake scraper.
+// scrapePodActiveQueries returns firebolt_running_queries +
+// firebolt_suspended_queries for a pod via the supplied scraper.
+// Mirrors isPodDrained so both probes share the same reachability and
+// transport story.
 func scrapePodActiveQueries(ctx context.Context, scraper podMetricScraper, pod *corev1.Pod) (int64, error) {
 	raw, err := scraper.Scrape(ctx, pod)
 	if err != nil {
