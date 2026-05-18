@@ -178,10 +178,8 @@ const (
 // user supplies a partial ImageSpec override.
 var (
 	PostgresImage             = images.PostgresImage
-	DefaultMetadataImage      = images.DefaultMetadata()
 	DefaultMetadataRepository = images.MetadataImage
 	DefaultMetadataTag        = images.MetadataTag
-	DefaultEnvoyImage         = images.DefaultEnvoy()
 	DefaultEnvoyRepository    = images.EnvoyImage
 	DefaultEnvoyTag           = images.EnvoyTag
 	DefaultEngineImage        = images.DefaultEngine()
