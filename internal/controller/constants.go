@@ -111,6 +111,14 @@ const (
 	// constant must be revisited.
 	PostgresUID int64 = 70
 
+	// MetadataUID is the numeric UID/GID of the built-in `dedicated-pensieve`
+	// user in the metadata image. The Dockerfile creates the user with this
+	// fixed UID and sets `USER dedicated-pensieve`, so pinning
+	// RunAsUser/RunAsGroup here just locks in the image's own default and
+	// lets the pod-level SecurityContext assert RunAsNonRoot=true. Revisit
+	// if the metadata image's user is ever renumbered.
+	MetadataUID int64 = 1111
+
 	// ContainerNameEngine is the container name inside engine StatefulSet pods.
 	ContainerNameEngine = "core"
 

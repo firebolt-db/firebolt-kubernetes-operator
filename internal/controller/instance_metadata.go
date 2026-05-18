@@ -209,6 +209,44 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 // peer to fail over to). The time to add a PDB is when metadata grows a
 // genuine multi-replica HA story (quorum, leader election); revisit then.
 func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
+	desired := buildMetadataDeployment(instance, configXML)
+
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
+
+	existing := &appsv1.Deployment{}
+	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: instance.Namespace}, existing)
+	if errors.IsNotFound(err) {
+		log.Info("Creating metadata Deployment",
+			"name", desired.Name,
+			"replicas", *desired.Spec.Replicas,
+			"image", desired.Spec.Template.Spec.Containers[0].Image)
+		return r.Create(ctx, desired)
+	}
+	if err != nil {
+		return err
+	}
+
+	existing.Spec.Replicas = desired.Spec.Replicas
+	existing.Spec.Template = desired.Spec.Template
+	existing.Spec.Strategy = desired.Spec.Strategy
+	return r.Update(ctx, existing)
+}
+
+// buildMetadataDeployment returns the desired Deployment object for the
+// metadata (pensieve) service. The pod is hardened to the same standard as
+// the internal PostgreSQL and Envoy gateway pods: it runs as the image's
+// built-in non-root `dedicated-pensieve` user (MetadataUID), drops all
+// Linux capabilities, sets `RuntimeDefault` seccomp, denies privilege
+// escalation, and uses a read-only root filesystem backed by an emptyDir
+// at `/tmp` for the binary's transient files. `automountServiceAccountToken`
+// is false because pensieve does not call the Kubernetes API; an attacker
+// with code execution inside the container therefore has neither a SA
+// token to reach the API server nor a writable rootfs to stage payloads on.
+func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configXML string) *appsv1.Deployment {
 	name := instance.Name + SuffixMetadataService
 	configMapName := metadataConfigMapName(instance.Name)
 	labels := instanceLabels(instance.Name, "metadata")
@@ -239,6 +277,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		AnnotationConfigHash: configHash,
 	}, spec.Annotations)
 
+	metadataUID := MetadataUID
+
 	desired := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -262,6 +302,15 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 				},
 				Spec: corev1.PodSpec{
 					TerminationGracePeriodSeconds: int64Ptr(30),
+					AutomountServiceAccountToken:  boolPtr(false),
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: boolPtr(true),
+						RunAsUser:    &metadataUID,
+						RunAsGroup:   &metadataUID,
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{{
 						Name:            metadataContainerName,
 						Image:           image,
@@ -269,6 +318,15 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 						Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
 						Ports: []corev1.ContainerPort{
 							{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
+						},
+						SecurityContext: &corev1.SecurityContext{
+							RunAsNonRoot:             boolPtr(true),
+							RunAsUser:                &metadataUID,
+							ReadOnlyRootFilesystem:   boolPtr(true),
+							AllowPrivilegeEscalation: boolPtr(false),
+							Capabilities: &corev1.Capabilities{
+								Drop: []corev1.Capability{"ALL"},
+							},
 						},
 						LivenessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
@@ -298,6 +356,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "config", MountPath: metadataConfigMount, ReadOnly: true},
 							{Name: "postgres-creds", MountPath: metadataCredsMount, ReadOnly: true},
+							// Scratch space outside the read-only root
+							// fs. The pensieve binary has not been
+							// audited for filesystem writes, so back
+							// /tmp with an emptyDir as a defensive
+							// default; logs go to stderr by config.
+							{Name: "tmp", MountPath: "/tmp"},
 						},
 					}},
 					Volumes: []corev1.Volume{
@@ -316,6 +380,10 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 									SecretName: secretName,
 								},
 							},
+						},
+						{
+							Name:         "tmp",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 						},
 					},
 				},
@@ -336,26 +404,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		desired.Spec.Template.Spec.Affinity = spec.Affinity
 	}
 
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-
-	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating metadata Deployment", "name", name, "replicas", replicas, "image", image)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Replicas = desired.Spec.Replicas
-	existing.Spec.Template = desired.Spec.Template
-	existing.Spec.Strategy = desired.Spec.Strategy
-	return r.Update(ctx, existing)
+	return desired
 }
 
 func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
