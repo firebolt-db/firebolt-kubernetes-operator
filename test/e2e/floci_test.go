@@ -60,6 +60,15 @@ spec:
       labels:
         app: floci
     spec:
+      # The kubelet auto-injects FLOCI_PORT=tcp://<svc-ip>:4566 (and
+      # friends) into pods that live in the same namespace as the floci
+      # Service. floci's Quarkus runtime treats FLOCI_PORT as a config key
+      # for floci.port and tries to coerce "tcp://..." to an integer,
+      # which CrashLoopBackOffs the container before it ever listens.
+      # enableServiceLinks: false suppresses that whole env block; the
+      # pod still reaches the Service by DNS (floci.<ns>.svc:4566), so
+      # nothing else is affected.
+      enableServiceLinks: false
       containers:
         - name: floci
           image: floci/floci:latest
