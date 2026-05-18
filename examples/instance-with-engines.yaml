@@ -1,5 +1,34 @@
 # One Instance shared by two Engines: a typical pattern for separating
-# query workloads (analytics) from data ingestion (ingest).
+# query workloads (analytics) from data ingestion (ingest). Both engines
+# inherit pod-level settings from a single cluster-scoped EngineClass so
+# the IAM binding and image are defined once and reused — see
+# examples/engine-class.yaml for the full set of EngineClass fields.
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: shared-compute
+spec:
+  template:
+    metadata:
+      # kube2iam consumers read this from the pod annotation. IRSA / Pod
+      # Identity consumers read the ARN off the ServiceAccount; only the
+      # service-account name is needed on the engine pod and is set in
+      # template.spec below.
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/firebolt-engine
+    spec:
+      serviceAccountName: firebolt-engine
+      containers:
+        # The operator-owned engine container is named "engine". Allowed
+        # fields on it: image, imagePullPolicy, resources, env (non-
+        # reserved keys), envFrom, volumeMounts (non-reserved paths),
+        # securityContext, lifecycle. Image is the canonical knob for
+        # runtime version upgrades — bumping it here triggers a clean
+        # blue-green rollout on every engine that references this class.
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:latest
+---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
@@ -14,6 +43,7 @@ metadata:
   name: analytics
 spec:
   instanceRef: firebolt
+  engineClassRef: shared-compute
   replicas: 2
   resources:
     requests:
@@ -29,6 +59,7 @@ metadata:
   name: ingest
 spec:
   instanceRef: firebolt
+  engineClassRef: shared-compute
   replicas: 1
   resources:
     requests:

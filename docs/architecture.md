@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the reconciliation architecture used by the Firebolt operator. The operator manages two custom resources with a strict dependency relationship: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway), and **FireboltEngine** deploys stateful compute nodes that require a ready instance. An engine cannot be created or updated without a ready instance in its namespace.
+This document describes the reconciliation architecture used by the Firebolt operator. The operator manages three custom resources: **FireboltInstance** provisions the metadata infrastructure (PostgreSQL, metadata service, gateway); **FireboltEngine** deploys stateful compute nodes that require a ready instance; **EngineClass** is an optional cluster-scoped pod-template fragment that one or more engines can reference to inherit shared pod-level settings (service account, scheduling, pod annotations, sidecars, engine container image). An engine cannot be created or updated without a ready instance in its namespace; an engine may optionally reference an `EngineClass`.
 
 ## Resource dependency model
 
-The operator enforces a hierarchical dependency between instances and engines:
+The operator enforces a hierarchical dependency from engines to their instance, plus an optional shared dependency on a cluster-scoped EngineClass:
 
 ```
 ┌──────────────────┐         ┌──────────────────┐
@@ -18,7 +18,24 @@ The operator enforces a hierarchical dependency between instances and engines:
 │ status:          │         │ instance has:     │
 │   metadataEndpoint│        │ - metadataEndpoint│
 │                  │         │ - spec.id         │
-└──────────────────┘         └──────────────────┘
+└──────────────────┘         └─────────┬────────┘
+                                       │ reads spec.template
+                                       │ (when spec.engineClassRef set)
+                                       ▼
+                             ┌─────────────────────┐
+                             │     EngineClass     │
+                             │  (cluster-scoped,   │
+                             │   optional)         │
+                             │                     │
+                             │  spec.template:     │
+                             │    PodTemplateSpec  │
+                             │    merged into the  │
+                             │    engine pod spec  │
+                             │                     │
+                             │  status.boundEngines│
+                             │    drives deletion- │
+                             │    blocking webhook │
+                             └─────────────────────┘
 ```
 
 **Rules:**
@@ -28,6 +45,8 @@ The operator enforces a hierarchical dependency between instances and engines:
 - The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
 - The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
 - The instance reconciler is independent and has no dependency on engines.
+- The optional `spec.engineClassRef` references a cluster-scoped `EngineClass`. The reference is checked at admission time by the FireboltEngine validating webhook (hard-reject if the named class does not exist), so a runtime "class missing" state is not part of the steady-state status surface. The engine controller watches `EngineClass` and re-reconciles every referencing engine when a class is created, edited, or deleted — a class spec edit therefore rolls a fresh blue-green generation on every consumer engine immediately, rather than waiting for the 30s drift requeue.
+- `EngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines referencing the class) for user-facing visibility. The EngineClass validating webhook refuses deletion by listing referencing engines live from the API server at admission time rather than trusting the cached count — `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
 
 ## Design principles
 
@@ -200,6 +219,46 @@ engine-service     # Cluster Service (shared, selector changes)
 ```
 
 At most two generations exist simultaneously: the active one serving traffic and the new one being created (or the old one being drained/cleaned).
+
+`stsMatchesSpec` is the central drift detector. It compares the live StatefulSet against the resolved engine spec field-by-field; any mismatch returns false and the reconciler bumps `currentGeneration`. Two annotations on the StatefulSet act as content hashes for inputs that don't have a clean direct comparison:
+
+| Annotation | Source | What a change means |
+|---|---|---|
+| `firebolt.io/custom-engine-config-hash` | `spec.customEngineConfig` after the protected-paths strip | The engine ConfigMap content changed; roll a new generation. |
+| `firebolt.io/engine-class-hash` | Resolved `EngineClass.spec.template` (or absent when `spec.engineClassRef` is nil) | Either the referenced class was edited in place, the engine flipped to a different class, or `engineClassRef` was cleared. Any of those rolls a new generation. |
+
+## EngineClass merge layer
+
+When an engine sets `spec.engineClassRef`, the reconciler resolves the referenced `EngineClass` and merges its `spec.template` underneath the operator-built pod template before stamping it onto the StatefulSet. Precedence on every field:
+
+1. **Operator defaults** (image fallback, hardcoded ports / probes / command / reserved env, headless-DNS contract fields) — always win.
+2. **EngineClass template** — fills in user-owned fields the engine spec doesn't set.
+3. **FireboltEngine spec** — wins over the class on conflict.
+
+Merge rules (centralised in the `effective*` helpers in `engine_reconcile.go` so `buildStatefulSet` and `stsMatchesSpec` agree on the resolved value):
+
+| Field | Rule |
+|---|---|
+| `serviceAccountName` | engine spec > class > `""` |
+| `nodeSelector` | map-merge, engine keys win |
+| `tolerations` | class slice + engine slice, concatenated |
+| `affinity` | engine wins if non-nil, else class (no field-merge) |
+| pod-template labels | reserved keys (`firebolt.io/engine`, `firebolt.io/generation`) non-overridable; engine `spec.podLabels` > class labels |
+| pod-template annotations | engine `spec.podAnnotations` > class annotations |
+| pod-level `securityContext` | engine spec > class > operator default (FSGroup, FSGroupChangePolicy always stamped) |
+| pod-level `volumes` | operator-owned volumes (`nodes-config`, data) come first; class volumes appended; class names colliding with operator-owned volumes are dropped |
+| pod-level `imagePullSecrets` | passed through from class |
+| init containers | class slice + engine slice, concatenated (mirrors `tolerations`) |
+| sidecar containers (anything not named `engine`) | passed through from class, appended after the operator-built engine container |
+| engine container `image` / `imagePullPolicy` | class > operator default |
+| engine container `resources` | engine spec wins wholesale if it carries any requests/limits/claims, else class fills in (no field-level merge) |
+| engine container `securityContext` | engine spec wins if non-nil, else class |
+| engine container `env` | operator-injected vars (`POD_INDEX`, `FIREBOLT_ALLOW_AWS_IRSA`, `FIREBOLT_CORE_MODE`) first; class env appended (reserved keys rejected at admission) |
+| engine container `envFrom` | passed through from class |
+| engine container `volumeMounts` | operator-owned mounts first; class mounts appended; mounts colliding with operator volume names are dropped |
+| engine container `lifecycle` | passed through from class |
+
+The engine controller watches `EngineClass` via `EnqueueRequestsFromMapFunc` so a class edit immediately enqueues every consumer engine. The validating webhook on `EngineClass` rejects user input on paths the operator owns end-to-end (see [docs/engineclass-crd-reference.md](engineclass-crd-reference.md)) — the merge layer therefore assumes the resolved template only carries fields it knows how to handle.
 
 ## Drain check
 

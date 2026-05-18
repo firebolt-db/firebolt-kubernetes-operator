@@ -1,0 +1,103 @@
+# An EngineClass with every supported field set. Most are optional.
+#
+# An EngineClass holds a reusable pod-template fragment that multiple
+# FireboltEngines can reference via spec.engineClassRef. It eliminates the
+# need to repeat identical per-engine pod-level settings — most notably
+# the cloud-provider IAM binding (kube2iam pod annotation / IRSA service
+# account / Pod Identity) which is identical for every engine of one
+# instance.
+#
+# EngineClass is cluster-scoped (like StorageClass / IngressClass /
+# GatewayClass). The engine's namespace does not constrain which class
+# it references.
+#
+# Field precedence on the rendered engine pod:
+#   operator defaults  <  EngineClass template  <  FireboltEngine spec
+#
+# Fields the operator owns end-to-end are rejected at admission time on
+# this CR — the validating webhook refuses any spec.template that
+# touches the engine container's hardcoded identity (name, command,
+# ports, probes, reserved env keys), pod-level fields tied to the
+# StatefulSet contract (terminationGracePeriodSeconds, subdomain,
+# hostname, restartPolicy, activeDeadlineSeconds), or label/annotation
+# keys under the firebolt.io/ prefix. Sidecar containers and additional
+# init containers are fully user-owned.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: compute-optimized
+spec:
+  template:
+    metadata:
+      # Pod annotations on every engine pod. kube2iam reads its IAM
+      # binding from here. Operator-managed annotations under
+      # firebolt.io/ are reserved and rejected by the EngineClass webhook.
+      annotations:
+        iam.amazonaws.com/role: arn:aws:iam::123456789012:role/firebolt-engine
+        prometheus.io/scrape: "true"
+      # Pod labels added to every engine pod (in addition to the
+      # operator-managed firebolt.io/engine and firebolt.io/generation
+      # labels, which cannot be overridden).
+      labels:
+        team: data
+    spec:
+      # ServiceAccountName is the IRSA / Pod-Identity binding point.
+      # Engines whose own spec.serviceAccountName is set override this.
+      serviceAccountName: firebolt-engine
+      # Scheduling: every engine that references this class lands on
+      # the same node pool. nodeSelector keys merge with the engine's
+      # own spec.nodeSelector (engine keys win on conflict).
+      nodeSelector:
+        firebolt.dev/pool: engine-compute
+      tolerations:
+        - key: firebolt.dev/pool
+          operator: Equal
+          value: engine-compute
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: firebolt.dev/pool
+                    operator: In
+                    values: ["engine-compute"]
+      # The operator-owned engine container, named "engine". Setting
+      # image here is the canonical way to roll a new engine version
+      # for every engine referencing this class — the operator picks
+      # it up on the next reconcile and rolls a blue-green generation
+      # on each consumer engine.
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:latest
+          imagePullPolicy: IfNotPresent
+        # Sidecar containers (anything not named "engine") pass through
+        # verbatim — image, command, ports, env, mounts. They share
+        # the pod lifecycle with the engine container.
+        - name: log-shipper
+          image: fluent/fluent-bit:latest
+      # Init containers run before the engine container starts.
+      initContainers:
+        - name: cache-warmer
+          image: busybox:1.36
+          command: ["sh", "-c", "echo warming cache"]
+---
+# A FireboltEngine that inherits all the above through spec.engineClassRef.
+# The engine sets nothing about IAM, scheduling, or image — those flow
+# from the class. Engine spec stays focused on what varies per-engine
+# (replicas, resources, rollout strategy, drain checks).
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: analytics
+spec:
+  instanceRef: firebolt
+  engineClassRef: compute-optimized
+  replicas: 3
+  resources:
+    requests:
+      cpu: "4"
+      memory: 16Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
