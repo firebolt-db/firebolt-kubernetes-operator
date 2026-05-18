@@ -303,6 +303,10 @@ func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configX
 				Spec: corev1.PodSpec{
 					TerminationGracePeriodSeconds: int64Ptr(30),
 					AutomountServiceAccountToken:  boolPtr(false),
+					// See the equivalent comment in engine_reconcile.go's
+					// PodSpec: kill legacy service-link env injection, DNS
+					// is the only service-discovery channel here.
+					EnableServiceLinks: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: boolPtr(true),
 						RunAsUser:    &metadataUID,

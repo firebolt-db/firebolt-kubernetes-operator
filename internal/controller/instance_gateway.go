@@ -661,6 +661,10 @@ sleep 8
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            gatewayServiceAccountName(instance.Name),
 					TerminationGracePeriodSeconds: &gracePeriod,
+					// See the equivalent comment in engine_reconcile.go's
+					// PodSpec: kill legacy service-link env injection, DNS
+					// is the only service-discovery channel here.
+					EnableServiceLinks: boolPtr(false),
 					Containers: []corev1.Container{{
 						Name:            gatewayContainerName,
 						Image:           image,
