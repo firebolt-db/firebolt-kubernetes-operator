@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/lib/verify-quickstart.sh"
+source "${SCRIPT_DIR}/lib/setup-floci.sh"
 # Honour the same IMAGE_VARIANT switch as the Makefile (default: dev) so this
 # script picks the matching defaults.<variant>.env that replaced the now-gone
 # defaults.env in commit 554d320.
@@ -16,6 +17,8 @@ set +a
 NAMESPACE="${1:-helm-verify-full}"
 INSTANCE_NAME="${INSTANCE_NAME:-firebolt}"
 ENGINE_NAME="${ENGINE_NAME:-engine}"
+FLOCI_BUCKET="${FLOCI_BUCKET:-${ENGINE_NAME}-bucket}"
+FLOCI_ENDPOINT="http://floci.${NAMESPACE}.svc.cluster.local:4566"
 
 echo "=== verify-quickstart full (namespace=${NAMESPACE}) ==="
 echo "Bootstrapping external Postgres endpoint for instance-full..."
@@ -27,6 +30,12 @@ kubectl label nodes --all firebolt.dev/pool=system --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+# Deploy floci and create the bucket before the engine starts: the engine
+# refuses to come up without bucket_name_override, and once configured it
+# will start hitting floci on its first reconcile pass.
+setup_floci "$NAMESPACE" "$FLOCI_BUCKET"
+
 echo "Applying instance-full with metadata image pinned from config/images/defaults.${IMAGE_VARIANT}.env..."
 yq eval '
   (select(.kind == "FireboltInstance").spec.metadata.image.repository) = env(METADATA_IMAGE) |
@@ -39,8 +48,8 @@ echo "Relabeling Kind nodes for engine-full scheduling..."
 kubectl label nodes --all firebolt.dev/pool=engine --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
-echo "Applying engine-full with CI overrides (storage.size=1Gi, memory=2Gi)..."
-yq eval '
+echo "Applying engine-full with CI overrides (storage.size=1Gi, memory=2Gi) and floci managed_storage..."
+BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" yq eval '
   (select(.kind == "FireboltEngine").spec.image.repository) = env(ENGINE_IMAGE) |
   (select(.kind == "FireboltEngine").spec.image.tag) = env(ENGINE_TAG) |
   (select(.kind == "FireboltEngine").spec.image.pullPolicy) = "IfNotPresent" |
@@ -48,7 +57,17 @@ yq eval '
   (select(.kind == "FireboltEngine").spec.resources.requests.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.resources.limits.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.resources.requests.memory) = "2Gi" |
-  (select(.kind == "FireboltEngine").spec.resources.limits.memory) = "2Gi"
+  (select(.kind == "FireboltEngine").spec.resources.limits.memory) = "2Gi" |
+  (select(.kind == "FireboltEngine").spec.customEngineConfig) = {
+    "storage": {
+      "type": "minio",
+      "api_scheme": "s3://",
+      "bucket_name": env(BUCKET),
+      "minio": {
+        "endpoint": env(ENDPOINT)
+      }
+    }
+  }
 ' "${REPO_ROOT}/examples/engine-full.yaml" | kubectl apply -n "$NAMESPACE" -f -
 wait_engine_ready "$NAMESPACE" "$ENGINE_NAME"
 

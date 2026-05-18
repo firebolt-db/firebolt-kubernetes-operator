@@ -37,6 +37,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -248,10 +249,38 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 			DrainCheckEnabled:  &drainCheckEnabled,
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
+			CustomEngineConfig: engineStorageConfig(flociBucket, flociEndpoint),
 		},
 	}
 
 	return cl.Create(ctx, engine)
+}
+
+// engineStorageConfig returns a customEngineConfig JSON blob that points
+// the engine's top-level `storage:` block at the given MinIO-compatible
+// endpoint and bucket. Required when the engine runs in dedicated-pensieve
+// mode — the engine refuses to start with managed storage on a local fs,
+// and `storage.bucket_name` maps internally to the
+// `firebolt.managed_storage.bucket_name_override` signal that toggles it
+// into object-storage mode (engine
+// src/Core/Application/Configuration/StorageConfig.cpp).
+//
+// `type: minio` also flips `firebolt.aws.use_minio=true` internally, which
+// hardcodes the S3 access/secret to `firebolt/firebolt`. Floci is zero-auth
+// (it accepts any SigV4-signed request) so those baked-in credentials work
+// against it without any env-var plumbing on the engine pod.
+func engineStorageConfig(bucket, endpoint string) *apiextensionsv1.JSON {
+	raw := fmt.Sprintf(`{
+  "storage": {
+    "type": "minio",
+    "api_scheme": "s3://",
+    "bucket_name": %q,
+    "minio": {
+      "endpoint": %q
+    }
+  }
+}`, bucket, endpoint)
+	return &apiextensionsv1.JSON{Raw: []byte(raw)}
 }
 
 // UpdateEngineReplicas updates the replicas count in the engine CR (with retry on conflict)
