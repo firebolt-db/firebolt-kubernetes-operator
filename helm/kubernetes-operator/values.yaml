@@ -115,11 +115,16 @@ webhook:
   validatingWebhookConfiguration:
     # -- Render the ValidatingWebhookConfiguration for FireboltInstance
     # validation (reserved keys, metadata replicas, external Postgres
-    # secret presence). Only effective when `webhook.enabled` is also true.
+    # secret presence) and EngineClass validation (operator-owned pod
+    # template paths, deletion blocking while bound by FireboltEngines).
+    # Only effective when `webhook.enabled` is also true.
     enabled: true
     # -- failurePolicy for the validating webhook.
     # Defaults to Fail so invalid CR writes are rejected rather than
-    # silently admitted during operator outages.
+    # silently admitted during operator outages. Critical for the
+    # EngineClass deletion guard: with Ignore, an outage would open a
+    # window in which a bound EngineClass could be deleted, orphaning
+    # every engine that referenced it.
     failurePolicy: Fail
     # -- Max admission request timeout in seconds (k8s caps at 30).
     timeoutSeconds: 10

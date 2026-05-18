@@ -178,4 +178,4 @@ func int64Pointer(v int64) *int64 { return &v }
 // Compile-time guard: make sure we never silently drop the container name
 // the drain check targets. If this constant ever renames we want the test
 // suite to yell.
-var _ = corev1.Container{Name: ContainerNameEngine}
+var _ = corev1.Container{Name: computev1alpha1.EngineContainerName}

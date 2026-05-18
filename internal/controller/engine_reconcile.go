@@ -705,14 +705,14 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					InitContainers:     engineInitContainers(spec),
 					Containers: []corev1.Container{
 						{
-							Name:            ContainerNameEngine,
+							Name:            computev1alpha1.EngineContainerName,
 							Image:           image,
 							ImagePullPolicy: pullPolicy,
 							SecurityContext: containerSecurityContext,
 							Resources:       engineContainerResources(spec),
 							Env: []corev1.EnvVar{
 								{
-									Name: "POD_INDEX",
+									Name: computev1alpha1.EnginePodIndexEnvKey,
 									ValueFrom: &corev1.EnvVarSource{
 										FieldRef: &corev1.ObjectFieldSelector{
 											// Set explicitly so it matches the API-server-defaulted value on read-back.
@@ -723,7 +723,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								},
 								// Allows the default AWS SDK EC2 metadata detection (required for IRSA).
 								{
-									Name:  "FIREBOLT_ALLOW_AWS_IRSA",
+									Name:  computev1alpha1.EngineAllowAwsIrsaEnvKey,
 									Value: "true",
 								},
 								// Selects the firebolt-core code path inside the unified
@@ -731,7 +731,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								// config (config.yaml at the data-dir root) is honored as-is
 								// and not rewritten at startup.
 								{
-									Name:  "FIREBOLT_CORE_MODE",
+									Name:  computev1alpha1.EngineCoreModeEnvKey,
 									Value: "1",
 								},
 							},

@@ -230,6 +230,14 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
 			os.Exit(1)
 		}
+		if err := computev1alpha1.SetupEngineClassWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "EngineClass")
+			os.Exit(1)
+		}
+		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngine")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

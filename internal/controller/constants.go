@@ -120,9 +120,6 @@ const (
 	// if the metadata image's user is ever renumbered.
 	MetadataUID int64 = 1111
 
-	// ContainerNameEngine is the container name inside engine StatefulSet pods.
-	ContainerNameEngine = "core"
-
 	// DefaultDrainCheckInterval is how often the operator polls draining pods.
 	DefaultDrainCheckInterval = 5 * time.Second
 

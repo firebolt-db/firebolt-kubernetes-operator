@@ -32,4 +32,56 @@ webhooks:
     matchPolicy: Equivalent
     timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
     admissionReviewVersions: ["v1"]
+  - name: vengineclass.compute.firebolt.io
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ include "firebolt-operator.fullname" . }}-webhook
+        path: /validate-compute-firebolt-io-v1alpha1-engineclass
+        port: {{ .Values.webhook.port }}
+      {{- with .Values.webhook.caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}
+    # DELETE is included so the webhook can block deletion of an
+    # EngineClass while at least one FireboltEngine in the same namespace
+    # references it via spec.engineClassRef. The check lists engines live
+    # from the API server (not status.boundEngines, which can be stale on
+    # a freshly bound class). failurePolicy: Fail (set via values) is the
+    # load-bearing piece — a webhook outage must not open a window in
+    # which a bound class can be removed and orphan engines.
+    rules:
+      - operations: ["CREATE", "UPDATE", "DELETE"]
+        apiGroups: ["compute.firebolt.io"]
+        apiVersions: ["v1alpha1"]
+        resources: ["engineclasses"]
+        scope: "Cluster"
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.validatingWebhookConfiguration.failurePolicy }}
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
+    admissionReviewVersions: ["v1"]
+  - name: vfireboltengine.compute.firebolt.io
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ include "firebolt-operator.fullname" . }}-webhook
+        path: /validate-compute-firebolt-io-v1alpha1-fireboltengine
+        port: {{ .Values.webhook.port }}
+      {{- with .Values.webhook.caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}
+    # Validates that spec.engineClassRef, when set, references an existing
+    # EngineClass. Hard-reject so users see typos immediately at apply
+    # time instead of via engine status.
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["compute.firebolt.io"]
+        apiVersions: ["v1alpha1"]
+        resources: ["fireboltengines"]
+        scope: "Namespaced"
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.validatingWebhookConfiguration.failurePolicy }}
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
+    admissionReviewVersions: ["v1"]
 {{- end }}
