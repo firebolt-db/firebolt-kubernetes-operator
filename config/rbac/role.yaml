@@ -68,6 +68,24 @@ rules:
 - apiGroups:
   - compute.firebolt.io
   resources:
+  - engineclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - compute.firebolt.io
+  resources:
+  - engineclasses/status
+  - fireboltengines/status
+  - fireboltinstances/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - compute.firebolt.io
+  resources:
   - fireboltengines
   - fireboltinstances
   verbs:
@@ -84,15 +102,6 @@ rules:
   - fireboltengines/finalizers
   - fireboltinstances/finalizers
   verbs:
-  - update
-- apiGroups:
-  - compute.firebolt.io
-  resources:
-  - fireboltengines/status
-  - fireboltinstances/status
-  verbs:
-  - get
-  - patch
   - update
 - apiGroups:
   - policy

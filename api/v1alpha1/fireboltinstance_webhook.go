@@ -20,8 +20,6 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/oklog/ulid/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,14 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
-
-// reservedAnnotationLabelPrefix is the key prefix owned by the operator for
-// its own labels and annotations (e.g. firebolt.io/config-hash,
-// firebolt.io/generation). Users MUST NOT set any key with this prefix on
-// spec.metadata / spec.gateway labels or annotations: the controller
-// unconditionally overwrites some of these keys to drive behavior, and
-// letting users set them silently freezes rollouts or corrupts routing.
-const reservedAnnotationLabelPrefix = "firebolt.io/"
 
 // FireboltInstanceDefaulter defaults FireboltInstance resources.
 type FireboltInstanceDefaulter struct{}
@@ -161,36 +151,15 @@ func validateMetadataReplicas(inst *FireboltInstance) *field.Error {
 }
 
 // validateReservedKeys rejects any label or annotation on a ComponentSpec
-// whose key starts with reservedAnnotationLabelPrefix. Those keys are owned
-// by the operator; allowing users to set them would let them clobber
-// controller-managed keys (most dangerously firebolt.io/config-hash, which
-// drives pod-template rollouts when a ConfigMap changes) and either freeze
+// whose key starts with the operator-reserved prefix
+// (operatorauthority.ReservedFireboltKeyPrefix). Those keys are owned by
+// the operator; allowing users to set them would clobber controller-
+// managed keys (most dangerously firebolt.io/config-hash, which drives
+// pod-template rollouts when a ConfigMap changes) and either freeze
 // rollouts or corrupt routing.
 func validateReservedKeys(base *field.Path, cs ComponentSpec) field.ErrorList {
 	var errs field.ErrorList
-	errs = append(errs,
-		reservedKeyErrors(base.Child("labels"), cs.Labels)...)
-	errs = append(errs,
-		reservedKeyErrors(base.Child("annotations"), cs.Annotations)...)
-	return errs
-}
-
-func reservedKeyErrors(path *field.Path, m map[string]string) field.ErrorList {
-	reserved := make([]string, 0, len(m))
-	for k := range m {
-		if strings.HasPrefix(k, reservedAnnotationLabelPrefix) {
-			reserved = append(reserved, k)
-		}
-	}
-	if len(reserved) == 0 {
-		return nil
-	}
-	sort.Strings(reserved) // deterministic error messages for tests
-	errs := make(field.ErrorList, 0, len(reserved))
-	for _, k := range reserved {
-		errs = append(errs, field.Forbidden(path.Key(k),
-			fmt.Sprintf("keys with the %q prefix are reserved for the operator", reservedAnnotationLabelPrefix),
-		))
-	}
+	errs = append(errs, ValidateReservedKeyPrefix(base.Child("labels"), cs.Labels)...)
+	errs = append(errs, ValidateReservedKeyPrefix(base.Child("annotations"), cs.Annotations)...)
 	return errs
 }
