@@ -198,6 +198,35 @@ type AuthSpec struct {
 	OIDC *OIDCSpec `json:"oidc,omitempty"`
 }
 
+// MetricScrapeMode selects how the operator reaches engine pods to scrape
+// the Prometheus /metrics endpoint that backs the drain probe and the
+// autoscaler activity poll.
+// +kubebuilder:validation:Enum=PodIP;ApiserverProxy
+type MetricScrapeMode string
+
+// MetricScrapeModePodIP and MetricScrapeModeApiserverProxy enumerate the
+// supported scrape transports. PodIP is the production default; see the
+// docstring on FireboltInstanceSpec.MetricScrapeMode for the rationale.
+const (
+	// MetricScrapeModePodIP makes the operator open a plain HTTP
+	// connection from the controller pod directly to the engine pod IP
+	// on MetricsPort. Requires the operator to run in-cluster where pod
+	// IPs are routable. This is the default because it is what every
+	// standard in-cluster scraper (Prometheus, OpenTelemetry, kube-
+	// state-metrics) does and because EKS / kubeadm node security
+	// groups do not allow apiserver->node:9090 by default.
+	MetricScrapeModePodIP MetricScrapeMode = "PodIP"
+
+	// MetricScrapeModeApiserverProxy routes the scrape through the
+	// Kubernetes apiserver pods/proxy subresource. Works without a
+	// network path from the operator process to the pod (e.g. when the
+	// operator runs out-of-cluster via `make run`) and is RBAC-gated by
+	// pods/proxy. Requires the cluster security group to allow
+	// apiserver->node on MetricsPort, which is NOT the default on EKS;
+	// pick this mode only when you have explicitly opened that hole.
+	MetricScrapeModeApiserverProxy MetricScrapeMode = "ApiserverProxy"
+)
+
 // FireboltInstanceSpec defines the desired state of a Firebolt Instance.
 type FireboltInstanceSpec struct {
 	// ID is a stable unique identifier for this instance, used as the metadata
@@ -225,6 +254,30 @@ type FireboltInstanceSpec struct {
 	// TODO: not enforced yet; will be propagated to engine configuration in a future release.
 	// +optional
 	Auth *AuthSpec `json:"auth,omitempty"`
+
+	// MetricScrapeMode selects the transport the operator uses to scrape
+	// the Prometheus /metrics endpoint exposed by engine pods. The
+	// resulting samples drive the drain probe (which gates blue-green
+	// cutover until firebolt_running_queries + firebolt_suspended_queries
+	// reach zero) and the autoscaler activity poll. Both probes use
+	// whatever value is set here; the field is read fresh on every
+	// scrape so it can be flipped without restarting the controller.
+	//
+	// Defaults to PodIP: the controller pod opens a direct HTTP
+	// connection to the engine pod IP on MetricsPort. This is the
+	// pattern every standard in-cluster scraper uses (Prometheus
+	// PodMonitor, metrics-server, OpenTelemetry, kube-state-metrics)
+	// and it does not depend on apiserver->node SG rules that EKS /
+	// kubeadm do not open by default. ApiserverProxy is an opt-in
+	// fallback for clusters where the controller cannot reach pod IPs
+	// (out-of-cluster `make run`, or networks that explicitly forbid
+	// node-to-node on MetricsPort while allowing the apiserver to
+	// proxy); it costs extra apiserver request load and widens the
+	// blast radius of pods/proxy RBAC, so opt in only when the default
+	// is structurally infeasible.
+	// +kubebuilder:default=PodIP
+	// +optional
+	MetricScrapeMode MetricScrapeMode `json:"metricScrapeMode,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.
