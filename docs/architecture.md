@@ -176,6 +176,18 @@ A spec change during `draining` or `cleaning` does **not** create a new generati
 
 Reason `Stopped` is the only `Ready=False` reason that is not a transient rollout or instance-dependency failure. GitOps tools that key off `Ready=True` should treat a stopped engine as deliberately not-converged-to-serving rather than retrying it indefinitely.
 
+### StatefulSet event propagation
+
+A FireboltEngine can get stuck in `creating` (or in `stable` with `PodsNotReady`) when its generation StatefulSet exists but the StatefulSet controller cannot create the desired pods — missing ServiceAccount, ResourceQuota exceeded, PodSecurity / admission rejection, RBAC denial, PVC unbindable, and similar. The operator owns the StatefulSet but the actionable error is recorded by Kubernetes as a Warning event (typically `FailedCreate`) on the StatefulSet object, so without help users would have to run `kubectl describe sts <name>` to triage.
+
+To surface this on the FireboltEngine itself, after computing the Ready condition the reconciler queries the apiserver for Warning events on the current-generation StatefulSet whenever:
+
+- `CurrentSTS != nil` — there is an STS to look up events for, and
+- `CurrentPodTotal < spec.replicas` — pods are missing (rather than just unready), and
+- `Ready.Reason ∈ {Rolling, PodsNotReady}` — the existing reason is a generic "stuck" reason that we are allowed to refine. `InstanceNotReady`, `DrainCheckFailing`, `Stopped`, and `EngineReady` are higher-precedence diagnostics or healthy states and are not overridden.
+
+When a Warning event matches, the Ready condition is rewritten with that event's `Reason` (e.g. `FailedCreate`) and a message of the form `StatefulSet <name>: <event message> (x<count>)`. The lookup uses the Clientset (not the controller-runtime cache) with field selector `involvedObject.uid=<UID>,type=Warning`: events are high-volume cluster-wide, and a watch would inflate the controller's cache for a signal we consult only on already-stuck engines. Fetch failures are logged and swallowed — the diagnostic is best-effort and must never poison the main reconcile path. Once pods come up the trigger gate stops firing and the next reconcile restores `EngineReady`.
+
 ## Generation model
 
 Each spec change (while in `stable` or `stopped`) increments `status.currentGeneration`. Resources for each generation are named with a `-g<N>` suffix:
