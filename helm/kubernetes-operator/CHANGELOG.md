@@ -1,3 +1,18 @@
+# 1.0.15
+
+appVersion: v2.8.1
+
+## [2.8.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.8.0...v2.8.1) (2026-05-18)
+
+### Bug Fixes
+
+* **ci:** disable serviceLinks on floci pod to avoid FLOCI_PORT collision (FB-1215) ([9c16bc9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9c16bc9159f24245cc90476044896726cca12d0a))
+* **controller:** disable service-link env injection on operator-managed pods (FB-1215) ([fc07f55](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fc07f55b24ae74a1e6865656542ac1212aa0bd8f))
+* **controller:** harden metadata pod security context (FB-1213) ([960ea08](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/960ea08ee3d9bbe78e1c5f5d31665b520a58366d))
+* explicitly use latest versions (FB-1213) ([8860bcb](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8860bcbdf88b89d69544f8529a5e4052e5c0bf09))
+* remove unused constants (FB-1213) ([45d094c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/45d094c46bf7b2f8acf1904abdc15752c31fb506))
+
+
 # 1.0.14
 
 appVersion: v2.8.0
