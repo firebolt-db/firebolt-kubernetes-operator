@@ -122,6 +122,7 @@ func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
 						{
+							Name:            computev1alpha1.EngineContainerName,
 							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Resources:       engineContainerResources(spec),
@@ -171,6 +172,7 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.Statefu
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
 						{
+							Name:            computev1alpha1.EngineContainerName,
 							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Resources:       engineContainerResources(spec),
@@ -282,7 +284,7 @@ func TestComputeEngineReconcile_S1_InitialCreation(t *testing.T) {
 			}
 			current := EngineState{ClusterServiceTargetGen: -1}
 
-			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 			if result.Status.Phase != computev1alpha1.PhaseCreating {
 				t.Errorf("expected phase Creating, got %s", result.Status.Phase)
@@ -324,7 +326,7 @@ func TestComputeStable_PanicsOnNegativeActiveGeneration(t *testing.T) {
 		ActiveGeneration: -1,
 	}
 	current := EngineState{ClusterServiceTargetGen: -1}
-	_ = computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	_ = computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 }
 
 // --- S2: Blue-green upgrade ---
@@ -357,7 +359,7 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 				ClusterServiceTargetGen: 0,
 			}
 
-			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 			if result.Status.Phase != computev1alpha1.PhaseCreating {
 				t.Errorf("expected phase Creating, got %s", result.Status.Phase)
@@ -395,7 +397,7 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseSwitching {
 		t.Errorf("expected phase Switching, got %s", result.Status.Phase)
@@ -422,7 +424,7 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating (waiting), got %s", result.Status.Phase)
@@ -444,7 +446,7 @@ func TestComputeEngineReconcile_S3_SwitchingUpdateSelector(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service selector update")
@@ -466,7 +468,7 @@ func TestComputeEngineReconcile_S3_SwitchingToDraining(t *testing.T) {
 		ClusterServiceTargetGen: 1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseDraining {
 		t.Errorf("expected phase Draining, got %s", result.Status.Phase)
@@ -491,7 +493,7 @@ func TestComputeEngineReconcile_S3_SwitchingToStable_InitialDeploy(t *testing.T)
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable, got %s", result.Status.Phase)
@@ -515,7 +517,7 @@ func TestComputeEngineReconcile_S3_DrainingWait(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseDraining {
 		t.Errorf("expected phase Draining, got %s", result.Status.Phase)
@@ -539,7 +541,7 @@ func TestComputeEngineReconcile_S3_DrainingComplete(t *testing.T) {
 		DrainingPodsDrained: true,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCleaning {
 		t.Errorf("expected phase Cleaning, got %s", result.Status.Phase)
@@ -556,7 +558,7 @@ func TestComputeEngineReconcile_S3_DrainingNilDrainingGeneration(t *testing.T) {
 	}
 	current := EngineState{}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
@@ -582,7 +584,7 @@ func TestComputeEngineReconcile_S3_DrainingCustomInterval(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.RequeueAfter != 15*time.Second {
 		t.Errorf("expected RequeueAfter 15s (custom interval), got %v", result.RequeueAfter)
@@ -607,7 +609,7 @@ func TestComputeEngineReconcile_S3_CleaningDeletesOldResources(t *testing.T) {
 		DrainingConfigMap:   oldCM,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable, got %s", result.Status.Phase)
@@ -633,7 +635,7 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected new transition (Creating), got %s", result.Status.Phase)
@@ -663,7 +665,7 @@ func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected Creating (new generation for metadata override drift), got %s", result.Status.Phase)
@@ -687,7 +689,7 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 		ClusterServiceTargetGen: 99,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected to stay Stable (in-place fix), got %s", result.Status.Phase)
@@ -719,7 +721,7 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 				ClusterServiceTargetGen: 0,
 			}
 
-			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+			result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 			if result.Status.Phase != computev1alpha1.PhaseStable {
 				t.Errorf("expected Stable, got %s", result.Status.Phase)
@@ -759,8 +761,8 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	d1 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
-	d2 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	d1 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+	d2 := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if d1.Status.Phase != d2.Status.Phase {
 		t.Errorf("idempotency violated: phases differ %s vs %s", d1.Status.Phase, d2.Status.Phase)
@@ -790,7 +792,7 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 		DrainingPodsDrained: false,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
 
 	if result.Status.CurrentGeneration != 1 {
 		t.Errorf("OC1 violated: generation changed to %d during draining", result.Status.CurrentGeneration)
@@ -822,7 +824,7 @@ func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected to stay in Creating, got %s", result.Status.Phase)
@@ -857,7 +859,7 @@ func TestComputeEngineReconcile_CreatingNilClusterService(t *testing.T) {
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created from scratch")
@@ -879,7 +881,7 @@ func TestComputeEngineReconcile_SwitchingNilClusterService(t *testing.T) {
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created from scratch")
@@ -903,7 +905,7 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 		ClusterServiceTargetGen: -1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.EnsureClusterSvc == nil {
 		t.Fatal("expected cluster service to be created")
@@ -934,7 +936,7 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (in-place re-ensure), got %s", result.Status.Phase)
@@ -981,7 +983,7 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (in-place re-ensure), got %s", result.Status.Phase)
@@ -1023,7 +1025,7 @@ func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {
 	}
 	current := EngineState{}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStable {
 		t.Errorf("expected phase Stable (nil draining gen recovery), got %s", result.Status.Phase)
@@ -1057,7 +1059,7 @@ func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected to stay Creating, got %s", result.Status.Phase)
@@ -1143,7 +1145,7 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stsMatchesSpec(tt.sts, spec)
+			got := stsMatchesSpec(tt.sts, spec, nil)
 			if got != tt.match {
 				t.Errorf("stsMatchesSpec() = %v, want %v", got, tt.match)
 			}
@@ -1155,7 +1157,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec.Resources = corev1.ResourceRequirements{}
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for omitted resources")
 		}
 	})
@@ -1170,7 +1172,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for requests-only resources")
 		}
 	})
@@ -1185,7 +1187,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for limits-only resources")
 		}
 	})
@@ -1202,7 +1204,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for partial resource requirements")
 		}
 	})
@@ -1210,7 +1212,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("limit drift triggers mismatch", func(t *testing.T) {
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceMemory] = resource.MustParse("16Gi")
-		if stsMatchesSpec(sts, testSpec()) {
+		if stsMatchesSpec(sts, testSpec(), nil) {
 			t.Fatal("stsMatchesSpec() want false when a resource limit drifts")
 		}
 	})
@@ -1219,7 +1221,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
-		if stsMatchesSpec(sts, customSpec) {
+		if stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want false when resources are removed")
 		}
 	})
@@ -1237,7 +1239,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("1024Mi"),
 			},
 		}
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for semantically equivalent quantities")
 		}
 	})
@@ -1248,7 +1250,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec.ServiceAccountName = &sa
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.ServiceAccountName = sa
-		if !stsMatchesSpec(sts, customSpec) {
+		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
 		}
 	})
@@ -1258,7 +1260,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		// Drop fsGroup to simulate an STS built before the default existed:
 		// the spec resolves to fsGroup=3473, so the comparison must fail.
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
-		if stsMatchesSpec(sts, testSpec()) {
+		if stsMatchesSpec(sts, testSpec(), nil) {
 			t.Fatal("stsMatchesSpec() want false when pod SecurityContext drifts")
 		}
 	})
@@ -1271,7 +1273,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		// STS still has the old (nil) container SC, so a spec change must
 		// not be silently absorbed by an in-place update.
 		sts := makeSTS(testEngineName, 0, 3)
-		if stsMatchesSpec(sts, customSpec) {
+		if stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
 		}
 	})
@@ -1490,7 +1492,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			},
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.NodeAffinity == nil {
 			t.Fatal("expected NodeAffinity to be propagated to pod template")
@@ -1513,7 +1515,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				}},
 			},
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.PodAntiAffinity == nil {
 			t.Fatal("expected PodAntiAffinity to be propagated to pod template")
@@ -1527,7 +1529,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 	t.Run("nil affinity produces nil pod template affinity", func(t *testing.T) {
 		spec := testSpec()
 		spec.Affinity = nil
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		if sts.Spec.Template.Spec.Affinity != nil {
 			t.Fatalf("expected nil Affinity in pod template, got %+v", sts.Spec.Template.Spec.Affinity)
 		}
@@ -1545,22 +1547,22 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				}},
 			},
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// The STS matches spec because we built it from spec.
-		if !stsMatchesSpec(sts, spec) {
+		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching affinity")
 		}
 		// Remove affinity from spec — now the STS is ahead of spec and must be
 		// detected as drifted.
 		specNoAffinity := testSpec()
-		if stsMatchesSpec(sts, specNoAffinity) {
+		if stsMatchesSpec(sts, specNoAffinity, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec affinity removed but STS still has it")
 		}
 	})
 
 	t.Run("adding affinity to spec is detected as drift", func(t *testing.T) {
 		// STS built without affinity.
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		// Spec now requires nodeAffinity — STS must be re-rolled.
 		spec := testSpec()
 		spec.Affinity = &corev1.Affinity{
@@ -1576,7 +1578,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			},
 		}
-		if stsMatchesSpec(sts, spec) {
+		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
 		}
 	})
@@ -1586,7 +1588,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 	t.Run("base labels always present", func(t *testing.T) {
 		spec := testSpec()
 		spec.PodLabels = nil
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2, nil)
 		labels := sts.Spec.Template.Labels
 		if labels[LabelEngine] != testEngineName {
 			t.Errorf("expected %s label = %q, got %q", LabelEngine, testEngineName, labels[LabelEngine])
@@ -1603,7 +1605,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 			"environment": "prod",
 			"team":        "control-plane",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
 		labels := sts.Spec.Template.Labels
 		// Base labels must be present.
 		if labels[LabelEngine] != testEngineName {
@@ -1631,7 +1633,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 			LabelGeneration: "999",
 			"custom":        "value",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5, nil)
 		labels := sts.Spec.Template.Labels
 		// Reserved labels must be operator-owned.
 		if labels[LabelEngine] != testEngineName {
@@ -1651,26 +1653,26 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		spec.PodLabels = map[string]string{
 			"version": "1.0",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
-		if !stsMatchesSpec(sts, spec) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod labels")
 		}
 		// Remove label from spec — STS is now drifted.
 		specNoLabels := testSpec()
-		if stsMatchesSpec(sts, specNoLabels) {
+		if stsMatchesSpec(sts, specNoLabels, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec pod labels removed but STS still has them")
 		}
 	})
 
 	t.Run("adding pod labels to spec is detected as drift", func(t *testing.T) {
 		// STS built without extra pod labels.
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		// Spec now has extra labels — STS must be re-rolled.
 		spec := testSpec()
 		spec.PodLabels = map[string]string{
 			"new-label": "new-value",
 		}
-		if stsMatchesSpec(sts, spec) {
+		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod labels added to spec but STS has none")
 		}
 	})
@@ -1680,13 +1682,13 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		spec.PodLabels = map[string]string{
 			"version": "1.0",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// Change the label value.
 		specChanged := testSpec()
 		specChanged.PodLabels = map[string]string{
 			"version": "2.0",
 		}
-		if stsMatchesSpec(sts, specChanged) {
+		if stsMatchesSpec(sts, specChanged, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod label value changed")
 		}
 	})
@@ -1696,7 +1698,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 	t.Run("nil pod annotations produce no pod template annotations", func(t *testing.T) {
 		spec := testSpec()
 		spec.PodAnnotations = nil
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// We intentionally render no annotations on the pod template
 		// when the spec contributes none, so existing StatefulSets
 		// stay byte-identical across upgrades that introduce this
@@ -1715,7 +1717,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 			"karpenter.sh/do-not-disrupt": "true",
 			"kubernetes.io/description":   "engine pod",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
 		got := sts.Spec.Template.Annotations
 		for k, want := range spec.PodAnnotations {
 			if got[k] != want {
@@ -1737,7 +1739,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 			AnnotationMetadataOverride: "user-override-should-not-take-effect",
 			"unrelated":                "value",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
 		if got := sts.Annotations[AnnotationMetadataOverride]; got != override {
 			t.Errorf("expected STS-level %s = %q (operator-owned), got %q",
@@ -1757,23 +1759,23 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		spec.PodAnnotations = map[string]string{
 			"prometheus.io/scrape": "true",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
-		if !stsMatchesSpec(sts, spec) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod annotations")
 		}
 		specNoAnnotations := testSpec()
-		if stsMatchesSpec(sts, specNoAnnotations) {
+		if stsMatchesSpec(sts, specNoAnnotations, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec pod annotations removed but STS still has them")
 		}
 	})
 
 	t.Run("adding pod annotations to spec is detected as drift", func(t *testing.T) {
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		spec := testSpec()
 		spec.PodAnnotations = map[string]string{
 			"new-annotation": "new-value",
 		}
-		if stsMatchesSpec(sts, spec) {
+		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotations added to spec but STS has none")
 		}
 	})
@@ -1783,12 +1785,12 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		spec.PodAnnotations = map[string]string{
 			"version": "1.0",
 		}
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		specChanged := testSpec()
 		specChanged.PodAnnotations = map[string]string{
 			"version": "2.0",
 		}
-		if stsMatchesSpec(sts, specChanged) {
+		if stsMatchesSpec(sts, specChanged, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotation value changed")
 		}
 	})
@@ -1799,9 +1801,9 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		// as identical so we don't churn StatefulSets on no-op
 		// changes.
 		spec := testSpec()
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		sts.Spec.Template.Annotations = map[string]string{}
-		if !stsMatchesSpec(sts, spec) {
+		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true when pod template annotations is empty map and spec.PodAnnotations is nil")
 		}
 	})
@@ -1865,7 +1867,7 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 		},
 	}
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.Containers[0].Resources
 	if !resourceRequirementsEqual(got, spec.Resources) {
 		t.Fatalf("buildStatefulSet resources = %#v, want %#v", got, spec.Resources)
@@ -1878,7 +1880,7 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 // way floci's `FLOCI_PORT` did in FB-1215. DNS is the only service-
 // discovery channel the engine needs.
 func TestBuildStatefulSet_DisablesServiceLinks(t *testing.T) {
-	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 	esl := sts.Spec.Template.Spec.EnableServiceLinks
 	if esl == nil || *esl {
 		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
@@ -1929,7 +1931,7 @@ func TestComputeEngineReconcile_Stop_StableToCreating(t *testing.T) {
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating (drift to replicas=0), got %s", result.Status.Phase)
@@ -1960,7 +1962,7 @@ func TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero
 		ClusterServiceTargetGen: 1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStopped {
 		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
@@ -1986,7 +1988,7 @@ func TestComputeEngineReconcile_Stop_SwitchingToStoppedInitialDeploy(t *testing.
 		ClusterServiceTargetGen: 0,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStopped {
 		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
@@ -2014,7 +2016,7 @@ func TestComputeEngineReconcile_Stop_CleaningToStopped(t *testing.T) {
 		DrainingSTS: makeSTS(testEngineName, 0, 3),
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseStopped {
 		t.Errorf("expected phase Stopped, got %s", result.Status.Phase)
@@ -2049,7 +2051,7 @@ func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
 		ClusterServiceTargetGen: 1,
 	}
 
-	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo())
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
 
 	if result.Status.Phase != computev1alpha1.PhaseCreating {
 		t.Errorf("expected phase Creating (resume from stopped), got %s", result.Status.Phase)
@@ -2297,13 +2299,13 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 // remains.
 func TestBuildStatefulSet_DefaultImage(t *testing.T) {
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.Containers[0].Image
 	want := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
 	if got != want {
 		t.Errorf("container image = %q, want %q (operator default)", got, want)
 	}
-	if !stsMatchesSpec(sts, spec) {
+	if !stsMatchesSpec(sts, spec, nil) {
 		t.Error("stsMatchesSpec returned false for a freshly built STS")
 	}
 }
@@ -2324,7 +2326,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 		}},
 	}}
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.InitContainers
 	if len(got) != 1 || got[0].Name != "prep-disk" {
 		t.Fatalf("InitContainers = %+v, want prep-disk", got)
@@ -2332,7 +2334,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 	if got[0].VolumeMounts[0].MountPath != DataMountPath {
 		t.Fatalf("volume mount path = %q, want %q", got[0].VolumeMounts[0].MountPath, DataMountPath)
 	}
-	if !stsMatchesSpec(sts, spec) {
+	if !stsMatchesSpec(sts, spec, nil) {
 		t.Fatal("stsMatchesSpec() want true for matching init containers")
 	}
 
@@ -2342,18 +2344,18 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 			Name:  "prep-disk",
 			Image: "busybox:1.36",
 		}}
-		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0)
+		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0, nil)
 		// Simulate what the API server stamps on every container after create.
 		stsWithInit.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = corev1.PullIfNotPresent
 		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePath = "/dev/termination-log"
 		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
-		if !stsMatchesSpec(stsWithInit, specWithInit) {
+		if !stsMatchesSpec(stsWithInit, specWithInit, nil) {
 			t.Fatal("stsMatchesSpec() want true when init containers differ only by API defaults")
 		}
 	})
 
 	spec.InitContainers = nil
-	if stsMatchesSpec(sts, spec) {
+	if stsMatchesSpec(sts, spec, nil) {
 		t.Fatal("stsMatchesSpec() want false when init containers removed from spec")
 	}
 }

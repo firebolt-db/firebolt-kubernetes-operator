@@ -76,7 +76,7 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 // (Previously this used the container image; the image moved out of
 // FireboltEngineSpec into EngineClass, so SA is the carrier now.)
 func tlaMakeSTS(spec *computev1alpha1.FireboltEngineSpec, gen, stsSpecVer int) *appsv1.StatefulSet {
-	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen)
+	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, nil)
 	sts.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", stsSpecVer)
 	return sts
 }
@@ -403,7 +403,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			m := materializeTLAState(start)
 			result := computeEngineReconcile(
 				&m.spec, &m.status, m.buildState(),
-				propEngineName, propNamespace, 0, testInstanceInfo(),
+				propEngineName, propNamespace, 0, testInstanceInfo(), nil,
 			)
 			if !result.Requeue && result.RequeueAfter == 0 {
 				t.Fatalf("Inv_AlwaysRequeues: result has neither Requeue nor RequeueAfter (phase=%s)",

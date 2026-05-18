@@ -110,7 +110,7 @@ func TestBuildStatefulSetInstallsTGPS(t *testing.T) {
 	custom := int64(45)
 	spec.TerminationGracePeriodSeconds = &custom
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
 	podSpec := sts.Spec.Template.Spec
 	if podSpec.TerminationGracePeriodSeconds == nil || *podSpec.TerminationGracePeriodSeconds != 45 {
@@ -129,7 +129,7 @@ func TestBuildStatefulSetInstallsTGPS(t *testing.T) {
 func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 	spec := testSpec()
 	spec.TerminationGracePeriodSeconds = nil
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.TerminationGracePeriodSeconds
 	if got == nil || *got != int64(DefaultTerminationGracePeriodSeconds) {
 		t.Fatalf("expected default TGPS=%d, got %v", DefaultTerminationGracePeriodSeconds, got)

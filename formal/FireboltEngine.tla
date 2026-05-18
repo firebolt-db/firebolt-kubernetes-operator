@@ -43,6 +43,16 @@
 \*     TerminalPhase: zero-replica specs land in "stopped", non-zero in
 \*     "stable". Drift detection and re-materialization treat "stopped"
 \*     identically to "stable".
+\*   - EngineClass edits are modeled implicitly by specVer increments. The
+\*     reconciler's class watch + stsMatchesSpec class-hash comparison
+\*     make a class spec edit observationally identical to a FireboltEngine
+\*     spec edit: both flip StsMatchesSpec(g) to FALSE and the next
+\*     reconcile bumps currentGeneration through the same code paths. The
+\*     Go fidelity check uses ServiceAccountName as the version carrier in
+\*     the rapid harness (engine_property_test.go) and exercises class-
+\*     hash drift directly in engine_class_merge_test.go. No new TLA+
+\*     variable is introduced: from the model's perspective the class is
+\*     just another input to the spec-content hash specVer abstracts over.
 
 EXTENDS Integers, TLC
 

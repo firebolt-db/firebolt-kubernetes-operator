@@ -215,8 +215,20 @@ func CreateEngine(ctx context.Context, instanceName, name string, replicas int) 
 }
 
 // CreateEngineWithRollout creates a FireboltEngine CR bound to the given
-// FireboltInstance with a specific rollout strategy.
+// FireboltInstance with a specific rollout strategy. The engine container
+// image flows from the operator's embedded default.
 func CreateEngineWithRollout(ctx context.Context, instanceName, name string, replicas int, rollout string) error {
+	return createEngine(ctx, instanceName, name, replicas, rollout, nil)
+}
+
+// CreateEngineWithClass creates a FireboltEngine that references the given
+// cluster-scoped EngineClass via spec.engineClassRef. Image override and
+// shared pod-spec defaults flow from the class template.
+func CreateEngineWithClass(ctx context.Context, instanceName, name string, replicas int, classRef string) error {
+	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef)
+}
+
+func createEngine(ctx context.Context, instanceName, name string, replicas int, rollout string, classRef *string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -229,13 +241,9 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef: instanceName,
-			Replicas:    int32(replicas),
-			// Image flows from the operator's embedded default
-			// (DefaultEngineRepository / DefaultEngineTag) — equivalent
-			// to testImage:testTag at e2e build time — until EngineClass
-			// template merging is wired in. Engine-level overrides were
-			// removed when image became class-only (FB-1145).
+			InstanceRef:    instanceName,
+			Replicas:       int32(replicas),
+			EngineClassRef: classRef,
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -254,6 +262,92 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 	}
 
 	return cl.Create(ctx, engine)
+}
+
+// CreateEngineClass creates a cluster-scoped EngineClass whose
+// spec.template carries the engine container image. The class is the
+// canonical knob for switching engine images at runtime — mutating
+// containers[engine].image on the class triggers a blue-green rollout
+// on every FireboltEngine that references it (FB-1145).
+func CreateEngineClass(ctx context.Context, name, image string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	class := &computev1alpha1.EngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: computev1alpha1.EngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  computev1alpha1.EngineContainerName,
+							Image: image,
+						},
+					},
+				},
+			},
+		},
+	}
+	return cl.Create(ctx, class)
+}
+
+// UpdateEngineClassImage mutates the engine container image on an
+// existing EngineClass. Used by the e2e Image Switching test as the
+// canonical path for changing the running engine version: the engine
+// controller's EngineClass watch fires immediately, stsMatchesSpec
+// detects the class hash drift, and a new generation rolls.
+func UpdateEngineClassImage(ctx context.Context, name, image string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	for i := 0; i < 10; i++ {
+		class := &computev1alpha1.EngineClass{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: name}, class); err != nil {
+			return err
+		}
+		setEngineContainerImage(&class.Spec.Template.Spec, image)
+		if err := cl.Update(ctx, class); err == nil {
+			return nil
+		} else if !errors.IsConflict(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("updating EngineClass %q image to %q: conflict after 10 retries", name, image)
+}
+
+// setEngineContainerImage updates (or appends) the engine container's
+// image in a PodSpec. Centralised so both CreateEngineClass and
+// UpdateEngineClassImage produce a class shape the operator's merge
+// layer recognises.
+func setEngineContainerImage(podSpec *corev1.PodSpec, image string) {
+	for i := range podSpec.Containers {
+		if podSpec.Containers[i].Name == computev1alpha1.EngineContainerName {
+			podSpec.Containers[i].Image = image
+			return
+		}
+	}
+	podSpec.Containers = append(podSpec.Containers, corev1.Container{
+		Name:  computev1alpha1.EngineContainerName,
+		Image: image,
+	})
+}
+
+// DeleteEngineClass deletes a cluster-scoped EngineClass. Tolerates
+// NotFound so the helper is safe in AfterAll cleanup paths.
+func DeleteEngineClass(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	class := &computev1alpha1.EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	err = cl.Delete(ctx, class)
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // engineStorageConfig returns a customEngineConfig JSON blob that points
@@ -290,20 +384,6 @@ func UpdateEngineReplicas(ctx context.Context, name string, replicas int) error 
 	})
 }
 
-// UpdateEngineImageTag previously bumped the engine image tag to trigger
-// a blue-green roll. FireboltEngineSpec.Image was removed when image
-// became EngineClass-only; this helper now fails fast so the upgrade
-// e2e tests are surfaced as todo until EngineClass merging lands and the
-// upgrade flow is rewritten in terms of class mutation.
-//
-// TODO(FB-1145): switch upgrade e2e tests to mutate the referenced
-// EngineClass's container image and remove this stub.
-func UpdateEngineImageTag(ctx context.Context, name string, tag string) error {
-	_ = ctx
-	_ = name
-	_ = tag
-	return fmt.Errorf("UpdateEngineImageTag is a no-op until EngineClass image override lands (FB-1145)")
-}
 
 // UpdateEngineScheduling sets NodeSelector, Tolerations, and Affinity on the
 // engine CR in a single update (with retry on conflict). All three fields are
@@ -847,6 +927,31 @@ func WaitForEnginePhase(ctx context.Context, engineName string, phase computev1a
 	}
 
 	return fmt.Errorf("timeout waiting for engine %s to reach phase %s", engineName, phase)
+}
+
+// WaitForEnginePhaseChange is the inverse of WaitForEnginePhase: it
+// blocks until the engine's phase becomes anything other than the given
+// phase. Used by tests that trigger drift via a sibling resource
+// (EngineClass mutation, FireboltInstance change) where there is no
+// FireboltEngine spec edit to wait on via observedGeneration.
+func WaitForEnginePhaseChange(ctx context.Context, engineName string, phase computev1alpha1.EnginePhase, timeout time.Duration) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		engine := &computev1alpha1.FireboltEngine{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: engineName, Namespace: testNamespace}, engine); err != nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+		if engine.Status.Phase != phase {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for engine %s to leave phase %s", engineName, phase)
 }
 
 // WaitForEngineReadyCondition waits for the Ready condition on the engine to

@@ -502,15 +502,20 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 	})
 
-	// Test 6: Image switching.
-	// Skipped until EngineClass-based image override lands (FB-1145):
-	// FireboltEngineSpec.Image was removed; image lives on the referenced
-	// EngineClass template. This Describe will be re-enabled and rewritten
-	// to switch images by mutating the engine's referenced EngineClass.
-	XDescribe("Image Switching", Ordered, func() {
+	// Test 6: Image switching via EngineClass mutation.
+	//
+	// Image override moved from spec.image on FireboltEngine to
+	// containers[engine].image on the referenced EngineClass (FB-1145).
+	// The engine is created with spec.engineClassRef pointing at a
+	// dedicated class; mutating the class's container image is the
+	// canonical path for runtime version upgrades. The engine controller's
+	// EngineClass watch fires immediately, stsMatchesSpec detects the
+	// AnnotationEngineClassHash drift, and a clean blue-green rolls.
+	Describe("Image Switching", Ordered, func() {
 		var (
 			instanceName = "inst-image" + queryConfig.Suffix
 			engineName   = "test-image" + queryConfig.Suffix + "-engine"
+			className    = "test-image" + queryConfig.Suffix + "-class"
 			clientPod    = "client-image" + queryConfig.Suffix
 			lc           *TestInstanceLifecycle
 			bgRunner     *GatewayBackgroundQueryRunner
@@ -531,12 +536,22 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			// EngineClass deletion is guarded by the validating webhook
+			// while any FireboltEngine in the same namespace references
+			// the class (the gate uses a live List, not status); clearing
+			// the engine first (above) must drop the count to zero,
+			// after which the class delete goes through.
+			_ = DeleteEngineClass(ctx, className)
 			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should switch image without downtime", func() {
-			By("Creating engine with 3 replicas")
-			err := CreateEngine(ctx, instanceName, engineName, 3)
+			By("Creating EngineClass with the initial image")
+			err := CreateEngineClass(ctx, className, testImage+":"+testTag)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating engine with 3 replicas, referencing the EngineClass")
+			err = CreateEngineWithClass(ctx, instanceName, engineName, 3, className)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for initial engine to become ready")
@@ -558,12 +573,17 @@ var _ = Describe("Firebolt Engine", func() {
 			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
-			By("Switching to new image tag")
-			err = UpdateEngineImageTag(ctx, engineName, newImageTag)
+			By("Switching the EngineClass to the new image tag")
+			err = UpdateEngineClassImage(ctx, className, testImage+":"+newImageTag)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for controller to observe the new spec (avoid racing the pre-mutation PhaseStable)")
-			err = WaitForEngineSpecObserved(ctx, engineName, clusterTransitionTimeout)
+			By("Waiting for engine to leave the pre-mutation PhaseStable")
+			// EngineClass watch enqueues this engine for re-reconcile;
+			// stsMatchesSpec returns false on the new class hash and the
+			// controller bumps currentGeneration. No FireboltEngine spec
+			// edit is involved, so observedGeneration cannot be used as
+			// the gate — wait for the engine to leave Stable instead.
+			err = WaitForEnginePhaseChange(ctx, engineName, computev1alpha1.PhaseStable, clusterTransitionTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for engine to complete image switch")
