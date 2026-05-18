@@ -20,6 +20,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -42,6 +43,15 @@ import (
 )
 
 const finalizerName = "compute.firebolt.io/engine-cleanup"
+
+// reasonStatefulSetWarning is the fallback Reason stamped on the Ready
+// condition when a propagated StatefulSet event carries a Reason string
+// that is not a valid metav1.Condition Reason (must match
+// ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$). Standard kube-emitted
+// reasons (FailedCreate, BackOff, ...) pass through unchanged; this is
+// defense against custom controllers emitting malformed reasons that
+// would otherwise cause the status update to be rejected by the apiserver.
+const reasonStatefulSetWarning = "StatefulSetWarning"
 
 // FireboltEngineReconciler reconciles FireboltEngine objects by managing
 // blue-green generational deployments of Firebolt engine StatefulSets.
@@ -83,6 +93,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
 
 // Reconcile reads the current engine state from the cluster, computes the
 // reconcile actions needed, and applies them. Deletion is handled separately
@@ -256,6 +267,19 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	setReadyCondition(&result.Status, current, engine.Generation)
+
+	// When the engine is stuck because the StatefulSet controller cannot
+	// create the desired pod count (missing ServiceAccount, quota, admission
+	// rejection, PVC unbindable, ...), the only place the actionable error
+	// appears is on the StatefulSet's events. Surface the latest Warning
+	// onto the Ready condition so users do not have to know to run
+	// `kubectl describe sts`. The lookup is best-effort; failures here
+	// only forfeit the diagnostic, never the reconcile.
+	if shouldSurfaceStatefulSetEvent(&result.Status, current, engine.Spec.Replicas) {
+		if ev := r.latestStatefulSetWarning(ctx, current.CurrentSTS); ev != nil {
+			applyStatefulSetEventToReadyCondition(&result.Status, ev, engine.Generation)
+		}
+	}
 
 	if err := r.applyEngineState(ctx, engine, &result); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
@@ -500,6 +524,112 @@ func setDrainCheckFailingCondition(status *computev1alpha1.FireboltEngineStatus,
 		ObservedGeneration: generation,
 	})
 	return true
+}
+
+// shouldSurfaceStatefulSetEvent reports whether the Ready condition would
+// benefit from being decorated with the latest Warning event recorded on
+// the current-generation StatefulSet. The lookup is gated to keep the
+// per-reconcile cost (one Events API call) tied to a concrete symptom:
+//
+//  1. CurrentSTS must exist — without an STS there is nothing to look up
+//     events for, and computeStable would already be creating a new
+//     generation rather than waiting on the old one.
+//  2. CurrentPodTotal must be below the desired replica count. This
+//     specifically targets the "STS controller cannot create pods" case
+//     (forbidden SA, quota, admission rejection, ...). Pods that exist
+//     but are CrashLoopBackOff'ing emit pod-level events, not STS events,
+//     so we do not surface those here.
+//  3. The existing Ready reason must be one of the two generic "stuck"
+//     reasons (Rolling / PodsNotReady). More specific reasons
+//     (InstanceNotReady, DrainCheckFailing, Stopped, EngineReady) are
+//     either higher-precedence diagnostics we must not mask, or
+//     statements about a healthy engine.
+func shouldSurfaceStatefulSetEvent(
+	status *computev1alpha1.FireboltEngineStatus,
+	current EngineState,
+	expectedReplicas int32,
+) bool {
+	if current.CurrentSTS == nil {
+		return false
+	}
+	if current.CurrentPodTotal >= int(expectedReplicas) {
+		return false
+	}
+	cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		return false
+	}
+	switch cond.Reason {
+	case "Rolling", "PodsNotReady":
+		return true
+	default:
+		return false
+	}
+}
+
+// applyStatefulSetEventToReadyCondition rewrites the Ready=False condition
+// to carry the actionable Reason/Message from a recent StatefulSet Warning
+// event (typically FailedCreate). Decorating the existing Ready condition
+// — rather than emitting a sibling condition — keeps a single top-level
+// "what is wrong?" signal: consumers already keying off Ready inherit the
+// improved diagnostic for free, and the operator does not split the
+// diagnostic surface across two fields.
+//
+// The decoration is idempotent: each reconcile recomputes Ready from
+// scratch (setReadyCondition) and then re-applies the latest event. Once
+// pods come up the trigger gate stops firing and the next reconcile
+// restores the natural EngineReady reason.
+func applyStatefulSetEventToReadyCondition(
+	status *computev1alpha1.FireboltEngineStatus,
+	ev *corev1.Event,
+	generation int64,
+) {
+	if ev == nil {
+		return
+	}
+	reason := sanitizeConditionReason(ev.Reason)
+	message := fmt.Sprintf("StatefulSet %s: %s",
+		ev.InvolvedObject.Name, strings.TrimSpace(ev.Message))
+	if ev.Count > 1 {
+		message = fmt.Sprintf("%s (x%d)", message, ev.Count)
+	}
+	apimeta.SetStatusCondition(&status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: generation,
+	})
+}
+
+// sanitizeConditionReason returns s when it is a valid metav1.Condition
+// reason (must match ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$ per the
+// apimachinery validation rules), or a generic fallback otherwise. Standard
+// Kubernetes event reasons (FailedCreate, FailedScheduling, BackOff, ...)
+// satisfy the regex; the fallback is defense-in-depth against a custom
+// controller emitting a reason with reserved characters that would
+// otherwise cause the status update to be rejected by the apiserver.
+func sanitizeConditionReason(s string) string {
+	if s == "" {
+		return reasonStatefulSetWarning
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case (r >= '0' && r <= '9') || r == '_' || r == ',' || r == ':':
+			if i == 0 {
+				return reasonStatefulSetWarning
+			}
+		default:
+			return reasonStatefulSetWarning
+		}
+	}
+	last := s[len(s)-1]
+	if last == ',' || last == ':' {
+		return reasonStatefulSetWarning
+	}
+	return s
 }
 
 // isInstanceConditionTrue reports whether ConditionInstanceReady is

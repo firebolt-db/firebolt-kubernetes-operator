@@ -24,10 +24,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -408,6 +410,80 @@ func (r *FireboltEngineReconciler) isPodDrained(ctx context.Context, pod *corev1
 	}
 
 	return running == 0 && suspended == 0, nil
+}
+
+// latestStatefulSetWarning returns the most recent Warning event recorded
+// against sts, or nil when no actionable event exists. Errors fetching events
+// are logged and swallowed: this lookup is a best-effort diagnostic to
+// surface why pod creation is blocked, never a reconcile-blocking signal,
+// so a transient API failure must not poison the main reconcile path.
+//
+// We deliberately use the Clientset (one-shot List) instead of a
+// controller-runtime cached read: Events are high-volume cluster-wide and a
+// watch would inflate the controller's cache for a signal we consult only
+// when the engine is already known to be stuck. Field-selecting on the STS
+// UID keeps the response small and stable across STS recreations.
+func (r *FireboltEngineReconciler) latestStatefulSetWarning(ctx context.Context, sts *appsv1.StatefulSet) *corev1.Event {
+	if r.Clientset == nil || sts == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx).WithValues("statefulSet", sts.Name)
+
+	events, err := r.Clientset.CoreV1().Events(sts.Namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("involvedObject.uid=%s,type=Warning", string(sts.UID)),
+		Limit:         32,
+	})
+	if err != nil {
+		log.Info("Failed to list StatefulSet events; skipping warning propagation",
+			"error", err.Error())
+		return nil
+	}
+
+	return pickLatestWarning(events.Items)
+}
+
+// pickLatestWarning returns a copy of the most recent Warning event from the
+// supplied slice, or nil when the slice is empty or contains no Warning
+// events with a usable message. Recency is keyed on LastTimestamp /
+// EventTime / CreationTimestamp (whichever is the freshest non-zero
+// timestamp) so both the legacy core/v1 aggregation path and the newer
+// events.k8s.io Series path order correctly.
+func pickLatestWarning(events []corev1.Event) *corev1.Event {
+	var latest *corev1.Event
+	var latestAt time.Time
+	for i := range events {
+		ev := &events[i]
+		if ev.Type != corev1.EventTypeWarning {
+			continue
+		}
+		if strings.TrimSpace(ev.Message) == "" {
+			continue
+		}
+		t := eventLastTime(ev)
+		if latest == nil || t.After(latestAt) {
+			latest = ev
+			latestAt = t
+		}
+	}
+	if latest == nil {
+		return nil
+	}
+	out := latest.DeepCopy()
+	return out
+}
+
+// eventLastTime returns the most recent non-zero timestamp associated with
+// an Event, preferring LastTimestamp (legacy aggregation), then EventTime
+// (events.k8s.io Series), then CreationTimestamp. A zero return means the
+// event has no recorded timestamps at all, which sorts before everything.
+func eventLastTime(ev *corev1.Event) time.Time {
+	if !ev.LastTimestamp.IsZero() {
+		return ev.LastTimestamp.Time
+	}
+	if !ev.EventTime.IsZero() {
+		return ev.EventTime.Time
+	}
+	return ev.CreationTimestamp.Time
 }
 
 // parsePrometheusGauge pulls a single gauge value out of a Prometheus text

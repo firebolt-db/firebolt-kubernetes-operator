@@ -21,7 +21,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -249,5 +252,289 @@ func TestSetDrainCheckFailingCondition_RecoversOnNextSetReady(t *testing.T) {
 	}
 	if cond.Reason != "Rolling" {
 		t.Errorf("phase is Draining; expected Rolling, got %s", cond.Reason)
+	}
+}
+
+func TestShouldSurfaceStatefulSetEvent(t *testing.T) {
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "engine-g0"}}
+
+	readyCondFalse := func(reason string) metav1.Condition {
+		return metav1.Condition{
+			Type:   computev1alpha1.ConditionReady,
+			Status: metav1.ConditionFalse,
+			Reason: reason,
+		}
+	}
+
+	tests := []struct {
+		name             string
+		conditions       []metav1.Condition
+		current          EngineState
+		expectedReplicas int32
+		want             bool
+	}{
+		{
+			name:             "no STS observed yet => skip",
+			conditions:       []metav1.Condition{readyCondFalse("Rolling")},
+			current:          EngineState{CurrentSTS: nil, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name:             "pod count matches replicas => skip (no missing pods)",
+			conditions:       []metav1.Condition{readyCondFalse("PodsNotReady")},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 3},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name:             "Rolling + STS + missing pods => surface",
+			conditions:       []metav1.Condition{readyCondFalse("Rolling")},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             true,
+		},
+		{
+			name:             "PodsNotReady + STS + missing pods => surface",
+			conditions:       []metav1.Condition{readyCondFalse("PodsNotReady")},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 1},
+			expectedReplicas: 3,
+			want:             true,
+		},
+		{
+			name: "InstanceNotReady wins; do not mask higher-precedence reason",
+			conditions: []metav1.Condition{
+				readyCondFalse("InstanceNotReady"),
+			},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name: "DrainCheckFailing wins; do not mask drain-probe diagnostic",
+			conditions: []metav1.Condition{
+				readyCondFalse("DrainCheckFailing"),
+			},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name: "Ready=True => skip (engine is healthy)",
+			conditions: []metav1.Condition{{
+				Type:   computev1alpha1.ConditionReady,
+				Status: metav1.ConditionTrue,
+				Reason: "EngineReady",
+			}},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name:             "missing Ready condition => skip",
+			conditions:       nil,
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 3,
+			want:             false,
+		},
+		{
+			name:             "zero expected replicas => skip (parked engine, no pods expected)",
+			conditions:       []metav1.Condition{readyCondFalse("Stopped")},
+			current:          EngineState{CurrentSTS: sts, CurrentPodTotal: 0},
+			expectedReplicas: 0,
+			want:             false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &computev1alpha1.FireboltEngineStatus{Conditions: tc.conditions}
+			got := shouldSurfaceStatefulSetEvent(status, tc.current, tc.expectedReplicas)
+			if got != tc.want {
+				t.Errorf("shouldSurfaceStatefulSetEvent = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyStatefulSetEventToReadyCondition(t *testing.T) {
+	baseStatus := func() *computev1alpha1.FireboltEngineStatus {
+		return &computev1alpha1.FireboltEngineStatus{
+			Conditions: []metav1.Condition{{
+				Type:    computev1alpha1.ConditionReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  "Rolling",
+				Message: "Engine is in creating phase",
+			}},
+		}
+	}
+
+	t.Run("FailedCreate event overrides Reason and Message", func(t *testing.T) {
+		status := baseStatus()
+		ev := &corev1.Event{
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "StatefulSet",
+				Name: "gamma-g0",
+			},
+			Type:    corev1.EventTypeWarning,
+			Reason:  "FailedCreate",
+			Message: `create Pod gamma-g0-0 in StatefulSet gamma-g0 failed error: pods "gamma-g0-0" is forbidden: error looking up service account firebolt-oss/firebolt-oss: serviceaccount "firebolt-oss" not found`,
+			Count:   7,
+		}
+		applyStatefulSetEventToReadyCondition(status, ev, 42)
+
+		cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+		if cond == nil {
+			t.Fatal("expected Ready condition")
+		}
+		if cond.Reason != "FailedCreate" {
+			t.Errorf("reason: got %q, want FailedCreate", cond.Reason)
+		}
+		if cond.Status != metav1.ConditionFalse {
+			t.Errorf("status: got %s, want False", cond.Status)
+		}
+		if cond.ObservedGeneration != 42 {
+			t.Errorf("observedGeneration: got %d, want 42", cond.ObservedGeneration)
+		}
+		if !strings.Contains(cond.Message, "gamma-g0") {
+			t.Errorf("message missing STS name: %q", cond.Message)
+		}
+		if !strings.Contains(cond.Message, "serviceaccount") {
+			t.Errorf("message missing underlying error: %q", cond.Message)
+		}
+		if !strings.Contains(cond.Message, "x7") {
+			t.Errorf("message missing event count: %q", cond.Message)
+		}
+	})
+
+	t.Run("count==1 omits the multiplier suffix", func(t *testing.T) {
+		status := baseStatus()
+		ev := &corev1.Event{
+			InvolvedObject: corev1.ObjectReference{Kind: "StatefulSet", Name: "e-g0"},
+			Type:           corev1.EventTypeWarning,
+			Reason:         "FailedCreate",
+			Message:        "boom",
+			Count:          1,
+		}
+		applyStatefulSetEventToReadyCondition(status, ev, 1)
+		cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+		if strings.Contains(cond.Message, "x1") {
+			t.Errorf("did not expect count suffix for count==1: %q", cond.Message)
+		}
+	})
+
+	t.Run("nil event is a no-op", func(t *testing.T) {
+		status := baseStatus()
+		applyStatefulSetEventToReadyCondition(status, nil, 1)
+		cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+		if cond.Reason != "Rolling" {
+			t.Errorf("expected Reason untouched; got %q", cond.Reason)
+		}
+	})
+
+	t.Run("event with invalid Reason falls back to generic", func(t *testing.T) {
+		status := baseStatus()
+		ev := &corev1.Event{
+			InvolvedObject: corev1.ObjectReference{Kind: "StatefulSet", Name: "e-g0"},
+			Type:           corev1.EventTypeWarning,
+			Reason:         "1-cannot-start-with-digit",
+			Message:        "weird",
+		}
+		applyStatefulSetEventToReadyCondition(status, ev, 1)
+		cond := apimeta.FindStatusCondition(status.Conditions, computev1alpha1.ConditionReady)
+		if cond.Reason != reasonStatefulSetWarning {
+			t.Errorf("expected fallback reason; got %q", cond.Reason)
+		}
+	})
+}
+
+func TestPickLatestWarning(t *testing.T) {
+	now := time.Now()
+	older := corev1.Event{
+		Type:          corev1.EventTypeWarning,
+		Reason:        "FailedCreate",
+		Message:       "old failure",
+		LastTimestamp: metav1.NewTime(now.Add(-5 * time.Minute)),
+	}
+	newer := corev1.Event{
+		Type:          corev1.EventTypeWarning,
+		Reason:        "FailedCreate",
+		Message:       "new failure",
+		LastTimestamp: metav1.NewTime(now),
+	}
+	normal := corev1.Event{
+		Type:          corev1.EventTypeNormal,
+		Reason:        "SuccessfulCreate",
+		Message:       "ignored",
+		LastTimestamp: metav1.NewTime(now.Add(time.Minute)),
+	}
+	blank := corev1.Event{
+		Type:          corev1.EventTypeWarning,
+		Reason:        "FailedCreate",
+		Message:       "   ",
+		LastTimestamp: metav1.NewTime(now.Add(2 * time.Minute)),
+	}
+	seriesOnly := corev1.Event{
+		Type:      corev1.EventTypeWarning,
+		Reason:    "FailedCreate",
+		Message:   "series-style",
+		EventTime: metav1.MicroTime{Time: now.Add(10 * time.Minute)},
+	}
+
+	t.Run("empty slice", func(t *testing.T) {
+		if got := pickLatestWarning(nil); got != nil {
+			t.Errorf("want nil, got %+v", got)
+		}
+	})
+
+	t.Run("Warning events sorted by recency, ignoring Normal and blank", func(t *testing.T) {
+		got := pickLatestWarning([]corev1.Event{older, normal, newer, blank})
+		if got == nil {
+			t.Fatal("expected an event")
+		}
+		if got.Message != "new failure" {
+			t.Errorf("want newest non-blank warning, got %q", got.Message)
+		}
+	})
+
+	t.Run("EventTime is honored when LastTimestamp is zero", func(t *testing.T) {
+		got := pickLatestWarning([]corev1.Event{newer, seriesOnly})
+		if got == nil || got.Message != "series-style" {
+			t.Fatalf("expected series-style event, got %+v", got)
+		}
+	})
+
+	t.Run("returns a copy (caller cannot mutate the source slice)", func(t *testing.T) {
+		input := []corev1.Event{newer}
+		got := pickLatestWarning(input)
+		got.Message = "mutated"
+		if input[0].Message == "mutated" {
+			t.Error("pickLatestWarning must return a defensive copy")
+		}
+	})
+}
+
+func TestSanitizeConditionReason(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"", reasonStatefulSetWarning},
+		{"FailedCreate", "FailedCreate"},
+		{"FailedScheduling", "FailedScheduling"},
+		{"BackOff", "BackOff"},
+		{"camelCase_with_underscore", "camelCase_with_underscore"},
+		{"1leading_digit", reasonStatefulSetWarning},
+		{"has spaces", reasonStatefulSetWarning},
+		{"has-dash", reasonStatefulSetWarning},
+		{"trailing,", reasonStatefulSetWarning},
+		{"trailing:", reasonStatefulSetWarning},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := sanitizeConditionReason(tc.in); got != tc.want {
+				t.Errorf("sanitizeConditionReason(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
