@@ -1,3 +1,14 @@
+# 1.0.14
+
+appVersion: v2.8.0
+
+## [2.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.7.1...v2.8.0) (2026-05-18)
+
+### Features
+
+* **api:** allow overriding image repository or tag independently (FB-1090) ([3d453d6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3d453d618fe4c02d39a63d9e1b18a7906604e63e))
+
+
 # 1.0.13
 
 appVersion: v2.7.1
