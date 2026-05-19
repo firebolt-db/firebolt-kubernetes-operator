@@ -1131,6 +1131,12 @@ func TestStsMatchesSpec(t *testing.T) {
 				},
 			}
 		}), false},
+		{"init container mismatch", mutate(func(s *appsv1.StatefulSet) {
+			s.Spec.Template.Spec.InitContainers = []corev1.Container{{
+				Name:  "prep-disk",
+				Image: "busybox:1.36",
+			}}
+		}), false},
 	}
 
 	for _, tt := range tests {
@@ -2335,4 +2341,58 @@ func TestBuildStatefulSet_PartialImageOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildStatefulSet_InitContainers(t *testing.T) {
+	spec := testSpec()
+	spec.InitContainers = []corev1.Container{{
+		Name:    "prep-disk",
+		Image:   "busybox:1.36",
+		Command: []string{"sh", "-c"},
+		Args:    []string{"chown -R 3473:3473 /firebolt-core/volume"},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser: boolPtrInt64(0),
+		},
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      DataVolumeName,
+			MountPath: DataMountPath,
+		}},
+	}}
+
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0)
+	got := sts.Spec.Template.Spec.InitContainers
+	if len(got) != 1 || got[0].Name != "prep-disk" {
+		t.Fatalf("InitContainers = %+v, want prep-disk", got)
+	}
+	if got[0].VolumeMounts[0].MountPath != DataMountPath {
+		t.Fatalf("volume mount path = %q, want %q", got[0].VolumeMounts[0].MountPath, DataMountPath)
+	}
+	if !stsMatchesSpec(sts, spec) {
+		t.Fatal("stsMatchesSpec() want true for matching init containers")
+	}
+
+	t.Run("API server defaults on read-back", func(t *testing.T) {
+		specWithInit := testSpec()
+		specWithInit.InitContainers = []corev1.Container{{
+			Name:  "prep-disk",
+			Image: "busybox:1.36",
+		}}
+		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0)
+		// Simulate what the API server stamps on every container after create.
+		stsWithInit.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = corev1.PullIfNotPresent
+		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePath = "/dev/termination-log"
+		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
+		if !stsMatchesSpec(stsWithInit, specWithInit) {
+			t.Fatal("stsMatchesSpec() want true when init containers differ only by API defaults")
+		}
+	})
+
+	spec.InitContainers = nil
+	if stsMatchesSpec(sts, spec) {
+		t.Fatal("stsMatchesSpec() want false when init containers removed from spec")
+	}
+}
+
+func boolPtrInt64(v int64) *int64 {
+	return &v
 }

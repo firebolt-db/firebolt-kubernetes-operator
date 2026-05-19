@@ -110,3 +110,28 @@ func TestResolveImagePullPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveContainerImagePullPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		image  string
+		policy corev1.PullPolicy
+		want   corev1.PullPolicy
+	}{
+		{"explicit policy", "busybox:1.36", corev1.PullAlways, corev1.PullAlways},
+		{"tagged image defaults IfNotPresent", "busybox:1.36", "", corev1.PullIfNotPresent},
+		{":latest defaults Always", "busybox:latest", "", corev1.PullAlways},
+		{"untagged defaults Always", "busybox", "", corev1.PullAlways},
+		{"registry port without tag defaults Always", "myregistry:5000/myimage", "", corev1.PullAlways},
+		{"registry port with tag defaults IfNotPresent", "myregistry:5000/myimage:v1", "", corev1.PullIfNotPresent},
+		{"digest defaults IfNotPresent", "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000", "", corev1.PullIfNotPresent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveContainerImagePullPolicy(tc.image, tc.policy)
+			if got != tc.want {
+				t.Errorf("resolveContainerImagePullPolicy() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

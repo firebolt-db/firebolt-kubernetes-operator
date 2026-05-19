@@ -385,6 +385,13 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 		*out = new(v1.SecurityContext)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.InitContainers != nil {
+		in, out := &in.InitContainers, &out.InitContainers
+		*out = make([]v1.Container, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Autoscaling != nil {
 		in, out := &in.Autoscaling, &out.Autoscaling
 		*out = new(AutoscalingSpec)

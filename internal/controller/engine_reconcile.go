@@ -699,6 +699,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					// firebolt-core's own config keys (cf. floci's
 					// `FLOCI_PORT` collision in FB-1215).
 					EnableServiceLinks: boolPtr(false),
+					InitContainers:     engineInitContainers(spec),
 					Containers: []corev1.Container{
 						{
 							Name:            ContainerNameEngine,
@@ -951,6 +952,61 @@ func getEnginePodSecurityContext(spec *computev1alpha1.FireboltEngineSpec) *core
 	return psc
 }
 
+const defaultTerminationMessagePath = "/dev/termination-log"
+
+// engineInitContainers returns a deep copy of spec.InitContainers for the pod
+// template, or nil when unset so nil and empty compare equal in stsMatchesSpec.
+// API-server defaults (imagePullPolicy, terminationMessagePath/Policy) are
+// applied so a freshly-built STS compares equal to the same object read back
+// from the API.
+func engineInitContainers(spec *computev1alpha1.FireboltEngineSpec) []corev1.Container {
+	if len(spec.InitContainers) == 0 {
+		return nil
+	}
+	out := make([]corev1.Container, len(spec.InitContainers))
+	for i := range spec.InitContainers {
+		spec.InitContainers[i].DeepCopyInto(&out[i])
+		applyInitContainerDefaults(&out[i])
+	}
+	return out
+}
+
+func applyInitContainerDefaults(c *corev1.Container) {
+	if c.TerminationMessagePath == "" {
+		c.TerminationMessagePath = defaultTerminationMessagePath
+	}
+	if c.TerminationMessagePolicy == "" {
+		c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+	if c.ImagePullPolicy == "" {
+		c.ImagePullPolicy = resolveContainerImagePullPolicy(c.Image, "")
+	}
+}
+
+func normalizeInitContainer(c *corev1.Container) corev1.Container {
+	out := *c.DeepCopy()
+	applyInitContainerDefaults(&out)
+	return out
+}
+
+// initContainersEqual compares init container slices for drift, applying the
+// same API-server defaults the kubelet would stamp so read-back from the API
+// does not spuriously differ from the user spec.
+func initContainersEqual(actual, desired []corev1.Container) bool {
+	if len(actual) == 0 && len(desired) == 0 {
+		return true
+	}
+	if len(actual) != len(desired) {
+		return false
+	}
+	for i := range desired {
+		if !reflect.DeepEqual(normalizeInitContainer(&actual[i]), normalizeInitContainer(&desired[i])) {
+			return false
+		}
+	}
+	return true
+}
+
 // getEngineContainerSecurityContext returns the container-level security
 // context for the engine container. Pure pass-through of spec.SecurityContext;
 // the operator stamps no defaults at the container scope.
@@ -1079,6 +1135,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 	if !reflect.DeepEqual(container.SecurityContext, getEngineContainerSecurityContext(spec)) {
+		return false
+	}
+
+	if !initContainersEqual(podSpec.InitContainers, engineInitContainers(spec)) {
 		return false
 	}
 
