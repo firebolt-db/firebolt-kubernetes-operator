@@ -435,6 +435,18 @@ type FireboltEngineSpec struct {
 	// +optional
 	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
 
+	// InitContainers are additional init containers stamped on the engine pod
+	// template before the engine container starts. Use this for node-local data
+	// prep (for example chown on a hostPath volume at the data mount path).
+	// Init containers must mount pod volumes explicitly (typically the "data"
+	// volume at /firebolt-core/volume). The operator does not inject volume
+	// mounts or mutate container definitions.
+	//
+	// Changes to this field trigger a new blue-green generation.
+	// +optional
+	// +listType=atomic
+	InitContainers []corev1.Container `json:"initContainers,omitempty"`
+
 	// Autoscaling configures automatic replica management for this engine.
 	// When omitted or with Enabled=false, replicas is governed entirely by
 	// the user. When enabled, the autoscaler owns spec.replicas (HPA-style)

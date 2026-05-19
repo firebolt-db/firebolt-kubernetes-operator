@@ -19,6 +19,7 @@ package controller
 import (
 	"time"
 
+	dockerref "github.com/distribution/reference"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -222,6 +223,42 @@ func resolveImageRef(spec *computev1alpha1.ImageSpec, defaultRepo, defaultTag st
 func resolveImagePullPolicy(spec *computev1alpha1.ImageSpec) corev1.PullPolicy {
 	if spec != nil && spec.PullPolicy != "" {
 		return spec.PullPolicy
+	}
+	return corev1.PullIfNotPresent
+}
+
+// containerImageDefaultTag returns the effective tag used for pull-policy
+// defaulting, mirroring k8s.io/kubernetes/pkg/util/parsers.ParseImageName.
+func containerImageDefaultTag(image string) string {
+	named, err := dockerref.ParseNormalizedNamed(image)
+	if err != nil {
+		return ""
+	}
+	var tag string
+	if tagged, ok := named.(dockerref.Tagged); ok {
+		tag = tagged.Tag()
+	}
+	var digest string
+	if digested, ok := named.(dockerref.Digested); ok {
+		digest = digested.Digest().String()
+	}
+	if tag == "" && digest == "" {
+		tag = "latest"
+	}
+	return tag
+}
+
+// resolveContainerImagePullPolicy returns the effective pull policy for a
+// container image, mirroring the API server's defaulting rules when policy
+// is unset.
+func resolveContainerImagePullPolicy(image string, policy corev1.PullPolicy) corev1.PullPolicy {
+	if policy != "" {
+		return policy
+	}
+	// SetDefaults_Container ignores ParseImageName errors and assumes validation
+	// happened elsewhere; an empty tag therefore defaults to IfNotPresent.
+	if containerImageDefaultTag(image) == "latest" {
+		return corev1.PullAlways
 	}
 	return corev1.PullIfNotPresent
 }
