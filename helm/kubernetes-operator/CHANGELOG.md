@@ -1,3 +1,14 @@
+# 1.0.18
+
+appVersion: v2.11.0
+
+## [2.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.10.0...v2.11.0) (2026-05-19)
+
+### Features
+
+* add support for init-containers on engine pods (FB-1234) ([#72](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/72)) ([b39c819](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b39c8190689b071f841e7fb8b4090ad01664a98d))
+
+
 # 1.0.17
 
 appVersion: v2.10.0
