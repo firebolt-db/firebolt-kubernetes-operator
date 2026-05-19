@@ -1,3 +1,19 @@
+# 1.0.17
+
+appVersion: v2.10.0
+
+## [2.10.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.9.0...v2.10.0) (2026-05-19)
+
+### Features
+
+* **api:** add FireboltInstance.spec.metricScrapeMode (FB-1085) ([fb8abc5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fb8abc593906b6be907facc0abf694f7bcf3f609))
+* **controller:** pluggable pod-metric scraper for drain probe and autoscaler (FB-1085) ([37bfd2c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/37bfd2c99d575741388ac7ae7d258b4c71abb669))
+
+### Bug Fixes
+
+* **controller:** typed nil clientset in apiserverProxyScraper (FB-1085) ([9cff4e9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9cff4e9e0136ef735041b774d7c48c2b89cb6279))
+
+
 # 1.0.16
 
 appVersion: v2.9.0
