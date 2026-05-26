@@ -1,3 +1,43 @@
+# 1.0.20
+
+appVersion: v3.0.0
+
+## [3.0.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.12.0...v3.0.0) (2026-05-26)
+
+### ⚠ BREAKING CHANGES
+
+* **api:** scope EngineClass to namespaces (FB-1145)
+* **api:** FireboltEngineSpec.Image is removed. The engine container
+image now flows from the operator's embedded default until EngineClass-based
+merging lands (the new spec.engineClassRef has no behavioural effect yet).
+Migration: update Helm values to set the desired default image cluster-wide,
+or wait for the merge layer commit and reference an EngineClass whose
+template.containers[engine].image carries the per-class image. Existing
+engines with spec.image will fail admission; remove the field or update the
+operator's default. The intent is image governance through EngineClass rather
+than per-engine duplication; see the e2e Image Switching block (XDescribe'd
+here) for the rewrite landing in a follow-up commit.
+
+Tests using the engine container image as a per-generation spec carrier now
+use spec.serviceAccountName instead — same stsMatchesSpec drift semantics,
+different field.
+
+### Features
+
+* **api:** add EngineClass + FireboltEngine validating webhooks (FB-1145) ([eb10df6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/eb10df68aa40c13d8a970bafad5ad0c4046929c8))
+* **api:** introduce EngineClass and route engine image through it (FB-1145) ([1693660](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1693660d971d3f40402a6a49b5f6a266d66b12cb))
+* **controller:** add EngineClass status reconciler (FB-1145) ([6f5bd8b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6f5bd8b037d4b2498b3879d1ab1b50609ac08789))
+* **controller:** merge EngineClass template into engine pod spec (FB-1145) ([57b86c1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/57b86c1c3d904e4c3ff42caa287aa9c038ab7181))
+
+### Bug Fixes
+
+* **controller:** apply CI EngineClass to engine namespace; log missing-class refs (FB-1145) ([d7fe90e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d7fe90ef8e55c23a99542e5ad17d5e93abe9fe3c))
+
+### Code Refactoring
+
+* **api:** scope EngineClass to namespaces (FB-1145) ([72ec13d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/72ec13dd2ed97d229f39819e069321538a5edc33))
+
+
 # 1.0.19
 
 appVersion: v2.12.0
