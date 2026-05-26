@@ -48,6 +48,10 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | imagePullSecrets | list | `[]` | Secrets for pulling images from private registries. |
 | leaderElection.enabled | bool | `true` | Enable leader election for the controller manager. |
+| logging.development | bool | `false` | Development mode (--zap-devel): console encoding, debug level, no sampling. Use for local clusters; production installs should leave this false. When true, encoder/level/stacktraceLevel below are not passed (zap dev defaults apply). |
+| logging.encoder | string | `"json"` | Log encoding (json or console). Used when development is false. |
+| logging.level | string | `"info"` | Minimum log level (debug, info, error). Used when development is false. |
+| logging.stacktraceLevel | string | `"error"` | Level at and above which stack traces are captured (info, error, panic). Used when development is false. Dev mode defaults to warn internally but that threshold is not configurable via --zap-stacktrace-level. |
 | metrics.bindAddress | string | `":8443"` | Address the metrics endpoint binds to. Use ":8443" with secure: true (HTTPS) or ":8080" with secure: false (HTTP). |
 | metrics.enabled | bool | `true` | Enable the metrics Service. |
 | metrics.secure | bool | `true` | Serve metrics via HTTPS with authn/authz. When true, controller-runtime auto-generates self-signed TLS certs and enables Kubernetes authn/authz. The operator ServiceMonitor automatically adapts scheme and TLS config. |

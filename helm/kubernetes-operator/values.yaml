@@ -130,6 +130,20 @@ healthProbeBindAddress: ":8081"
 # -- Namespace to watch for FireboltEngine resources. Empty watches all namespaces.
 watchNamespace: ""
 
+logging:
+  # -- Development mode (--zap-devel): console encoding, debug level, no sampling.
+  # Use for local clusters; production installs should leave this false. When true,
+  # encoder/level/stacktraceLevel below are not passed (zap dev defaults apply).
+  development: false
+  # -- Log encoding (json or console). Used when development is false.
+  encoder: json
+  # -- Minimum log level (debug, info, error). Used when development is false.
+  level: info
+  # -- Level at and above which stack traces are captured (info, error, panic).
+  # Used when development is false. Dev mode defaults to warn internally but that
+  # threshold is not configurable via --zap-stacktrace-level.
+  stacktraceLevel: error
+
 # -- Priority class name for the operator pod.
 priorityClassName: ""
 

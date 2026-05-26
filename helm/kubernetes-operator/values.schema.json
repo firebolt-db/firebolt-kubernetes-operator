@@ -187,6 +187,24 @@
     "watchNamespace": {
       "type": "string"
     },
+    "logging": {
+      "type": "object",
+      "properties": {
+        "development": { "type": "boolean" },
+        "encoder": {
+          "type": "string",
+          "enum": ["json", "console"]
+        },
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "error"]
+        },
+        "stacktraceLevel": {
+          "type": "string",
+          "enum": ["info", "error", "panic"]
+        }
+      }
+    },
     "priorityClassName": {
       "type": "string"
     },
