@@ -72,6 +72,19 @@ spec:
             {{- with .Values.watchNamespace }}
             - --namespace={{ . }}
             {{- end }}
+            {{- if (.Values.logging.development | default false) }}
+            - --zap-devel=true
+            {{- else }}
+            {{- with .Values.logging.encoder | default "json" }}
+            - --zap-encoder={{ . }}
+            {{- end }}
+            {{- with .Values.logging.level | default "info" }}
+            - --zap-log-level={{ . }}
+            {{- end }}
+            {{- with .Values.logging.stacktraceLevel | default "error" }}
+            - --zap-stacktrace-level={{ . }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.additionalArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

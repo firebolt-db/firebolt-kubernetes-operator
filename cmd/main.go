@@ -26,6 +26,9 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	uberzap "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -91,10 +94,8 @@ func main() {
 		"Enable the admission webhook server. Disable when TLS certs are not available (e.g. local Kind clusters).")
 	flag.StringVar(&watchNamespace, "namespace", "",
 		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
+	zapOpts := zap.Options{Development: false}
+	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	if showVersion {
@@ -102,7 +103,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -246,4 +247,31 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// zapLoggerOpts builds controller-runtime zap options. Production defaults apply
+// when --zap-encoder/--zap-log-level/--zap-stacktrace-level are omitted; pass
+// --zap-devel for local console output. Timestamps are always RFC3339.
+func zapLoggerOpts(flags zap.Options) []zap.Opts {
+	opts := []zap.Opts{
+		zap.UseFlagOptions(&flags),
+		func(o *zap.Options) {
+			o.TimeEncoder = zapcore.RFC3339TimeEncoder
+		},
+	}
+	if flags.Development {
+		return opts
+	}
+	if flags.NewEncoder == nil {
+		opts = append(opts, zap.JSONEncoder())
+	}
+	if flags.Level == nil {
+		lvl := uberzap.NewAtomicLevelAt(zapcore.InfoLevel)
+		opts = append(opts, zap.Level(&lvl))
+	}
+	if flags.StacktraceLevel == nil {
+		lvl := uberzap.NewAtomicLevelAt(zapcore.ErrorLevel)
+		opts = append(opts, zap.StacktraceLevel(&lvl))
+	}
+	return opts
 }
