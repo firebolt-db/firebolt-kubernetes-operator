@@ -463,6 +463,91 @@ func TestSidecarsMatch_TolerantOfAPIServerDefaults(t *testing.T) {
 	}
 }
 
+// TestEffectiveEngineContainerSecurityContext_Default pins down the
+// production path that buildStatefulSet and stsMatchesSpec take when
+// neither the engine spec nor the EngineClass supplies a
+// container-level SecurityContext. The operator must stamp the
+// hardened firebolt-instance-helm-parity default (drop ALL, non-root
+// 3473, no privilege escalation) — otherwise the pod runs with
+// whatever the engine image's USER directive happens to be, and the
+// hardening parity FB-1297 set out to deliver is lost.
+//
+// This is distinct from the existing test on
+// getEngineContainerSecurityContext (the test-fixture wrapper); the
+// production wiring is what matters and is what was missed in the
+// original FB-1297 attempt.
+func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
+	t.Run("default applied when neither spec nor class sets it", func(t *testing.T) {
+		got := effectiveEngineContainerSecurityContext(testSpec(), nil)
+		if got == nil {
+			t.Fatal("effectiveEngineContainerSecurityContext returned nil; expected hardened default")
+		}
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		}
+		if got.RunAsGroup == nil || *got.RunAsGroup != DefaultEngineGID {
+			t.Errorf("RunAsGroup = %v, want %d", got.RunAsGroup, DefaultEngineGID)
+		}
+		if got.RunAsNonRoot == nil || !*got.RunAsNonRoot {
+			t.Errorf("RunAsNonRoot = %v, want true", got.RunAsNonRoot)
+		}
+		if got.AllowPrivilegeEscalation == nil || *got.AllowPrivilegeEscalation {
+			t.Errorf("AllowPrivilegeEscalation = %v, want false", got.AllowPrivilegeEscalation)
+		}
+		if got.Capabilities == nil || len(got.Capabilities.Drop) != 1 || got.Capabilities.Drop[0] != "ALL" {
+			t.Errorf("Capabilities.Drop = %v, want [ALL]", got.Capabilities)
+		}
+	})
+
+	t.Run("spec wins wholesale", func(t *testing.T) {
+		spec := testSpec()
+		runAsUser := int64(2222)
+		spec.SecurityContext = &corev1.SecurityContext{RunAsUser: &runAsUser}
+		got := effectiveEngineContainerSecurityContext(spec, nil)
+		if got == nil || got.RunAsUser == nil || *got.RunAsUser != 2222 {
+			t.Errorf("RunAsUser = %v, want 2222", got)
+		}
+		if got.Capabilities != nil {
+			t.Errorf("Capabilities = %v, want nil — defaults must not leak into a partial spec override", got.Capabilities)
+		}
+	})
+
+	t.Run("class fills in when spec unset", func(t *testing.T) {
+		spec := testSpec()
+		classRunAsUser := int64(5555)
+		classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: computev1alpha1.EngineContainerName,
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: &classRunAsUser,
+				},
+			}},
+		}))
+		got := effectiveEngineContainerSecurityContext(spec, classInfo)
+		if got == nil || got.RunAsUser == nil || *got.RunAsUser != classRunAsUser {
+			t.Errorf("RunAsUser = %v, want %d (from class)", got, classRunAsUser)
+		}
+	})
+
+	t.Run("buildStatefulSet stamps the default on the engine container", func(t *testing.T) {
+		spec := testSpec()
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if len(sts.Spec.Template.Spec.Containers) == 0 {
+			t.Fatal("no containers on built STS")
+		}
+		got := sts.Spec.Template.Spec.Containers[0].SecurityContext
+		if got == nil {
+			t.Fatal("engine container SecurityContext is nil on freshly-built STS; the hardened default is not reaching production")
+		}
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec returned false for a freshly built STS — drift comparator must also use the default")
+		}
+	})
+}
+
 // TestEffectivePodSecurityContext_Precedence pins down spec > class >
 // operator-default ordering on the pod-level securityContext, with the
 // operator FSGroup default always stamped.

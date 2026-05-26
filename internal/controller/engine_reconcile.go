@@ -1212,9 +1212,14 @@ func engineClassEngineVolumeMounts(classInfo *EngineClassInfo) []corev1.VolumeMo
 
 // effectiveEngineContainerSecurityContext resolves the container-level
 // SecurityContext on the engine container. Precedence: engine spec >
-// class > nil. Whole-struct ownership: a non-nil spec replaces the
-// class's value entirely so a partial override does not silently
-// inherit unrelated fields.
+// class > operator-stamped hardened default. Whole-struct ownership: a
+// non-nil spec or class value replaces the default wholesale so a
+// partial override does not silently inherit unrelated fields.
+//
+// The hardened default (drop ALL capabilities, non-root UID/GID 3473,
+// no privilege escalation) matches the sibling firebolt-instance-helm
+// chart's engine StatefulSet, so an engine migrated between deployment
+// paths keeps the same security posture.
 func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec, classInfo *EngineClassInfo) *corev1.SecurityContext {
 	if spec.SecurityContext != nil {
 		return spec.SecurityContext.DeepCopy()
@@ -1222,7 +1227,7 @@ func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngin
 	if c := classEngineContainer(classInfo); c != nil && c.SecurityContext != nil {
 		return c.SecurityContext.DeepCopy()
 	}
-	return nil
+	return defaultEngineContainerSecurityContext()
 }
 
 // effectiveEngineLifecycle returns the Lifecycle hooks for the engine
@@ -1467,14 +1472,35 @@ func containersEqualAfterDefaults(actual, desired []corev1.Container) bool {
 	return true
 }
 
-// getEngineContainerSecurityContext returns the container-level security
-// context for the engine container. Pure pass-through of spec.SecurityContext;
-// the operator stamps no defaults at the container scope.
+// getEngineContainerSecurityContext is the no-class shorthand around
+// effectiveEngineContainerSecurityContext kept solely for test fixtures
+// (makeSTS / makeEmptyDirSTS) that pre-date the EngineClass merge layer.
+// Production code paths use effectiveEngineContainerSecurityContext
+// directly; do not introduce new callers of this wrapper.
 func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec) *corev1.SecurityContext {
-	if spec.SecurityContext == nil {
-		return nil
+	return effectiveEngineContainerSecurityContext(spec, nil)
+}
+
+// defaultEngineContainerSecurityContext returns the hardened
+// container-level SecurityContext applied to the engine container when
+// no user value is supplied. Mirrors the firebolt-instance-helm chart's
+// engine StatefulSet (UID/GID 3473): non-root, no extra capabilities,
+// no privilege escalation, writable root filesystem (the engine writes
+// ephemeral files at startup; persistent state lives on the data PVC
+// mounted separately).
+func defaultEngineContainerSecurityContext() *corev1.SecurityContext {
+	runAsUser := DefaultEngineUID
+	runAsGroup := DefaultEngineGID
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: boolPtr(false),
+		ReadOnlyRootFilesystem:   boolPtr(false),
+		RunAsNonRoot:             boolPtr(true),
+		RunAsUser:                &runAsUser,
+		RunAsGroup:               &runAsGroup,
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
 	}
-	return spec.SecurityContext.DeepCopy()
 }
 
 func engineContainerResources(spec *computev1alpha1.FireboltEngineSpec) corev1.ResourceRequirements {
