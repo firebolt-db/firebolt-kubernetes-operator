@@ -1335,9 +1335,40 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 	})
 
-	t.Run("getEngineContainerSecurityContext returns nil when unset", func(t *testing.T) {
-		if got := getEngineContainerSecurityContext(testSpec()); got != nil {
-			t.Fatalf("expected nil container SecurityContext when unset, got %+v", got)
+	t.Run("getEngineContainerSecurityContext stamps the hardened default when unset", func(t *testing.T) {
+		got := getEngineContainerSecurityContext(testSpec())
+		if got == nil {
+			t.Fatal("expected default container SecurityContext when unset, got nil")
+		}
+		if got.RunAsNonRoot == nil || !*got.RunAsNonRoot {
+			t.Errorf("RunAsNonRoot = %v, want true (firebolt-instance-helm parity)", got.RunAsNonRoot)
+		}
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		}
+		if got.RunAsGroup == nil || *got.RunAsGroup != DefaultEngineGID {
+			t.Errorf("RunAsGroup = %v, want %d", got.RunAsGroup, DefaultEngineGID)
+		}
+		if got.AllowPrivilegeEscalation == nil || *got.AllowPrivilegeEscalation {
+			t.Errorf("AllowPrivilegeEscalation = %v, want false", got.AllowPrivilegeEscalation)
+		}
+		if got.Capabilities == nil || len(got.Capabilities.Drop) != 1 || got.Capabilities.Drop[0] != "ALL" {
+			t.Errorf("Capabilities.Drop = %v, want [ALL]", got.Capabilities)
+		}
+	})
+
+	t.Run("getEngineContainerSecurityContext passes spec value through unchanged", func(t *testing.T) {
+		spec := testSpec()
+		runAsUser := int64(2222)
+		spec.SecurityContext = &corev1.SecurityContext{
+			RunAsUser: &runAsUser,
+		}
+		got := getEngineContainerSecurityContext(spec)
+		if got == nil || got.RunAsUser == nil || *got.RunAsUser != 2222 {
+			t.Errorf("RunAsUser = %v, want 2222 (spec wins wholesale)", got)
+		}
+		if got.Capabilities != nil {
+			t.Errorf("Capabilities = %v, want nil (whole-struct ownership; defaults must not leak when spec is set)", got.Capabilities)
 		}
 	})
 }

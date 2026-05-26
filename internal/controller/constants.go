@@ -176,6 +176,18 @@ const (
 	// kernel uses it to chown the per-pod data PVC so the (non-root) engine
 	// process can read and write its own volume.
 	DefaultEngineFSGroup int64 = 3473
+	// DefaultEngineUID is the non-root UID the engine container runs
+	// under when FireboltEngine.spec.securityContext does not override
+	// it. 3473 matches DefaultEngineFSGroup so the process's primary
+	// GID, the volume-mount fsGroup, and the port mnemonic all line up
+	// — and matches the sibling firebolt-instance-helm chart's engine
+	// StatefulSet, so engines moved between deployment paths keep their
+	// on-disk ownership.
+	DefaultEngineUID int64 = 3473
+	// DefaultEngineGID is the non-root GID the engine container runs
+	// under. Pinned to the same value as DefaultEngineUID and
+	// DefaultEngineFSGroup; see DefaultEngineUID.
+	DefaultEngineGID int64 = 3473
 	// EngineShutdownMarginSeconds is subtracted from terminationGracePeriodSeconds
 	// to compute shutdown_wait_unfinished. The remaining margin covers container
 	// runtime teardown and pod API deletion after the engine process exits.
