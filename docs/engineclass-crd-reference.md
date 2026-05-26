@@ -1,15 +1,26 @@
 # EngineClass CRD Reference
 
-`EngineClass` is a cluster-scoped CRD that holds a reusable pod-template
+`EngineClass` is a namespaced CRD that holds a reusable pod-template
 fragment referenced by `FireboltEngine` via `spec.engineClassRef`.
-Engines inherit shared pod-level settings — service account, scheduling,
-pod annotations, sidecars, engine container image — from a single
-declaration, so the same value does not have to be repeated on every
-engine.
+Engines in the same namespace inherit shared pod-level settings —
+service account, scheduling, pod annotations, sidecars, engine
+container image — from a single declaration, so the same value does
+not have to be repeated on every engine.
 
-The pattern follows `StorageClass`, `IngressClass`, and `GatewayClass`:
-multiple classes can exist; the engine picks one by name; usage is
-optional.
+The pattern echoes `StorageClass` / `IngressClass` / `GatewayClass` in
+the "shared template referenced by name" sense, but `EngineClass` is
+**namespaced** rather than cluster-scoped because its template carries
+namespace-resolved identifiers — ServiceAccount names, Secret /
+ConfigMap / PVC volume references, and the per-tenant IAM annotations
+the engine pod needs. Kubernetes resolves those names in the engine's
+own namespace at pod admission time; a cluster-scoped class with
+`serviceAccountName: foo` referenced from two namespaces would bind
+silently to two different ServiceAccounts (and possibly two different
+IAM roles) with admission catching nothing. Co-locating the class and
+its consumer engines avoids that footgun.
+
+Multiple classes can exist per namespace; the engine picks one by name;
+usage is optional.
 
 ## Spec Reference
 
@@ -75,41 +86,51 @@ with the operator-rendered engine container during the merge.
 | Field | Description |
 |---|---|
 | `status.observedGeneration` | `metadata.generation` last reconciled. |
-| `status.boundEngines` | Count of FireboltEngines referencing this class via `spec.engineClassRef`. Surfaced for visibility; the deletion gate uses a live list of engines, not this cached value. |
+| `status.boundEngines` | Count of FireboltEngines in this class's namespace that reference it via `spec.engineClassRef`. Surfaced for visibility; the deletion gate uses a live list of engines, not this cached value. |
 | `status.conditions[type=Ready]` | True when `spec.template` contains no operator-owned fields. `False/Reason=OperatorOwnedFieldSet` is a defense-in-depth signal for classes admitted under an older operator with a narrower rejection set. |
 
 ## Deletion
 
 The validating webhook **refuses** `DELETE` while any FireboltEngine in
-any namespace references the class via `spec.engineClassRef`. The check
-lists FireboltEngines live from the API server at admission time rather
-than reading `status.boundEngines`, so a class bound between reconciler
-runs (the field still at its zero default) is still protected. Clear
-`spec.engineClassRef` on every referencing engine first, then delete the
-class. `failurePolicy: Fail` on the webhook configuration prevents a
-webhook outage from opening a window in which a bound class could be
-removed.
+the class's namespace references the class via `spec.engineClassRef`.
+EngineClass is namespaced, so cross-namespace references are not
+possible — only engines in the same namespace count toward the gate.
+The check lists FireboltEngines live from the API server at admission
+time rather than reading `status.boundEngines`, so a class bound
+between reconciler runs (the field still at its zero default) is still
+protected. Clear `spec.engineClassRef` on every referencing engine
+first, then delete the class. `failurePolicy: Fail` on the webhook
+configuration prevents a webhook outage from opening a window in which
+a bound class could be removed.
 
 ## Rollouts
 
-Editing the class spec triggers a blue-green rollout on every referencing
-engine. The mechanism: the engine controller watches `EngineClass`; on
-event it enqueues every engine whose `spec.engineClassRef` matches.
+Editing the class spec triggers a blue-green rollout on every
+referencing engine in the same namespace. The mechanism: the engine
+controller watches `EngineClass`; on event it enqueues every engine in
+the class's namespace whose `spec.engineClassRef` matches.
 `stsMatchesSpec` compares the resolved class content hash against the
 `firebolt.io/engine-class-hash` annotation on the StatefulSet — any
 mismatch returns false and the engine bumps `currentGeneration`. Same
-mechanism whether the class spec was edited in place, the engine flipped
-to a different class, or the reference was cleared.
+mechanism whether the class spec was edited in place, the engine
+flipped to a different class in the same namespace, or the reference
+was cleared.
 
 ## Monitoring
 
 ```bash
-kubectl get firec
+kubectl get firec -n firebolt
 ```
 
 ```
 NAME                BOUND   READY   AGE
 compute-optimized   3       True    24h
+```
+
+Or across all namespaces:
+
+```bash
+kubectl get firec --all-namespaces
 ```
 
 For a worked example, see [`examples/engine-class.yaml`](../examples/engine-class.yaml).

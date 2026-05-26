@@ -55,13 +55,17 @@ func fireboltEngineRefingClass(name, namespace, className string) *FireboltEngin
 }
 
 // validEngineClass returns an EngineClass whose spec.template contains
-// only user-allowed fields. Used as the baseline for negative tests that
-// add one rejected field at a time.
+// only user-allowed fields. Used as the baseline for negative tests
+// that add one rejected field at a time. Lives in namespace "firebolt"
+// so the delete-webhook tests (which list FireboltEngines scoped to
+// the class's namespace) exercise the real same-namespace filter
+// rather than the empty-namespace special case the fake client treats
+// as "all namespaces".
 func validEngineClass() *EngineClass {
 	gracePeriod := int64(60)
 	_ = gracePeriod
 	return &EngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized"},
+		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "firebolt"},
 		Spec: EngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -314,19 +318,44 @@ func TestEngineClassValidator_RejectsDeleteWhileBound(t *testing.T) {
 	scheme := engineClassWebhookScheme(t)
 	ec := validEngineClass()
 	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		fireboltEngineRefingClass("e1", "ns-a", ec.Name),
-		fireboltEngineRefingClass("e2", "ns-b", ec.Name),
-		fireboltEngineRefingClass("e3", "ns-b", ec.Name),
-		// Unrelated engine — should not contribute to the count.
-		fireboltEngineRefingClass("other", "ns-b", "different-class"),
+		// Same namespace as the class — counted.
+		fireboltEngineRefingClass("e1", ec.Namespace, ec.Name),
+		fireboltEngineRefingClass("e2", ec.Namespace, ec.Name),
+		// Same namespace, different class — not counted.
+		fireboltEngineRefingClass("other", ec.Namespace, "different-class"),
+		// Different namespace, same name — NOT counted. EngineClass is
+		// namespaced; cross-namespace references cannot resolve.
+		fireboltEngineRefingClass("cross-ns", "other-ns", ec.Name),
 	).Build()
 	v := &EngineClassCustomValidator{Reader: reader}
 	_, err := v.ValidateDelete(context.Background(), ec)
 	if err == nil {
 		t.Fatal("ValidateDelete: expected refusal while engines reference the class, got nil")
 	}
-	if !strings.Contains(err.Error(), "3 FireboltEngine") {
-		t.Errorf("ValidateDelete: error %q does not mention bound engine count", err.Error())
+	if !strings.Contains(err.Error(), "2 FireboltEngine") {
+		t.Errorf("ValidateDelete: error %q does not mention bound engine count (expected 2 in same namespace)", err.Error())
+	}
+	if !strings.Contains(err.Error(), ec.Namespace) {
+		t.Errorf("ValidateDelete: error %q does not mention the class's namespace %q", err.Error(), ec.Namespace)
+	}
+}
+
+// TestEngineClassValidator_AllowsDeleteWhenOnlyCrossNamespaceRefs pins
+// down the cross-namespace isolation: a class with engines in OTHER
+// namespaces referencing the same class name must NOT be protected.
+// Those references are dangling by Kubernetes semantics (an engine in
+// namespace X cannot resolve an EngineClass in namespace Y), so the
+// deletion gate must let the class go.
+func TestEngineClassValidator_AllowsDeleteWhenOnlyCrossNamespaceRefs(t *testing.T) {
+	scheme := engineClassWebhookScheme(t)
+	ec := validEngineClass() // namespace "firebolt"
+	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		fireboltEngineRefingClass("cross1", "ns-a", ec.Name),
+		fireboltEngineRefingClass("cross2", "ns-b", ec.Name),
+	).Build()
+	v := &EngineClassCustomValidator{Reader: reader}
+	if _, err := v.ValidateDelete(context.Background(), ec); err != nil {
+		t.Fatalf("ValidateDelete: expected to allow delete when only cross-namespace engines reference the class, got %v", err)
 	}
 }
 
@@ -350,7 +379,9 @@ func TestEngineClassValidator_RejectsDeleteWhenStatusZeroButRefExists(t *testing
 	ec := validEngineClass()
 	ec.Status.BoundEngines = 0
 	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		fireboltEngineRefingClass("racy", "ns-a", ec.Name),
+		// Same namespace so the cross-namespace filter does not mask
+		// the race-closure behavior the test is asserting.
+		fireboltEngineRefingClass("racy", ec.Namespace, ec.Name),
 	).Build()
 	v := &EngineClassCustomValidator{Reader: reader}
 	_, err := v.ValidateDelete(context.Background(), ec)

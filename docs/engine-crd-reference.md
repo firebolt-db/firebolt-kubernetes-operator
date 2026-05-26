@@ -5,7 +5,7 @@
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
-| `spec.engineClassRef` | No | - | Name of a cluster-scoped [`EngineClass`](engineclass-crd-reference.md). When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class — there is no per-engine image override on this CR; see the EngineClass reference for the merge precedence. |
+| `spec.engineClassRef` | No | - | Name of an [`EngineClass`](engineclass-crd-reference.md) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class — there is no per-engine image override on this CR; see the EngineClass reference for the merge precedence. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine (the CR is preserved; see [Stop and Resume](../README.md#stop-and-resume)). |
 | `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory` |
 | `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory` |

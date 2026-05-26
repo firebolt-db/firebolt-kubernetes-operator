@@ -54,7 +54,7 @@ webhooks:
         apiGroups: ["compute.firebolt.io"]
         apiVersions: ["v1alpha1"]
         resources: ["engineclasses"]
-        scope: "Cluster"
+        scope: "Namespaced"
     sideEffects: None
     failurePolicy: {{ .Values.webhook.validatingWebhookConfiguration.failurePolicy }}
     matchPolicy: Equivalent

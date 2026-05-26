@@ -655,25 +655,32 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 // content hash. Returns nil info (and no error) when no class is
 // referenced — that engine falls back to operator defaults.
 //
-// Admission normally rejects a missing engineClassRef, so a NotFound at
-// reconcile time means either the class was removed out of band (force
-// deletion bypassing the deletion-blocking webhook) or an admission
-// webhook was disabled at the time of apply. We return the error so
-// controller-runtime requeues; the user sees the engine not progressing
-// and the reconciler log message in the next reconcile carries the
-// missing-class name. Adding a status condition for this is intentionally
-// scoped out — webhook-rejection is the primary surface and a runtime
-// log + requeue is sufficient for the back-door cases.
+// EngineClass is namespaced; the lookup is scoped to the engine's
+// namespace, matching the FireboltEngine validating webhook and how
+// Kubernetes resolves the volume / SA / secret refs the template
+// carries.
+//
+// Admission normally rejects a missing engineClassRef, so a NotFound
+// at reconcile time means either the class was removed out of band
+// (force deletion bypassing the deletion-blocking webhook) or an
+// admission webhook was disabled at the time of apply. We return the
+// error so controller-runtime requeues; the user sees the engine not
+// progressing and the reconciler log message in the next reconcile
+// carries the missing-class name. Adding a status condition for this
+// is intentionally scoped out — webhook-rejection is the primary
+// surface and a runtime log + requeue is sufficient for the back-door
+// cases.
 func (r *FireboltEngineReconciler) resolveEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*EngineClassInfo, error) {
 	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
 		return nil, nil
 	}
 	class := &computev1alpha1.EngineClass{}
-	if err := r.Get(ctx, types.NamespacedName{Name: *engine.Spec.EngineClassRef}, class); err != nil {
+	key := types.NamespacedName{Name: *engine.Spec.EngineClassRef, Namespace: engine.Namespace}
+	if err := r.Get(ctx, key, class); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("EngineClass %q referenced by spec.engineClassRef not found", *engine.Spec.EngineClassRef)
+			return nil, fmt.Errorf("EngineClass %q referenced by spec.engineClassRef not found in namespace %q", *engine.Spec.EngineClassRef, engine.Namespace)
 		}
-		return nil, fmt.Errorf("getting EngineClass %q: %w", *engine.Spec.EngineClassRef, err)
+		return nil, fmt.Errorf("getting EngineClass %q in namespace %q: %w", *engine.Spec.EngineClassRef, engine.Namespace, err)
 	}
 	return newEngineClassInfo(class), nil
 }
@@ -737,20 +744,20 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 }
 
 // engineClassToEngines maps an EngineClass event to reconcile requests
-// for every FireboltEngine (in any namespace this reconciler watches)
-// that references the class via spec.engineClassRef. A class spec edit
-// or class arrival therefore wakes every consumer engine immediately so
-// the merged pod template / class hash changes are picked up without
-// waiting for the 30s drift requeue.
+// for every FireboltEngine in the same namespace that references the
+// class via spec.engineClassRef. EngineClass is namespaced, so a class
+// can only be referenced by engines in its own namespace — the watch
+// handler scopes the list to obj.GetNamespace() instead of fanning out
+// across the cluster.
 func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
 	className := obj.GetName()
-	engineList := &computev1alpha1.FireboltEngineList{}
-	listOpts := []client.ListOption{}
-	if r.Namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(r.Namespace))
+	classNamespace := obj.GetNamespace()
+	if r.Namespace != "" && classNamespace != r.Namespace {
+		return nil
 	}
-	if err := r.List(ctx, engineList, listOpts...); err != nil {
-		logf.FromContext(ctx).Error(err, "Failed to list engines for EngineClass watch", "engineclass", className)
+	engineList := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engineList, client.InNamespace(classNamespace)); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for EngineClass watch", "engineclass", className, "namespace", classNamespace)
 		return nil
 	}
 	requests := make([]reconcile.Request, 0, len(engineList.Items))

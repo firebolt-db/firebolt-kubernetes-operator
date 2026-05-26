@@ -45,9 +45,10 @@ func fireboltEngineWithRef(ref *string) *FireboltEngine {
 }
 
 // fakeReaderWithClasses builds a controller-runtime fake client preloaded
-// with the named EngineClasses (cluster-scoped). The fake client satisfies
-// client.Reader and is sufficient for the admission-time existence check —
-// the webhook does not depend on watch/cache behavior.
+// with the named EngineClasses in the test engine's namespace ("default").
+// EngineClass is namespaced, so the validator's Get includes the engine's
+// namespace; the fixtures live in the same namespace to satisfy that
+// lookup.
 func fakeReaderWithClasses(t *testing.T, names ...string) client.Reader {
 	t.Helper()
 	sch := runtime.NewScheme()
@@ -59,7 +60,7 @@ func fakeReaderWithClasses(t *testing.T, names ...string) client.Reader {
 	}
 	objs := make([]client.Object, 0, len(names))
 	for _, name := range names {
-		objs = append(objs, &EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name}})
+		objs = append(objs, &EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
 	}
 	return fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
 }
@@ -100,6 +101,35 @@ func TestFireboltEngineValidator_MissingClassIsRejected(t *testing.T) {
 	_, err = v.ValidateUpdate(context.Background(), eng, eng)
 	if err == nil {
 		t.Fatal("ValidateUpdate: missing class should be rejected, got nil")
+	}
+}
+
+// TestFireboltEngineValidator_ClassInDifferentNamespaceIsRejected pins
+// down the namespace-coupled lookup: an EngineClass with the right name
+// existing in a different namespace must NOT satisfy
+// spec.engineClassRef. Kubernetes resolves the reference in the
+// engine's own namespace at reconcile / pod-admission time; the webhook
+// must agree.
+func TestFireboltEngineValidator_ClassInDifferentNamespaceIsRejected(t *testing.T) {
+	sch := runtime.NewScheme()
+	if err := scheme.AddToScheme(sch); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := AddToScheme(sch); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	// Class lives in "other-ns"; the engine is in "default".
+	reader := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		&EngineClass{ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "other-ns"}},
+	).Build()
+	v := &FireboltEngineCustomValidator{Reader: reader}
+	eng := fireboltEngineWithRef(ptr.To("compute-optimized"))
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: class in different namespace should be rejected (Kubernetes resolves engineClassRef in the engine's namespace)")
+	}
+	if !strings.Contains(err.Error(), "engineClassRef") || !strings.Contains(err.Error(), "compute-optimized") {
+		t.Errorf("ValidateCreate: error %q does not surface field path and missing name", err.Error())
 	}
 }
 

@@ -37,12 +37,12 @@ import (
 // headless-DNS contracts). Sidecar containers and additional init
 // containers pass through unconstrained.
 //
-// Deletion is rejected while at least one FireboltEngine in any namespace
-// references the class. The check lists FireboltEngines live via Reader
-// at admission time (rather than reading status.boundEngines) so a class
-// bound between reconciler runs still refuses deletion. Configured
-// failurePolicy: Fail so a webhook outage cannot open a deletion window
-// that would orphan referencing engines.
+// Deletion is rejected while at least one FireboltEngine in the same
+// namespace references the class. The check lists FireboltEngines live
+// via Reader at admission time (rather than reading status.boundEngines)
+// so a class bound between reconciler runs still refuses deletion.
+// Configured failurePolicy: Fail so a webhook outage cannot open a
+// deletion window that would orphan referencing engines.
 //
 // +kubebuilder:object:generate=false
 type EngineClassCustomValidator struct {
@@ -93,17 +93,21 @@ func (v *EngineClassCustomValidator) ValidateUpdate(
 }
 
 // ValidateDelete rejects deletion while at least one FireboltEngine in
-// any namespace references this class via spec.engineClassRef. The count
-// is recomputed live from the API server, not read from
-// status.boundEngines, because status defaults to zero on a freshly
-// created class — relying on it would open a race where the class can be
-// deleted between the moment an engine first references it and the next
-// reconcile that increments the field.
+// the same namespace references this class via spec.engineClassRef.
+// EngineClass is namespaced so engineClassRef resolves in the engine's
+// own namespace; only engines in the class's namespace can bind to it,
+// and only those count toward the deletion gate.
 //
-// Configured failurePolicy: Fail on the ValidatingWebhookConfiguration so
-// that a webhook outage cannot bypass this guard. List errors propagate
-// as admission errors for the same reason: better to refuse the delete
-// than to admit it on incomplete information.
+// The count is recomputed live from the API server, not read from
+// status.boundEngines, because status defaults to zero on a freshly
+// created class — relying on it would open a race where the class can
+// be deleted between the moment an engine first references it and the
+// next reconcile that increments the field.
+//
+// Configured failurePolicy: Fail on the ValidatingWebhookConfiguration
+// so that a webhook outage cannot bypass this guard. List errors
+// propagate as admission errors for the same reason: better to refuse
+// the delete than to admit it on incomplete information.
 func (v *EngineClassCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	ec, ok := obj.(*EngineClass)
 	if !ok {
@@ -113,8 +117,8 @@ func (v *EngineClassCustomValidator) ValidateDelete(ctx context.Context, obj run
 		return nil, errors.New("EngineClass delete webhook has no API reader configured")
 	}
 	var engines FireboltEngineList
-	if err := v.Reader.List(ctx, &engines); err != nil {
-		return nil, fmt.Errorf("listing FireboltEngines to check class references: %w", err)
+	if err := v.Reader.List(ctx, &engines, client.InNamespace(ec.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing FireboltEngines in namespace %q to check class references: %w", ec.Namespace, err)
 	}
 	var count int
 	for i := range engines.Items {
@@ -128,8 +132,10 @@ func (v *EngineClassCustomValidator) ValidateDelete(ctx context.Context, obj run
 	}
 	return nil, field.Forbidden(
 		field.NewPath("metadata", "name"),
-		fmt.Sprintf("EngineClass %q is referenced by %d FireboltEngine(s); clear spec.engineClassRef on those engines before deleting the class",
-			ec.Name, count),
+		fmt.Sprintf(
+			"EngineClass %q in namespace %q is referenced by %d FireboltEngine(s); "+
+				"clear spec.engineClassRef on those engines before deleting the class",
+			ec.Name, ec.Namespace, count),
 	)
 }
 

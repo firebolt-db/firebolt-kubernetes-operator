@@ -56,9 +56,13 @@ type EngineClassStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// BoundEngines counts the FireboltEngines that reference this class
-	// via spec.engineClassRef. The EngineClass deletion webhook reads this
-	// value to block deletion while the class is in use.
+	// BoundEngines counts the FireboltEngines in the same namespace that
+	// reference this class via spec.engineClassRef. Surfaced for
+	// visibility (printcolumn, kubectl describe); the EngineClass
+	// deletion webhook does its own live List against the namespace
+	// rather than trusting this cached value, so a class bound between
+	// reconciler runs (status still at zero) is still protected from
+	// deletion.
 	// +optional
 	BoundEngines int32 `json:"boundEngines,omitempty"`
 
@@ -76,21 +80,29 @@ const EngineClassConditionReady = "Ready"
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=firec
+// +kubebuilder:resource:shortName=firec
 // +kubebuilder:printcolumn:name="Bound",type=integer,JSONPath=`.status.boundEngines`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // EngineClass is a reusable pod-template fragment shared by multiple
-// FireboltEngines. Engines reference an EngineClass by name through
-// spec.engineClassRef and inherit its template, eliminating the need to
-// repeat identical per-engine settings (serviceAccountName, nodeSelector,
-// tolerations, pod annotations — including the cloud-provider IAM
-// binding for kube2iam, IRSA, and Pod Identity).
+// FireboltEngines in the same namespace. Engines reference an EngineClass
+// by name through spec.engineClassRef and inherit its template,
+// eliminating the need to repeat identical per-engine settings
+// (serviceAccountName, nodeSelector, tolerations, pod annotations —
+// including the cloud-provider IAM binding for kube2iam, IRSA, and Pod
+// Identity).
 //
-// EngineClass is cluster-scoped to match the convention used by
-// IngressClass and GatewayClass. The engine's namespace does not
-// constrain which class it may reference.
+// EngineClass is namespaced (not cluster-scoped like IngressClass /
+// GatewayClass) because its template carries namespace-resolved
+// identifiers — ServiceAccount names, Secret / ConfigMap / PVC volume
+// references, and the per-tenant IAM annotations that the engine pod
+// needs. Kubernetes resolves those names in the engine's own namespace
+// at pod admission time, so the class and its consumer engines must
+// live together. A cluster-scoped class with `serviceAccountName: foo`
+// referenced from two namespaces would silently bind to two different
+// ServiceAccounts (and possibly two different IAM roles) without
+// admission catching the divergence.
 type EngineClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -1,5 +1,5 @@
 {
-  "description": "EngineClass is a reusable pod-template fragment shared by multiple\nFireboltEngines. Engines reference an EngineClass by name through\nspec.engineClassRef and inherit its template, eliminating the need to\nrepeat identical per-engine settings (serviceAccountName, nodeSelector,\ntolerations, pod annotations \u2014 including the cloud-provider IAM\nbinding for kube2iam, IRSA, and Pod Identity).\n\nEngineClass is cluster-scoped to match the convention used by\nIngressClass and GatewayClass. The engine's namespace does not\nconstrain which class it may reference.",
+  "description": "EngineClass is a reusable pod-template fragment shared by multiple\nFireboltEngines in the same namespace. Engines reference an EngineClass\nby name through spec.engineClassRef and inherit its template,\neliminating the need to repeat identical per-engine settings\n(serviceAccountName, nodeSelector, tolerations, pod annotations \u2014\nincluding the cloud-provider IAM binding for kube2iam, IRSA, and Pod\nIdentity).\n\nEngineClass is namespaced (not cluster-scoped like IngressClass /\nGatewayClass) because its template carries namespace-resolved\nidentifiers \u2014 ServiceAccount names, Secret / ConfigMap / PVC volume\nreferences, and the per-tenant IAM annotations that the engine pod\nneeds. Kubernetes resolves those names in the engine's own namespace\nat pod admission time, so the class and its consumer engines must\nlive together. A cluster-scoped class with `serviceAccountName: foo`\nreferenced from two namespaces would silently bind to two different\nServiceAccounts (and possibly two different IAM roles) without\nadmission catching the divergence.",
   "properties": {
     "apiVersion": {
       "description": "APIVersion defines the versioned schema of this representation of an object.\nServers should convert recognized schemas to the latest internal value, and\nmay reject unrecognized values.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
@@ -7247,7 +7247,7 @@
       "description": "EngineClassStatus is the observed state of an EngineClass.",
       "properties": {
         "boundEngines": {
-          "description": "BoundEngines counts the FireboltEngines that reference this class\nvia spec.engineClassRef. The EngineClass deletion webhook reads this\nvalue to block deletion while the class is in use.",
+          "description": "BoundEngines counts the FireboltEngines in the same namespace that\nreference this class via spec.engineClassRef. Surfaced for\nvisibility (printcolumn, kubectl describe); the EngineClass\ndeletion webhook does its own live List against the namespace\nrather than trusting this cached value, so a class bound between\nreconciler runs (status still at zero) is still protected from\ndeletion.",
           "format": "int32",
           "type": "integer"
         },
