@@ -1,3 +1,14 @@
+# 1.0.19
+
+appVersion: v2.12.0
+
+## [2.12.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v2.11.0...v2.12.0) (2026-05-26)
+
+### Features
+
+* add log config options and use JSON by default (FB-1222) ([#74](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/74)) ([4a7b30f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4a7b30f254ffeaf6e4cdc3eca812b123e1b3f692))
+
+
 # 1.0.18
 
 appVersion: v2.11.0
