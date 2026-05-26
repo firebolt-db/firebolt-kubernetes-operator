@@ -254,10 +254,22 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		})
 	}
 
-	classInfo, err := r.resolveEngineClassInfo(ctx, engine)
-	if err != nil {
-		log.Info("EngineClass resolution failed; requeueing", "reason", err.Error())
-		return ctrl.Result{}, err
+	// EngineClass resolution is bubbled up to controller-runtime on
+	// every failure. NotFound (errEngineClassNotFound) is normally
+	// caught at admission by the FireboltEngine validating webhook,
+	// but the helm chart ships webhooks disabled by default, so a
+	// missing class can reach this point in dev/test deployments. The
+	// engine stays stuck at the Initializing condition and the
+	// reconciler-loop log carries the missing-class name (the
+	// resolver wraps the upstream error with the name + namespace).
+	// We intentionally do NOT mint a dedicated EngineClassReady
+	// condition: the class state space is binary (exists / doesn't),
+	// not a lifecycle worth narrating like InstanceReady. A future
+	// Kubernetes Event on the engine is the right next step if the
+	// log-only signal proves insufficient.
+	classInfo, classErr := r.resolveEngineClassInfo(ctx, engine)
+	if classErr != nil {
+		return ctrl.Result{}, classErr
 	}
 
 	result := computeEngineReconcile(
@@ -466,6 +478,14 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 //     ConditionReady from Phase==Stable: the latter can be true while
 //     pods are still coming up.
 //  5. Otherwise True: serving traffic, all replicas ready.
+//
+// EngineClass resolution failures are not in this list. A missing class
+// is caught by the FireboltEngine validating webhook at admission time
+// in normal deployments; when webhooks are disabled (helm chart
+// default) the runtime error is logged and bubbled to controller-
+// runtime for backoff retry, but does not get its own condition type.
+// The class state space is binary (exists / doesn't), unlike the
+// instance which has a real lifecycle worth narrating in status.
 func setReadyCondition(
 	status *computev1alpha1.FireboltEngineStatus,
 	current EngineState,
@@ -650,6 +670,18 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 	return c != nil && c.Status == metav1.ConditionTrue
 }
 
+// errEngineClassNotFound is returned by resolveEngineClassInfo when the
+// engine's spec.engineClassRef names an EngineClass that does not exist
+// in the engine's namespace. Wrapping via stderrors.Is lets future
+// callers distinguish this user-actionable case (typo, class in wrong
+// namespace) from transient API errors (apiserver down, RBAC race).
+// Today's single caller — Reconcile — bubbles both kinds up to
+// controller-runtime for backoff retry; admission catches the
+// missing-class case in normal deployments. The sentinel earns its
+// keep against future evolution: an Event emitter on the engine, or a
+// different log severity on the actionable path, would key off it.
+var errEngineClassNotFound = stderrors.New("EngineClass referenced by spec.engineClassRef not found")
+
 // resolveEngineClassInfo fetches the EngineClass referenced by
 // engine.spec.engineClassRef and returns the resolved template plus a
 // content hash. Returns nil info (and no error) when no class is
@@ -660,16 +692,15 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 // Kubernetes resolves the volume / SA / secret refs the template
 // carries.
 //
-// Admission normally rejects a missing engineClassRef, so a NotFound
-// at reconcile time means either the class was removed out of band
-// (force deletion bypassing the deletion-blocking webhook) or an
-// admission webhook was disabled at the time of apply. We return the
-// error so controller-runtime requeues; the user sees the engine not
-// progressing and the reconciler log message in the next reconcile
-// carries the missing-class name. Adding a status condition for this
-// is intentionally scoped out — webhook-rejection is the primary
-// surface and a runtime log + requeue is sufficient for the back-door
-// cases.
+// Admission normally rejects a missing engineClassRef. A NotFound at
+// reconcile time means either the class was removed out of band (force
+// deletion bypassing the deletion-blocking webhook) or admission webhooks
+// were disabled at the time of apply — the helm chart ships webhooks
+// off by default, so the latter is the realistic case. The returned
+// error wraps errEngineClassNotFound so future callers can distinguish
+// it from a transient API failure via stderrors.Is; today's caller
+// (Reconcile) just bubbles both kinds up to controller-runtime's
+// backoff retry.
 func (r *FireboltEngineReconciler) resolveEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*EngineClassInfo, error) {
 	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
 		return nil, nil
@@ -678,7 +709,7 @@ func (r *FireboltEngineReconciler) resolveEngineClassInfo(ctx context.Context, e
 	key := types.NamespacedName{Name: *engine.Spec.EngineClassRef, Namespace: engine.Namespace}
 	if err := r.Get(ctx, key, class); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("EngineClass %q referenced by spec.engineClassRef not found in namespace %q", *engine.Spec.EngineClassRef, engine.Namespace)
+			return nil, fmt.Errorf("%w: %q in namespace %q", errEngineClassNotFound, *engine.Spec.EngineClassRef, engine.Namespace)
 		}
 		return nil, fmt.Errorf("getting EngineClass %q in namespace %q: %w", *engine.Spec.EngineClassRef, engine.Namespace, err)
 	}

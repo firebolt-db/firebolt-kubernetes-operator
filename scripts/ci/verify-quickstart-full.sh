@@ -48,9 +48,12 @@ echo "Relabeling Kind nodes for engine-full scheduling..."
 kubectl label nodes --all firebolt.dev/pool=engine --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
-echo "Creating EngineClass that pins the CI engine image (replaces the v1alpha0 spec.image field)..."
+echo "Creating EngineClass that pins the CI engine image (the per-engine spec.image field was removed in FB-1145)..."
 ENGINE_CLASS_NAME="${ENGINE_NAME}-ci-class"
-cat <<EOF | kubectl apply -f -
+# EngineClass is namespaced (FB-1145); apply it to the engine's namespace
+# so spec.engineClassRef resolves. Pre-namespace-flip this worked under
+# the cluster default namespace; now the class must live with its consumer.
+cat <<EOF | kubectl apply -n "$NAMESPACE" -f -
 apiVersion: compute.firebolt.io/v1alpha1
 kind: EngineClass
 metadata:
