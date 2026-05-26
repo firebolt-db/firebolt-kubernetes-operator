@@ -221,9 +221,11 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 	return createEngine(ctx, instanceName, name, replicas, rollout, nil)
 }
 
-// CreateEngineWithClass creates a FireboltEngine that references the given
-// cluster-scoped EngineClass via spec.engineClassRef. Image override and
-// shared pod-spec defaults flow from the class template.
+// CreateEngineWithClass creates a FireboltEngine that references an
+// EngineClass in the same testNamespace via spec.engineClassRef.
+// EngineClass is namespaced, so the class must live in testNamespace
+// for the engine to resolve it. Image override and shared pod-spec
+// defaults flow from the class template.
 func CreateEngineWithClass(ctx context.Context, instanceName, name string, replicas int, classRef string) error {
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef)
 }
@@ -264,18 +266,20 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 	return cl.Create(ctx, engine)
 }
 
-// CreateEngineClass creates a cluster-scoped EngineClass whose
+// CreateEngineClass creates an EngineClass in testNamespace whose
 // spec.template carries the engine container image. The class is the
 // canonical knob for switching engine images at runtime — mutating
 // containers[engine].image on the class triggers a blue-green rollout
-// on every FireboltEngine that references it (FB-1145).
+// on every FireboltEngine in the same namespace that references it
+// (FB-1145). EngineClass is namespaced; the class and its consumer
+// engines must share a namespace.
 func CreateEngineClass(ctx context.Context, name, image string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
 	class := &computev1alpha1.EngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 		Spec: computev1alpha1.EngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
@@ -293,10 +297,11 @@ func CreateEngineClass(ctx context.Context, name, image string) error {
 }
 
 // UpdateEngineClassImage mutates the engine container image on an
-// existing EngineClass. Used by the e2e Image Switching test as the
-// canonical path for changing the running engine version: the engine
-// controller's EngineClass watch fires immediately, stsMatchesSpec
-// detects the class hash drift, and a new generation rolls.
+// existing EngineClass in testNamespace. Used by the e2e Image
+// Switching test as the canonical path for changing the running engine
+// version: the engine controller's EngineClass watch fires immediately,
+// stsMatchesSpec detects the class hash drift, and a new generation
+// rolls.
 func UpdateEngineClassImage(ctx context.Context, name, image string) error {
 	cl, err := getCRDClient()
 	if err != nil {
@@ -304,7 +309,7 @@ func UpdateEngineClassImage(ctx context.Context, name, image string) error {
 	}
 	for i := 0; i < 10; i++ {
 		class := &computev1alpha1.EngineClass{}
-		if err := cl.Get(ctx, types.NamespacedName{Name: name}, class); err != nil {
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, class); err != nil {
 			return err
 		}
 		setEngineContainerImage(&class.Spec.Template.Spec, image)
@@ -335,14 +340,14 @@ func setEngineContainerImage(podSpec *corev1.PodSpec, image string) {
 	})
 }
 
-// DeleteEngineClass deletes a cluster-scoped EngineClass. Tolerates
+// DeleteEngineClass deletes an EngineClass in testNamespace. Tolerates
 // NotFound so the helper is safe in AfterAll cleanup paths.
 func DeleteEngineClass(ctx context.Context, name string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
-	class := &computev1alpha1.EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	class := &computev1alpha1.EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
 	err = cl.Delete(ctx, class)
 	if errors.IsNotFound(err) {
 		return nil

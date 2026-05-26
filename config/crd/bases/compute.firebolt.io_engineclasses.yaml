@@ -14,7 +14,7 @@ spec:
     shortNames:
     - firec
     singular: engineclass
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.boundEngines
@@ -31,15 +31,23 @@ spec:
       openAPIV3Schema:
         description: |-
           EngineClass is a reusable pod-template fragment shared by multiple
-          FireboltEngines. Engines reference an EngineClass by name through
-          spec.engineClassRef and inherit its template, eliminating the need to
-          repeat identical per-engine settings (serviceAccountName, nodeSelector,
-          tolerations, pod annotations — including the cloud-provider IAM
-          binding for kube2iam, IRSA, and Pod Identity).
+          FireboltEngines in the same namespace. Engines reference an EngineClass
+          by name through spec.engineClassRef and inherit its template,
+          eliminating the need to repeat identical per-engine settings
+          (serviceAccountName, nodeSelector, tolerations, pod annotations —
+          including the cloud-provider IAM binding for kube2iam, IRSA, and Pod
+          Identity).
 
-          EngineClass is cluster-scoped to match the convention used by
-          IngressClass and GatewayClass. The engine's namespace does not
-          constrain which class it may reference.
+          EngineClass is namespaced (not cluster-scoped like IngressClass /
+          GatewayClass) because its template carries namespace-resolved
+          identifiers — ServiceAccount names, Secret / ConfigMap / PVC volume
+          references, and the per-tenant IAM annotations that the engine pod
+          needs. Kubernetes resolves those names in the engine's own namespace
+          at pod admission time, so the class and its consumer engines must
+          live together. A cluster-scoped class with `serviceAccountName: foo`
+          referenced from two namespaces would silently bind to two different
+          ServiceAccounts (and possibly two different IAM roles) without
+          admission catching the divergence.
         properties:
           apiVersion:
             description: |-
@@ -8565,9 +8573,13 @@ spec:
             properties:
               boundEngines:
                 description: |-
-                  BoundEngines counts the FireboltEngines that reference this class
-                  via spec.engineClassRef. The EngineClass deletion webhook reads this
-                  value to block deletion while the class is in use.
+                  BoundEngines counts the FireboltEngines in the same namespace that
+                  reference this class via spec.engineClassRef. Surfaced for
+                  visibility (printcolumn, kubectl describe); the EngineClass
+                  deletion webhook does its own live List against the namespace
+                  rather than trusting this cached value, so a class bound between
+                  reconciler runs (status still at zero) is still protected from
+                  deletion.
                 format: int32
                 type: integer
               conditions:

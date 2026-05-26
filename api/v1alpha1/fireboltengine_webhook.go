@@ -31,12 +31,13 @@ import (
 
 // FireboltEngineCustomValidator validates FireboltEngine resources at
 // admission time. The only cross-resource check is that
-// spec.engineClassRef, when set, points to an existing EngineClass — the
-// reference is hard-rejected so users see a typo immediately at apply
-// time rather than via engine status. Apply ordering matters: an
-// EngineClass must exist before any FireboltEngine that references it
-// (GitOps tooling such as Argo CD sync-waves or Flux dependsOn handles
-// this in practice).
+// spec.engineClassRef, when set, points to an EngineClass that exists
+// in the engine's own namespace — the reference is hard-rejected so
+// users see a typo (or a class-applied-in-the-wrong-namespace mistake)
+// immediately at apply time rather than via engine status. Apply
+// ordering matters: an EngineClass must exist in the same namespace
+// before any FireboltEngine that references it (GitOps tooling such as
+// Argo CD sync-waves or Flux dependsOn handles this in practice).
 //
 // The validator reads through mgr.GetAPIReader (live, non-cached) because
 // the informer cache may not yet have the EngineClass at the moment of
@@ -95,17 +96,21 @@ func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ runt
 }
 
 // validateEngineClassRef returns field.NotFound when spec.engineClassRef
-// names an EngineClass that does not exist in the cluster. A nil ref is
-// allowed (the engine falls back to operator defaults). Any non-NotFound
-// API error surfaces as a generic internal error so the user can retry
-// once the API server / RBAC issue clears.
+// names an EngineClass that does not exist in the engine's namespace.
+// EngineClass is namespaced; the lookup is therefore scoped to
+// engine.Namespace, matching how Kubernetes will resolve the reference
+// at reconcile time. A nil ref is allowed (the engine falls back to
+// operator defaults). Any non-NotFound API error surfaces as a generic
+// internal error so the user can retry once the API server / RBAC
+// issue clears.
 func (v *FireboltEngineCustomValidator) validateEngineClassRef(ctx context.Context, eng *FireboltEngine) field.ErrorList {
 	if eng.Spec.EngineClassRef == nil || *eng.Spec.EngineClassRef == "" {
 		return nil
 	}
 	classPath := field.NewPath("spec", "engineClassRef")
 	class := &EngineClass{}
-	if err := v.Reader.Get(ctx, client.ObjectKey{Name: *eng.Spec.EngineClassRef}, class); err != nil {
+	key := client.ObjectKey{Name: *eng.Spec.EngineClassRef, Namespace: eng.Namespace}
+	if err := v.Reader.Get(ctx, key, class); err != nil {
 		if apierrors.IsNotFound(err) {
 			return field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
 		}

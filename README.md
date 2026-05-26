@@ -8,7 +8,7 @@ The operator manages three custom resources:
 
 - **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, and an Envoy gateway proxy.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
-- **EngineClass** *(optional, cluster-scoped)* holds a reusable pod-template fragment that multiple engines can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Modeled on Kubernetes' `StorageClass` and `GatewayClass`.
+- **EngineClass** *(optional, namespaced)* holds a reusable pod-template fragment that multiple engines in the same namespace can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Namespaced (not cluster-scoped) because the template carries namespace-resolved identifiers like ServiceAccount names and Secret/PVC volume references.
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `EngineClass` triggers the same blue-green flow on every consumer engine.
 

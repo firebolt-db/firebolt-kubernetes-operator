@@ -35,11 +35,14 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// engineClassRequeueAfter is how often the controller re-checks
-// status.boundEngines in steady state. It runs more often than the engine
-// reconciler's drift loop because boundEngines is the input to the
-// deletion-blocking webhook: a stale "you can't delete this" surfaces to
-// users sooner with a shorter requeue.
+// engineClassRequeueAfter is the steady-state safety-net requeue for
+// the EngineClass reconciler. Engine create / update / delete events
+// already enqueue the class reactively (via the FireboltEngine watch
+// in SetupWithManager), so this requeue only kicks in if a watch
+// event is missed; tighter than the engine reconciler's drift loop
+// because status.boundEngines is the printcolumn / kubectl-describe
+// surface users look at, and a stale count is mildly more confusing
+// than a stale generation.
 const engineClassRequeueAfter = 30 * time.Second
 
 // EngineClassReconciler keeps EngineClass status in sync with cluster
@@ -48,11 +51,14 @@ const engineClassRequeueAfter = 30 * time.Second
 //
 // Two status fields are maintained:
 //
-//   - BoundEngines: the count of FireboltEngines (across all namespaces)
-//     whose spec.engineClassRef names this class. The deletion-blocking
-//     webhook reads this value to refuse deletion while engines reference
-//     the class. The count is recomputed from scratch each reconcile by
-//     listing FireboltEngines; no per-class index is maintained.
+//   - BoundEngines: the count of FireboltEngines in the class's
+//     namespace whose spec.engineClassRef names this class. EngineClass
+//     is namespaced, so engines outside the class's namespace cannot
+//     bind to it and are not counted. The deletion-blocking webhook
+//     does its own live list (status can be stale across reconciles);
+//     this value is purely a visibility surface. The count is
+//     recomputed from scratch each reconcile by listing FireboltEngines
+//     in the class's namespace.
 //   - Conditions[Ready]: True when the class's spec.template passes
 //     ValidateOperatorOwnedPodTemplate. Admission normally catches
 //     offending specs, so Ready=False is reserved for classes admitted
@@ -75,7 +81,7 @@ func (r *EngineClassReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("fetching EngineClass: %w", err)
 	}
 
-	bound, err := r.countBoundEngines(ctx, class.Name)
+	bound, err := r.countBoundEngines(ctx, class.Namespace, class.Name)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("counting bound engines: %w", err)
 	}
@@ -105,15 +111,14 @@ func (r *EngineClassReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{RequeueAfter: engineClassRequeueAfter}, nil
 }
 
-// countBoundEngines lists FireboltEngines across all namespaces and counts
-// those whose spec.engineClassRef matches className. The list path is
-// O(N) in total engines; that's acceptable at our scale (tens to hundreds
-// of engines per cluster) and avoids carrying a label or index we'd have
-// to maintain elsewhere. Revisit if EngineClasses ever land in a single-
-// cluster fleet with thousands of engines.
-func (r *EngineClassReconciler) countBoundEngines(ctx context.Context, className string) (int32, error) {
+// countBoundEngines lists FireboltEngines in the class's namespace and
+// counts those whose spec.engineClassRef matches className. EngineClass
+// is namespaced, so engines outside this namespace cannot bind to it.
+// The list path is O(N) in engines per namespace; that's acceptable at
+// our scale (tens of engines per instance) and avoids a per-class index.
+func (r *EngineClassReconciler) countBoundEngines(ctx context.Context, namespace, className string) (int32, error) {
 	var engines computev1alpha1.FireboltEngineList
-	if err := r.List(ctx, &engines); err != nil {
+	if err := r.List(ctx, &engines, client.InNamespace(namespace)); err != nil {
 		return 0, err
 	}
 	var count int32
@@ -174,8 +179,9 @@ func (r *EngineClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // enqueueClassFromEngine maps a FireboltEngine event back to a reconcile
 // request for the EngineClass it references. Engines without a
-// spec.engineClassRef produce no events. Class scope is cluster-wide, so
-// reconcile.Request needs only the class name.
+// spec.engineClassRef produce no events. EngineClass is namespaced, so
+// the request carries the engine's namespace — that's the namespace the
+// class lives in too.
 func enqueueClassFromEngine(_ context.Context, obj client.Object) []reconcile.Request {
 	eng, ok := obj.(*computev1alpha1.FireboltEngine)
 	if !ok {
@@ -184,5 +190,10 @@ func enqueueClassFromEngine(_ context.Context, obj client.Object) []reconcile.Re
 	if eng.Spec.EngineClassRef == nil || *eng.Spec.EngineClassRef == "" {
 		return nil
 	}
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: *eng.Spec.EngineClassRef}}}
+	return []reconcile.Request{{
+		NamespacedName: client.ObjectKey{
+			Name:      *eng.Spec.EngineClassRef,
+			Namespace: eng.Namespace,
+		},
+	}}
 }

@@ -2,7 +2,7 @@
 
 ## What this project does
 
-Firebolt Kubernetes Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **EngineClass** (optional cluster-scoped pod-template fragment shared by multiple engines; modeled on Kubernetes' StorageClass / GatewayClass). Built with Go and controller-runtime.
+Firebolt Kubernetes Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **EngineClass** (optional namespaced pod-template fragment shared by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently). Built with Go and controller-runtime.
 
 Engines require a ready instance. See [docs/architecture.md](docs/architecture.md) for the full design.
 
@@ -138,7 +138,7 @@ Before touching the engine reconciler -- especially `engine_reconcile.go`, `engi
 
 ### EngineClass merge layer
 
-EngineClass holds a reusable pod-template fragment that engines reference via `spec.engineClassRef`. The merge runs inside `buildStatefulSet`, with the resolved class hash stamped on the StatefulSet as `firebolt.io/engine-class-hash` so `stsMatchesSpec` detects class drift (either an in-place class spec edit or a flip to a different class).
+EngineClass holds a reusable pod-template fragment that engines in the same namespace reference via `spec.engineClassRef`. EngineClass is namespaced — the resolver, the FireboltEngine admission check, the controller watch, and the deletion-blocking webhook all key by `{Namespace, Name}`, not `Name` alone. The merge runs inside `buildStatefulSet`, with the resolved class hash stamped on the StatefulSet as `firebolt.io/engine-class-hash` so `stsMatchesSpec` detects class drift (either an in-place class spec edit or a flip to a different class in the same namespace).
 
 - Centralised in the `effective*` helpers (`engine_reconcile.go`): `effectiveServiceAccountName`, `effectiveNodeSelector`, `effectiveTolerations`, `effectiveAffinity`, `effectivePodLabels`, `effectivePodAnnotations`, `effectiveEngineImage`, `engineClassSidecars`, `engineClassInitContainers`. Every helper has the same shape: takes `(spec, classInfo)` and returns the merged value. `buildStatefulSet` and `stsMatchesSpec` MUST consume the same helper for any given field — divergence produces phantom drift (rebuilds-without-changes, infinite rollouts).
 - The operator-owned set on `EngineClass.spec.template` lives in `api/v1alpha1/operatorauthority.go` (`ValidateOperatorOwnedPodTemplate`). The validating webhook returns those `field.Forbidden` errors verbatim; the EngineClass status controller re-runs the same check as a defense-in-depth `Ready=False/OperatorOwnedFieldSet` signal. Adding a new operator-owned field belongs in `ValidateOperatorOwnedPodTemplate` and propagates everywhere automatically.

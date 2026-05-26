@@ -47,9 +47,14 @@ func engineClassTestScheme(t *testing.T) *runtime.Scheme {
 // newClassFixture returns an EngineClass whose spec.template is valid
 // (passes ValidateOperatorOwnedPodTemplate). The status starts zeroed so
 // the reconciler's first pass produces a deterministic Status.Update.
+// EngineClass is namespaced; tests use namespace "firebolt" by default.
 func newClassFixture(name string) *computev1alpha1.EngineClass {
+	return newClassFixtureIn(name, "firebolt")
+}
+
+func newClassFixtureIn(name, namespace string) *computev1alpha1.EngineClass {
 	return &computev1alpha1.EngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Generation: 1},
 		Spec: computev1alpha1.EngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
@@ -79,13 +84,23 @@ func newEngineFixture(name, namespace, classRef string) *computev1alpha1.Firebol
 
 func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 	sch := engineClassTestScheme(t)
-	class := newClassFixture("compute-optimized")
+	class := newClassFixtureIn("compute-optimized", "firebolt")
 	objs := []client.Object{
 		class,
-		newEngineFixture("a", "ns-a", "compute-optimized"),
-		newEngineFixture("b", "ns-b", "compute-optimized"),
-		newEngineFixture("c", "ns-c", "other-class"), // different class
-		newEngineFixture("d", "ns-d", ""),            // no ref
+		// Same namespace, same ref → counted.
+		newEngineFixture("a", "firebolt", "compute-optimized"),
+		newEngineFixture("b", "firebolt", "compute-optimized"),
+		// Same namespace, different ref → not counted.
+		newEngineFixture("c", "firebolt", "other-class"),
+		// Same namespace, no ref → not counted.
+		newEngineFixture("d", "firebolt", ""),
+		// Different namespace, matching name → NOT counted. EngineClass is
+		// namespaced, so an engine in another namespace cannot bind to
+		// this class. Includes a same-named EngineClass in that other
+		// namespace so the cross-namespace separation is exercised end
+		// to end.
+		newClassFixtureIn("compute-optimized", "other-ns"),
+		newEngineFixture("e", "other-ns", "compute-optimized"),
 	}
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
@@ -94,17 +109,17 @@ func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 		Build()
 
 	r := &EngineClassReconciler{Client: cli, Scheme: sch}
-	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "compute-optimized"}})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "compute-optimized", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
 	updated := &computev1alpha1.EngineClass{}
-	if err := cli.Get(context.Background(), client.ObjectKey{Name: "compute-optimized"}, updated); err != nil {
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: "compute-optimized", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if updated.Status.BoundEngines != 2 {
-		t.Errorf("BoundEngines = %d, want 2 (engines a and b reference this class)", updated.Status.BoundEngines)
+		t.Errorf("BoundEngines = %d, want 2 (engines a and b in firebolt reference this class; e in other-ns binds to its own class)", updated.Status.BoundEngines)
 	}
 	if updated.Status.ObservedGeneration != 1 {
 		t.Errorf("ObservedGeneration = %d, want 1", updated.Status.ObservedGeneration)
@@ -135,12 +150,12 @@ func TestEngineClassReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
 		Build()
 
 	r := &EngineClassReconciler{Client: cli, Scheme: sch}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "bad-class"}}); err != nil {
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "bad-class", Namespace: "firebolt"}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
 	updated := &computev1alpha1.EngineClass{}
-	if err := cli.Get(context.Background(), client.ObjectKey{Name: "bad-class"}, updated); err != nil {
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: "bad-class", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.EngineClassConditionReady)
@@ -163,7 +178,7 @@ func TestEngineClassReconcile_NotFoundIsNoOp(t *testing.T) {
 		Build()
 
 	r := &EngineClassReconciler{Client: cli, Scheme: sch}
-	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "missing"}})
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "missing", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -194,7 +209,7 @@ func TestEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 		Build()
 
 	r := &EngineClassReconciler{Client: cli, Scheme: sch}
-	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "steady"}})
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "steady", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -204,19 +219,23 @@ func TestEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 }
 
 func TestEnqueueClassFromEngine_RoutesByRef(t *testing.T) {
+	type wantRef struct {
+		name      string
+		namespace string
+	}
 	cases := []struct {
 		name string
 		eng  *computev1alpha1.FireboltEngine
-		want []string
+		want []wantRef
 	}{
 		{
-			name: "engine with ref enqueues that class",
-			eng:  newEngineFixture("e", "ns", "compute-optimized"),
-			want: []string{"compute-optimized"},
+			name: "engine with ref enqueues that class in the engine's namespace",
+			eng:  newEngineFixture("e", "ns-a", "compute-optimized"),
+			want: []wantRef{{name: "compute-optimized", namespace: "ns-a"}},
 		},
 		{
 			name: "engine without ref enqueues nothing",
-			eng:  newEngineFixture("e", "ns", ""),
+			eng:  newEngineFixture("e", "ns-a", ""),
 			want: nil,
 		},
 	}
@@ -227,8 +246,11 @@ func TestEnqueueClassFromEngine_RoutesByRef(t *testing.T) {
 				t.Fatalf("len(got) = %d, want %d", len(got), len(tc.want))
 			}
 			for i := range got {
-				if got[i].Name != tc.want[i] {
-					t.Errorf("got[%d].Name = %q, want %q", i, got[i].Name, tc.want[i])
+				if got[i].Name != tc.want[i].name {
+					t.Errorf("got[%d].Name = %q, want %q", i, got[i].Name, tc.want[i].name)
+				}
+				if got[i].Namespace != tc.want[i].namespace {
+					t.Errorf("got[%d].Namespace = %q, want %q", i, got[i].Namespace, tc.want[i].namespace)
 				}
 			}
 		})

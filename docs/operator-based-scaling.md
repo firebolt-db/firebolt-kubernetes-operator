@@ -1,6 +1,6 @@
 # Operator-Based Zero-Downtime Scaling Design
 
-This document describes the architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator. The operator manages three CRDs: `FireboltInstance` (shared infrastructure), `FireboltEngine` (compute nodes), and the optional cluster-scoped `EngineClass` (pod-template fragment shared by multiple engines — see [engineclass-crd-reference.md](engineclass-crd-reference.md)).
+This document describes the architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator. The operator manages three CRDs: `FireboltInstance` (shared infrastructure), `FireboltEngine` (compute nodes), and the optional namespaced `EngineClass` (pod-template fragment shared by multiple engines in the same namespace — see [engineclass-crd-reference.md](engineclass-crd-reference.md)).
 
 ## Goals
 

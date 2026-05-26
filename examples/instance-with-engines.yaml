@@ -1,23 +1,44 @@
 # One Instance shared by two Engines: a typical pattern for separating
 # query workloads (analytics) from data ingestion (ingest). Both engines
-# inherit pod-level settings from a single cluster-scoped EngineClass so
-# the IAM binding and image are defined once and reused — see
+# inherit pod-level settings from a single namespaced EngineClass so the
+# IAM binding and image are defined once and reused — see
 # examples/engine-class.yaml for the full set of EngineClass fields.
+# EngineClass and the engines that reference it must live in the same
+# namespace (the template carries namespace-resolved identifiers).
+#
+# This example wires AWS IRSA: the IAM role ARN lives on the
+# ServiceAccount (not on the pod), and the EngineClass references the
+# SA by name. Each pod the engine spawns inherits the role via the
+# kubelet's projected service-account token. For kube2iam (legacy) the
+# role ARN goes on the pod template via spec.template.metadata.
+# annotations[iam.amazonaws.com/role] instead — see engine-class.yaml.
+# For EKS Pod Identity the SA carries no annotation and the SA → role
+# mapping is configured out-of-band via the AWS API; the SA name is
+# still what binds the pod to the identity.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firebolt-engine
+  namespace: firebolt
+  annotations:
+    # IRSA: the eks.amazonaws.com/role-arn annotation belongs HERE on
+    # the ServiceAccount, not on the pod template. EKS' webhook
+    # rewrites pods that mount this SA to project the AssumeRoleWithWebIdentity
+    # token at startup.
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/firebolt-engine
 ---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: EngineClass
 metadata:
   name: shared-compute
+  namespace: firebolt
 spec:
   template:
-    metadata:
-      # kube2iam consumers read this from the pod annotation. IRSA / Pod
-      # Identity consumers read the ARN off the ServiceAccount; only the
-      # service-account name is needed on the engine pod and is set in
-      # template.spec below.
-      annotations:
-        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/firebolt-engine
     spec:
+      # Bind every engine pod to the IRSA-enabled ServiceAccount above.
+      # The pod inherits the IAM role via the SA → projected token chain;
+      # no pod annotation is required for IRSA.
       serviceAccountName: firebolt-engine
       containers:
         # The operator-owned engine container is named "engine". Allowed
@@ -33,6 +54,7 @@ apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
   name: firebolt
+  namespace: firebolt
 spec:
   metadata: {}
   gateway: {}
@@ -41,6 +63,7 @@ apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
   name: analytics
+  namespace: firebolt
 spec:
   instanceRef: firebolt
   engineClassRef: shared-compute
@@ -57,6 +80,7 @@ apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
   name: ingest
+  namespace: firebolt
 spec:
   instanceRef: firebolt
   engineClassRef: shared-compute
