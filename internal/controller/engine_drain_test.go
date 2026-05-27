@@ -149,7 +149,9 @@ func TestShutdownWaitUnfinished(t *testing.T) {
 	}{
 		{"default 60s", 60, "55s"},
 		{"custom 120s", 120, "115s"},
-		{"small 5s clamps to tgps-1", 5, "4s"},
+		{"5s floors to 1s", 5, "1s"},
+		{"boundary 6s floors to 1s", 6, "1s"},
+		{"7s leaves 2s", 7, "2s"},
 		{"very small 1s clamps to 1", 1, "1s"},
 	}
 	for _, tt := range tests {
