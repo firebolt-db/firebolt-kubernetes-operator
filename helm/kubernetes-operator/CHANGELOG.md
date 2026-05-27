@@ -1,3 +1,14 @@
+# 1.0.22
+
+appVersion: v3.1.1
+
+## [3.1.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v3.1.0...v3.1.1) (2026-05-27)
+
+### Bug Fixes
+
+* **controller:** make engine drain budget monotonic in grace period (FB-1327) ([#77](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/77)) ([6c42fc5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c42fc577a5713a4a2dedf86dcfd58a0cfbbcb3e))
+
+
 # 1.0.21
 
 appVersion: v3.1.0
