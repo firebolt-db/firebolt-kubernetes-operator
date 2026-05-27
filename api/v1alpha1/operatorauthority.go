@@ -50,6 +50,19 @@ const ReservedFireboltKeyPrefix = "firebolt.io/"
 // on the pod template.
 const EngineContainerName = "engine"
 
+// GatewayContainerName is the fixed name of the Envoy container inside
+// the FireboltInstance gateway Deployment's pod template. The
+// FireboltInstance validating webhook uses it to locate the primary
+// container on a user-supplied gateway template; the controller's
+// build function emits a single container with the same name.
+const GatewayContainerName = "envoy"
+
+// MetadataContainerName is the fixed name of the dedicated-pensieve
+// container inside the FireboltInstance metadata Deployment's pod
+// template. Used by the validating webhook and the builder, same
+// pattern as GatewayContainerName.
+const MetadataContainerName = "metadata"
+
 // Operator-injected environment variables on the engine container. These
 // keys carry pod-index plumbing (POD_INDEX) and AWS SDK + runtime mode
 // signals that the operator must control end to end: a user override
@@ -69,6 +82,78 @@ var operatorOwnedEngineEnvKeys = []string{
 	EnginePodIndexEnvKey,
 	EngineAllowAwsIrsaEnvKey,
 	EngineCoreModeEnvKey,
+}
+
+// MetadataPostgresUsernameEnvKey and MetadataPostgresPasswordEnvKey are
+// the env vars the operator injects on the metadata container to point
+// dedicated-pensieve at its Postgres credentials Secret. User-supplied
+// templates may not redefine these names; the validator rejects them.
+const (
+	MetadataPostgresUsernameEnvKey = "POSTGRES_USERNAME_FILE"
+	MetadataPostgresPasswordEnvKey = "POSTGRES_PASSWORD_FILE" //nolint:gosec // env-var name, not a credential
+)
+
+// operatorOwnedMetadataEnvKeys is the set of env names the operator
+// injects on the metadata container.
+var operatorOwnedMetadataEnvKeys = []string{
+	MetadataPostgresUsernameEnvKey,
+	MetadataPostgresPasswordEnvKey,
+}
+
+// Operator-rendered volume names on each component's primary
+// container. User templates may not declare volumeMounts with these
+// names; the validator rejects them so a renamed mount can't shadow
+// the operator's config / credentials / data volumes.
+const (
+	// EngineConfigVolumeName is the projected-volume name carrying the
+	// engine config.yaml (operator-rendered ConfigMap). It is mounted
+	// at ConfigMountPath on the engine container.
+	EngineConfigVolumeName = "nodes-config"
+	// EngineDataVolumeName is the data volume backing the engine's
+	// per-pod state — either a PVC synthesized from the StatefulSet's
+	// VolumeClaimTemplate, an emptyDir, or a hostPath, depending on
+	// FireboltEngineSpec.Storage. Mounted at DataMountPath.
+	EngineDataVolumeName = "data"
+	// GatewayConfigVolumeName carries the operator-rendered Envoy
+	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy
+	// container.
+	GatewayConfigVolumeName = "config-volume"
+	// GatewayTmpVolumeName is the writable /tmp emptyDir the Envoy
+	// container needs alongside ReadOnlyRootFilesystem=true.
+	GatewayTmpVolumeName = "tmp"
+	// MetadataConfigVolumeName carries the operator-rendered Pensieve
+	// XML config. Mounted at /configs on the metadata container.
+	MetadataConfigVolumeName = "config"
+	// MetadataPostgresCredsVolumeName is the projected Secret with the
+	// dedicated-pensieve Postgres username/password. Mounted at
+	// /secrets/postgres on the metadata container.
+	MetadataPostgresCredsVolumeName = "postgres-creds" //nolint:gosec // volume name, not a credential
+	// MetadataTmpVolumeName is the writable /tmp emptyDir the metadata
+	// container needs alongside ReadOnlyRootFilesystem=true.
+	MetadataTmpVolumeName = "tmp"
+)
+
+// operatorOwnedEngineVolumeNames are the volume names the operator
+// renders on the engine StatefulSet's pod template. User templates may
+// not declare volumes or volumeMounts with these names.
+var operatorOwnedEngineVolumeNames = []string{
+	EngineConfigVolumeName,
+	EngineDataVolumeName,
+}
+
+// operatorOwnedGatewayVolumeNames are the volume names the operator
+// renders on the gateway Deployment's pod template.
+var operatorOwnedGatewayVolumeNames = []string{
+	GatewayConfigVolumeName,
+	GatewayTmpVolumeName,
+}
+
+// operatorOwnedMetadataVolumeNames are the volume names the operator
+// renders on the metadata Deployment's pod template.
+var operatorOwnedMetadataVolumeNames = []string{
+	MetadataConfigVolumeName,
+	MetadataPostgresCredsVolumeName,
+	MetadataTmpVolumeName,
 }
 
 // EngineConfigOwnedSection enumerates one operator-owned section of the
@@ -129,35 +214,178 @@ func ValidateReservedKeyPrefix(path *field.Path, m map[string]string) field.Erro
 	return errs
 }
 
-// ValidateOperatorOwnedPodTemplate rejects any user-supplied input on a
-// PodTemplateSpec that lands at a path the operator owns end to end. It is
-// the central enforcement function for EngineClass.spec.template; the
-// EngineClass validating webhook returns these errors verbatim. The
-// rejection set covers:
+// PodTemplateRules declares the per-component validation contract for a
+// FireboltInstance subcomponent's pod template (engine, gateway,
+// metadata). One ruleset per component, consumed by ValidatePodTemplate.
+// The walker rejects any user-supplied input on fields the operator
+// owns end-to-end while passing through fields the user is allowed to
+// set; "allowed" is an explicit allowlist on the primary container so a
+// future container field added by Kubernetes lands as rejected by
+// default (fail-safe direction).
+//
+// The pod-level rejected fields (TerminationGracePeriodSeconds,
+// Subdomain, Hostname, RestartPolicy, ActiveDeadlineSeconds) are
+// universally operator-owned across engine, gateway, and metadata —
+// every component stamps them from operator constants or relies on a
+// StatefulSet / Deployment contract — so they are rejected
+// unconditionally and don't appear on PodTemplateRules.
+type PodTemplateRules struct {
+	// Component is the short component name used in error messages
+	// ("engine", "gateway", "metadata").
+	Component string
+
+	// PrimaryContainerName is the name of the operator-rendered
+	// container for this component. A second container with the same
+	// name is rejected as a duplicate.
+	PrimaryContainerName string
+
+	// AllowedPrimaryFields enumerates the container-level fields the
+	// user may set on the primary container. Any field that the user
+	// sets and is not allowed here is rejected.
+	AllowedPrimaryFields PrimaryContainerFields
+
+	// ReservedPrimaryEnvKeys are env var names the operator injects on
+	// the primary container; user entries with these names are
+	// rejected. Only consulted when AllowedPrimaryFields.Env is true.
+	ReservedPrimaryEnvKeys []string
+
+	// ReservedPrimaryVolumeMountNames are mount names the operator
+	// renders on the primary container; user entries with these names
+	// in the primary container's volumeMounts are rejected. Only
+	// consulted when AllowedPrimaryFields.VolumeMounts is true.
+	ReservedPrimaryVolumeMountNames []string
+
+	// AllowSidecars permits additional containers (any container whose
+	// name is not PrimaryContainerName). When false, any sidecar is
+	// rejected as a whole.
+	AllowSidecars bool
+
+	// AllowInitContainers permits user-supplied initContainers. When
+	// false, any init container is rejected as a whole. When true,
+	// an init container named PrimaryContainerName is still rejected
+	// (it would collide with the operator-rendered primary container).
+	AllowInitContainers bool
+}
+
+// PrimaryContainerFields declares which container-level fields a user
+// is allowed to set on the operator-rendered primary container. Every
+// field defaults to false (rejected) so silently adding a Container
+// field to the Kubernetes API surface keeps the operator's owned-by-
+// default posture without a code change here.
+type PrimaryContainerFields struct {
+	Image           bool // image and imagePullPolicy
+	Resources       bool
+	Env             bool // entries with reserved keys still rejected
+	EnvFrom         bool
+	VolumeMounts    bool // entries with reserved names still rejected
+	SecurityContext bool
+	Lifecycle       bool
+}
+
+// EngineClassPodTemplateRules is the ruleset for EngineClass.spec.template.
+// The engine container is the user-extension point most heavily used —
+// users routinely set image, env, volumeMounts, securityContext — so the
+// allowlist is wide. Sidecars and additional init containers pass
+// through; the EngineClass merge layer in engine_reconcile.go appends
+// them onto the operator-rendered pod spec.
+var EngineClassPodTemplateRules = PodTemplateRules{
+	Component:            "engine",
+	PrimaryContainerName: EngineContainerName,
+	AllowedPrimaryFields: PrimaryContainerFields{
+		Image:           true,
+		Resources:       true,
+		Env:             true,
+		EnvFrom:         true,
+		VolumeMounts:    true,
+		SecurityContext: true,
+		Lifecycle:       true,
+	},
+	ReservedPrimaryEnvKeys:          operatorOwnedEngineEnvKeys,
+	ReservedPrimaryVolumeMountNames: operatorOwnedEngineVolumeNames,
+	AllowSidecars:                   true,
+	AllowInitContainers:             true,
+}
+
+// GatewayPodTemplateRules is the ruleset for FireboltInstance.spec.gateway.template.
+// Envoy is operator-rendered end-to-end (config, command via args,
+// ports, probes, preStop drain hook, securityContext, the config and
+// tmp volume mounts), so the user-allowed surface on the primary
+// container is intentionally narrow: only image (so users can roll
+// Envoy versions) and resources (so users can size the pod). The user
+// may add sidecars (e.g. a stats exporter, a network filter) and
+// init containers (e.g. a config validator); the gateway builder
+// appends them after the operator-rendered Envoy container.
+var GatewayPodTemplateRules = PodTemplateRules{
+	Component:            "gateway",
+	PrimaryContainerName: GatewayContainerName,
+	AllowedPrimaryFields: PrimaryContainerFields{
+		Image:     true,
+		Resources: true,
+	},
+	ReservedPrimaryVolumeMountNames: operatorOwnedGatewayVolumeNames,
+	AllowSidecars:                   true,
+	AllowInitContainers:             true,
+}
+
+// MetadataPodTemplateRules is the ruleset for FireboltInstance.spec.metadata.template.
+// The Pensieve container is operator-rendered (command, ports, probes,
+// the POSTGRES_USERNAME_FILE/POSTGRES_PASSWORD_FILE env vars, the
+// config / postgres-creds / tmp volume mounts, securityContext), so
+// only image and resources are user-settable on the primary container.
+// Sidecars and additional init containers pass through, same shape as
+// the gateway.
+var MetadataPodTemplateRules = PodTemplateRules{
+	Component:            "metadata",
+	PrimaryContainerName: MetadataContainerName,
+	AllowedPrimaryFields: PrimaryContainerFields{
+		Image:     true,
+		Resources: true,
+	},
+	ReservedPrimaryEnvKeys:          operatorOwnedMetadataEnvKeys,
+	ReservedPrimaryVolumeMountNames: operatorOwnedMetadataVolumeNames,
+	AllowSidecars:                   true,
+	AllowInitContainers:             true,
+}
+
+// ValidateOperatorOwnedPodTemplate is the EngineClass entry point for
+// pod-template validation. Kept as a stable named function because the
+// EngineClass webhook references it directly; the implementation
+// delegates to the generic ValidatePodTemplate walker driven by
+// EngineClassPodTemplateRules.
+func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *field.Path) field.ErrorList {
+	return ValidatePodTemplate(template, base, EngineClassPodTemplateRules)
+}
+
+// ValidatePodTemplate walks a user-supplied PodTemplateSpec and rejects
+// any input that conflicts with the supplied component rules. It is the
+// single enforcement entry point for every component pod template the
+// operator templates over (engine, gateway, metadata).
+//
+// Rejection covers four layers:
 //
 //   - pod-template metadata.labels / metadata.annotations under the
-//     ReservedFireboltKeyPrefix (operator-managed keys like config-hash)
-//   - the engine container ("engine")'s identity, command, ports, probes,
-//     and the env keys the operator injects (POD_INDEX, FIREBOLT_*)
-//   - any second container or initContainer named "engine" (collides with
-//     the operator-rendered engine container in the merge)
-//   - pod-level fields the operator stamps from FireboltEngineSpec or
-//     hard-codes for the headless-DNS / StatefulSet contract:
-//     terminationGracePeriodSeconds, subdomain, hostname, restartPolicy,
-//     activeDeadlineSeconds
+//     ReservedFireboltKeyPrefix.
+//   - pod-level fields the operator owns universally:
+//     terminationGracePeriodSeconds, subdomain, hostname,
+//     restartPolicy, activeDeadlineSeconds.
+//   - the primary container (matched by rules.PrimaryContainerName):
+//     allowlist-driven — only fields enabled in rules.AllowedPrimaryFields
+//     pass; everything else is rejected. Within env and volumeMounts,
+//     entries with reserved names are rejected even when those fields
+//     are allowed in general.
+//   - init containers and additional containers (anything not
+//     PrimaryContainerName): rejected entirely when their respective
+//     AllowSidecars / AllowInitContainers flag is false. When permitted,
+//     they pass through with the single exception that no init
+//     container may take the primary container's name.
 //
-// User-allowed engine-container fields: image, imagePullPolicy, resources,
-// non-reserved env / envFrom, non-reserved volumeMounts, securityContext,
-// lifecycle. Sidecar containers (any container whose name is not
-// EngineContainerName) and additional initContainers are fully user-owned —
-// their image, command, ports, env, mounts, and so on pass through
-// untouched.
-//
-// base is the field.Path that the caller used to reach this PodTemplateSpec
-// in its own object (e.g. field.NewPath("spec","template") for EngineClass).
-// Returned errors carry the full nested path so kubectl apply surfaces
-// every violation at the exact offending coordinate.
-func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *field.Path) field.ErrorList {
+// base is the field.Path the caller used to reach this PodTemplateSpec
+// in its own object (e.g. field.NewPath("spec","template") for
+// EngineClass; field.NewPath("spec","gateway","template") for the
+// FireboltInstance gateway). Returned errors carry the full nested
+// path so kubectl apply surfaces every violation at the offending
+// coordinate.
+func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	if template == nil {
 		return nil
 	}
@@ -168,127 +396,206 @@ func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *fi
 	errs = append(errs, ValidateReservedKeyPrefix(metaPath.Child("annotations"), template.Annotations)...)
 
 	specPath := base.Child("spec")
-	errs = append(errs, validateOwnedPodFields(&template.Spec, specPath)...)
-	errs = append(errs, validateInitContainersOwnership(template.Spec.InitContainers, specPath.Child("initContainers"))...)
-	errs = append(errs, validateContainersOwnership(template.Spec.Containers, specPath.Child("containers"))...)
+	errs = append(errs, validateUniversalPodFields(&template.Spec, specPath)...)
+	errs = append(errs, validateContainersAgainstRules(template.Spec.Containers, specPath.Child("containers"), rules)...)
+	errs = append(errs, validateInitContainersAgainstRules(template.Spec.InitContainers, specPath.Child("initContainers"), rules)...)
 
 	return errs
 }
 
-// validateOwnedPodFields enforces the pod-level (non-container) ownership
-// rules. Fields rejected here are either set by the operator from
-// FireboltEngineSpec (TerminationGracePeriodSeconds) or hard-coded to keep
-// the StatefulSet / headless-DNS contract intact (Subdomain, Hostname,
-// RestartPolicy, ActiveDeadlineSeconds).
-func validateOwnedPodFields(spec *corev1.PodSpec, base *field.Path) field.ErrorList {
+// validateUniversalPodFields enforces the pod-level (non-container)
+// ownership rules that apply to every component. Each rejected field
+// is stamped by the operator (terminationGracePeriodSeconds from
+// component defaults or FireboltEngineSpec) or fixed by a workload
+// contract (subdomain/hostname under headless DNS, restartPolicy under
+// Deployment / StatefulSet semantics, activeDeadlineSeconds for
+// long-lived pods).
+func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path) field.ErrorList {
 	var errs field.ErrorList
 	if spec.TerminationGracePeriodSeconds != nil {
 		errs = append(errs, field.Forbidden(base.Child("terminationGracePeriodSeconds"),
-			"terminationGracePeriodSeconds is stamped from spec.terminationGracePeriodSeconds on the FireboltEngine"))
+			"terminationGracePeriodSeconds is operator-owned"))
 	}
 	if spec.Subdomain != "" {
 		errs = append(errs, field.Forbidden(base.Child("subdomain"),
-			"subdomain is owned by the operator for headless-DNS routing"))
+			"subdomain is owned by the operator"))
 	}
 	if spec.Hostname != "" {
 		errs = append(errs, field.Forbidden(base.Child("hostname"),
-			"hostname is owned by the operator (set per pod ordinal by the StatefulSet)"))
+			"hostname is owned by the operator"))
 	}
 	if spec.RestartPolicy != "" {
 		errs = append(errs, field.Forbidden(base.Child("restartPolicy"),
-			"restartPolicy is fixed by the StatefulSet controller"))
+			"restartPolicy is fixed by the workload controller"))
 	}
 	if spec.ActiveDeadlineSeconds != nil {
 		errs = append(errs, field.Forbidden(base.Child("activeDeadlineSeconds"),
-			"activeDeadlineSeconds is incompatible with long-lived engine pods"))
+			"activeDeadlineSeconds is incompatible with long-lived component pods"))
 	}
 	return errs
 }
 
-// validateContainersOwnership walks template.spec.containers. The container
-// named EngineContainerName is the operator-rendered engine container; user
-// input on its identity, command, ports, probes, and reserved env keys is
-// rejected. Sidecars (any other name) are fully user-owned. A second
-// container whose name is also EngineContainerName is rejected: the merge
-// would otherwise produce two containers with the same name and the pod
-// would never be created.
-func validateContainersOwnership(containers []corev1.Container, base *field.Path) field.ErrorList {
+// validateContainersAgainstRules walks template.spec.containers. The
+// container whose name matches rules.PrimaryContainerName is validated
+// against the allowlist; a second container with the same name is
+// rejected as a duplicate (the operator's container-merge would emit
+// two containers with the same name and the pod would never be
+// created). Containers with any other name are sidecars: rejected as a
+// group when rules.AllowSidecars is false, passed through unchanged
+// otherwise.
+func validateContainersAgainstRules(containers []corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
-	engineSeen := false
+	primarySeen := false
 	for i := range containers {
 		c := &containers[i]
 		path := base.Index(i)
-		if c.Name != EngineContainerName {
-			continue
+		switch {
+		case c.Name == rules.PrimaryContainerName:
+			if primarySeen {
+				errs = append(errs, field.Duplicate(path.Child("name"), rules.PrimaryContainerName))
+				continue
+			}
+			primarySeen = true
+			errs = append(errs, validatePrimaryContainerFields(c, path, rules)...)
+		case !rules.AllowSidecars:
+			errs = append(errs, field.Forbidden(path,
+				fmt.Sprintf("additional containers are not allowed on the %s pod template; only the %q container may be defined here",
+					rules.Component, rules.PrimaryContainerName)))
+		default:
+			// Sidecar with an allowed-sidecars ruleset: pass through.
 		}
-		if engineSeen {
-			errs = append(errs, field.Duplicate(path.Child("name"), EngineContainerName))
-			continue
-		}
-		engineSeen = true
-		errs = append(errs, validateEngineContainerOwnership(c, path)...)
 	}
 	return errs
 }
 
-// validateInitContainersOwnership rejects any initContainer whose name is
-// EngineContainerName (collides with the engine container) and otherwise
-// leaves user-supplied init containers untouched.
-func validateInitContainersOwnership(initContainers []corev1.Container, base *field.Path) field.ErrorList {
+// validateInitContainersAgainstRules rejects init containers as a group
+// when rules.AllowInitContainers is false. When permitted, an init
+// container whose name collides with the primary container is still
+// rejected: the operator-rendered primary container would then live
+// alongside a same-named init container, and Kubernetes would never
+// admit such a pod.
+func validateInitContainersAgainstRules(initContainers []corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	for i := range initContainers {
-		c := &initContainers[i]
-		if c.Name == EngineContainerName {
-			errs = append(errs, field.Forbidden(base.Index(i).Child("name"),
-				fmt.Sprintf("init container name %q collides with the engine container; pick a different name", EngineContainerName)))
+		path := base.Index(i)
+		if !rules.AllowInitContainers {
+			errs = append(errs, field.Forbidden(path,
+				fmt.Sprintf("init containers are not allowed on the %s pod template", rules.Component)))
+			continue
+		}
+		if initContainers[i].Name == rules.PrimaryContainerName {
+			errs = append(errs, field.Forbidden(path.Child("name"),
+				fmt.Sprintf("init container name %q collides with the %s container; pick a different name",
+					rules.PrimaryContainerName, rules.Component)))
 		}
 	}
 	return errs
 }
 
-// validateEngineContainerOwnership returns one *field.Error per user-set
-// field that the operator owns on the engine container.
-func validateEngineContainerOwnership(c *corev1.Container, base *field.Path) field.ErrorList {
+// validatePrimaryContainerFields walks every user-set container field on
+// the primary container and rejects any that the allowlist does not
+// permit. Fields the operator always controls — Name, Command, Args,
+// Ports, all three Probes — are checked unconditionally because they
+// have no allowlist toggle. Env and VolumeMounts, even when allowed,
+// have their reserved-key / reserved-name filter applied per entry.
+func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
+	allowed := rules.AllowedPrimaryFields
+
+	// Always operator-owned, regardless of component.
 	if len(c.Command) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("command"),
-			"engine container command is hardcoded by the operator (EngineStartupScript)"))
+			fmt.Sprintf("%s container command is operator-owned", rules.Component)))
 	}
 	if len(c.Args) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("args"),
-			"engine container args are hardcoded by the operator"))
+			fmt.Sprintf("%s container args are operator-owned", rules.Component)))
 	}
 	if len(c.Ports) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("ports"),
-			"engine container ports are hardcoded by the operator (drain check, headless service)"))
+			fmt.Sprintf("%s container ports are operator-owned", rules.Component)))
 	}
 	if c.ReadinessProbe != nil {
 		errs = append(errs, field.Forbidden(base.Child("readinessProbe"),
-			"engine container readinessProbe is owned by the operator (/health/ready contract)"))
+			fmt.Sprintf("%s container readinessProbe is operator-owned", rules.Component)))
 	}
 	if c.LivenessProbe != nil {
 		errs = append(errs, field.Forbidden(base.Child("livenessProbe"),
-			"engine container livenessProbe is owned by the operator"))
+			fmt.Sprintf("%s container livenessProbe is operator-owned", rules.Component)))
 	}
 	if c.StartupProbe != nil {
 		errs = append(errs, field.Forbidden(base.Child("startupProbe"),
-			"engine container startupProbe is owned by the operator"))
+			fmt.Sprintf("%s container startupProbe is operator-owned", rules.Component)))
 	}
-	for ei := range c.Env {
-		name := c.Env[ei].Name
-		if !isReservedEngineEnvKey(name) {
-			continue
+
+	// Allowlist-toggled fields.
+	if !allowed.Image && (c.Image != "" || c.ImagePullPolicy != "") {
+		errs = append(errs, field.Forbidden(base.Child("image"),
+			fmt.Sprintf("%s container image is operator-owned", rules.Component)))
+	}
+	if !allowed.Resources && HasContainerResources(c.Resources) {
+		errs = append(errs, field.Forbidden(base.Child("resources"),
+			fmt.Sprintf("%s container resources are operator-owned", rules.Component)))
+	}
+	if !allowed.SecurityContext && c.SecurityContext != nil {
+		errs = append(errs, field.Forbidden(base.Child("securityContext"),
+			fmt.Sprintf("%s container securityContext is operator-owned", rules.Component)))
+	}
+	if !allowed.Lifecycle && c.Lifecycle != nil {
+		errs = append(errs, field.Forbidden(base.Child("lifecycle"),
+			fmt.Sprintf("%s container lifecycle is operator-owned", rules.Component)))
+	}
+
+	if allowed.Env {
+		for ei := range c.Env {
+			if !isReservedKey(c.Env[ei].Name, rules.ReservedPrimaryEnvKeys) {
+				continue
+			}
+			errs = append(errs, field.Forbidden(base.Child("env").Index(ei).Child("name"),
+				fmt.Sprintf("env key %q is injected by the operator; pick a different name", c.Env[ei].Name)))
 		}
-		errs = append(errs, field.Forbidden(base.Child("env").Index(ei).Child("name"),
-			fmt.Sprintf("env key %q is injected by the operator; pick a different name", name)))
+	} else if len(c.Env) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("env"),
+			fmt.Sprintf("%s container env is operator-owned", rules.Component)))
 	}
+
+	if !allowed.EnvFrom && len(c.EnvFrom) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("envFrom"),
+			fmt.Sprintf("%s container envFrom is operator-owned", rules.Component)))
+	}
+
+	if allowed.VolumeMounts {
+		for mi := range c.VolumeMounts {
+			if !isReservedKey(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
+				continue
+			}
+			errs = append(errs, field.Forbidden(base.Child("volumeMounts").Index(mi).Child("name"),
+				fmt.Sprintf("volumeMount name %q is operator-owned; pick a different name", c.VolumeMounts[mi].Name)))
+		}
+	} else if len(c.VolumeMounts) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("volumeMounts"),
+			fmt.Sprintf("%s container volumeMounts are operator-owned", rules.Component)))
+	}
+
 	return errs
 }
 
-// isReservedEngineEnvKey reports whether name is one of the env keys the
-// operator injects on the engine container.
-func isReservedEngineEnvKey(name string) bool {
-	for _, k := range operatorOwnedEngineEnvKeys {
+// HasContainerResources reports whether a ResourceRequirements struct
+// carries any user input (requests, limits, or claims). Exported so
+// controller code that consumes the API package can reuse it instead
+// of restating the predicate (callers: builders that decide whether
+// to copy a user-supplied Resources field through to the rendered
+// container, drift comparators that need to distinguish "user said
+// nothing" from "user said empty").
+func HasContainerResources(r corev1.ResourceRequirements) bool {
+	return len(r.Requests) > 0 || len(r.Limits) > 0 || len(r.Claims) > 0
+}
+
+// isReservedKey reports whether name appears in the reserved slice.
+// O(n) suits the small reserved sets the operator carries (at most a
+// few entries per component).
+func isReservedKey(name string, reserved []string) bool {
+	for _, k := range reserved {
 		if name == k {
 			return true
 		}

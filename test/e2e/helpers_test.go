@@ -1405,24 +1405,28 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 		Spec: computev1alpha1.FireboltInstanceSpec{
 			ID: ulid.MustNew(ulid.Now(), rand.Reader).String(),
 			Metadata: computev1alpha1.MetadataSpec{
-				ComponentSpec: computev1alpha1.ComponentSpec{
-					Replicas:  &replicas,
-					Resources: smallResources,
-					Image: &computev1alpha1.ImageSpec{
-						Repository: metadataImage,
-						Tag:        metadataTag,
-						PullPolicy: corev1.PullIfNotPresent,
+				Replicas: &replicas,
+				Template: &corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:            computev1alpha1.MetadataContainerName,
+							Image:           metadataImage + ":" + metadataTag,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Resources:       *smallResources,
+						}},
 					},
 				},
 			},
 			Gateway: computev1alpha1.GatewaySpec{
-				ComponentSpec: computev1alpha1.ComponentSpec{
-					Replicas:  &replicas,
-					Resources: smallResources,
-					Image: &computev1alpha1.ImageSpec{
-						Repository: envoyImage,
-						Tag:        envoyTag,
-						PullPolicy: corev1.PullIfNotPresent,
+				Replicas: &replicas,
+				Template: &corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name:            computev1alpha1.GatewayContainerName,
+							Image:           envoyImage + ":" + envoyTag,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Resources:       *smallResources,
+						}},
 					},
 				},
 			},
@@ -1582,14 +1586,38 @@ func DeleteInstance(ctx context.Context, name string) error {
 
 // --- Instance mutation helpers ---
 
-// UpdateInstanceMetadataImage updates the metadata image tag on the FireboltInstance (with retry on conflict).
+// UpdateInstanceMetadataImage updates the metadata image tag on the
+// FireboltInstance (with retry on conflict) by writing
+// spec.metadata.template.spec.containers[name=="metadata"].image with
+// the operator's default repository at the requested tag.
 func UpdateInstanceMetadataImage(ctx context.Context, name, tag string) error {
 	return retryOnInstanceConflict(ctx, name, func(inst *computev1alpha1.FireboltInstance) {
-		if inst.Spec.Metadata.Image == nil {
-			inst.Spec.Metadata.Image = &computev1alpha1.ImageSpec{}
-		}
-		inst.Spec.Metadata.Image.Tag = tag
+		setMetadataContainerImage(inst, tag)
 	})
+}
+
+// setMetadataContainerImage mutates inst.Spec.Metadata.Template so the
+// "metadata" container carries the operator's default repository at
+// the supplied tag. Creates the Template / containers / container
+// entry as needed.
+func setMetadataContainerImage(inst *computev1alpha1.FireboltInstance, tag string) {
+	if inst.Spec.Metadata.Template == nil {
+		inst.Spec.Metadata.Template = &corev1.PodTemplateSpec{}
+	}
+	containers := inst.Spec.Metadata.Template.Spec.Containers
+	idx := -1
+	for i := range containers {
+		if containers[i].Name == computev1alpha1.MetadataContainerName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		containers = append(containers, corev1.Container{Name: computev1alpha1.MetadataContainerName})
+		idx = len(containers) - 1
+	}
+	containers[idx].Image = metadataImage + ":" + tag
+	inst.Spec.Metadata.Template.Spec.Containers = containers
 }
 
 // UpdateInstanceGatewayReplicas updates the gateway replica count on the FireboltInstance (with retry on conflict).

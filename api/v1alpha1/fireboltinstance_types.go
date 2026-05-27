@@ -119,13 +119,51 @@ type PostgresSpec struct {
 }
 
 // MetadataSpec configures the metadata service.
+//
+// Pod scheduling, image, resources, sidecars, init containers, volumes,
+// imagePullSecrets, podSecurityContext, and labels / annotations are
+// expressed via spec.metadata.template (a Kubernetes PodTemplateSpec).
+// The FireboltInstance validating webhook rejects any input on that
+// template that lands at a path the operator owns end-to-end: the
+// dedicated-pensieve container's command / ports / probes / reserved
+// env keys (POSTGRES_USERNAME_FILE / POSTGRES_PASSWORD_FILE) /
+// reserved volume mounts (config / postgres-creds / tmp), and the
+// pod-level terminationGracePeriodSeconds / subdomain / hostname /
+// restartPolicy / activeDeadlineSeconds. See the
+// MetadataPodTemplateRules ruleset in operatorauthority.go for the
+// authoritative allowlist.
+//
 // Only replicas=1 is currently supported; multi-replica metadata is not yet
 // available. The CEL rule below enforces this at admission time, in addition
 // to the Go-level check in the validating webhook (kept for defense-in-depth
 // and to surface a clearer error message when the webhook is in the request path).
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || self.replicas == 1",message="metadata replicas must be 1"
 type MetadataSpec struct {
-	ComponentSpec `json:",inline"`
+	// Replicas is the number of metadata pods. Pinned to 1 today by
+	// the CEL rule above and the validating webhook; the surface is
+	// kept on the spec for the day a multi-writer metadata story
+	// lands.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// MetricsPort is the container port exposing Prometheus metrics
+	// from dedicated-pensieve. Defaults to 9090 if zero. The operator
+	// stamps a corresponding "metrics" port entry on the container.
+	// +kubebuilder:default=9090
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	MetricsPort int32 `json:"metricsPort,omitempty"`
+
+	// Template is the pod template the operator merges with its
+	// own-rendered metadata container, config volume, credentials
+	// mount, probes, and pod-level securityContext to produce the
+	// metadata Deployment's pod spec. Most users set only
+	// template.spec.containers[name=="metadata"].image and
+	// .resources, plus scheduling fields (nodeSelector / tolerations /
+	// affinity / topologySpreadConstraints / priorityClassName).
+	// +optional
+	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
 	// Postgres configures the external PostgreSQL connection.
 	// If nil, the operator deploys an internal PostgreSQL instance.
@@ -140,6 +178,17 @@ type MetadataSpec struct {
 
 // GatewaySpec configures the gateway component.
 //
+// Pod scheduling, image, resources, sidecars, init containers, volumes,
+// imagePullSecrets, podSecurityContext, and labels / annotations are
+// expressed via spec.gateway.template (a Kubernetes PodTemplateSpec).
+// The FireboltInstance validating webhook rejects any input on that
+// template that lands at a path the operator owns end-to-end: the
+// Envoy container's args / ports / probes / lifecycle preStop hook /
+// reserved volume mounts (config-volume / tmp), and the pod-level
+// terminationGracePeriodSeconds / subdomain / hostname / restartPolicy
+// / activeDeadlineSeconds. See the GatewayPodTemplateRules ruleset in
+// operatorauthority.go for the authoritative allowlist.
+//
 // The Envoy `per_connection_buffer_limit_bytes` is intentionally NOT
 // exposed here. The operator hard-codes it (see GatewayPerConnectionBufferLimitBytes
 // in instance_gateway.go) because it sits at the center of multiple
@@ -150,7 +199,28 @@ type MetadataSpec struct {
 // gateway pod. If this trade-off needs to be revisited, raise it in
 // the architecture doc rather than re-adding a field.
 type GatewaySpec struct {
-	ComponentSpec `json:",inline"`
+	// Replicas is the number of gateway pods. Defaults to 2 when nil.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// MetricsPort is the container port exposing Envoy's Prometheus
+	// metrics endpoint. Defaults to 9090 if zero. The operator
+	// stamps a corresponding "metrics" port entry on the container.
+	// +kubebuilder:default=9090
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	MetricsPort int32 `json:"metricsPort,omitempty"`
+
+	// Template is the pod template the operator merges with its
+	// own-rendered Envoy container, config volume mount, hardcoded
+	// probes, and preStop drain hook to produce the gateway
+	// Deployment's pod spec. Most users set only
+	// template.spec.containers[name=="envoy"].image and .resources,
+	// plus scheduling fields (nodeSelector / tolerations / affinity /
+	// topologySpreadConstraints / priorityClassName).
+	// +optional
+	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 }
 
 // AuthMode defines the authentication mode for the Firebolt Instance.

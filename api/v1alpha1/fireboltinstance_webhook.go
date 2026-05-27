@@ -105,10 +105,23 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 		errs = append(errs, err)
 	}
 
-	errs = append(errs, validateReservedKeys(
-		field.NewPath("spec", "metadata"), inst.Spec.Metadata.ComponentSpec)...)
-	errs = append(errs, validateReservedKeys(
-		field.NewPath("spec", "gateway"), inst.Spec.Gateway.ComponentSpec)...)
+	// Per-component pod-template validation. Each ruleset rejects user
+	// input on fields the operator owns end-to-end (commands, ports,
+	// probes, reserved env keys, reserved volume mount names) and on
+	// universally operator-owned pod-level fields (subdomain, hostname,
+	// terminationGracePeriodSeconds, restartPolicy, activeDeadlineSeconds).
+	// See MetadataPodTemplateRules / GatewayPodTemplateRules in
+	// operatorauthority.go for the authoritative allowlists.
+	errs = append(errs, ValidatePodTemplate(
+		inst.Spec.Metadata.Template,
+		field.NewPath("spec", "metadata", "template"),
+		MetadataPodTemplateRules,
+	)...)
+	errs = append(errs, ValidatePodTemplate(
+		inst.Spec.Gateway.Template,
+		field.NewPath("spec", "gateway", "template"),
+		GatewayPodTemplateRules,
+	)...)
 
 	if err := validateExternalPostgres(inst); err != nil {
 		errs = append(errs, err)
@@ -148,18 +161,4 @@ func validateMetadataReplicas(inst *FireboltInstance) *field.Error {
 		)
 	}
 	return nil
-}
-
-// validateReservedKeys rejects any label or annotation on a ComponentSpec
-// whose key starts with the operator-reserved prefix
-// (operatorauthority.ReservedFireboltKeyPrefix). Those keys are owned by
-// the operator; allowing users to set them would clobber controller-
-// managed keys (most dangerously firebolt.io/config-hash, which drives
-// pod-template rollouts when a ConfigMap changes) and either freeze
-// rollouts or corrupt routing.
-func validateReservedKeys(base *field.Path, cs ComponentSpec) field.ErrorList {
-	var errs field.ErrorList
-	errs = append(errs, ValidateReservedKeyPrefix(base.Child("labels"), cs.Labels)...)
-	errs = append(errs, ValidateReservedKeyPrefix(base.Child("annotations"), cs.Annotations)...)
-	return errs
 }

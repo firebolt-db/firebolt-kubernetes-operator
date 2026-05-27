@@ -29,29 +29,45 @@ spec:
       credentialsSecretRef:
         name: metadata-postgres-credentials
     engineRegistration: true
-    # Omit image to use the operator default (metadata service image from config/images).
-    image:
-      repository: ghcr.io/firebolt-db/metadata
-      tag: latest
-      pullPolicy: IfNotPresent
-    resources:
-      requests:
-        cpu: 200m
-        memory: 1Gi
-      limits:
-        memory: 2Gi
-    nodeSelector:
-      firebolt.dev/pool: system
-    serviceAccountName: metadata
+    # All pod scheduling, the container image, resources, and the
+    # serviceAccount live on a pod template. The operator stamps the
+    # command, ports, probes, securityContext, and reserved volume
+    # mounts on top; the validating webhook rejects user input on any
+    # of those (see docs/instance-crd-reference.md).
+    template:
+      spec:
+        serviceAccountName: metadata
+        nodeSelector:
+          firebolt.dev/pool: system
+        containers:
+          - name: metadata
+            # Omit image to use the operator default.
+            image: ghcr.io/firebolt-db/metadata:latest
+            imagePullPolicy: IfNotPresent
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                memory: 2Gi
 
   gateway:
     replicas: 2
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-    nodeSelector:
-      firebolt.dev/pool: system
+    # Same pod-template pattern as metadata above. Only image and
+    # resources on the operator-rendered "envoy" container are user-
+    # settable; the validating webhook rejects user input on
+    # Envoy's args / ports / probes / preStop / reserved volume
+    # mounts.
+    template:
+      spec:
+        nodeSelector:
+          firebolt.dev/pool: system
+        containers:
+          - name: envoy
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
 
   # Reserved: persisted but not yet enforced at the engine level.
   auth:

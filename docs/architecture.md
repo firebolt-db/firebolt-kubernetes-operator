@@ -471,9 +471,9 @@ Each `Reconcile` call runs through four sequential steps. If any step fails, the
 | Step | Description | Implementation |
 |---|---|---|
 | 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. The pod runs as the image's built-in non-root postgres user (UID 70) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, and emptyDir volumes for `/var/run/postgresql` and `/tmp` (the only paths the postgres entrypoint needs to write outside its data PVC). Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
-| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. Values are derived from the instance spec (PG connection, image, replicas, resources). The XML config includes `<default_account_id>` set to `spec.id`; the metadata service uses this to provision the account on startup. The pod runs as the metadata image's built-in non-root `dedicated-pensieve` user (UID 1111) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, an emptyDir backing `/tmp`, and `automountServiceAccountToken: false` (pensieve does not call the Kubernetes API). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
+| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. The Deployment's pod template is produced by `effectiveMetadataPodTemplate`, which merges `spec.metadata.template` (a user-supplied `PodTemplateSpec`) with operator-rendered fields — see [Component pod templates](#component-pod-templates) below. The XML config includes `<default_account_id>` set to `spec.id`; the metadata service uses this to provision the account on startup. The pod runs as the metadata image's built-in non-root `dedicated-pensieve` user (UID 1111) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, an emptyDir backing `/tmp`, and `automountServiceAccountToken: false` (pensieve does not call the Kubernetes API). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
-| 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. Values are derived from the instance spec and namespace. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
+| 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. The Deployment's pod template is produced by `effectiveGatewayPodTemplate`, which merges `spec.gateway.template` with operator-rendered fields — see [Component pod templates](#component-pod-templates) below. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
 
 ### Instance lifecycle phases
 
@@ -497,6 +497,28 @@ The instance starts in `Provisioning` and transitions to `Ready` once both the m
 The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone. The operator continues to requeue but will not transition out of `Failed` without manual intervention.
 
 When the metadata service or gateway becomes not-ready, the operator clears the corresponding endpoint from the instance status (`metadataEndpoint` or `gatewayEndpoint`). This ensures that dependent engines observe consistent state and block until the instance is fully operational again.
+
+### Component pod templates
+
+`spec.gateway.template` and `spec.metadata.template` are raw [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) embeds — the same shape as `EngineClass.spec.template`. Two `effective*` helpers live alongside their builders and produce the resolved pod template that the Deployment carries:
+
+- `effectiveGatewayPodTemplate(...)` in `instance_gateway.go`.
+- `effectiveMetadataPodTemplate(...)` in `instance_metadata.go`.
+
+Each helper starts from a deep-copy of the user template and stamps operator-rendered fields on top. The validating webhook (see [Operator-owned fields](instance-crd-reference.md#operator-owned-fields-on-component-templates) in the CRD reference) already rejected user input on any field the builder owns, so the merge is straight-stamp rather than precedence-merge:
+
+| Field | Origin | Notes |
+|---|---|---|
+| Pod-template labels | User template + operator base labels | Operator keys (`firebolt.io/instance`, `firebolt.io/component`) win on conflict; user keys outside the reserved prefix pass through. |
+| Pod-template annotations | User template + operator-stamped `firebolt.io/config-hash` | Hash drives the rollout when the rendered config changes. |
+| `nodeSelector` / `tolerations` / `affinity` / `topologySpreadConstraints` / `priorityClassName` | User template | Pass-through. |
+| `serviceAccountName` | User template, else operator-built default | Operator default for gateway is `{instance}-gateway`; metadata has no operator-built default (uses the namespace default service account). |
+| `imagePullSecrets`, pod-level `securityContext`, additional `initContainers`, additional `containers` (sidecars) | User template | Pass-through. Metadata adds a non-root floor on top of the user's PodSecurityContext (RunAsUser/RunAsGroup pinned to the image's UID, `RuntimeDefault` seccomp, RunAsNonRoot true). |
+| `volumes` | Operator config / tmp / postgres-creds volumes + user volumes | Operator volumes prepended; user volumes appended with operator-reserved names filtered (defense-in-depth — the webhook already rejected collisions). |
+| `terminationGracePeriodSeconds`, `enableServiceLinks` | Operator-stamped | 15s/false for gateway, 30s/false for metadata. |
+| Primary container at `containers[0]` | Operator-rendered | Identity, command, args, ports, probes, securityContext, lifecycle, volumeMounts, env, envFrom all hardcoded. `image` / `imagePullPolicy` / `resources` taken from the user's primary-named container when set. |
+
+The Deployment's wrapper fields — `Replicas`, `Selector`, `Strategy` — stay on the builder; they aren't pod-template concerns.
 
 ### Integration with engine reconciler
 
