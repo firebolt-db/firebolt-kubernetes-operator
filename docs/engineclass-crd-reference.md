@@ -70,7 +70,7 @@ the pod template.
 |---|---|---|
 | `image`, `imagePullPolicy` | Yes | Canonical knob for runtime version upgrades. |
 | `resources` | Yes | Engine `spec.resources` wins wholesale if it carries any requests/limits/claims; otherwise the class entry fills in. No field-level merge. |
-| `env` | Yes | Operator-injected vars (`POD_INDEX`, `FIREBOLT_ALLOW_AWS_IRSA`, `FIREBOLT_CORE_MODE`) appear first on the pod; class entries appended. Class entries that name a reserved key are **rejected** at admission. |
+| `env` | Yes | Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) appear first on the pod; class entries appended. Class entries that name a reserved key are **rejected** at admission. |
 | `envFrom` | Yes | Passed through from class. |
 | `volumeMounts` | Yes | Operator-owned mounts first; class mounts appended. Class entries whose names collide with operator-owned volumes (`nodes-config`, data) are silently dropped. |
 | `securityContext` | Yes | Engine `spec.securityContext` wins if non-nil; otherwise class. |

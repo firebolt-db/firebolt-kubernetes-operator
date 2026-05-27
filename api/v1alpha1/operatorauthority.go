@@ -70,9 +70,9 @@ const MetadataContainerName = "metadata"
 // are rejected at admission time on EngineClass spec.template and would
 // be stripped if injected through another template channel.
 const (
-	EnginePodIndexEnvKey     = "POD_INDEX"
-	EngineAllowAwsIrsaEnvKey = "FIREBOLT_ALLOW_AWS_IRSA"
-	EngineCoreModeEnvKey     = "FIREBOLT_CORE_MODE"
+	EnginePodIndexEnvKey                    = "POD_INDEX"
+	EngineAwsEC2MetadataClientEnabledEnvKey = "FB_AWS_EC2_METADATA_CLIENT_ENABLED"
+	EngineCoreModeEnvKey                    = "FIREBOLT_CORE_MODE"
 )
 
 // operatorOwnedEngineEnvKeys is the set of env names the operator injects on
@@ -80,7 +80,7 @@ const (
 // as a slice so iteration order is deterministic when reporting violations.
 var operatorOwnedEngineEnvKeys = []string{
 	EnginePodIndexEnvKey,
-	EngineAllowAwsIrsaEnvKey,
+	EngineAwsEC2MetadataClientEnabledEnvKey,
 	EngineCoreModeEnvKey,
 }
 
