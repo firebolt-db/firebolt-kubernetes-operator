@@ -90,7 +90,7 @@ var operatorOwnedEngineEnvKeys = []string{
 // templates may not redefine these names; the validator rejects them.
 const (
 	MetadataPostgresUsernameEnvKey = "POSTGRES_USERNAME_FILE"
-	MetadataPostgresPasswordEnvKey = "POSTGRES_PASSWORD_FILE" //nolint:gosec // env-var name, not a credential
+	MetadataPostgresPasswordEnvKey = "POSTGRES_PASSWORD_FILE" //nolint:gosec // legit:ignore-secrets — env-var name, not a credential
 )
 
 // operatorOwnedMetadataEnvKeys is the set of env names the operator

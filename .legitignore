@@ -1,0 +1,19 @@
+# .legitignore — Legit Secret Scanning suppressions.
+#
+# Format: one entry per line, # for comments. Three entry shapes (per
+# the Legit alert annotation documentation):
+#
+#   value_<hash>     ignores every occurrence of this secret value
+#                    repo-wide and across history. Robust to history
+#                    rewrites that change instance hashes.
+#   instance_<hash>  ignores one specific (commit, file, line) match.
+#   <glob>           file/dir glob; ignores all secrets under the path.
+
+# "POSTGRES_PASSWORD_FILE" is the env-var NAME the operator injects on
+# the metadata container to point dedicated-pensieve at its Postgres
+# credentials Secret (the actual password lives in a mounted
+# Kubernetes Secret at the path this env var points to). Legit's
+# generic-password rule flags the literal because the word
+# "PASSWORD" appears in it. Value-based suppression so the rule stays
+# silent even after history rewrites.
+value_74C1494275B3EC5601DEB210A6ACA034
