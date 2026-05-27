@@ -1,3 +1,14 @@
+# 1.0.21
+
+appVersion: v3.1.0
+
+## [3.1.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v3.0.0...v3.1.0) (2026-05-27)
+
+### Features
+
+* **controller:** default engine container securityContext to hardened non-root (FB-1297) ([fe6f5ce](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fe6f5ce22fa26b92a3d608f4107487bf7fc12ef2))
+
+
 # 1.0.20
 
 appVersion: v3.0.0
