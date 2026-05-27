@@ -248,19 +248,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 // token to reach the API server nor a writable rootfs to stage payloads on.
 func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configXML string) *appsv1.Deployment {
 	name := instance.Name + SuffixMetadataService
-	configMapName := metadataConfigMapName(instance.Name)
 	labels := instanceLabels(instance.Name, "metadata")
-	secretName := metadataCredsSecretName(instance)
-
-	spec := &instance.Spec.Metadata.ComponentSpec
 
 	var replicas int32 = 1
 	if instance.Spec.Metadata.Replicas != nil {
 		replicas = *instance.Spec.Metadata.Replicas
 	}
-
-	image := resolveImageRef(spec.Image, DefaultMetadataRepository, DefaultMetadataTag)
-	pullPolicy := resolveImagePullPolicy(spec.Image)
 
 	configHash := contentHash(configXML)
 
@@ -272,14 +265,9 @@ func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configX
 	maxSurge := intstr.FromInt32(0)
 	maxUnavailable := intstr.FromInt32(1)
 
-	podLabels := mergeMaps(labels, spec.Labels)
-	podAnnotations := mergeMaps(map[string]string{
-		AnnotationConfigHash: configHash,
-	}, spec.Annotations)
+	podTemplate := effectiveMetadataPodTemplate(instance, configHash, labels)
 
-	metadataUID := MetadataUID
-
-	desired := &appsv1.Deployment{
+	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -295,120 +283,200 @@ func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configX
 					MaxSurge:       &maxSurge,
 				},
 			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      podLabels,
-					Annotations: podAnnotations,
+			Template: podTemplate,
+		},
+	}
+}
+
+// effectiveMetadataPodTemplate produces the metadata Deployment's pod
+// template by merging the user-supplied
+// FireboltInstance.spec.metadata.template with operator-rendered
+// fields. Mirrors effectiveGatewayPodTemplate field-for-field; see
+// that function's documentation for the precedence rules.
+func effectiveMetadataPodTemplate(
+	instance *computev1alpha1.FireboltInstance,
+	configHash string,
+	baseLabels map[string]string,
+) corev1.PodTemplateSpec {
+	var userPodMeta metav1.ObjectMeta
+	var userPodSpec corev1.PodSpec
+	if t := instance.Spec.Metadata.Template; t != nil {
+		user := t.DeepCopy()
+		userPodMeta = user.ObjectMeta
+		userPodSpec = user.Spec
+	}
+
+	userPrimary, userSidecars := splitUserContainers(userPodSpec.Containers, computev1alpha1.MetadataContainerName)
+
+	image := metadataImageFromUser(userPrimary)
+	pullPolicy := metadataImagePullPolicyFromUser(userPrimary)
+
+	metadataUID := MetadataUID
+	configMapName := metadataConfigMapName(instance.Name)
+	secretName := metadataCredsSecretName(instance)
+
+	pensieve := corev1.Container{
+		Name:            computev1alpha1.MetadataContainerName,
+		Image:           image,
+		ImagePullPolicy: pullPolicy,
+		Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
+		Ports: []corev1.ContainerPort{
+			{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsNonRoot:             boolPtr(true),
+			RunAsUser:                &metadataUID,
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{
+					Port: intstr.FromInt32(int32(MetadataServicePort)),
 				},
-				Spec: corev1.PodSpec{
-					TerminationGracePeriodSeconds: int64Ptr(30),
-					AutomountServiceAccountToken:  boolPtr(false),
-					// See the equivalent comment in engine_reconcile.go's
-					// PodSpec: kill legacy service-link env injection, DNS
-					// is the only service-discovery channel here.
-					EnableServiceLinks: boolPtr(false),
-					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot: boolPtr(true),
-						RunAsUser:    &metadataUID,
-						RunAsGroup:   &metadataUID,
-						SeccompProfile: &corev1.SeccompProfile{
-							Type: corev1.SeccompProfileTypeRuntimeDefault,
-						},
-					},
-					Containers: []corev1.Container{{
-						Name:            metadataContainerName,
-						Image:           image,
-						ImagePullPolicy: pullPolicy,
-						Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
-						Ports: []corev1.ContainerPort{
-							{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
-						},
-						SecurityContext: &corev1.SecurityContext{
-							RunAsNonRoot:             boolPtr(true),
-							RunAsUser:                &metadataUID,
-							ReadOnlyRootFilesystem:   boolPtr(true),
-							AllowPrivilegeEscalation: boolPtr(false),
-							Capabilities: &corev1.Capabilities{
-								Drop: []corev1.Capability{"ALL"},
-							},
-						},
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								TCPSocket: &corev1.TCPSocketAction{
-									Port: intstr.FromInt32(int32(MetadataServicePort)),
-								},
-							},
-							InitialDelaySeconds: 2,
-							PeriodSeconds:       10,
-							FailureThreshold:    3,
-						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								GRPC: &corev1.GRPCAction{
-									Port:    int32(MetadataServicePort),
-									Service: strPtr(""),
-								},
-							},
-							InitialDelaySeconds: 2,
-							PeriodSeconds:       5,
-							FailureThreshold:    3,
-						},
-						Env: []corev1.EnvVar{
-							{Name: "POSTGRES_USERNAME_FILE", Value: metadataCredsMount + "/username"},
-							{Name: "POSTGRES_PASSWORD_FILE", Value: metadataCredsMount + "/password"},
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "config", MountPath: metadataConfigMount, ReadOnly: true},
-							{Name: "postgres-creds", MountPath: metadataCredsMount, ReadOnly: true},
-							// Scratch space outside the read-only root
-							// fs. The pensieve binary has not been
-							// audited for filesystem writes, so back
-							// /tmp with an emptyDir as a defensive
-							// default; logs go to stderr by config.
-							{Name: "tmp", MountPath: "/tmp"},
-						},
-					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: "config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
-								},
-							},
-						},
-						{
-							Name: "postgres-creds",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: secretName,
-								},
-							},
-						},
-						{
-							Name:         "tmp",
-							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-						},
-					},
+			},
+			InitialDelaySeconds: 2,
+			PeriodSeconds:       10,
+			FailureThreshold:    3,
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				GRPC: &corev1.GRPCAction{
+					Port:    int32(MetadataServicePort),
+					Service: strPtr(""),
+				},
+			},
+			InitialDelaySeconds: 2,
+			PeriodSeconds:       5,
+			FailureThreshold:    3,
+		},
+		Env: []corev1.EnvVar{
+			{Name: computev1alpha1.MetadataPostgresUsernameEnvKey, Value: metadataCredsMount + "/username"},
+			{Name: computev1alpha1.MetadataPostgresPasswordEnvKey, Value: metadataCredsMount + "/password"},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: computev1alpha1.MetadataConfigVolumeName, MountPath: metadataConfigMount, ReadOnly: true},
+			{Name: computev1alpha1.MetadataPostgresCredsVolumeName, MountPath: metadataCredsMount, ReadOnly: true},
+			// Scratch space outside the read-only root fs. The
+			// pensieve binary has not been audited for filesystem
+			// writes, so back /tmp with an emptyDir as a defensive
+			// default; logs go to stderr by config.
+			{Name: computev1alpha1.MetadataTmpVolumeName, MountPath: "/tmp"},
+		},
+	}
+	if userPrimary != nil && computev1alpha1.HasContainerResources(userPrimary.Resources) {
+		pensieve.Resources = *userPrimary.Resources.DeepCopy()
+	}
+
+	operatorVolumes := []corev1.Volume{
+		{
+			Name: computev1alpha1.MetadataConfigVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
 				},
 			},
 		},
+		{
+			Name: computev1alpha1.MetadataPostgresCredsVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretName},
+			},
+		},
+		{
+			Name:         computev1alpha1.MetadataTmpVolumeName,
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		},
 	}
 
-	if spec.Resources != nil {
-		desired.Spec.Template.Spec.Containers[0].Resources = *spec.Resources
-	}
-	if len(spec.NodeSelector) > 0 {
-		desired.Spec.Template.Spec.NodeSelector = spec.NodeSelector
-	}
-	if len(spec.Tolerations) > 0 {
-		desired.Spec.Template.Spec.Tolerations = spec.Tolerations
-	}
-	if spec.Affinity != nil {
-		desired.Spec.Template.Spec.Affinity = spec.Affinity
-	}
+	containers := append([]corev1.Container{pensieve}, userSidecars...)
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
+		computev1alpha1.MetadataConfigVolumeName,
+		computev1alpha1.MetadataPostgresCredsVolumeName,
+		computev1alpha1.MetadataTmpVolumeName,
+	)
 
-	return desired
+	// metadataPodSecurityContext starts from the user-supplied
+	// PodSecurityContext (deep-copied) and stamps the operator's
+	// non-root posture on top. RunAsUser/RunAsGroup are forced to
+	// MetadataUID because pensieve's data on disk is owned by that
+	// UID and the binary is hardcoded to that user inside the image;
+	// a different RunAsUser would mismatch the on-disk ownership.
+	podSC := metadataPodSecurityContext(userPodSpec.SecurityContext, metadataUID)
+
+	sa := userPodSpec.ServiceAccountName
+
+	return corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: mergeMaps(userPodMeta.Labels, baseLabels),
+			Annotations: mergeMaps(userPodMeta.Annotations, map[string]string{
+				AnnotationConfigHash: configHash,
+			}),
+		},
+		Spec: corev1.PodSpec{
+			ServiceAccountName:            sa,
+			TerminationGracePeriodSeconds: int64Ptr(30),
+			AutomountServiceAccountToken:  boolPtr(false),
+			EnableServiceLinks:            boolPtr(false),
+			NodeSelector:                  userPodSpec.NodeSelector,
+			Tolerations:                   userPodSpec.Tolerations,
+			Affinity:                      userPodSpec.Affinity,
+			TopologySpreadConstraints:     userPodSpec.TopologySpreadConstraints,
+			PriorityClassName:             userPodSpec.PriorityClassName,
+			SecurityContext:               podSC,
+			ImagePullSecrets:              userPodSpec.ImagePullSecrets,
+			InitContainers:                userPodSpec.InitContainers,
+			Containers:                    containers,
+			Volumes:                       volumes,
+		},
+	}
+}
+
+// metadataImageFromUser returns the user-supplied image on the
+// metadata primary container, falling back to the operator's default
+// pensieve image when the user did not set one.
+func metadataImageFromUser(primary *corev1.Container) string {
+	if primary != nil && primary.Image != "" {
+		return primary.Image
+	}
+	return resolveImageRef(nil, DefaultMetadataRepository, DefaultMetadataTag)
+}
+
+// metadataImagePullPolicyFromUser returns the user-supplied pull
+// policy on the metadata primary container, falling back to the
+// operator's default-resolution rule.
+func metadataImagePullPolicyFromUser(primary *corev1.Container) corev1.PullPolicy {
+	if primary != nil && primary.ImagePullPolicy != "" {
+		return primary.ImagePullPolicy
+	}
+	if primary != nil && primary.Image != "" {
+		return resolveContainerImagePullPolicy(primary.Image, "")
+	}
+	return resolveImagePullPolicy(nil)
+}
+
+// metadataPodSecurityContext composes the pod-level securityContext
+// stamped on the metadata Deployment's pod template. The operator
+// forces RunAsNonRoot/RunAsUser/RunAsGroup to MetadataUID and pins
+// SeccompProfile to RuntimeDefault; everything else passes through
+// from the user-supplied PodSecurityContext.
+func metadataPodSecurityContext(user *corev1.PodSecurityContext, uid int64) *corev1.PodSecurityContext {
+	var out *corev1.PodSecurityContext
+	if user != nil {
+		out = user.DeepCopy()
+	} else {
+		out = &corev1.PodSecurityContext{}
+	}
+	out.RunAsNonRoot = boolPtr(true)
+	out.RunAsUser = &uid
+	out.RunAsGroup = &uid
+	if out.SeccompProfile == nil {
+		out.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	}
+	return out
 }
 
 func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {

@@ -72,7 +72,7 @@ Instead, a separate read-only stats listener is added on the metrics port (defau
 
 ### Consistent metrics port
 
-All components default to port 9090 named `metrics` via `ComponentSpec.MetricsPort`. This means PodMonitors can always reference `port: metrics` without knowing the actual port number. The port is overridable per FireboltInstance CR for non-standard binaries.
+All components default to port 9090 named `metrics`. Gateway and metadata expose the override on the FireboltInstance via `spec.gateway.metricsPort` and `spec.metadata.metricsPort` respectively; the operator stamps the corresponding `metrics`-named port on the rendered container. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number.
 
 ### Cross-namespace support
 

@@ -576,66 +576,19 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	configMapName := name + "-config"
 	labels := instanceLabels(instance.Name, "gateway")
 
-	spec := &instance.Spec.Gateway.ComponentSpec
+	gw := &instance.Spec.Gateway
 
 	var replicas int32 = 2
-	if spec.Replicas != nil {
-		replicas = *spec.Replicas
+	if gw.Replicas != nil {
+		replicas = *gw.Replicas
 	}
-
-	image := resolveImageRef(spec.Image, DefaultEnvoyRepository, DefaultEnvoyTag)
-	pullPolicy := resolveImagePullPolicy(spec.Image)
 
 	configHash := contentHash(envoyYAML)
 
 	maxSurge := intstr.FromString("25%")
 	maxUnavailable := intstr.FromInt32(0)
-	var runAsUser int64 = 101 // Envoy default UID
 
-	// terminationGracePeriodSeconds budget for graceful shutdown:
-	//   - preStop POSTs /healthcheck/fail to the Envoy admin (bash /dev/tcp
-	//     because the stock envoyproxy/envoy image ships without curl/wget),
-	//     then sleeps 8s so Cilium can drop this pod from Service
-	//     endpoints before SIGTERM. The readiness probe below is tuned so
-	//     that the flip is visible to kubelet within that window without
-	//     being so tight that it causes steady-state flapping.
-	//   - After preStop returns, kubelet sends SIGTERM and Envoy has the
-	//     remaining ~7s to drain in-flight HTTP/2 streams and exit. Short
-	//     requests finish; a hang in Envoy gets SIGKILLed at the grace
-	//     deadline rather than stalling the whole rollout.
-	//
-	// The 15s / 8s split is a trade-off: lower it and Envoy loses drain
-	// time; raise it and the rollout wall-clock grows. 15s keeps pod-level
-	// shutdown well under the default pod-deletion timeout most schedulers
-	// expect while still giving a proxy enough room to drain gracefully.
-	var gracePeriod int64 = 15
-
-	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
-	// admin API without requiring curl/wget in the image. The POST flips
-	// the envoy.filters.http.health_check filter (pass_through_mode=false
-	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
-	// the kubelet readiness probe hits.
-	//
-	// Timing chain after the flip:
-	//   - next probe tick:              up to 2s (PeriodSeconds=2)
-	//   - FailureThreshold=2:           up to 2s more
-	//   - EndpointSlice fanout:         ~1s
-	//   - Cilium eBPF map update:        ~1s
-	// Worst case ~6s, which fits inside the 8s sleep with ~2s of margin.
-	// By the time SIGTERM arrives, new client SYNs are no longer being
-	// load-balanced to this pod - eliminating the terminating-endpoint
-	// race where new connections would hit a listener already shutting down.
-	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
-printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
-cat <&3 >/dev/null
-exec 3<&- 3>&-
-sleep 8
-`, gatewayAdminPort)
-
-	podLabels := mergeMaps(labels, spec.Labels)
-	podAnnotations := mergeMaps(map[string]string{
-		AnnotationConfigHash: configHash,
-	}, spec.Annotations)
+	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
 
 	desired := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -653,133 +606,8 @@ sleep 8
 					MaxSurge:       &maxSurge,
 				},
 			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      podLabels,
-					Annotations: podAnnotations,
-				},
-				Spec: corev1.PodSpec{
-					ServiceAccountName:            gatewayServiceAccountName(instance.Name),
-					TerminationGracePeriodSeconds: &gracePeriod,
-					// See the equivalent comment in engine_reconcile.go's
-					// PodSpec: kill legacy service-link env injection, DNS
-					// is the only service-discovery channel here.
-					EnableServiceLinks: boolPtr(false),
-					Containers: []corev1.Container{{
-						Name:            gatewayContainerName,
-						Image:           image,
-						ImagePullPolicy: pullPolicy,
-						Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
-						Ports: []corev1.ContainerPort{
-							{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
-							{Name: "metrics", ContainerPort: instance.Spec.Gateway.MetricsPort, Protocol: corev1.ProtocolTCP},
-						},
-						Lifecycle: &corev1.Lifecycle{
-							PreStop: &corev1.LifecycleHandler{
-								Exec: &corev1.ExecAction{
-									Command: []string{"bash", "-c", preStopScript},
-								},
-							},
-						},
-						LivenessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/healthz",
-									Port: intstr.FromString("http"),
-								},
-							},
-							InitialDelaySeconds: 1,
-							PeriodSeconds:       15,
-							TimeoutSeconds:      3,
-						},
-						// Readiness tuning balances two opposing requirements:
-						//
-						//   1. At shutdown, the preStop /healthcheck/fail flip must
-						//      propagate to Cilium before SIGTERM. With the
-						//      preStop sleep of 8s and terminationGracePeriodSeconds
-						//      of 15s, we have budget for Period+Failure probe
-						//      latency plus EndpointSlice/Cilium eBPF fanout.
-						//   2. At steady state, a single probe hiccup (network
-						//      blip, brief CPU throttle, transient listener stall)
-						//      must not flap the pod out of the Service and cause
-						//      cascading load onto the other replica.
-						//
-						// PeriodSeconds=2, TimeoutSeconds=2, FailureThreshold=2
-						// gives worst-case ~4s detection - comfortably inside the
-						// 8s preStop - while still requiring two consecutive bad
-						// probes to mark NotReady, absorbing single-sample noise.
-						//
-						// The previous setting (default FailureThreshold=3 with
-						// PeriodSeconds=3) gave ~9s worst-case detection, which is
-						// past SIGKILL even with the old 5s TGPS; the preStop
-						// script's comment claiming "readiness immediately goes
-						// false" did not actually hold.
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/healthz",
-									Port: intstr.FromString("http"),
-								},
-							},
-							InitialDelaySeconds: 1,
-							PeriodSeconds:       2,
-							TimeoutSeconds:      2,
-							FailureThreshold:    2,
-						},
-						SecurityContext: &corev1.SecurityContext{
-							RunAsUser:                &runAsUser,
-							RunAsNonRoot:             boolPtr(true),
-							ReadOnlyRootFilesystem:   boolPtr(true),
-							AllowPrivilegeEscalation: boolPtr(false),
-							Capabilities: &corev1.Capabilities{
-								Drop: []corev1.Capability{"ALL"},
-							},
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{
-								Name:      "config-volume",
-								MountPath: "/etc/envoy",
-								ReadOnly:  true,
-							},
-							{
-								Name:      "tmp",
-								MountPath: "/tmp",
-							},
-						},
-					}},
-					Volumes: []corev1.Volume{
-						{
-							Name: "config-volume",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
-									Items: []corev1.KeyToPath{
-										{Key: gatewayConfigKey, Path: gatewayConfigKey},
-									},
-								},
-							},
-						},
-						{
-							Name:         "tmp",
-							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-						},
-					},
-				},
-			},
+			Template: podTemplate,
 		},
-	}
-
-	if spec.Resources != nil {
-		desired.Spec.Template.Spec.Containers[0].Resources = *spec.Resources
-	}
-	if len(spec.NodeSelector) > 0 {
-		desired.Spec.Template.Spec.NodeSelector = spec.NodeSelector
-	}
-	if len(spec.Tolerations) > 0 {
-		desired.Spec.Template.Spec.Tolerations = spec.Tolerations
-	}
-	if spec.Affinity != nil {
-		desired.Spec.Template.Spec.Affinity = spec.Affinity
 	}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
@@ -791,7 +619,7 @@ sleep 8
 	existing := &appsv1.Deployment{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
 	if errors.IsNotFound(err) {
-		log.Info("Creating gateway Deployment", "name", name, "replicas", replicas, "image", image)
+		log.Info("Creating gateway Deployment", "name", name, "replicas", replicas, "image", podTemplate.Spec.Containers[0].Image)
 		return r.Create(ctx, desired)
 	}
 	if err != nil {
@@ -884,3 +712,247 @@ func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, insta
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// gatewayMetricsPort returns the port number to expose Envoy's
+// Prometheus metrics endpoint on. Defaults to 9090 when the user did
+// not set spec.gateway.metricsPort.
+func gatewayMetricsPort(gw *computev1alpha1.GatewaySpec) int32 {
+	if gw.MetricsPort > 0 {
+		return gw.MetricsPort
+	}
+	return 9090
+}
+
+// effectiveGatewayPodTemplate produces the gateway Deployment's pod
+// template by merging the user-supplied
+// FireboltInstance.spec.gateway.template with operator-rendered
+// fields. The validating webhook (GatewayPodTemplateRules) has
+// already rejected user input on any field this function overwrites,
+// so callers can trust that the user template only carries fields the
+// merge here is willing to forward.
+//
+// Field-by-field rules:
+//
+//   - Pod labels: operator-rendered base labels (firebolt.io/instance,
+//     firebolt.io/component) override any user values on those exact
+//     keys; user labels otherwise pass through.
+//   - Pod annotations: operator AnnotationConfigHash overrides any
+//     user value on that key; user annotations otherwise pass through.
+//   - Scheduling fields (nodeSelector, tolerations, affinity,
+//     topologySpreadConstraints, priorityClassName), pod-level
+//     securityContext, imagePullSecrets, user-supplied initContainers
+//     and additional containers: all pass through deep-copied from the
+//     user template.
+//   - ServiceAccountName: pass through from user when set; otherwise
+//     the operator-built per-instance name.
+//   - terminationGracePeriodSeconds, enableServiceLinks: operator-stamped.
+//   - Primary container: operator-rendered Envoy at index 0; image
+//     and ImagePullPolicy and Resources merged from any user-supplied
+//     container with name == GatewayContainerName. User sidecars
+//     (non-Envoy entries in user.template.spec.containers) appended
+//     after the operator container.
+//   - Volumes: operator config-volume + tmp at the head; user volumes
+//     (excluding operator-reserved names — webhook already rejected
+//     those, but the merge is defensive in case the webhook is off)
+//     appended.
+func effectiveGatewayPodTemplate(
+	instance *computev1alpha1.FireboltInstance,
+	configMapName string,
+	configHash string,
+	baseLabels map[string]string,
+) corev1.PodTemplateSpec {
+	var userPodMeta metav1.ObjectMeta
+	var userPodSpec corev1.PodSpec
+	if t := instance.Spec.Gateway.Template; t != nil {
+		user := t.DeepCopy()
+		userPodMeta = user.ObjectMeta
+		userPodSpec = user.Spec
+	}
+
+	userPrimary, userSidecars := splitUserContainers(userPodSpec.Containers, computev1alpha1.GatewayContainerName)
+
+	image := envoyImageFromUser(userPrimary)
+	pullPolicy := envoyImagePullPolicyFromUser(userPrimary)
+
+	var gracePeriod int64 = 15
+	var runAsUser int64 = 101 // Envoy default UID
+
+	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
+	// admin API without requiring curl/wget in the image. The POST flips
+	// the envoy.filters.http.health_check filter (pass_through_mode=false
+	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
+	// the kubelet readiness probe hits.
+	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
+printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
+cat <&3 >/dev/null
+exec 3<&- 3>&-
+sleep 8
+`, gatewayAdminPort)
+
+	envoy := corev1.Container{
+		Name:            computev1alpha1.GatewayContainerName,
+		Image:           image,
+		ImagePullPolicy: pullPolicy,
+		Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
+		Ports: []corev1.ContainerPort{
+			{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
+			{Name: "metrics", ContainerPort: gatewayMetricsPort(&instance.Spec.Gateway), Protocol: corev1.ProtocolTCP},
+		},
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{"bash", "-c", preStopScript},
+				},
+			},
+		},
+		LivenessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+			},
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       15,
+			TimeoutSeconds:      3,
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+			},
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       2,
+			TimeoutSeconds:      2,
+			FailureThreshold:    2,
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                &runAsUser,
+			RunAsNonRoot:             boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: computev1alpha1.GatewayConfigVolumeName, MountPath: "/etc/envoy", ReadOnly: true},
+			{Name: computev1alpha1.GatewayTmpVolumeName, MountPath: "/tmp"},
+		},
+	}
+	if userPrimary != nil && computev1alpha1.HasContainerResources(userPrimary.Resources) {
+		envoy.Resources = *userPrimary.Resources.DeepCopy()
+	}
+
+	operatorVolumes := []corev1.Volume{
+		{
+			Name: computev1alpha1.GatewayConfigVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+					Items: []corev1.KeyToPath{
+						{Key: gatewayConfigKey, Path: gatewayConfigKey},
+					},
+				},
+			},
+		},
+		{
+			Name:         computev1alpha1.GatewayTmpVolumeName,
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		},
+	}
+
+	containers := append([]corev1.Container{envoy}, userSidecars...)
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName)
+
+	sa := userPodSpec.ServiceAccountName
+	if sa == "" {
+		sa = gatewayServiceAccountName(instance.Name)
+	}
+
+	return corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: mergeMaps(userPodMeta.Labels, baseLabels),
+			Annotations: mergeMaps(userPodMeta.Annotations, map[string]string{
+				AnnotationConfigHash: configHash,
+			}),
+		},
+		Spec: corev1.PodSpec{
+			ServiceAccountName:            sa,
+			TerminationGracePeriodSeconds: &gracePeriod,
+			EnableServiceLinks:            boolPtr(false),
+			NodeSelector:                  userPodSpec.NodeSelector,
+			Tolerations:                   userPodSpec.Tolerations,
+			Affinity:                      userPodSpec.Affinity,
+			TopologySpreadConstraints:     userPodSpec.TopologySpreadConstraints,
+			PriorityClassName:             userPodSpec.PriorityClassName,
+			SecurityContext:               userPodSpec.SecurityContext,
+			ImagePullSecrets:              userPodSpec.ImagePullSecrets,
+			InitContainers:                userPodSpec.InitContainers,
+			Containers:                    containers,
+			Volumes:                       volumes,
+		},
+	}
+}
+
+// splitUserContainers separates the user's template containers into
+// the primary (matching primaryName) and the remaining sidecars.
+// Returns nil for primary if the user did not declare it; an empty
+// slice for sidecars if none.
+func splitUserContainers(containers []corev1.Container, primaryName string) (primary *corev1.Container, sidecars []corev1.Container) {
+	for i := range containers {
+		c := containers[i]
+		if c.Name == primaryName && primary == nil {
+			cp := c
+			primary = &cp
+			continue
+		}
+		sidecars = append(sidecars, c)
+	}
+	return primary, sidecars
+}
+
+// envoyImageFromUser returns the user-supplied image on the gateway
+// primary container, falling back to the operator's default Envoy
+// image when the user did not set one.
+func envoyImageFromUser(primary *corev1.Container) string {
+	if primary != nil && primary.Image != "" {
+		return primary.Image
+	}
+	return resolveImageRef(nil, DefaultEnvoyRepository, DefaultEnvoyTag)
+}
+
+// envoyImagePullPolicyFromUser returns the user-supplied pull policy
+// on the gateway primary container, falling back to the operator's
+// default-resolution rule (Always for :latest, IfNotPresent otherwise).
+func envoyImagePullPolicyFromUser(primary *corev1.Container) corev1.PullPolicy {
+	if primary != nil && primary.ImagePullPolicy != "" {
+		return primary.ImagePullPolicy
+	}
+	if primary != nil && primary.Image != "" {
+		return resolveContainerImagePullPolicy(primary.Image, "")
+	}
+	return resolveImagePullPolicy(nil)
+}
+
+// appendUserVolumes appends user-supplied volumes to the
+// operator-rendered set, skipping any user entry whose name collides
+// with an operator-reserved name. The validating webhook already
+// rejects such collisions, but the merge is defensive so that a
+// webhook outage cannot let a user-rendered volume shadow an
+// operator-rendered one (which would silently break the matching
+// volumeMount on the operator container).
+func appendUserVolumes(operator []corev1.Volume, userVolumes []corev1.Volume, reserved ...string) []corev1.Volume {
+	if len(userVolumes) == 0 {
+		return operator
+	}
+	reservedSet := make(map[string]struct{}, len(reserved))
+	for _, n := range reserved {
+		reservedSet[n] = struct{}{}
+	}
+	out := make([]corev1.Volume, 0, len(operator)+len(userVolumes))
+	out = append(out, operator...)
+	for i := range userVolumes {
+		if _, taken := reservedSet[userVolumes[i].Name]; taken {
+			continue
+		}
+		out = append(out, *userVolumes[i].DeepCopy())
+	}
+	return out
+}

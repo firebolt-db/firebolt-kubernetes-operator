@@ -37,10 +37,14 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 setup_floci "$NAMESPACE" "$FLOCI_BUCKET"
 
 echo "Applying instance-full with metadata image pinned from config/images/defaults.${IMAGE_VARIANT}.env..."
-yq eval '
-  (select(.kind == "FireboltInstance").spec.metadata.image.repository) = env(METADATA_IMAGE) |
-  (select(.kind == "FireboltInstance").spec.metadata.image.tag) = env(METADATA_TAG) |
-  (select(.kind == "FireboltInstance").spec.metadata.image.pullPolicy) = "IfNotPresent"
+# spec.metadata.image was removed in FB-1322; the metadata container's
+# image lives on the embedded PodTemplateSpec at
+# spec.metadata.template.spec.containers[name=="metadata"].image. The
+# example file already declares that container — we just overwrite
+# image and imagePullPolicy.
+METADATA_REF="${METADATA_IMAGE}:${METADATA_TAG}" yq eval '
+  (select(.kind == "FireboltInstance").spec.metadata.template.spec.containers[] | select(.name == "metadata").image) = env(METADATA_REF) |
+  (select(.kind == "FireboltInstance").spec.metadata.template.spec.containers[] | select(.name == "metadata").imagePullPolicy) = "IfNotPresent"
 ' "${REPO_ROOT}/examples/instance-full.yaml" | kubectl apply -n "$NAMESPACE" -f -
 wait_instance_ready "$NAMESPACE" "$INSTANCE_NAME"
 

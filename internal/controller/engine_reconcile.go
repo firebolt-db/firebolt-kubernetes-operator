@@ -1135,14 +1135,6 @@ func classEngineContainer(classInfo *EngineClassInfo) *corev1.Container {
 	return nil
 }
 
-// hasResourceRequirements reports whether r carries any user input
-// (requests, limits, or claims). Used by effectiveEngineResources to
-// decide whether the engine spec has "opted in" to setting resources,
-// in which case it wins over the class wholesale.
-func hasResourceRequirements(r corev1.ResourceRequirements) bool {
-	return len(r.Requests) > 0 || len(r.Limits) > 0 || len(r.Claims) > 0
-}
-
 // effectiveEngineResources resolves the resources stamped on the engine
 // container. Precedence: engine spec wins if it carries any
 // requests / limits / claims; otherwise the class's engine container
@@ -1150,10 +1142,10 @@ func hasResourceRequirements(r corev1.ResourceRequirements) bool {
 // partial spec override does not silently inherit the rest from the
 // class.
 func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInfo *EngineClassInfo) corev1.ResourceRequirements {
-	if hasResourceRequirements(spec.Resources) {
+	if computev1alpha1.HasContainerResources(spec.Resources) {
 		return *spec.Resources.DeepCopy()
 	}
-	if c := classEngineContainer(classInfo); c != nil && hasResourceRequirements(c.Resources) {
+	if c := classEngineContainer(classInfo); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		return *c.Resources.DeepCopy()
 	}
 	return corev1.ResourceRequirements{}
