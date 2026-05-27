@@ -258,7 +258,7 @@ Merge rules (centralised in the `effective*` helpers in `engine_reconcile.go` so
 | engine container `image` / `imagePullPolicy` | class > operator default |
 | engine container `resources` | engine spec wins wholesale if it carries any requests/limits/claims, else class fills in (no field-level merge) |
 | engine container `securityContext` | engine spec wins if non-nil, else class |
-| engine container `env` | operator-injected vars (`POD_INDEX`, `FIREBOLT_ALLOW_AWS_IRSA`, `FIREBOLT_CORE_MODE`) first; class env appended (reserved keys rejected at admission) |
+| engine container `env` | operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) first; class env appended (reserved keys rejected at admission) |
 | engine container `envFrom` | passed through from class |
 | engine container `volumeMounts` | operator-owned mounts first; class mounts appended; mounts colliding with operator volume names are dropped |
 | engine container `lifecycle` | passed through from class |

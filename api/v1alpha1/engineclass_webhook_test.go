@@ -237,9 +237,9 @@ func TestEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			wantField: "spec.template.spec.containers[0].env[0].name",
 		},
 		{
-			name: "engine container reserved env FIREBOLT_ALLOW_AWS_IRSA",
+			name: "engine container reserved env FB_AWS_EC2_METADATA_CLIENT_ENABLED",
 			mutate: func(ec *EngineClass) {
-				ec.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: EngineAllowAwsIrsaEnvKey, Value: "false"}}
+				ec.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: EngineAwsEC2MetadataClientEnabledEnvKey, Value: "false"}}
 			},
 			wantField: "spec.template.spec.containers[0].env[0].name",
 		},

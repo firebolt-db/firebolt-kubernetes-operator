@@ -328,7 +328,7 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 	}
 	for _, e := range engine.Env[:3] {
 		if e.Name != computev1alpha1.EnginePodIndexEnvKey &&
-			e.Name != computev1alpha1.EngineAllowAwsIrsaEnvKey &&
+			e.Name != computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey &&
 			e.Name != computev1alpha1.EngineCoreModeEnvKey {
 			t.Errorf("operator env var displaced from leading position: %s", e.Name)
 		}

@@ -628,7 +628,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		},
 		// Allows the default AWS SDK EC2 metadata detection (required for IRSA).
 		{
-			Name:  computev1alpha1.EngineAllowAwsIrsaEnvKey,
+			Name:  computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
 			Value: "true",
 		},
 		// Selects the firebolt-core code path inside the unified
@@ -1154,7 +1154,7 @@ func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInf
 // engineClassEngineEnv returns the env vars declared on the class's
 // engine container, deep-copied for downstream mutation safety. The
 // validating webhook rejects reserved keys (POD_INDEX,
-// FIREBOLT_ALLOW_AWS_IRSA, FIREBOLT_CORE_MODE) so the result can be
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE) so the result can be
 // appended verbatim to the operator-injected list.
 func engineClassEngineEnv(classInfo *EngineClassInfo) []corev1.EnvVar {
 	c := classEngineContainer(classInfo)
