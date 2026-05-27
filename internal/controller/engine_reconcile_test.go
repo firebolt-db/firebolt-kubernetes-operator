@@ -2394,3 +2394,40 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 func boolPtrInt64(v int64) *int64 {
 	return &v
 }
+
+func TestEngineShutdownWaitSeconds(t *testing.T) {
+	// Specific values, including the boundary that previously produced a
+	// non-monotonic dip (TGPS=5 -> 4s but TGPS=6 -> 1s under the old logic).
+	cases := map[int64]int64{
+		1:   1,
+		2:   1,
+		5:   1,
+		6:   1,
+		7:   2,
+		10:  5,
+		60:  55,
+		120: 115,
+	}
+	for tgps, want := range cases {
+		if got := engineShutdownWaitSeconds(tgps); got != want {
+			t.Errorf("engineShutdownWaitSeconds(%d) = %d, want %d", tgps, got, want)
+		}
+	}
+
+	// Across a sweep the budget must stay within [1, gracePeriod] and be
+	// monotonic non-decreasing, so raising the grace period never shrinks it.
+	prev := int64(0)
+	for tgps := int64(1); tgps <= 600; tgps++ {
+		got := engineShutdownWaitSeconds(tgps)
+		if got < 1 {
+			t.Errorf("engineShutdownWaitSeconds(%d) = %d, want >= 1", tgps, got)
+		}
+		if got > tgps {
+			t.Errorf("engineShutdownWaitSeconds(%d) = %d, exceeds grace period", tgps, got)
+		}
+		if got < prev {
+			t.Errorf("engineShutdownWaitSeconds non-monotonic: tgps=%d gave %d after %d", tgps, got, prev)
+		}
+		prev = got
+	}
+}

@@ -457,13 +457,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	// shutdown_wait_unfinished inside the engine). Without a preStop hook,
 	// SIGTERM arrives immediately; the engine uses this window before SIGKILL.
 	// The margin covers container runtime teardown after the process exits.
-	shutdownWait := gracePeriod - int64(EngineShutdownMarginSeconds)
-	if shutdownWait < 1 {
-		shutdownWait = gracePeriod - 1
-	}
-	if shutdownWait < 1 {
-		shutdownWait = 1
-	}
+	shutdownWait := engineShutdownWaitSeconds(gracePeriod)
 	// Canonical document seeded with operator-managed defaults, shaped to
 	// the structured YAML schema consumed by FireboltCoreServer (packdb
 	// `DB::Config::ApplicationConfig`). User input from spec.customEngineConfig
@@ -892,6 +886,18 @@ func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
 		return *spec.TerminationGracePeriodSeconds
 	}
 	return DefaultTerminationGracePeriodSeconds
+}
+
+// engineShutdownWaitSeconds returns the engine's post-SIGTERM in-flight-query
+// budget: the pod grace period minus EngineShutdownMarginSeconds so the engine
+// exits before the kubelet escalates to SIGKILL, floored at 1s. A single clamp
+// keeps the result monotonic non-decreasing in gracePeriod.
+func engineShutdownWaitSeconds(gracePeriod int64) int64 {
+	shutdownWait := gracePeriod - int64(EngineShutdownMarginSeconds)
+	if shutdownWait < 1 {
+		shutdownWait = 1
+	}
+	return shutdownWait
 }
 
 // enginePodServiceAccountName returns the ServiceAccount name stamped on engine
