@@ -21,7 +21,9 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -137,6 +139,157 @@ func TestFireboltEngineValidator_DeleteIsNoOp(t *testing.T) {
 	v := &FireboltEngineCustomValidator{Reader: fakeReaderWithClasses(t)}
 	if _, err := v.ValidateDelete(context.Background(), fireboltEngineWithRef(ptr.To("any"))); err != nil {
 		t.Fatalf("ValidateDelete: expected no-op, got %v", err)
+	}
+}
+
+// engineWithResources returns a minimal valid FireboltEngine with the
+// supplied resources block. nil ref keeps the EngineClass lookup out of
+// the way so the resource-bound assertions are not entangled with
+// reader fixtures.
+func engineWithResources(req, lim corev1.ResourceList) *FireboltEngine {
+	eng := fireboltEngineWithRef(nil)
+	eng.Spec.Resources = corev1.ResourceRequirements{Requests: req, Limits: lim}
+	return eng
+}
+
+func TestFireboltEngineValidator_ResourcesWithinBounds(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClasses(t),
+		ResourceBounds: EngineResourceBounds{
+			MaxCPU:    resource.MustParse("32"),
+			MaxMemory: resource.MustParse("256Gi"),
+		},
+	}
+	eng := engineWithResources(
+		corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("4"),
+			corev1.ResourceMemory: resource.MustParse("16Gi"),
+		},
+		corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("32"),
+			corev1.ResourceMemory: resource.MustParse("256Gi"),
+		},
+	)
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: within bounds (including equality on max) should pass, got %v", err)
+	}
+}
+
+func TestFireboltEngineValidator_ResourcesExceedCPULimit(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClasses(t),
+		ResourceBounds: EngineResourceBounds{
+			MaxCPU: resource.MustParse("32"),
+		},
+	}
+	eng := engineWithResources(
+		nil,
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+	)
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: cpu limit above bound should be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.resources.limits") || !strings.Contains(err.Error(), "cpu") {
+		t.Errorf("ValidateCreate: error %q does not surface limits.cpu path", err.Error())
+	}
+	if !strings.Contains(err.Error(), "32") {
+		t.Errorf("ValidateCreate: error %q does not surface the configured maximum", err.Error())
+	}
+}
+
+func TestFireboltEngineValidator_ResourcesExceedMemoryRequest(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClasses(t),
+		ResourceBounds: EngineResourceBounds{
+			MaxMemory: resource.MustParse("256Gi"),
+		},
+	}
+	eng := engineWithResources(
+		corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Gi")},
+		nil,
+	)
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: memory request above bound should be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.resources.requests") || !strings.Contains(err.Error(), "memory") {
+		t.Errorf("ValidateCreate: error %q does not surface requests.memory path", err.Error())
+	}
+}
+
+// TestFireboltEngineValidator_ResourcesUnboundedDimensionPasses keeps
+// the operator from gatekeeping ResourceNames it has no bound for
+// (extended resources, GPU vendors, etc.). The MaxMemory bound exists
+// but the engine declares only cpu, so the request must be admitted.
+func TestFireboltEngineValidator_ResourcesUnboundedDimensionPasses(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClasses(t),
+		ResourceBounds: EngineResourceBounds{
+			MaxMemory: resource.MustParse("256Gi"),
+		},
+	}
+	eng := engineWithResources(
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("128")},
+		nil,
+	)
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: unbounded dimension should pass, got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_ResourcesEmptyBoundsIsNoOp confirms that
+// the default (empty) bound matrix admits any spec.resources value —
+// platform teams must opt into bounds explicitly.
+func TestFireboltEngineValidator_ResourcesEmptyBoundsIsNoOp(t *testing.T) {
+	v := &FireboltEngineCustomValidator{Reader: fakeReaderWithClasses(t)}
+	eng := engineWithResources(
+		corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("999"),
+			corev1.ResourceMemory: resource.MustParse("999Ti"),
+		},
+		corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("999"),
+			corev1.ResourceMemory: resource.MustParse("999Ti"),
+		},
+	)
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: empty bounds should be a no-op, got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_AggregatesClassAndResourceErrors makes
+// sure a single admission round-trip reports both a missing class and a
+// resources violation. Users with a fat-fingered apply should see every
+// blocker at once instead of fixing them one-by-one.
+func TestFireboltEngineValidator_AggregatesClassAndResourceErrors(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClasses(t),
+		ResourceBounds: EngineResourceBounds{
+			MaxCPU: resource.MustParse("8"),
+		},
+	}
+	eng := engineWithResources(nil,
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16")},
+	)
+	eng.Spec.EngineClassRef = ptr.To("missing")
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: expected aggregated error, got nil")
+	}
+	if !strings.Contains(err.Error(), "engineClassRef") || !strings.Contains(err.Error(), "spec.resources.limits") {
+		t.Errorf("ValidateCreate: error %q should report both engineClassRef and resources violations", err.Error())
+	}
+}
+
+func TestFireboltEngineValidator_ResourceBoundsIsEmpty(t *testing.T) {
+	empty := EngineResourceBounds{}
+	if !empty.IsEmpty() {
+		t.Fatal("zero-value EngineResourceBounds should report IsEmpty()=true")
+	}
+	withCPU := EngineResourceBounds{MaxCPU: resource.MustParse("1")}
+	if withCPU.IsEmpty() {
+		t.Fatal("any non-zero bound should make IsEmpty() false")
 	}
 }
 
