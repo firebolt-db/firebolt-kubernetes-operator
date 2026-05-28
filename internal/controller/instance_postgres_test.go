@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -215,5 +216,82 @@ func TestBuildPostgresStatefulSetDisablesServiceLinks(t *testing.T) {
 	esl := sts.Spec.Template.Spec.EnableServiceLinks
 	if esl == nil || *esl {
 		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
+	}
+}
+
+// validatePostgresSecret is the gate ensurePostgresSecret runs against
+// any pre-existing Secret it observes before deciding to skip the
+// write — both on the cached Get fast path and on the
+// IsAlreadyExists slow path after a Create raced against a stale
+// cache. A wrong-shape Secret slipping past this validator means the
+// metadata and PostgreSQL pods bind to inconsistent credentials and
+// auth-fail silently.
+func TestValidatePostgresSecret(t *testing.T) {
+	valid := func() *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst-metadata-postgres-creds", Namespace: "ns-1"},
+			Type:       corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"username": []byte(PostgresUser),
+				"password": []byte("any-non-empty-value"),
+				"database": []byte(PostgresDBName),
+			},
+		}
+	}
+
+	t.Run("accepts a well-formed Secret", func(t *testing.T) {
+		if err := validatePostgresSecret(valid()); err != nil {
+			t.Fatalf("validatePostgresSecret(valid): unexpected error: %v", err)
+		}
+	})
+
+	cases := []struct {
+		name    string
+		mutate  func(*corev1.Secret)
+		wantSub string
+	}{
+		{
+			name:    "rejects non-Opaque type",
+			mutate:  func(s *corev1.Secret) { s.Type = corev1.SecretTypeBasicAuth },
+			wantSub: "type",
+		},
+		{
+			name:    "rejects missing username key",
+			mutate:  func(s *corev1.Secret) { delete(s.Data, "username") },
+			wantSub: `"username"`,
+		},
+		{
+			name:    "rejects empty password value",
+			mutate:  func(s *corev1.Secret) { s.Data["password"] = []byte{} },
+			wantSub: `"password"`,
+		},
+		{
+			name:    "rejects missing database key",
+			mutate:  func(s *corev1.Secret) { delete(s.Data, "database") },
+			wantSub: `"database"`,
+		},
+		{
+			name:    "rejects wrong username value",
+			mutate:  func(s *corev1.Secret) { s.Data["username"] = []byte("not-firebolt") },
+			wantSub: "username",
+		},
+		{
+			name:    "rejects wrong database value",
+			mutate:  func(s *corev1.Secret) { s.Data["database"] = []byte("not-the-metadata-db") },
+			wantSub: "database",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := valid()
+			c.mutate(s)
+			err := validatePostgresSecret(s)
+			if err == nil {
+				t.Fatalf("validatePostgresSecret(%s): expected error, got nil", c.name)
+			}
+			if !strings.Contains(err.Error(), c.wantSub) {
+				t.Errorf("validatePostgresSecret(%s): error %q does not contain %q", c.name, err.Error(), c.wantSub)
+			}
+		})
 	}
 }

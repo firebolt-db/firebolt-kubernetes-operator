@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -601,26 +602,32 @@ admin:
 }
 
 // Design note for the ensure* functions in this file (and their
-// siblings in instance_metadata.go): each one calls r.Update
-// unconditionally after Get, with no client-side equality check
-// against the stored Spec. We rely on the API server — and, for
-// Deployments, the built-in Deployment controller's own spec
-// comparison — to short-circuit no-op writes: an Update whose
-// post-defaulted object matches what is already stored does not
-// bump .metadata.generation, so no spurious rollout is triggered.
-// Pod-template changes do propagate through the AnnotationConfigHash
-// annotation (set from contentHash of the rendered config), which
-// means a real config change is always reflected in the stored spec
-// and picked up by the Deployment controller.
+// siblings in instance_metadata.go and instance_postgres.go): each one
+// writes through Server-Side Apply (client.Apply) with FieldManager
+// OperatorFieldManager and ForceOwnership. The operator declares
+// exactly the fields it owns (everything in the `desired` literal)
+// and the apiserver tracks that ownership under
+// metadata.managedFields; foreign-managed fields a user adds via
+// kubectl/SSA from a different field manager — extra labels,
+// annotations, sidecar containers, additional volumes — are
+// preserved across reconciles. ForceOwnership keeps the operator
+// authoritative on every field it does declare.
 //
-// A bespoke client-side equality helper here would duplicate that
-// logic and, worse, create a silent-drift hazard: any managed field
-// we forget to include in the helper would mask a real change on
-// every subsequent reconcile. The engine controller does keep
-// stsSpecEqual in engine_apply.go because (a) the rollout cost of a
-// false-positive update on a StatefulSet is much higher and (b) the
+// The apiserver short-circuits no-op applies: an Apply whose
+// post-defaulted object matches what is already stored does not bump
+// .metadata.generation, so the Deployment controller never sees a
+// spurious rollout even though we Apply on every reconcile.
+// Pod-template changes propagate through the AnnotationConfigHash
+// annotation (set from contentHash of the rendered config) so a real
+// config change is always reflected in the stored spec and picked up
+// by the Deployment controller.
+//
+// The engine controller (engine_apply.go) keeps stsSpecEqual and the
+// explicit Get→Update path because (a) the rollout cost of a
+// false-positive write on a StatefulSet is much higher and (b) the
 // engine generation model relies on explicit in-place vs new-gen
-// decisions. The asymmetry is deliberate.
+// decisions that depend on reading the live object before deciding
+// what to do.
 func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 
@@ -628,6 +635,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	labels := instanceLabels(instance.Name, "gateway")
 
 	desired := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -642,19 +650,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 		return err
 	}
 
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating gateway ConfigMap", "name", name)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Data = desired.Data
-	existing.Labels = desired.Labels
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying gateway ConfigMap", "name", name)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
@@ -677,6 +674,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
 
 	desired := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -701,21 +699,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	}
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating gateway Deployment", "name", name, "replicas", replicas, "image", podTemplate.Spec.Containers[0].Image)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Replicas = desired.Spec.Replicas
-	existing.Spec.Template = desired.Spec.Template
-	existing.Spec.Strategy = desired.Spec.Strategy
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying gateway Deployment", "name", name, "replicas", replicas, "image", podTemplate.Spec.Containers[0].Image)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -723,6 +708,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, i
 	labels := instanceLabels(instance.Name, "gateway")
 
 	desired := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -742,20 +728,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, i
 	}
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &corev1.Service{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating gateway Service", "name", name)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Ports = desired.Spec.Ports
-	existing.Spec.Selector = desired.Spec.Selector
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying gateway Service", "name", name)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -764,6 +738,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, insta
 	maxUnavailable := intstr.FromInt32(1)
 
 	desired := &policyv1.PodDisruptionBudget{
+		TypeMeta: metav1.TypeMeta{APIVersion: "policy/v1", Kind: "PodDisruptionBudget"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -780,21 +755,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, insta
 	}
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &policyv1.PodDisruptionBudget{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating gateway PDB", "name", name)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.MaxUnavailable = desired.Spec.MaxUnavailable
-	existing.Spec.Selector = desired.Spec.Selector
-	existing.Labels = desired.Labels
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying gateway PDB", "name", name)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func boolPtr(v bool) *bool { return &v }

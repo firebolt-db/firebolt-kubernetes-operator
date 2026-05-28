@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -62,12 +63,50 @@ func pgCredentialsSecretName(instanceName string) string {
 	return instanceName + SuffixMetadataPostgresCreds
 }
 
+// ensurePostgresSecret is the single exception to the SSA-Apply idiom
+// used by every other ensure* path. The Secret is created exactly
+// once per FireboltInstance with a freshly-generated password and
+// every subsequent reconcile MUST skip the write so the password is
+// preserved — the metadata and PostgreSQL pods bind to whatever the
+// Secret carried at startup.
+//
+// SSA Apply is the wrong primitive here on two counts:
+//
+//  1. With ForceOwnership, Apply is an upsert that would silently
+//     overwrite the stored password with a freshly-generated value
+//     whenever this function ran a second time (e.g. after a cached
+//     Get returned a stale NotFound because the informer had not yet
+//     observed the Secret at operator startup or after a restart).
+//     The running pods would keep their old password and start
+//     failing authentication against a rotated Secret — a silent
+//     outage with no operator log line marking the moment of damage.
+//
+//  2. Without ForceOwnership, Apply would conflict against the
+//     operator field manager's own previous claim on the password
+//     field whenever we tried to re-apply with a different value,
+//     turning the same stale-cache scenario into a perpetually
+//     erroring reconcile loop instead of an outage. Neither failure
+//     mode is acceptable.
+//
+// r.Create handles both concerns atomically: the API server rejects a
+// duplicate Create with AlreadyExists, which we then resolve into a
+// fresh Get + validatePostgresSecret to confirm the surviving Secret
+// is structurally compatible with what the metadata and PostgreSQL
+// pods bind to. The cached Get on the fast path runs the same
+// validator so a pre-existing Secret that is the wrong shape — wrong
+// keys, wrong username, wrong database, wrong type — surfaces as a
+// loud reconcile error instead of being silently accepted. A
+// pre-existing matching Secret (e.g. operator restart, manual restore
+// from backup with the right contents) passes both paths without
+// touching the password.
 func (r *FireboltInstanceReconciler) ensurePostgresSecret(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	name := pgCredentialsSecretName(instance.Name)
+	key := types.NamespacedName{Name: name, Namespace: instance.Namespace}
+
 	existing := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
+	err := r.Get(ctx, key, existing)
 	if err == nil {
-		return nil
+		return validatePostgresSecret(existing)
 	}
 	if !errors.IsNotFound(err) {
 		return err
@@ -96,39 +135,73 @@ func (r *FireboltInstanceReconciler) ensurePostgresSecret(ctx context.Context, i
 		return err
 	}
 
-	return r.Create(ctx, secret)
+	if err := r.Create(ctx, secret); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+		// Cache lag or interleaved reconcile created the Secret
+		// between our cached Get and our Create. Re-fetch with the
+		// live client and run the same validator the fast path
+		// uses — accepting a stale, wrong-shape Secret here would
+		// hand the metadata and PostgreSQL pods a password their
+		// peers do not have.
+		if err := r.Get(ctx, key, existing); err != nil {
+			return fmt.Errorf("re-Get postgres secret after AlreadyExists: %w", err)
+		}
+		return validatePostgresSecret(existing)
+	}
+	return nil
 }
 
+// validatePostgresSecret confirms an existing Secret carries the
+// shape the metadata and PostgreSQL pods bind to. Returns nil when
+// the Secret is structurally compatible (right type, right keys,
+// constants match), or a descriptive error otherwise. The password
+// value is checked for non-emptiness only — it is generated per
+// FireboltInstance and the operator has no expected value to compare
+// against; the postgres pod's `initdb` will accept any non-empty
+// password and bake it into its on-disk auth state.
+func validatePostgresSecret(s *corev1.Secret) error {
+	if s.Type != corev1.SecretTypeOpaque {
+		return fmt.Errorf("existing postgres-credentials Secret %q has type %q, want %q",
+			s.Name, s.Type, corev1.SecretTypeOpaque)
+	}
+	for _, k := range []string{"username", "password", "database"} {
+		if v, ok := s.Data[k]; !ok || len(v) == 0 {
+			return fmt.Errorf("existing postgres-credentials Secret %q is missing or empty for required key %q", s.Name, k)
+		}
+	}
+	if got := string(s.Data["username"]); got != PostgresUser {
+		return fmt.Errorf("existing postgres-credentials Secret %q has username=%q, want %q",
+			s.Name, got, PostgresUser)
+	}
+	if got := string(s.Data["database"]); got != PostgresDBName {
+		return fmt.Errorf("existing postgres-credentials Secret %q has database=%q, want %q",
+			s.Name, got, PostgresDBName)
+	}
+	return nil
+}
+
+// ensurePostgresStatefulSet uses Server-Side Apply (see the design
+// note above ensureGatewayConfigMap in instance_gateway.go). The
+// operator owns the StatefulSet's spec including pod-level
+// SecurityContext, Volumes, Containers, and EnableServiceLinks — the
+// fields the pre-SSA implementation re-asserted explicitly because
+// the container hardening depends on them as a set (RunAsNonRoot
+// requires FSGroup PVC ownership; read-only root FS requires the
+// writable emptyDirs at /var/run/postgresql and /tmp). With SSA the
+// "as a set" invariant becomes structural: the operator's apply
+// declares all of them, so the apiserver carries them together and
+// any future hardening that adds a new field is automatically owned
+// alongside the existing ones.
 func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	desired := buildPostgresStatefulSet(instance)
+	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
-
-	existing := &appsv1.StatefulSet{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	// Drift propagation: re-apply the fields we own on the pod template.
-	// Pod-level SecurityContext and Volumes are propagated alongside
-	// Containers because the container security hardening relies on them
-	// (RunAsNonRoot=true requires FSGroup ownership of the data PVC; the
-	// container's read-only root filesystem requires writable emptyDir
-	// volumes mounted at /var/run/postgresql and /tmp). If we propagated
-	// only Containers we would silently leave older StatefulSets running
-	// without the new hardening, or break the pod by mounting a volume
-	// that is not declared at the pod level.
-	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
-	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
-	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
-	existing.Spec.Template.Spec.EnableServiceLinks = desired.Spec.Template.Spec.EnableServiceLinks
-	return r.Update(ctx, existing)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 // buildPostgresStatefulSet returns the desired StatefulSet for the
@@ -295,6 +368,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresService(ctx context.Context, 
 	labels := instanceLabels(instance.Name, "postgres")
 
 	desired := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -312,19 +386,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresService(ctx context.Context, 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
-
-	existing := &corev1.Service{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Ports = desired.Spec.Ports
-	existing.Spec.Selector = desired.Spec.Selector
-	return r.Update(ctx, existing)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func envFromSecret(envName, secretName, secretKey string) corev1.EnvVar {
