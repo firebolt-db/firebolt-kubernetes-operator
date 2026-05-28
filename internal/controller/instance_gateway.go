@@ -123,11 +123,23 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 
 	envoyYAML := buildEnvoyConfigYAML(instance)
 
-	// RBAC must exist before the Deployment that mounts the ServiceAccount;
-	// without it the Deployment would still admit (kubelet creates a token
-	// for any SA name), but the gateway's first wake-patch attempt would
-	// fail with Forbidden.
-	if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
+	// RBAC: the operator manages the gateway ServiceAccount, Role, and
+	// RoleBinding only when the user has NOT supplied a custom
+	// spec.gateway.template.spec.serviceAccountName. Setting that field
+	// is the explicit opt-out signal: the user is taking responsibility
+	// for the SA and the RBAC it needs (see
+	// docs/instance-crd-reference.md "Gateway custom ServiceAccount"
+	// for the verb set). Operator-managed RBAC would otherwise bind to
+	// a different SA name than the one the gateway pod runs as, and
+	// the wake-on-zero patch would silently 403 at runtime — worse
+	// than the loud "ServiceAccount not found" the kubelet logs when
+	// the user-supplied SA is missing.
+	if userSA := userGatewayServiceAccountName(instance); userSA != "" {
+		log.Info(
+			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, so the user is responsible for the ServiceAccount and RBAC (get/list/patch on compute.firebolt.io/fireboltengines for wake-on-zero)",
+			"serviceAccountName", userSA,
+		)
+	} else if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
 		return fmt.Errorf("ensuring gateway RBAC: %w", err)
 	}
 

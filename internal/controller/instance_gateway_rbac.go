@@ -46,6 +46,20 @@ func gatewayServiceAccountName(instanceName string) string {
 	return instanceName + SuffixGateway
 }
 
+// userGatewayServiceAccountName returns the user-supplied
+// spec.gateway.template.spec.serviceAccountName, or "" when the user
+// did not set one. Treated as the explicit opt-out signal for
+// operator-managed gateway RBAC: when non-empty, ensureGatewayRBAC is
+// skipped and the user takes ownership of the ServiceAccount + RBAC.
+// See docs/instance-crd-reference.md "Gateway custom ServiceAccount"
+// for the verb set the user must bind.
+func userGatewayServiceAccountName(instance *computev1alpha1.FireboltInstance) string {
+	if t := instance.Spec.Gateway.Template; t != nil {
+		return t.Spec.ServiceAccountName
+	}
+	return ""
+}
+
 // gatewayWakeRoleName returns the Role / RoleBinding name granting the
 // gateway permission to update FireboltEngines.
 func gatewayWakeRoleName(instanceName string) string {
