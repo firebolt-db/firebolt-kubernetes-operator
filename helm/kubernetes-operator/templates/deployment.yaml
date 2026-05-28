@@ -72,6 +72,15 @@ spec:
             {{- with .Values.watchNamespace }}
             - --namespace={{ . }}
             {{- end }}
+            {{- with .Values.engineResourceBounds.maxCPU }}
+            - --engine-max-cpu={{ . }}
+            {{- end }}
+            {{- with .Values.engineResourceBounds.maxMemory }}
+            - --engine-max-memory={{ . }}
+            {{- end }}
+            {{- with .Values.engineResourceBounds.maxEphemeralStorage }}
+            - --engine-max-ephemeral-storage={{ . }}
+            {{- end }}
             {{- if (.Values.logging.development | default false) }}
             - --zap-devel=true
             {{- else }}

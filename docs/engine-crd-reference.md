@@ -7,8 +7,8 @@
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
 | `spec.engineClassRef` | No | - | Name of an [`EngineClass`](engineclass-crd-reference.md) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class — there is no per-engine image override on this CR; see the EngineClass reference for the merge precedence. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine (the CR is preserved; see [Stop and Resume](../README.md#stop-and-resume)). |
-| `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory` |
-| `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory` |
+| `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory`. Subject to operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
+| `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory`. Subject to operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain; `recreate` deletes immediately |
 | `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the operator-side drain check. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status |
@@ -53,6 +53,41 @@
 | **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
 | **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
 | **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
+
+## Admission resource bounds
+
+The validating webhook can be configured with per-dimension maxima for
+`spec.resources.requests` and `spec.resources.limits`. When configured,
+any FireboltEngine create or update whose `cpu`, `memory`, or
+`ephemeral-storage` value exceeds the matching maximum is rejected at
+admission with a `spec.resources.{requests,limits}.{name}` field error
+that names the offending value and the operator-configured ceiling.
+
+Bounds are opt-in: defaults are empty (unbounded) so existing installs
+are not broken by an operator upgrade. Configure via Helm values when
+the operator's webhook is enabled:
+
+```yaml
+webhook:
+  enabled: true
+engineResourceBounds:
+  maxCPU: "32"
+  maxMemory: "256Gi"
+  maxEphemeralStorage: "10Ti"
+```
+
+Or directly via operator flags:
+
+```
+--engine-max-cpu=32
+--engine-max-memory=256Gi
+--engine-max-ephemeral-storage=10Ti
+```
+
+Bounds are applied independently per dimension; resource names without
+a configured maximum (extended resources, GPU vendors, etc.) pass
+through unchecked. Both Requests and Limits are checked against the
+same per-dimension maximum.
 
 ## Monitoring
 

@@ -135,6 +135,25 @@ healthProbeBindAddress: ":8081"
 # -- Namespace to watch for FireboltEngine resources. Empty watches all namespaces.
 watchNamespace: ""
 
+# Admission-time upper bounds on FireboltEngine.spec.resources values. Each
+# entry is a Kubernetes resource.Quantity that caps both Requests and Limits
+# for the matching dimension. Empty disables that dimension's bound; the
+# default leaves every dimension unbounded so existing installs are not
+# broken by an upgrade. Bounds protect a namespace from accidentally
+# admitting an engine whose requests would starve sibling workloads or
+# whose limits would OOM the node. Only enforced when the operator's
+# validating webhook is enabled (webhook.enabled: true).
+engineResourceBounds:
+  # -- Maximum allowed FireboltEngine.spec.resources CPU (requests and limits).
+  # Example: "32".
+  maxCPU: ""
+  # -- Maximum allowed FireboltEngine.spec.resources memory (requests and limits).
+  # Example: "256Gi".
+  maxMemory: ""
+  # -- Maximum allowed FireboltEngine.spec.resources ephemeral-storage
+  # (requests and limits). Example: "10Ti".
+  maxEphemeralStorage: ""
+
 logging:
   # -- Development mode (--zap-devel): console encoding, debug level, no sampling.
   # Use for local clusters; production installs should leave this false. When true,

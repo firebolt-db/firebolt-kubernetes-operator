@@ -29,6 +29,7 @@ import (
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -71,6 +72,7 @@ func main() {
 	var enableHTTP2 bool
 	var enableWebhooks bool
 	var watchNamespace string
+	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
 	var tlsOpts []func(*tls.Config)
 	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -94,6 +96,15 @@ func main() {
 		"Enable the admission webhook server. Disable when TLS certs are not available (e.g. local Kind clusters).")
 	flag.StringVar(&watchNamespace, "namespace", "",
 		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
+	flag.StringVar(&engineMaxCPUStr, "engine-max-cpu", "",
+		"Maximum value (Kubernetes resource.Quantity, e.g. \"32\") for FireboltEngine.spec.resources requests/limits CPU. "+
+			"Empty disables the bound.")
+	flag.StringVar(&engineMaxMemoryStr, "engine-max-memory", "",
+		"Maximum value (Kubernetes resource.Quantity, e.g. \"256Gi\") for FireboltEngine.spec.resources requests/limits memory. "+
+			"Empty disables the bound.")
+	flag.StringVar(&engineMaxEphemeralStorageStr, "engine-max-ephemeral-storage", "",
+		"Maximum value (Kubernetes resource.Quantity, e.g. \"10Ti\") for FireboltEngine.spec.resources requests/limits ephemeral-storage. "+
+			"Empty disables the bound.")
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -104,6 +115,18 @@ func main() {
 	}
 
 	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
+
+	engineBounds, boundsErr := parseEngineResourceBounds(engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr)
+	if boundsErr != nil {
+		setupLog.Error(boundsErr, "invalid --engine-max-* flag")
+		os.Exit(1)
+	}
+	if !engineBounds.IsEmpty() {
+		setupLog.Info("engine resource bounds enabled",
+			"maxCPU", engineBounds.MaxCPU.String(),
+			"maxMemory", engineBounds.MaxMemory.String(),
+			"maxEphemeralStorage", engineBounds.MaxEphemeralStorage.String())
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -242,7 +265,7 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "EngineClass")
 			os.Exit(1)
 		}
-		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr); err != nil {
+		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, &engineBounds); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngine")
 			os.Exit(1)
 		}
@@ -290,4 +313,36 @@ func zapLoggerOpts(flags zap.Options) []zap.Opts {
 		opts = append(opts, zap.StacktraceLevel(&lvl))
 	}
 	return opts
+}
+
+// parseEngineResourceBounds turns the three --engine-max-* flag strings
+// into a single EngineResourceBounds value. Each input is parsed as a
+// Kubernetes resource.Quantity; an empty string leaves the matching field
+// at the zero quantity, which the validator interprets as "no bound".
+// A non-empty but malformed value returns an error so the operator fails
+// fast at startup instead of silently dropping the bound.
+func parseEngineResourceBounds(cpu, memory, ephemeral string) (computev1alpha1.EngineResourceBounds, error) {
+	var bounds computev1alpha1.EngineResourceBounds
+	if cpu != "" {
+		q, err := resource.ParseQuantity(cpu)
+		if err != nil {
+			return bounds, fmt.Errorf("--engine-max-cpu=%q: %w", cpu, err)
+		}
+		bounds.MaxCPU = q
+	}
+	if memory != "" {
+		q, err := resource.ParseQuantity(memory)
+		if err != nil {
+			return bounds, fmt.Errorf("--engine-max-memory=%q: %w", memory, err)
+		}
+		bounds.MaxMemory = q
+	}
+	if ephemeral != "" {
+		q, err := resource.ParseQuantity(ephemeral)
+		if err != nil {
+			return bounds, fmt.Errorf("--engine-max-ephemeral-storage=%q: %w", ephemeral, err)
+		}
+		bounds.MaxEphemeralStorage = q
+	}
+	return bounds, nil
 }

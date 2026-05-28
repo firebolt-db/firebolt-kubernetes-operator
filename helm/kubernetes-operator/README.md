@@ -37,6 +37,9 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | additionalArgs | list | `[]` | Additional CLI arguments passed to the operator binary. |
 | additionalEnv | list | `[]` | Additional environment variables for the operator container. |
 | affinity | object | `{}` | Affinity rules for the operator pod. |
+| engineResourceBounds.maxCPU | string | `""` | Maximum allowed FireboltEngine.spec.resources CPU (requests and limits). Example: "32". |
+| engineResourceBounds.maxEphemeralStorage | string | `""` | Maximum allowed FireboltEngine.spec.resources ephemeral-storage (requests and limits). Example: "10Ti". |
+| engineResourceBounds.maxMemory | string | `""` | Maximum allowed FireboltEngine.spec.resources memory (requests and limits). Example: "256Gi". |
 | extraAnnotations | object | `{}` | Extra annotations added to all operator manifests. |
 | extraLabels | object | `{}` | Extra labels added to all operator manifests. |
 | extraVolumeMounts | list | `[]` | Extra volume mounts for the operator container. Rendered as-is into `container.volumeMounts`. Pair each entry with an `extraVolumes` entry of the same `name`. |
