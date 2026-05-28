@@ -36,9 +36,8 @@ import (
 )
 
 const (
-	metadataCredsMount    = "/secrets/postgres" //nolint:gosec // mount path, not a credential
-	metadataConfigMount   = "/configs"
-	metadataContainerName = "metadata"
+	metadataCredsMount  = "/secrets/postgres" //nolint:gosec // mount path, not a credential
+	metadataConfigMount = "/configs"
 )
 
 // ensureMetadataResources creates or updates the ConfigMap, Deployment, and
