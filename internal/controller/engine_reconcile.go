@@ -227,15 +227,17 @@ func computeStable(
 		r.Requeue = true
 	}
 
-	if current.ClusterService == nil {
+	// Always rebuild from buildClusterService instead of DeepCopying the
+	// live Service. With Server-Side Apply, the desired object passed to
+	// client.Patch(Apply) must have metadata.managedFields == nil; a
+	// DeepCopy of a live object carries the apiserver-populated
+	// managedFields and the apply is rejected with
+	// "metadata.managedFields must be nil". buildClusterService produces
+	// a fresh object owning exactly the fields the operator manages
+	// (selector, ports, ClusterIPNone, PublishNotReadyAddresses); SSA
+	// preserves any foreign-managed fields a user added separately.
+	if current.ClusterService == nil || current.ClusterServiceTargetGen != gen {
 		r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
-	} else if current.ClusterServiceTargetGen != gen {
-		svcCopy := current.ClusterService.DeepCopy()
-		if svcCopy.Spec.Selector == nil {
-			svcCopy.Spec.Selector = make(map[string]string)
-		}
-		svcCopy.Spec.Selector[LabelGeneration] = strconv.Itoa(gen)
-		r.EnsureClusterSvc = svcCopy
 	}
 
 	status.Phase = terminalPhase(spec)
@@ -331,16 +333,11 @@ func computeSwitching(
 	gen := status.CurrentGeneration
 
 	if current.ClusterServiceTargetGen != gen {
-		if current.ClusterService != nil {
-			svcCopy := current.ClusterService.DeepCopy()
-			if svcCopy.Spec.Selector == nil {
-				svcCopy.Spec.Selector = make(map[string]string)
-			}
-			svcCopy.Spec.Selector[LabelGeneration] = strconv.Itoa(gen)
-			r.EnsureClusterSvc = svcCopy
-		} else {
-			r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
-		}
+		// See computeStable for why we rebuild via buildClusterService
+		// instead of DeepCopying the live Service: SSA Apply rejects a
+		// desired object whose metadata.managedFields is non-nil, and a
+		// DeepCopy of the live object always carries managedFields.
+		r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
 		r.Requeue = true
 		return
 	}

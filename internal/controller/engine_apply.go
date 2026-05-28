@@ -19,13 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -142,113 +140,62 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 	return nil
 }
 
+// The three ensure* functions below write through Server-Side Apply
+// (client.Apply) with FieldManager OperatorFieldManager and
+// ForceOwnership — same idiom as the instance-side resources in
+// instance_gateway.go / instance_metadata.go / instance_postgres.go,
+// with the design rationale documented in the file-level note above
+// ensureGatewayConfigMap.
+//
+// The pre-SSA code carried a client-side equality check
+// (stsSpecEqual, the ClusterIP+selector+PublishNotReadyAddresses
+// trio, the ConfigMap content-hash comparison) that short-circuited
+// the write when nothing changed; the apiserver's SSA short-circuit
+// (no managedFields change → no resourceVersion bump → no rollout)
+// covers that case server-side, so the client-side checks are now
+// redundant and have been removed. stsMatchesSpec in
+// engine_reconcile.go remains in place — it serves the orthogonal
+// "do I need a new blue-green generation?" decision, which is taken
+// before the apply call and is independent of the apply mechanism.
+//
+// SSA Apply is also upsert, so the previous IsAlreadyExists fallback
+// (cache-staleness retry on Create) is no longer needed: a concurrent
+// reconcile that already created the object simply means our Apply
+// patches into the existing object.
 func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *corev1.ConfigMap) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
+	want.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
-
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: want.Name, Namespace: want.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating ConfigMap", "name", want.Name)
-		return r.Create(ctx, want)
-	}
-	if err != nil {
-		return err
-	}
-
-	if existing.Data[ConfigFileName] == want.Data[ConfigFileName] {
-		return nil
-	}
-	log.Info("Updating ConfigMap", "name", want.Name)
-	existing.Data = want.Data
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying ConfigMap", "name", want.Name)
+	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *corev1.Service) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
+	want.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Service"}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
-
-	existing := &corev1.Service{}
-	err := r.Get(ctx, types.NamespacedName{Name: want.Name, Namespace: want.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating Service", "name", want.Name)
-		createErr := r.Create(ctx, want)
-		if errors.IsAlreadyExists(createErr) {
-			// The informer cache was stale — another reconcile already created
-			// the resource. We skip the update path here because re-reading
-			// from the same cache would likely still return NotFound. Any spec
-			// drift will be corrected on the next reconcile once the cache
-			// catches up (level-triggered convergence).
-			return nil
-		}
-		return createErr
-	}
-	if err != nil {
-		return err
-	}
-
-	existingGenLabel := existing.Spec.Selector[LabelGeneration]
-	wantGenLabel := want.Spec.Selector[LabelGeneration]
-
-	needsUpdate := (existing.Spec.ClusterIP != want.Spec.ClusterIP && want.Spec.ClusterIP != "") ||
-		existing.Spec.PublishNotReadyAddresses != want.Spec.PublishNotReadyAddresses ||
-		existingGenLabel != wantGenLabel
-
-	if !needsUpdate {
-		return nil
-	}
-
-	log.Info("Updating Service", "name", want.Name,
-		"selectorGeneration", existingGenLabel+"→"+wantGenLabel)
-	existing.Spec.Selector = want.Spec.Selector
-	existing.Spec.PublishNotReadyAddresses = want.Spec.PublishNotReadyAddresses
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying Service", "name", want.Name,
+		"selectorGeneration", want.Spec.Selector[LabelGeneration])
+	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *appsv1.StatefulSet) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
+	want.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
-
-	existing := &appsv1.StatefulSet{}
-	err := r.Get(ctx, types.NamespacedName{Name: want.Name, Namespace: want.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating StatefulSet", "name", want.Name,
-			"replicas", *want.Spec.Replicas,
-			"image", want.Spec.Template.Spec.Containers[0].Image)
-		createErr := r.Create(ctx, want)
-		if errors.IsAlreadyExists(createErr) {
-			// The informer cache was stale — another reconcile already created
-			// the resource. We skip the update path here because re-reading
-			// from the same cache would likely still return NotFound. Any spec
-			// drift will be corrected on the next reconcile once the cache
-			// catches up (level-triggered convergence).
-			return nil
-		}
-		return createErr
-	}
-	if err != nil {
-		return err
-	}
-
-	if stsSpecEqual(existing, want) {
-		return nil
-	}
-
-	log.Info("Updating StatefulSet", "name", want.Name,
+	log.V(1).Info("Applying StatefulSet", "name", want.Name,
 		"replicas", *want.Spec.Replicas,
 		"image", want.Spec.Template.Spec.Containers[0].Image)
-	existing.Spec.Replicas = want.Spec.Replicas
-	existing.Spec.Template = want.Spec.Template
-	return r.Update(ctx, existing)
+	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 func (r *FireboltEngineReconciler) deleteIfExists(ctx context.Context, obj client.Object) error {
@@ -265,72 +212,4 @@ func (r *FireboltEngineReconciler) deleteIfExists(ctx context.Context, obj clien
 		return nil
 	}
 	return err
-}
-
-// stsSpecEqual compares only the fields we explicitly manage in buildStatefulSet,
-// ignoring API-server-defaulted fields that would cause false mismatches with DeepEqual.
-func stsSpecEqual(a, b *appsv1.StatefulSet) bool {
-	if a.Spec.Replicas == nil || b.Spec.Replicas == nil || *a.Spec.Replicas != *b.Spec.Replicas {
-		return false
-	}
-
-	aContainers := a.Spec.Template.Spec.Containers
-	bContainers := b.Spec.Template.Spec.Containers
-	if len(aContainers) == 0 || len(bContainers) == 0 {
-		return false
-	}
-	ac, bc := aContainers[0], bContainers[0]
-
-	if ac.Image != bc.Image {
-		return false
-	}
-	if ac.ImagePullPolicy != bc.ImagePullPolicy {
-		return false
-	}
-	if !reflect.DeepEqual(ac.Resources, bc.Resources) {
-		return false
-	}
-	if !reflect.DeepEqual(ac.Env, bc.Env) {
-		return false
-	}
-	if !reflect.DeepEqual(a.Spec.Template.Spec.NodeSelector, b.Spec.Template.Spec.NodeSelector) {
-		return false
-	}
-	if !reflect.DeepEqual(a.Spec.Template.Spec.Tolerations, b.Spec.Template.Spec.Tolerations) {
-		return false
-	}
-	if !reflect.DeepEqual(a.Spec.Template.Spec.Affinity, b.Spec.Template.Spec.Affinity) {
-		return false
-	}
-
-	if !reflect.DeepEqual(a.Spec.Template.Labels, b.Spec.Template.Labels) {
-		return false
-	}
-
-	if !annotationsEqual(a.Spec.Template.Annotations, b.Spec.Template.Annotations) {
-		return false
-	}
-
-	if a.Spec.Template.Spec.ServiceAccountName != b.Spec.Template.Spec.ServiceAccountName {
-		return false
-	}
-
-	aTGPS := a.Spec.Template.Spec.TerminationGracePeriodSeconds
-	bTGPS := b.Spec.Template.Spec.TerminationGracePeriodSeconds
-	if (aTGPS == nil) != (bTGPS == nil) || (aTGPS != nil && *aTGPS != *bTGPS) {
-		return false
-	}
-
-	if !reflect.DeepEqual(a.Spec.Template.Spec.SecurityContext, b.Spec.Template.Spec.SecurityContext) {
-		return false
-	}
-	if !reflect.DeepEqual(ac.SecurityContext, bc.SecurityContext) {
-		return false
-	}
-
-	if a.Annotations[AnnotationMetadataOverride] != b.Annotations[AnnotationMetadataOverride] {
-		return false
-	}
-
-	return true
 }

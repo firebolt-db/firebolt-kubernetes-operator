@@ -622,12 +622,11 @@ admin:
 // config change is always reflected in the stored spec and picked up
 // by the Deployment controller.
 //
-// The engine controller (engine_apply.go) keeps stsSpecEqual and the
-// explicit Get→Update path because (a) the rollout cost of a
-// false-positive write on a StatefulSet is much higher and (b) the
-// engine generation model relies on explicit in-place vs new-gen
-// decisions that depend on reading the live object before deciding
-// what to do.
+// The engine controller's ensure* paths (engine_apply.go) follow the
+// same SSA idiom. The "do I need a new blue-green generation?"
+// decision still lives in stsMatchesSpec in engine_reconcile.go and
+// runs before applyEngineState; SSA only changes how the chosen
+// resources are written, not how the operator decides what to write.
 func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 
