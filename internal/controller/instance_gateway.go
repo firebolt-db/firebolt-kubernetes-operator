@@ -107,6 +107,24 @@ const (
 	// constraint, and the README's "Gateway sizing" section for the
 	// memory-budget formula.
 	gatewayPerConnectionBufferLimitBytes int64 = 2 << 20 // 2 MiB
+
+	// gatewayMaxConnectionsPerEngine is the Envoy circuit-breaker cap on
+	// concurrent upstream TCP connections in one DFP sub-cluster (i.e.
+	// per engine, per gateway pod). With max_requests_per_connection=1
+	// this is also the cap on concurrent in-flight queries to one
+	// engine. See the cluster-level comment in buildEnvoyConfigYAML for
+	// the rationale; keep this in lockstep with
+	// gatewayMaxRequestsPerEngine (HTTP/2 active streams) and
+	// gatewayMaxPendingRequestsPerEngine (queue depth).
+	gatewayMaxConnectionsPerEngine     = 1024
+	gatewayMaxPendingRequestsPerEngine = 1024
+	gatewayMaxRequestsPerEngine        = 1024
+	// gatewayMaxRetriesPerEngine bounds the simultaneous retry budget
+	// across one engine sub-cluster. Higher than Envoy's default (3)
+	// because the route's num_retries is 50 and a cutover can have many
+	// in-flight retries at once; still bounded so a pathological retry
+	// storm cannot consume the whole gateway.
+	gatewayMaxRetriesPerEngine = 256
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -429,6 +447,58 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       # 200 + error body) from draining pods are not covered by the
       # transport-failure retry policy.
       max_requests_per_connection: 1
+      # Circuit breakers — per-engine concurrency caps for the gateway.
+      #
+      # Each unique authority (one per engine's headless Service) gets
+      # its own STRICT_DNS sub-cluster, and the thresholds below apply
+      # per sub-cluster (Envoy circuit-breaker semantics). The effect is
+      # per-engine isolation of gateway resources: a runaway or
+      # misbehaving engine's traffic cannot consume more than its share
+      # of connection pool slots, pending-request queue, in-flight
+      # request budget, or retries, and therefore cannot starve sibling
+      # engines on the same gateway pod.
+      #
+      # Sizing rationale (priority DEFAULT only — we do not route to
+      # priority HIGH):
+      #
+      #   - max_connections: 1024. With max_requests_per_connection=1
+      #     above, this is also the maximum concurrent in-flight queries
+      #     to one engine through one gateway pod. The memory floor it
+      #     implies (1024 * per_connection_buffer_limit_bytes = 2 GiB
+      #     worst case per engine) is bounded; operators that expect
+      #     higher per-engine concurrency raise gateway.replicas rather
+      #     than this value, so the memory budget per pod stays
+      #     predictable (see docs/gateway-sizing.md).
+      #
+      #   - max_pending_requests: 1024. Queue depth before Envoy starts
+      #     returning a synthetic "upstream connection pool overflow"
+      #     503. Matched to max_connections so the gateway either
+      #     dispatches the request or rejects it promptly; we never
+      #     amplify backlog beyond the in-flight cap.
+      #
+      #   - max_requests: 1024. HTTP/2 active-streams cap; since
+      #     max_requests_per_connection=1 collapses streams to
+      #     connections, this is the same dimension as max_connections
+      #     and is set in lockstep.
+      #
+      #   - max_retries: 256. Cluster-wide simultaneous retry budget.
+      #     Higher than Envoy's default (3) because num_retries on the
+      #     route policy is 50 and during a cutover many in-flight
+      #     requests may be retrying at once. Still bounded so a
+      #     pathological retry storm cannot consume the whole gateway.
+      #
+      # All four limits are hard-coded for the same reason as
+      # per_connection_buffer_limit_bytes (see the file-level comment):
+      # they sit at the center of the operator's per-engine isolation
+      # contract, and exposing them on the CR would invite settings
+      # that silently break the contract on one side without the other.
+      circuit_breakers:
+        thresholds:
+          - priority: DEFAULT
+            max_connections: %d
+            max_pending_requests: %d
+            max_requests: %d
+            max_retries: %d
       # Active health checks — fast ejection of draining pods.
       #
       # Envoy probes every pod IP in the sub-cluster's STRICT_DNS set on
@@ -521,6 +591,10 @@ admin:
 		instance.Namespace,                   // Lua: :authority rewrite
 		instance.Spec.Gateway.MetricsPort,    // stats_listener: port_value
 		gatewayPerConnectionBufferLimitBytes, // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayMaxConnectionsPerEngine,       // circuit_breakers: max_connections
+		gatewayMaxPendingRequestsPerEngine,   // circuit_breakers: max_pending_requests
+		gatewayMaxRequestsPerEngine,          // circuit_breakers: max_requests
+		gatewayMaxRetriesPerEngine,           // circuit_breakers: max_retries
 		gatewayAdminPort,                     // admin_stats endpoint: port_value
 		gatewayAdminPort,                     // admin: port_value
 	)

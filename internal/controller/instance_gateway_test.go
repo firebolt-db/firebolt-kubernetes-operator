@@ -190,6 +190,98 @@ func TestBuildEnvoyConfigYAMLBufferLimit(t *testing.T) {
 	}
 }
 
+// TestBuildEnvoyConfigYAMLCircuitBreakers guards the per-engine
+// concurrency caps on the dynamic_forward_proxy cluster. Circuit
+// breakers on the parent DFP cluster apply per sub-cluster (one per
+// engine authority) — without them, a runaway engine could consume
+// every connection slot, pending-request slot, in-flight stream, or
+// retry on a gateway pod and starve sibling engines.
+//
+// The values themselves are hard-coded by the operator (see the
+// gatewayMax* constants in instance_gateway.go); the test asserts
+// presence and equality against those constants so an accidental
+// removal of the block, or a typoed override, fails CI loudly.
+func TestBuildEnvoyConfigYAMLCircuitBreakers(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+
+	dfp := dfpCluster(t, parsed)
+	cb, ok := dfp["circuit_breakers"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing circuit_breakers; keys = %v", keysOf(dfp))
+	}
+	thresholds, ok := cb["thresholds"].([]any)
+	if !ok || len(thresholds) == 0 {
+		t.Fatalf("circuit_breakers.thresholds missing or empty; got %T = %v", cb["thresholds"], cb["thresholds"])
+	}
+
+	// Find the DEFAULT-priority threshold. The route does not target
+	// priority HIGH, so any HIGH threshold here is dead config; the
+	// invariants we care about live on DEFAULT.
+	var th map[string]any
+	for _, raw := range thresholds {
+		tm, _ := raw.(map[string]any)
+		if pr, _ := tm["priority"].(string); pr == "" || pr == "DEFAULT" {
+			th = tm
+			break
+		}
+	}
+	if th == nil {
+		t.Fatalf("no DEFAULT-priority threshold in circuit_breakers.thresholds; got %v", thresholds)
+	}
+
+	checks := []struct {
+		field string
+		want  int
+	}{
+		{"max_connections", gatewayMaxConnectionsPerEngine},
+		{"max_pending_requests", gatewayMaxPendingRequestsPerEngine},
+		{"max_requests", gatewayMaxRequestsPerEngine},
+		{"max_retries", gatewayMaxRetriesPerEngine},
+	}
+	for _, c := range checks {
+		// YAML numeric fields decode as int / int64 depending on size;
+		// normalise to int64 for comparison.
+		var got64 int64
+		switch v := th[c.field].(type) {
+		case int:
+			got64 = int64(v)
+		case int64:
+			got64 = v
+		case float64:
+			got64 = int64(v)
+		default:
+			t.Errorf("circuit_breakers.thresholds[0].%s missing or unexpected type %T", c.field, v)
+			continue
+		}
+		if got64 != int64(c.want) {
+			t.Errorf("circuit_breakers.thresholds[0].%s = %d; want %d", c.field, got64, c.want)
+		}
+	}
+}
+
+// dfpCluster returns the parsed dynamic_forward_proxy cluster (the
+// top-level entry, not its typed_config). Callers needing the inner
+// typed_config use dfpClusterTypedConfig instead.
+func dfpCluster(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	clusters := parsed["static_resources"].(map[string]any)["clusters"].([]any)
+	for _, c := range clusters {
+		cm, _ := c.(map[string]any)
+		if name, _ := cm["name"].(string); name == "dynamic_forward_proxy" {
+			return cm
+		}
+	}
+	t.Fatal("dynamic_forward_proxy cluster not found in emitted config")
+	return nil
+}
+
 func dfpRouteRetryPolicy(t *testing.T, parsed map[string]any) map[string]any {
 	t.Helper()
 	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
