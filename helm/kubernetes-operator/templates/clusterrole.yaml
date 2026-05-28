@@ -22,6 +22,7 @@ rules:
       - ""
     resources:
       - configmaps
+      - secrets
       - serviceaccounts
       - services
     verbs:
@@ -65,16 +66,6 @@ rules:
       - pods/proxy
     verbs:
       - get
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - watch
   - apiGroups:
       - apps
     resources:
