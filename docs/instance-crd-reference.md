@@ -20,7 +20,6 @@ below.
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
 | `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported). |
-| `spec.metadata.metricsPort` | No | `9090` | Container port exposing Prometheus metrics from dedicated-pensieve. The operator stamps a corresponding `metrics` port on the container. |
 | `spec.metadata.template` | No | (operator default) | Pod template merged with the operator-rendered metadata container. See [Operator-owned fields](#operator-owned-fields-on-component-templates) for what users may and may not set. Image: `spec.metadata.template.spec.containers[name=="metadata"].image`. |
 | `spec.metadata.engineRegistration` | No | `false` | Register Engine objects in the metadata service for SQL-level RBAC. |
 | `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
