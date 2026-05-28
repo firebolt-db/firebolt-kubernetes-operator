@@ -92,6 +92,50 @@ as `GatewayPodTemplateRules` and `MetadataPodTemplateRules`.
 | `Degraded` | Was previously Ready, but one or more components became unhealthy |
 | `Failed` | Terminal error requiring manual intervention (e.g., multiple accounts found in metadata) |
 
+## Gateway custom ServiceAccount
+
+By default the operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `compute.firebolt.io/fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on FireboltEngines when a request arrives for a stopped engine (the wake-on-zero protocol).
+
+When `spec.gateway.template.spec.serviceAccountName` is set, the operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA / Role / RoleBinding entirely**. The user is then responsible for:
+
+1. Creating the ServiceAccount in the instance's namespace under the name they specified.
+2. Granting it the verbs the gateway needs:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-wake
+  namespace: firebolt
+rules:
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltengines"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-wake
+  namespace: firebolt
+subjects:
+  - kind: ServiceAccount
+    name: my-gateway-sa
+    namespace: firebolt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gateway-wake
+```
+
+The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA you can also just annotate the operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset — that path keeps the operator in charge of the RBAC.
+
+Missing or under-permissioned user SAs do **not** fail at admission. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts but logs `Forbidden` 403s when it tries to patch a stopped engine's wake annotation. Verify with:
+
+```bash
+kubectl auth can-i patch fireboltengines.compute.firebolt.io \
+  --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
+```
+
 ## Gateway sizing
 
 See [gateway-sizing.md](gateway-sizing.md) for the full sizing guidance on replica count, memory limits, and the 2 MiB buffer constraint.
