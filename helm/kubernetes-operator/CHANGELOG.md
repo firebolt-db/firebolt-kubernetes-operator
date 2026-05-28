@@ -1,3 +1,20 @@
+# 1.0.24
+
+appVersion: v4.1.0
+
+## [4.1.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.0.0...v4.1.0) (2026-05-28)
+
+### Features
+
+* **api:** bound FireboltEngine.spec.resources at admission (FB-556) ([c421174](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c421174dd58d9ca5f60a3b5ce83e1a5f42313fef))
+* **controller:** add per-engine Envoy circuit breakers on DFP cluster (FB-556) ([3ac0aa5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3ac0aa550870b3fb60439b1ccf1311f98a384228))
+* **controller:** surface external finalizers on engine-owned children (FB-556) ([177f274](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/177f2741708f7693f21420495ebd8574683f3a87))
+
+### Bug Fixes
+
+* **controller:** sync ResourceVersion in updateStatus conflict path (FB-556) ([6227d50](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6227d501c3f426e74dd2282c2a4f26043fb6d486))
+
+
 # 1.0.23
 
 appVersion: v4.0.0
