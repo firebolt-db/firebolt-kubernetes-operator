@@ -1,3 +1,24 @@
+# 1.0.23
+
+appVersion: v4.0.0
+
+## [4.0.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v3.1.1...v4.0.0) (2026-05-28)
+
+### ⚠ BREAKING CHANGES
+
+* **api:** drop fictional MetadataSpec.MetricsPort (FB-1322)
+* **api:** replace ComponentSpec with PodTemplateSpec on FireboltInstance gateway/metadata (FB-1322)
+
+### Features
+
+* **api:** replace ComponentSpec with PodTemplateSpec on FireboltInstance gateway/metadata (FB-1322) ([dc750b9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/dc750b97083404a3a8c4fe6047658da994bb48a7))
+
+### Bug Fixes
+
+* **api:** drop fictional MetadataSpec.MetricsPort (FB-1322) ([c0b5f11](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c0b5f11dbee44046d3a253ddfb73ce0c2c359458))
+* **controller:** skip operator-managed gateway RBAC when user supplies serviceAccountName (FB-1322) ([b729b9e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b729b9e8dcbed9e24e6f2060dbcb3a4b0fd04e93))
+
+
 # 1.0.22
 
 appVersion: v3.1.1
