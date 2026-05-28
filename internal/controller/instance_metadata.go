@@ -26,10 +26,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -156,10 +155,23 @@ func metadataConfigMapName(instanceName string) string {
 	return instanceName + SuffixMetadataService + "-config"
 }
 
-// See the design note above ensureGatewayConfigMap in instance_gateway.go
-// for why the metadata ensure* functions below also call r.Update
-// unconditionally and rely on server-side no-op short-circuiting
-// instead of a client-side equality helper.
+// Each metadata ensure* function below writes its resource via
+// Server-Side Apply (client.Apply) with FieldManager
+// OperatorFieldManager and ForceOwnership. SSA lets the operator
+// declare exactly the fields it owns (everything in the `desired`
+// literal) while preserving foreign-managed fields a user may have
+// added via kubectl/SSA from a different field manager — extra
+// labels, annotations, sidecar containers, additional volumes. The
+// ForceOwnership flag means the operator wins on every conflict over
+// fields it does declare; users wanting to override an
+// operator-managed field must use spec.metadata.template (the
+// operator-rendered fields then read from the user's template, which
+// goes through the validating webhook).
+//
+// The apiserver short-circuits no-op applies — generation is not
+// bumped when the resulting object matches what is already stored,
+// so the Deployment controller does not see spurious rollouts even
+// though the operator applies on every reconcile.
 func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 
@@ -167,6 +179,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 	labels := instanceLabels(instance.Name, "metadata")
 
 	desired := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -181,19 +194,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 		return err
 	}
 
-	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating metadata ConfigMap", "name", name)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Data = desired.Data
-	existing.Labels = desired.Labels
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying metadata ConfigMap", "name", name)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 // ensureMetadataDeployment creates or updates the metadata Deployment for a
@@ -210,30 +212,18 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 // genuine multi-replica HA story (quorum, leader election); revisit then.
 func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
 	desired := buildMetadataDeployment(instance, configXML)
+	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating metadata Deployment",
-			"name", desired.Name,
-			"replicas", *desired.Spec.Replicas,
-			"image", desired.Spec.Template.Spec.Containers[0].Image)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Replicas = desired.Spec.Replicas
-	existing.Spec.Template = desired.Spec.Template
-	existing.Spec.Strategy = desired.Spec.Strategy
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying metadata Deployment",
+		"name", desired.Name,
+		"replicas", *desired.Spec.Replicas,
+		"image", desired.Spec.Template.Spec.Containers[0].Image)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
@@ -484,6 +474,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, 
 	labels := instanceLabels(instance.Name, "metadata")
 
 	desired := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: instance.Namespace,
@@ -503,20 +494,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, 
 	}
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
-
-	existing := &corev1.Service{}
-	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, existing)
-	if errors.IsNotFound(err) {
-		log.Info("Creating metadata Service", "name", name)
-		return r.Create(ctx, desired)
-	}
-	if err != nil {
-		return err
-	}
-
-	existing.Spec.Ports = desired.Spec.Ports
-	existing.Spec.Selector = desired.Spec.Selector
-	return r.Update(ctx, existing)
+	log.V(1).Info("Applying metadata Service", "name", name)
+	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
 }
 
 // contentHash returns a truncated SHA-256 hash of the given string, used

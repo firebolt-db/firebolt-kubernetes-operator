@@ -28,6 +28,17 @@ import (
 )
 
 const (
+	// OperatorFieldManager is the Server-Side Apply field-manager name
+	// stamped on every operator-emitted Patch (client.Apply). All
+	// `ensure*` functions across the engine, instance, gateway, metadata,
+	// postgres, and RBAC paths converge on this single identifier so
+	// `kubectl get <resource> -o yaml` shows one consistent owner under
+	// `metadata.managedFields[].manager` for everything the operator
+	// produces. Changing the value is a breaking change: existing
+	// resources would be left half-owned by the old manager name until
+	// the operator next applies them with ForceOwnership.
+	OperatorFieldManager = "firebolt-operator"
+
 	// LabelEngine identifies the engine a resource belongs to.
 	LabelEngine = "firebolt.io/engine"
 	// LabelGeneration identifies the generation of a resource.
