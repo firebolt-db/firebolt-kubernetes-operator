@@ -146,15 +146,6 @@ type MetadataSpec struct {
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// MetricsPort is the container port exposing Prometheus metrics
-	// from dedicated-pensieve. Defaults to 9090 if zero. The operator
-	// stamps a corresponding "metrics" port entry on the container.
-	// +kubebuilder:default=9090
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=65535
-	// +optional
-	MetricsPort int32 `json:"metricsPort,omitempty"`
-
 	// Template is the pod template the operator merges with its
 	// own-rendered metadata container, config volume, credentials
 	// mount, probes, and pod-level securityContext to produce the

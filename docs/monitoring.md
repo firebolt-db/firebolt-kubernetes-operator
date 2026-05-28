@@ -72,7 +72,7 @@ Instead, a separate read-only stats listener is added on the metrics port (defau
 
 ### Consistent metrics port
 
-All components default to port 9090 named `metrics`. Gateway and metadata expose the override on the FireboltInstance via `spec.gateway.metricsPort` and `spec.metadata.metricsPort` respectively; the operator stamps the corresponding `metrics`-named port on the rendered container. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number.
+Engine pods and gateway pods both expose Prometheus metrics on a container port named `metrics` (default 9090). The gateway override lives on the FireboltInstance at `spec.gateway.metricsPort`; the operator stamps the corresponding `metrics`-named port on the rendered Envoy container. Engine pods carry the port via the per-FireboltEngine wiring. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number. The metadata pod does not currently expose a Prometheus endpoint, so no `metrics` port is stamped there.
 
 ### Cross-namespace support
 

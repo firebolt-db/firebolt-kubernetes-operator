@@ -8689,16 +8689,6 @@ spec:
                     description: EngineRegistration enables registration of Engine
                       objects in the metadata service for SQL-level RBAC.
                     type: boolean
-                  metricsPort:
-                    default: 9090
-                    description: |-
-                      MetricsPort is the container port exposing Prometheus metrics
-                      from dedicated-pensieve. Defaults to 9090 if zero. The operator
-                      stamps a corresponding "metrics" port entry on the container.
-                    format: int32
-                    maximum: 65535
-                    minimum: 1
-                    type: integer
                   postgres:
                     description: |-
                       Postgres configures the external PostgreSQL connection.
