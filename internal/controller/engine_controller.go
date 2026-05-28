@@ -563,6 +563,15 @@ func formatExternalFinalizerMessage(externals []externalFinalizerEntry) string {
 // spec/metadata. Conflicts on the main object are handled by
 // returning the error and letting controller-runtime requeue - do
 // NOT copy the force-overwrite pattern below to non-status writes.
+//
+// ResourceVersion sync: a /status subresource Update bumps the
+// object's resourceVersion just like a main-object Update does.
+// On the conflict-recovery path we Get + Update a `fresh` copy,
+// which leaves the caller's `engine` pointing at a stale RV. The
+// next main-object write the caller issues (typically
+// reconcileDelete removing the finalizer) would then hit a
+// guaranteed 409, adding an extra requeue cycle for no reason.
+// Sync the new RV back onto the caller's engine before returning.
 func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *computev1alpha1.FireboltEngine) error {
 	now := metav1.Now()
 	engine.Status.LastReconciled = &now
@@ -575,7 +584,11 @@ func (r *FireboltEngineReconciler) updateStatus(ctx context.Context, engine *com
 		return err
 	}
 	fresh.Status = engine.Status
-	return r.Status().Update(ctx, fresh)
+	if err := r.Status().Update(ctx, fresh); err != nil {
+		return err
+	}
+	engine.ResourceVersion = fresh.ResourceVersion
+	return nil
 }
 
 // setReadyCondition derives the top-level ConditionReady from the
