@@ -1,0 +1,227 @@
+# Security model
+
+This document records the operator's threat-model boundary: what the
+operator hardens by default versus what is the cluster-platform team's
+responsibility.
+
+## What the operator enforces
+
+Pod-level hardening is stamped onto every workload the operator
+creates and is non-overridable by user input (see
+`api/v1alpha1/operatorauthority.go` for the field-level allowlist):
+
+| Pod | UID/GID | RunAsNonRoot | Capabilities | Seccomp | Read-only root FS |
+|---|---|---|---|---|---|
+| Engine | 3473 / 3473 (default; configurable per spec) | true | drop ALL | `RuntimeDefault` | yes (data volume mounted at `/firebolt-core/volume`) |
+| Metadata (Pensieve) | 1111 / 1111 (pinned to image's `dedicated-pensieve` user) | true | drop ALL | `RuntimeDefault` | yes (tmp via `emptyDir`) |
+| PostgreSQL (internal) | 70 / 70 (Alpine image's `postgres` user) | true | drop ALL | `RuntimeDefault` | yes (PGDATA via PVC) |
+| Gateway (Envoy) | 101 / 101 | true | drop ALL | `RuntimeDefault` | yes |
+
+The validating webhooks on FireboltInstance and EngineClass reject
+user input that would weaken these defaults. The metadata pod also
+floors any user-supplied PodSecurityContext to RunAsNonRoot with the
+pinned UID/GID — a user template cannot drop privileges below what
+the image requires.
+
+The operator's own ClusterRole (rendered into
+`config/rbac/role.yaml`, mirrored in
+`helm/kubernetes-operator/templates/clusterrole.yaml`) is the minimal
+set of verbs needed to manage the three CRDs and their generated
+resources. The operator does not request `*` on any namespaced verb
+and does not request `nodes`, `clusterrolebindings`, or any other
+cluster-scope mutation.
+
+Resource maxima on `FireboltEngine.spec.resources` are enforced by
+the validating webhook (see "Resource bounds" below). The bounds
+protect a namespace from accidentally admitting an engine whose
+requests would starve sibling workloads at scheduling time.
+
+## What the operator does NOT enforce
+
+### Network isolation between pods
+
+**The operator emits no NetworkPolicy objects.** All pod-to-pod and
+pod-to-external traffic is governed by whatever the cluster's CNI and
+NetworkPolicy controller already enforce. In a default Kubernetes
+install with no NetworkPolicy controller installed, every pod can
+reach every other pod on every port.
+
+This is a deliberate scoping decision: NetworkPolicy semantics depend
+on the CNI plugin (Calico, Cilium, Antrea, etc.), the cluster's
+default-allow-vs-default-deny posture, and the operator-vs-platform
+ownership boundary for security primitives. Encoding any of those
+assumptions into operator-emitted NetworkPolicies would either be a
+no-op (no controller installed) or actively wrong for the deployment
+target.
+
+Platform teams should apply NetworkPolicies covering at least the
+allowed flows below. Recommended selectors:
+
+| Pod kind | Selector |
+|---|---|
+| Engine pods | `firebolt.io/engine` exists (matches any generation of any engine in the namespace) |
+| Gateway / Metadata / PostgreSQL | `firebolt.io/component={gateway,metadata,postgres}` |
+| Instance scoping | `firebolt.io/instance=<instance-name>` (present on instance-level workloads only — engines carry `firebolt.io/engine` instead, which is unique per engine) |
+
+#### Allowed flows
+
+| From | To | Port | Purpose |
+|---|---|---|---|
+| External clients | Gateway | 8080 | Query traffic (HTTP) |
+| Gateway | Engine pods | 3473 | Query forwarding |
+| Engine pods | Metadata | 7000 | Metadata gRPC |
+| Metadata | PostgreSQL | 5432 | Metadata catalog reads/writes |
+| Engine pods | External object store | 443 / 80 | Managed-storage reads/writes (S3, GCS, etc.) |
+| Prometheus | Engine / Gateway / Operator | 9090 / 9090 / 8443 | Metrics scraping |
+| kube-apiserver | Operator webhook | 9443 | Admission control |
+
+Engine-to-engine, engine-to-PostgreSQL, gateway-to-metadata, and
+gateway-to-PostgreSQL are not required by any operator-managed
+control flow and should be denied.
+
+#### Example baseline NetworkPolicy
+
+The snippet below denies all ingress and egress by default in the
+instance's namespace, then re-allows the flows above. It assumes the
+gateway's external clients live in a `firebolt-clients` namespace; the
+selector should be adjusted to match the actual client topology.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress
+spec:
+  podSelector:
+    matchLabels:
+      firebolt.io/component: gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: firebolt-clients
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: engine-from-gateway
+spec:
+  podSelector:
+    matchExpressions:
+      - key: firebolt.io/engine
+        operator: Exists
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              firebolt.io/component: gateway
+      ports:
+        - port: 3473
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: metadata-from-engine
+spec:
+  podSelector:
+    matchLabels:
+      firebolt.io/component: metadata
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: firebolt.io/engine
+                operator: Exists
+      ports:
+        - port: 7000
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-metadata
+spec:
+  podSelector:
+    matchLabels:
+      firebolt.io/component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              firebolt.io/component: metadata
+      ports:
+        - port: 5432
+          protocol: TCP
+```
+
+Add egress allow-rules in the same shape; the operator does not
+generate them.
+
+### Namespace-level resource ceilings
+
+A `ResourceQuota` capping the aggregate of `requests.cpu` /
+`requests.memory` / pod count / PVC size across all engines in a
+namespace is a platform concern. The operator enforces per-engine
+upper bounds in admission (see below) but does not emit a
+ResourceQuota — the per-namespace budget is a deployment-target
+decision (test cluster vs. multi-tenant production).
+
+### Image provenance and supply-chain attestation
+
+The operator pulls whatever image the user supplies via
+`FireboltEngine.spec.engineClassRef` → `EngineClass.spec.template`,
+or the embedded defaults shipped with the operator binary. The
+operator does not validate signatures, attestations, or SBOMs. Use a
+cluster-level admission controller (Kyverno, Sigstore Policy
+Controller, etc.) if image-policy enforcement is required.
+
+## Resource bounds
+
+The FireboltEngine validating webhook rejects `spec.resources`
+requests/limits above operator-configured maxima. This is a
+defense-in-depth control against accidental over-provisioning — a
+typoed `100Gi` instead of `10Gi` is caught at admission rather than
+at scheduling time when it would silently exhaust namespace capacity
+and block other engines.
+
+The maxima are configurable at operator install time; defaults are
+sized for typical production deployments. Override via Helm values
+when running larger or smaller engines.
+
+## Secrets handling
+
+The operator generates one Secret: the internal PostgreSQL
+credentials (`<instance>-metadata-postgres-creds`). The password is
+generated at first reconcile, persisted to a Kubernetes Secret with
+owner reference to the FireboltInstance, and never re-rotated by the
+operator. The metadata and PostgreSQL Deployments load it via
+`envFrom`.
+
+User-supplied credentials (external PostgreSQL, external object
+store) are referenced by name on the FireboltInstance / FireboltEngine
+spec and resolved at reconcile time. The operator never reads or
+materializes a user-supplied secret's value into its own status,
+events, or logs.
+
+## See also
+
+- [docs/architecture.md](architecture.md) — full operator architecture
+- [docs/monitoring.md](monitoring.md) — metrics and alerts the operator exposes
+- [docs/instance-crd-reference.md](instance-crd-reference.md) — operator-owned vs. user-owned fields on FireboltInstance
+- [docs/engineclass-crd-reference.md](engineclass-crd-reference.md) — operator-owned vs. user-owned fields on EngineClass
