@@ -236,15 +236,24 @@ const (
 	// deployment has converged.
 	//
 	// Reasons for False:
-	//   - Initializing     : status has not been populated yet
-	//   - InstanceNotReady : ConditionInstanceReady is False
-	//   - Rolling          : phase is Creating / Switching / Draining / Cleaning
-	//   - PhaseFailed      : phase is Failed (terminal; human-gated recovery)
-	//   - PodsNotReady     : phase is Stable but active-generation pods
-	//                        have not yet reported Ready
-	//   - Stopped          : phase is Stopped (spec.replicas is 0);
-	//                        the engine is intentionally parked and
-	//                        cannot serve traffic until replicas > 0
+	//   - Initializing      : status has not been populated yet
+	//   - InstanceNotReady  : ConditionInstanceReady is False
+	//   - Rolling           : phase is Creating / Switching / Draining / Cleaning
+	//   - PhaseFailed       : phase is Failed (terminal; human-gated recovery)
+	//   - PodsNotReady      : phase is Stable but active-generation pods
+	//                         have not yet reported Ready
+	//   - Stopped           : phase is Stopped (spec.replicas is 0);
+	//                         the engine is intentionally parked and
+	//                         cannot serve traffic until replicas > 0
+	//   - ExternalFinalizer : reconcileDelete observed one or more
+	//                         non-operator finalizers on owned children
+	//                         (StatefulSet / Service / ConfigMap).
+	//                         The engine CR is still garbage-collected;
+	//                         the condition message and matching
+	//                         ExternalFinalizerOnOwnedResource Event
+	//                         name the resources and finalizers so the
+	//                         operator can identify which external
+	//                         controller is holding cleanup back.
 	ConditionReady = "Ready"
 
 	// ConditionInstanceReady indicates whether the referenced FireboltInstance
