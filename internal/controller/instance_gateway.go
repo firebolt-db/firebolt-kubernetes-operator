@@ -64,7 +64,6 @@ const (
 	gatewayContainerPort int32 = 8080
 	gatewayAdminPort     int32 = 9901
 	gatewayServicePort   int32 = 80
-	gatewayContainerName       = "envoy"
 	gatewayConfigKey           = "envoy.yaml"
 
 	// gatewayPerConnectionBufferLimitBytes is the value the operator stamps
