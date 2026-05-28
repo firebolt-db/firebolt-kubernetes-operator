@@ -168,6 +168,7 @@ make lint               # golangci-lint
 - [docs/gateway-sizing.md](docs/gateway-sizing.md) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
 - [docs/troubleshooting.md](docs/troubleshooting.md) -- common issues with instances and engines
 - [docs/monitoring.md](docs/monitoring.md) -- observability and metrics
+- [docs/security.md](docs/security.md) -- operator vs. platform responsibilities for pod hardening, network isolation, and secrets
 
 ### Design
 
