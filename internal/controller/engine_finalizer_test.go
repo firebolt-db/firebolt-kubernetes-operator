@@ -319,3 +319,87 @@ func TestReconcileDelete_ExternalFinalizer_StillRemovesOperatorFinalizer(t *test
 		t.Fatalf("operator finalizer should have been removed even with external finalizers present; engine still carries %v", got.Finalizers)
 	}
 }
+
+// TestUpdateStatus_ConflictRecoverySyncsResourceVersion guards the
+// invariant that updateStatus's one-shot conflict recovery leaves the
+// caller's `engine` pointer carrying the up-to-date ResourceVersion.
+// Without that sync, the next main-object write the caller issues
+// (typically reconcileDelete removing the finalizer) hits a guaranteed
+// 409 from a stale RV — observable as an extra requeue cycle on every
+// engine deletion that goes through the surfaceExternalFinalizers
+// path, and silently masking the real condition of the engine in
+// production logs.
+func TestUpdateStatus_ConflictRecoverySyncsResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: "ns"},
+		Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: "inst", Replicas: 1},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}).
+		WithObjects(engine).
+		Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          cl,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+	}
+
+	ctx := context.Background()
+
+	// Snapshot the engine into a "stale" in-memory copy at its initial
+	// RV. We then race a concurrent mutation through the cluster
+	// (annotation patch) so the stale copy's RV no longer matches the
+	// cluster's. updateStatus on the stale copy will fail with 409 and
+	// take the conflict-recovery path.
+	stale := &computev1alpha1.FireboltEngine{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: "eng", Namespace: "ns"}, stale); err != nil {
+		t.Fatalf("initial Get: %v", err)
+	}
+	staleRV := stale.ResourceVersion
+
+	concurrent := &computev1alpha1.FireboltEngine{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: "eng", Namespace: "ns"}, concurrent); err != nil {
+		t.Fatalf("concurrent Get: %v", err)
+	}
+	if concurrent.Annotations == nil {
+		concurrent.Annotations = map[string]string{}
+	}
+	concurrent.Annotations["test/forced-rv-bump"] = "1"
+	if err := cl.Update(ctx, concurrent); err != nil {
+		t.Fatalf("concurrent Update: %v", err)
+	}
+
+	// Set a status field on the stale copy and call updateStatus. The
+	// initial Status().Update fails with 409 (stale RV); the recovery
+	// path Gets fresh, copies status, succeeds. With the fix in place,
+	// stale.ResourceVersion is synced back to the post-write RV.
+	stale.Status.Phase = computev1alpha1.PhaseStable
+	if err := r.updateStatus(ctx, stale); err != nil {
+		t.Fatalf("updateStatus: %v", err)
+	}
+
+	if stale.ResourceVersion == staleRV {
+		t.Fatalf("updateStatus left stale.ResourceVersion at %q (the pre-write value); the conflict-recovery path must sync the new RV back so the next main-object Update does not 409", staleRV)
+	}
+
+	// The load-bearing assertion: a subsequent main-object Update on
+	// `stale` must succeed without 409. This is the exact sequence
+	// reconcileDelete runs after surfaceExternalFinalizers calls
+	// updateStatus, and the bug this test guards manifested as a
+	// guaranteed 409 right here.
+	stale.Labels = map[string]string{"test/after-updatestatus": "1"}
+	if err := cl.Update(ctx, stale); err != nil {
+		t.Fatalf("main-object Update after updateStatus must succeed (RV must be synced), got: %v", err)
+	}
+}
