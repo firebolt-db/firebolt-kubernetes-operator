@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -52,6 +53,27 @@ const finalizerName = "compute.firebolt.io/engine-cleanup"
 // defense against custom controllers emitting malformed reasons that
 // would otherwise cause the status update to be rejected by the apiserver.
 const reasonStatefulSetWarning = "StatefulSetWarning"
+
+// reasonExternalFinalizer is the Ready=False reason surfaced when
+// reconcileDelete observes a non-operator finalizer on an
+// owned StatefulSet / Service / ConfigMap. The operator does not stamp
+// finalizers on engine-owned children itself, so any finalizer found
+// on a labeled child is by definition installed by an external
+// controller (backup tools, service mesh injectors, custom admission
+// hooks). The condition is informational, not blocking: the engine's
+// own finalizer is still removed at the end of reconcileDelete so the
+// engine CR can be garbage-collected; the message tells the operator
+// which external finalizer to chase when child resources linger past
+// engine deletion. See the eventReason of the same name for the
+// matching Event.
+const reasonExternalFinalizer = "ExternalFinalizer"
+
+// eventReasonExternalFinalizer is the Reason on the Warning Event
+// emitted alongside the ExternalFinalizer condition. Same semantic as
+// reasonExternalFinalizer; the Event carries the per-resource detail
+// (kind/name/finalizer) so the report survives engine CR garbage
+// collection, since the condition disappears with the CR.
+const eventReasonExternalFinalizer = "ExternalFinalizerOnOwnedResource"
 
 // FireboltEngineReconciler reconciles FireboltEngine objects by managing
 // blue-green generational deployments of Firebolt engine StatefulSets.
@@ -76,6 +98,13 @@ type FireboltEngineReconciler struct {
 	// Must be non-nil; use metrics.NoOpEngineRecorder{} in tests.
 	MetricsRecorder metrics.EngineRecorder
 
+	// EventRecorder emits Kubernetes Events on the engine CR. Populated
+	// in SetupWithManager when nil; unit tests that exercise event-emitting
+	// paths should inject a record.FakeRecorder. Nil is tolerated: the
+	// emit-event helpers no-op so tests that do not care about events can
+	// leave the field unset.
+	EventRecorder record.EventRecorder
+
 	// DisableGC disables the orphaned-generation garbage collector. When
 	// true, the reconciler will not sweep resources from abandoned
 	// generations. E2E tests set this to verify that the happy path never
@@ -95,7 +124,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get
-// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
 
 // Reconcile reads the current engine state from the cluster, computes the
 // reconcile actions needed, and applies them. Deletion is handled separately
@@ -333,14 +362,35 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}, nil
 }
 
-// reconcileDelete removes all generation-scoped resources owned by this engine
-// and then removes the finalizer to allow garbage collection.
+// externalFinalizerEntry records one labeled child resource that
+// carries a finalizer the operator did not install. Used to build the
+// ExternalFinalizer Ready condition message and the matching Warning
+// Event so users can see what external controller (backup tool,
+// service mesh injector, custom admission hook) is holding up
+// cleanup.
+type externalFinalizerEntry struct {
+	Kind       string
+	Name       string
+	Finalizers []string
+}
+
+// reconcileDelete deletes generation-scoped resources owned by this
+// engine, surfaces any external finalizers it observed on those
+// children, and then removes the engine's own finalizer so the CR can
+// be garbage-collected. External finalizers are reported but do not
+// block the engine's finalizer removal: backup tools and similar
+// integrations are legitimate users of finalizers, and pinning the
+// engine CR indefinitely would force operators to manually edit
+// finalizers out for every routine deletion. The Warning Event
+// emitted alongside the condition survives the CR's deletion long
+// enough for an operator to find it via `kubectl get events`.
 func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *computev1alpha1.FireboltEngine) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 	log.Info("Handling engine deletion")
 
 	ns := engine.Namespace
 	var errs []error
+	var externals []externalFinalizerEntry
 
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList, client.InNamespace(ns), client.MatchingLabels{
@@ -350,6 +400,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		errs = append(errs, err)
 	} else {
 		for i := range stsList.Items {
+			externals = appendExternalFinalizer(externals, "StatefulSet", &stsList.Items[i])
 			log.Info("Deleting StatefulSet", "name", stsList.Items[i].Name)
 			if err := r.Delete(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete StatefulSet", "name", stsList.Items[i].Name)
@@ -366,6 +417,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		errs = append(errs, err)
 	} else {
 		for i := range svcList.Items {
+			externals = appendExternalFinalizer(externals, "Service", &svcList.Items[i])
 			log.Info("Deleting Service", "name", svcList.Items[i].Name)
 			if err := r.deleteIfExists(ctx, &svcList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete Service", "name", svcList.Items[i].Name)
@@ -382,6 +434,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		errs = append(errs, err)
 	} else {
 		for i := range cmList.Items {
+			externals = appendExternalFinalizer(externals, "ConfigMap", &cmList.Items[i])
 			log.Info("Deleting ConfigMap", "name", cmList.Items[i].Name)
 			if err := r.deleteIfExists(ctx, &cmList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete ConfigMap", "name", cmList.Items[i].Name)
@@ -394,6 +447,8 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
 
+	r.surfaceExternalFinalizers(ctx, engine, externals)
+
 	controllerutil.RemoveFinalizer(engine, finalizerName)
 	if err := r.Update(ctx, engine); err != nil {
 		return err
@@ -403,6 +458,81 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 
 	log.Info("Finalizer removed, deletion complete")
 	return nil
+}
+
+// appendExternalFinalizer adds obj to the report iff it carries one or
+// more finalizers. The operator does not stamp finalizers on engine
+// children, so any non-empty finalizer slice on a labeled child is
+// "external" by construction.
+func appendExternalFinalizer(externals []externalFinalizerEntry, kind string, obj client.Object) []externalFinalizerEntry {
+	fins := obj.GetFinalizers()
+	if len(fins) == 0 {
+		return externals
+	}
+	// Defensive copy: GetFinalizers returns the backing slice and the
+	// caller may mutate the object later (e.g. set DeletionTimestamp on
+	// re-list); we want a stable snapshot for the Event message.
+	copied := make([]string, len(fins))
+	copy(copied, fins)
+	return append(externals, externalFinalizerEntry{
+		Kind:       kind,
+		Name:       obj.GetName(),
+		Finalizers: copied,
+	})
+}
+
+// surfaceExternalFinalizers persists the ExternalFinalizer condition
+// on the engine and emits a matching Warning Event so the report
+// outlives the CR. No-op when the report is empty. Best-effort: a
+// status write or event-emit failure logs but does not propagate, so
+// the calling reconcileDelete can still remove the engine's finalizer
+// — losing the diagnostic is preferable to leaving the engine CR
+// stuck in DeletionTimestamp because of an unrelated transient
+// API failure.
+func (r *FireboltEngineReconciler) surfaceExternalFinalizers(
+	ctx context.Context,
+	engine *computev1alpha1.FireboltEngine,
+	externals []externalFinalizerEntry,
+) {
+	if len(externals) == 0 {
+		return
+	}
+	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
+
+	msg := formatExternalFinalizerMessage(externals)
+	log.Info("External finalizers detected on owned resources", "detail", msg)
+
+	if r.EventRecorder != nil {
+		r.EventRecorder.Event(engine, corev1.EventTypeWarning, eventReasonExternalFinalizer, msg)
+	}
+
+	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: engine.Generation,
+		Reason:             reasonExternalFinalizer,
+		Message:            msg,
+	})
+	if err := r.updateStatus(ctx, engine); err != nil {
+		log.Info("Failed to persist ExternalFinalizer condition; engine CR will still be garbage-collected", "error", err)
+	}
+}
+
+// formatExternalFinalizerMessage renders the per-resource detail as a
+// single multi-line string suitable for both an Event message and a
+// status condition Message. Keeps the kind/name first so a human
+// scanning `kubectl describe engine` can identify the offending
+// resource at a glance.
+func formatExternalFinalizerMessage(externals []externalFinalizerEntry) string {
+	var b strings.Builder
+	// strings.Builder.WriteString and fmt.Fprintf into a Builder both
+	// return errors that documentation guarantees to be nil; the linter
+	// flags them anyway, so we discard explicitly.
+	_, _ = b.WriteString("External finalizers on owned resources (engine CR will be garbage-collected; the listed resources will linger until their finalizers are removed by their owners):")
+	for _, e := range externals {
+		_, _ = fmt.Fprintf(&b, "\n  - %s/%s: %s", e.Kind, e.Name, strings.Join(e.Finalizers, ", "))
+	}
+	return b.String()
 }
 
 // updateStatus writes engine.Status back to the cluster with a one-shot
@@ -759,6 +889,9 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 			return fmt.Errorf("failed to create clientset: %w", err)
 		}
 		r.Clientset = clientset
+	}
+	if r.EventRecorder == nil {
+		r.EventRecorder = mgr.GetEventRecorderFor(name)
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

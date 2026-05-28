@@ -22,10 +22,11 @@ rules:
   - ""
   resources:
   - events
-  - pods
   verbs:
+  - create
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - ""
@@ -33,6 +34,14 @@ rules:
   - persistentvolumeclaims
   verbs:
   - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
   - get
   - list
   - watch

@@ -45,6 +45,15 @@ rules:
       - ""
     resources:
       - events
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
       - pods
     verbs:
       - get

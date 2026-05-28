@@ -42,6 +42,7 @@
 | `Ready=False, Reason=Stopped` | `spec.replicas == 0`. The engine is intentionally parked; not a transient failure. |
 | `Ready=False, Reason=InstanceNotReady` | The referenced `FireboltInstance` is not ready. |
 | `Ready=False, Reason=DrainCheckFailing` | The drain-readiness probe (Prometheus scrape on a draining-generation pod) cannot reach the pod or parse its metrics. The blue-green is paused until the probe recovers. |
+| `Ready=False, Reason=ExternalFinalizer` | The engine is being deleted (`metadata.deletionTimestamp` is set) and the operator detected one or more non-operator finalizers on owned children (StatefulSet / Service / ConfigMap). The condition `message` and the matching `ExternalFinalizerOnOwnedResource` Warning Event name the resources and finalizers. The engine CR is still garbage-collected; the listed resources will linger until their finalizers are removed by their owners (backup tools, service-mesh injectors, custom admission hooks). |
 
 ## Operator-Managed Resources
 
