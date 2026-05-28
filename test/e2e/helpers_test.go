@@ -230,6 +230,35 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef)
 }
 
+// CreateEngineWithResources creates a FireboltEngine with caller-supplied
+// resource requests/limits, bypassing the default 100m/2Gi the other
+// helpers stamp on. Used by failure-isolation tests that need an engine
+// to fail at startup (e.g. memory limit small enough to OOMKill the
+// container before its first health probe).
+func CreateEngineWithResources(ctx context.Context, instanceName, name string, replicas int, resources corev1.ResourceRequirements) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	drainCheckEnabled := false
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:        instanceName,
+			Replicas:           int32(replicas),
+			Resources:          resources,
+			DrainCheckEnabled:  &drainCheckEnabled,
+			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
+			Rollout:            computev1alpha1.RolloutStrategy("graceful"),
+			CustomEngineConfig: engineStorageConfig(flociBucket, flociEndpoint),
+		},
+	}
+	return cl.Create(ctx, engine)
+}
+
 func createEngine(ctx context.Context, instanceName, name string, replicas int, rollout string, classRef *string) error {
 	cl, err := getCRDClient()
 	if err != nil {
