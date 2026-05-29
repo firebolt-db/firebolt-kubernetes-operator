@@ -235,6 +235,7 @@ func main() {
 		Scheme:          mgr.GetScheme(),
 		Namespace:       watchNamespace,
 		MetricsRecorder: engineMetrics,
+		ResourceBounds:  engineBounds,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
 		os.Exit(1)

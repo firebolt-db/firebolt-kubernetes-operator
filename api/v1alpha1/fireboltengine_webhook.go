@@ -76,6 +76,47 @@ func (b *EngineResourceBounds) max(name corev1.ResourceName) resource.Quantity {
 	}
 }
 
+// Validate walks resources.Requests and resources.Limits and returns a
+// field.ErrorList containing one *field.Error per entry whose value
+// exceeds the configured per-dimension bound. base is the field.Path
+// the caller used to reach the ResourceRequirements (e.g.
+// field.NewPath("spec","resources")). Both webhook admission and the
+// FireboltEngine controller's defense-in-depth gate consume this so a
+// CR rejected at admission and a CR caught at reconcile carry the
+// same field path and the same "exceeds operator-configured maximum"
+// message. An empty bounds value (IsEmpty()) short-circuits — the
+// platform team has not opted into bounds, so every value passes.
+func (b *EngineResourceBounds) Validate(resources corev1.ResourceRequirements, base *field.Path) field.ErrorList {
+	if b.IsEmpty() {
+		return nil
+	}
+	var errs field.ErrorList
+	errs = append(errs, b.validateResourceList(base.Child("requests"), resources.Requests)...)
+	errs = append(errs, b.validateResourceList(base.Child("limits"), resources.Limits)...)
+	return errs
+}
+
+// validateResourceList is the per-map walker behind Validate. Kept
+// private because callers always reach it via Validate, which seeds
+// the Requests / Limits split and the IsEmpty short-circuit.
+func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev1.ResourceList) field.ErrorList {
+	var errs field.ErrorList
+	for name, qty := range list {
+		bound := b.max(name)
+		if bound.IsZero() {
+			continue
+		}
+		if qty.Cmp(bound) > 0 {
+			errs = append(errs, field.Invalid(
+				path.Key(string(name)),
+				qty.String(),
+				fmt.Sprintf("exceeds operator-configured maximum %s", bound.String()),
+			))
+		}
+	}
+	return errs
+}
+
 // FireboltEngineCustomValidator validates FireboltEngine resources at
 // admission time. It performs two checks:
 //
@@ -195,36 +236,10 @@ func (v *FireboltEngineCustomValidator) validateEngineClassRef(ctx context.Conte
 }
 
 // validateResources rejects spec.resources entries whose value exceeds
-// the operator-configured maximum. Both Requests and Limits are walked;
-// the two maps are checked independently so a user error in either side
-// is reported with the specific field path. Resource dimensions without
-// a configured bound (zero quantity in ResourceBounds, or a name the
-// operator doesn't know like "nvidia.com/gpu") pass through untouched.
+// the operator-configured maximum. Delegates to ResourceBounds.Validate
+// so the webhook and the FireboltEngineReconciler's controller-side
+// defense-in-depth check (admission-bypass path) report identical
+// field-path errors.
 func (v *FireboltEngineCustomValidator) validateResources(eng *FireboltEngine) field.ErrorList {
-	if v.ResourceBounds.IsEmpty() {
-		return nil
-	}
-	var errs field.ErrorList
-	base := field.NewPath("spec", "resources")
-	errs = append(errs, v.validateResourceList(base.Child("requests"), eng.Spec.Resources.Requests)...)
-	errs = append(errs, v.validateResourceList(base.Child("limits"), eng.Spec.Resources.Limits)...)
-	return errs
-}
-
-func (v *FireboltEngineCustomValidator) validateResourceList(path *field.Path, list corev1.ResourceList) field.ErrorList {
-	var errs field.ErrorList
-	for name, qty := range list {
-		bound := v.ResourceBounds.max(name)
-		if bound.IsZero() {
-			continue
-		}
-		if qty.Cmp(bound) > 0 {
-			errs = append(errs, field.Invalid(
-				path.Key(string(name)),
-				qty.String(),
-				fmt.Sprintf("exceeds operator-configured maximum %s", bound.String()),
-			))
-		}
-	}
-	return errs
+	return v.ResourceBounds.Validate(eng.Spec.Resources, field.NewPath("spec", "resources"))
 }

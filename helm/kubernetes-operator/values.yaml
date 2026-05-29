@@ -135,14 +135,19 @@ healthProbeBindAddress: ":8081"
 # -- Namespace to watch for FireboltEngine resources. Empty watches all namespaces.
 watchNamespace: ""
 
-# Admission-time upper bounds on FireboltEngine.spec.resources values. Each
-# entry is a Kubernetes resource.Quantity that caps both Requests and Limits
-# for the matching dimension. Empty disables that dimension's bound; the
-# default leaves every dimension unbounded so existing installs are not
-# broken by an upgrade. Bounds protect a namespace from accidentally
-# admitting an engine whose requests would starve sibling workloads or
-# whose limits would OOM the node. Only enforced when the operator's
-# validating webhook is enabled (webhook.enabled: true).
+# Upper bounds on FireboltEngine.spec.resources values. Each entry is a
+# Kubernetes resource.Quantity that caps both Requests and Limits for the
+# matching dimension. Empty disables that dimension's bound; the default
+# leaves every dimension unbounded so existing installs are not broken
+# by an upgrade. Bounds protect a namespace from accidentally admitting
+# an engine whose requests would starve sibling workloads or whose
+# limits would OOM the node. Enforced in two places: the validating
+# webhook rejects offending CRs at admission time (synchronous,
+# requires webhook.enabled: true), and the FireboltEngine controller
+# stamps Ready=False/ResourceBoundsExceeded with the offending field
+# path on any over-bound engine that slipped past admission (e.g.
+# webhooks off). The controller-side check is the always-on backstop;
+# enable the webhook for an immediate apply-time signal.
 engineResourceBounds:
   # -- Maximum allowed FireboltEngine.spec.resources CPU (requests and limits).
   # Example: "32".
