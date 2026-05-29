@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -111,6 +112,16 @@ type FireboltEngineReconciler struct {
 	// produces orphans; only tests that explicitly exercise mid-flight
 	// spec changes should enable GC.
 	DisableGC bool
+
+	// ResourceBounds caps per-dimension values in
+	// FireboltEngine.spec.resources at reconcile time. Identical to the
+	// admission webhook's ResourceBounds (both sourced from the
+	// --engine-max-* CLI flags in cmd/main.go) so admission and
+	// reconcile report the same field-path errors. When admission is on
+	// the controller-side gate is a redundant defense-in-depth check;
+	// when admission is bypassed (chart default), it is the only
+	// enforcement. An empty value disables the gate.
+	ResourceBounds computev1alpha1.EngineResourceBounds
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch
@@ -311,6 +322,18 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.handleEngineClassError(ctx, engine, classErr)
 	}
 
+	// Defense-in-depth for the FireboltEngine validating webhook's
+	// resource-bound check. Webhook ON: admission already rejected
+	// anything above the configured --engine-max-* maximum, so this
+	// branch is dead code. Webhook OFF (chart default): this is the
+	// only enforcement — values.yaml advertises the bounds, and a
+	// silent no-op would mislead operators who set them. Same field
+	// path and "exceeds operator-configured maximum" message as the
+	// webhook so diagnostics are stable across admission paths.
+	if boundsErrs := r.ResourceBounds.Validate(engine.Spec.Resources, field.NewPath("spec", "resources")); len(boundsErrs) > 0 {
+		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+	}
+
 	result := computeEngineReconcile(
 		&engine.Spec,
 		&engine.Status,
@@ -328,18 +351,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	setReadyCondition(&result.Status, current, engine.Generation)
 
-	// When the engine is stuck because the StatefulSet controller cannot
-	// create the desired pod count (missing ServiceAccount, quota, admission
-	// rejection, PVC unbindable, ...), the only place the actionable error
-	// appears is on the StatefulSet's events. Surface the latest Warning
-	// onto the Ready condition so users do not have to know to run
-	// `kubectl describe sts`. The lookup is best-effort; failures here
-	// only forfeit the diagnostic, never the reconcile.
-	if shouldSurfaceStatefulSetEvent(&result.Status, current, engine.Spec.Replicas) {
-		if ev := r.latestStatefulSetWarning(ctx, current.CurrentSTS); ev != nil {
-			applyStatefulSetEventToReadyCondition(&result.Status, ev, engine.Generation)
-		}
-	}
+	r.decorateReadyConditionWithSTSEvent(ctx, engine, &result, current)
 
 	if err := r.applyEngineState(ctx, engine, &result); err != nil {
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
@@ -734,6 +746,48 @@ func (r *FireboltEngineReconciler) handleEngineClassError(ctx context.Context, e
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
+// handleResourceBoundsViolation surfaces a ResourceBounds.Validate
+// failure on the engine's ConditionReady and short-circuits the
+// reconcile. The aggregated field-path error becomes the condition
+// message so kubectl describe shows exactly which dimension (cpu /
+// memory / ephemeral-storage) on which side (requests / limits)
+// exceeded its bound. Same shape as handleEngineClassError: no error
+// to controller-runtime (the engine is correctly reconciled given the
+// over-bound spec; the user has to fix spec.resources for progress),
+// just a requeue so a transient mistake recovers without an explicit
+// nudge.
+func (r *FireboltEngineReconciler) handleResourceBoundsViolation(ctx context.Context, engine *computev1alpha1.FireboltEngine, errs field.ErrorList) (ctrl.Result, error) {
+	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: engine.Generation,
+		Reason:             reasonResourceBoundsExceeded,
+		Message:            errs.ToAggregate().Error(),
+	})
+	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// decorateReadyConditionWithSTSEvent is the Reconcile-side wrapper
+// over the shouldSurfaceStatefulSetEvent / latestStatefulSetWarning /
+// applyStatefulSetEventToReadyCondition trio. Kept as a method so
+// Reconcile stays readable (one call, no nested branching) and so the
+// best-effort nature of the lookup is encapsulated: any failure here
+// silently forfeits the diagnostic but does not affect the reconcile
+// result.
+func (r *FireboltEngineReconciler) decorateReadyConditionWithSTSEvent(ctx context.Context, engine *computev1alpha1.FireboltEngine, result *EngineReconcileResult, current EngineState) {
+	if !shouldSurfaceStatefulSetEvent(&result.Status, current, engine.Spec.Replicas) {
+		return
+	}
+	ev := r.latestStatefulSetWarning(ctx, current.CurrentSTS)
+	if ev == nil {
+		return
+	}
+	applyStatefulSetEventToReadyCondition(&result.Status, ev, engine.Generation)
+}
+
 // shouldSurfaceStatefulSetEvent reports whether the Ready condition would
 // benefit from being decorated with the latest Warning event recorded on
 // the current-generation StatefulSet. The lookup is gated to keep the
@@ -881,6 +935,14 @@ var errEngineClassUnready = stderrors.New("EngineClass referenced by spec.engine
 // reconciliation before the renderer runs, so the regular
 // setReadyCondition path never executes for the offending engine.
 const reasonEngineClassUnready = "EngineClassUnready"
+
+// reasonResourceBoundsExceeded is the engine ConditionReady reason set
+// when r.ResourceBounds.Validate rejects spec.resources.{requests,limits}
+// for one of the operator-configured --engine-max-* dimensions. Same
+// reason string the webhook surfaces in admission errors, so users
+// who hit the bound at apply time and users who hit it at reconcile
+// time (admission bypassed) read the same diagnostic.
+const reasonResourceBoundsExceeded = "ResourceBoundsExceeded"
 
 // resolveEngineClassInfo fetches the EngineClass referenced by
 // engine.spec.engineClassRef and returns the resolved template plus a
