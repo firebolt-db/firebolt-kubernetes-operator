@@ -153,7 +153,9 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			bgRunner = NewGatewayBackgroundQueryRunner(clientPod, instanceName, engineName, LightQuery)
 			bgRunner.Start(ctx)
 
-			time.Sleep(3 * time.Second)
+			By("Letting the runner establish a query baseline (5 queries)")
+			Expect(bgRunner.WaitForAdditionalQueries(ctx, 5, 15*time.Second)).To(Succeed(),
+				"bg runner never reached baseline — gateway probably not serving before scale")
 
 			By("Scaling gateway to 3 replicas")
 			err := UpdateInstanceGatewayReplicas(ctx, instanceName, 3)
@@ -163,7 +165,9 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			err = WaitForGatewayReplicas(ctx, instanceName, 3, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			time.Sleep(3 * time.Second)
+			By("Letting the runner exercise the 3-replica state (5 queries)")
+			Expect(bgRunner.WaitForAdditionalQueries(ctx, 5, 15*time.Second)).To(Succeed(),
+				"bg runner stalled after scale up — gateway probably degraded across the reconfigure")
 
 			By("Scaling gateway back to 1 replica")
 			err = UpdateInstanceGatewayReplicas(ctx, instanceName, 1)
@@ -173,7 +177,9 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			err = WaitForGatewayReplicas(ctx, instanceName, 1, instanceReadyTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			time.Sleep(3 * time.Second)
+			By("Letting the runner exercise the post-scale-down state (5 queries)")
+			Expect(bgRunner.WaitForAdditionalQueries(ctx, 5, 15*time.Second)).To(Succeed(),
+				"bg runner stalled after scale down — gateway probably degraded across the reconfigure")
 
 			By("Stopping background queries and checking results")
 			bgRunner.Stop()

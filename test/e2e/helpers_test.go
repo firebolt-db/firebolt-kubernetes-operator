@@ -195,10 +195,37 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 		}
 	}()
 
-	// Wait for cache to sync
-	time.Sleep(500 * time.Millisecond)
+	if err := waitForOperatorReady(ctxOp, mgr, operatorReadyTimeout); err != nil {
+		cancel()
+		return nil, fmt.Errorf("engine operator cache did not sync: %w", err)
+	}
 
 	return instance, nil
+}
+
+// operatorReadyTimeout caps how long Start* helpers wait for the
+// manager's informer cache to do its initial list-watch. 10 seconds
+// is well above the observed startup time on the project's Kind
+// clusters (typically <1s) while staying inside the project-wide
+// 15-second ceiling for any individual condition (AGENTS.md).
+const operatorReadyTimeout = 10 * time.Second
+
+// waitForOperatorReady blocks until the manager's cache has finished
+// its initial list-watch or the timeout expires. The previous
+// 500-millisecond sleep at every Start* call was a guess that worked
+// most of the time but offered no signal when it didn't — a slow
+// apiserver, a missed RBAC grant, or any startup error would still
+// return a "ready" operator that could not actually serve requests.
+// WaitForCacheSync is the controller-runtime-blessed primitive for
+// this synchronization; it returns true when every informer the
+// manager has registered has acknowledged its first sync.
+func waitForOperatorReady(parent context.Context, mgr manager.Manager, timeout time.Duration) error {
+	syncCtx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	if !mgr.GetCache().WaitForCacheSync(syncCtx) {
+		return fmt.Errorf("cache did not sync within %s (context error: %v)", timeout, syncCtx.Err())
+	}
+	return nil
 }
 
 // Stop stops the operator instance
@@ -1423,7 +1450,10 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 		}
 	}()
 
-	time.Sleep(500 * time.Millisecond)
+	if err := waitForOperatorReady(ctxOp, mgr, operatorReadyTimeout); err != nil {
+		cancel()
+		return nil, fmt.Errorf("instance operator cache did not sync: %w", err)
+	}
 	return inst, nil
 }
 
@@ -1504,7 +1534,10 @@ func StartClassOperator() (*ClassOperator, error) {
 		}
 	}()
 
-	time.Sleep(500 * time.Millisecond)
+	if err := waitForOperatorReady(ctxOp, mgr, operatorReadyTimeout); err != nil {
+		cancel()
+		return nil, fmt.Errorf("class operator cache did not sync: %w", err)
+	}
 	return op, nil
 }
 
@@ -1952,6 +1985,43 @@ func (r *GatewayBackgroundQueryRunner) Stop() {
 // GetStats returns the success and failure counts.
 func (r *GatewayBackgroundQueryRunner) GetStats() (successes, failures int32) {
 	return r.successCount.Load(), r.failureCount.Load()
+}
+
+// WaitForAdditionalQueries blocks until the runner has processed at
+// least `additional` more queries (successes + failures combined)
+// since the call, or the timeout expires. Callers use it to drop
+// bare time.Sleep() calls around an operation they want to bracket
+// with traffic: instead of waiting wall-clock seconds and hoping the
+// runner happened to issue enough requests, wait for an explicit
+// count to land.
+//
+// The window is meaningful: the operation under test (gateway scale,
+// blue-green, etc.) is exercised against at least N real query
+// attempts, and the test's zero-failure assertion is anchored to
+// that N rather than to wall-clock time.
+//
+// Returns an error if the timeout elapses before the count is
+// reached — the caller should surface this with t.Fatal /
+// Expect(err).NotTo(HaveOccurred), since "the runner never made
+// progress" is a real failure mode (gateway dead, pod evicted, etc.)
+// that the old time.Sleep silently swallowed.
+func (r *GatewayBackgroundQueryRunner) WaitForAdditionalQueries(ctx context.Context, additional int32, timeout time.Duration) error {
+	startSuccesses, startFailures := r.GetStats()
+	target := startSuccesses + startFailures + additional
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		successes, failures := r.GetStats()
+		if successes+failures >= target {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	successes, failures := r.GetStats()
+	return fmt.Errorf("runner did not process %d additional queries within %s (started at %d successes / %d failures, now at %d / %d)",
+		additional, timeout, startSuccesses, startFailures, successes, failures)
 }
 
 // GetFailureReasons returns a summary of failure reasons.
