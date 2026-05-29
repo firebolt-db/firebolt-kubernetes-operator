@@ -80,11 +80,11 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 			bgRunner.Stop()
 		}
 		DeleteClientPod(ctx, clientPod)
-		_ = DeleteEngine(ctx, healthyEngine)
-		_ = DeleteEngine(ctx, badEngine)
-		_ = DeleteEngineClass(ctx, badClass)
-		_ = WaitForResourcesDeleted(ctx, healthyEngine, resourceCleanupTimeout)
-		_ = WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)
+		Expect(DeleteEngine(ctx, healthyEngine)).To(Succeed())
+		Expect(DeleteEngine(ctx, badEngine)).To(Succeed())
+		Expect(DeleteEngineClass(ctx, badClass)).To(Succeed())
+		Expect(WaitForResourcesDeleted(ctx, healthyEngine, resourceCleanupTimeout)).To(Succeed())
+		Expect(WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)).To(Succeed())
 		TeardownTestInstance(ctx, lc)
 	})
 
@@ -95,9 +95,9 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 		}
 		// Each It owns its own broken peer; tear it down so the next It
 		// starts from the same baseline (healthy engine alone, no class).
-		_ = DeleteEngine(ctx, badEngine)
-		_ = WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)
-		_ = DeleteEngineClass(ctx, badClass)
+		Expect(DeleteEngine(ctx, badEngine)).To(Succeed())
+		Expect(WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)).To(Succeed())
+		Expect(DeleteEngineClass(ctx, badClass)).To(Succeed())
 	})
 
 	// assertHealthyEngineStaysServing runs the gateway background query

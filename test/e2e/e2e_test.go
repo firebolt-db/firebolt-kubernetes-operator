@@ -65,8 +65,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up single node test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -124,8 +124,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up scale up test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -217,8 +217,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up scale down test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -316,8 +316,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up rapid changes test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -427,8 +427,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up harmonic scale test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -534,8 +534,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up image switching test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			// EngineClass deletion is guarded by the EngineClassReconciler's
 			// deletion-guard finalizer while any FireboltEngine in the
 			// same namespace references the class (the gate uses a live
@@ -545,7 +545,7 @@ var _ = Describe("Firebolt Engine", func() {
 			// the engine first (above) must drop the bound count to
 			// zero, after which the next class reconcile removes the
 			// finalizer and the delete completes.
-			_ = DeleteEngineClass(ctx, className)
+			Expect(DeleteEngineClass(ctx, className)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -661,8 +661,8 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 			DeleteClientPod(ctx, clientPod)
 			for _, name := range engineNames {
-				_ = DeleteEngine(ctx, name)
-				_ = WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)
+				Expect(DeleteEngine(ctx, name)).To(Succeed())
+				Expect(WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)).To(Succeed())
 			}
 			TeardownTestInstance(ctx, lc)
 		})
@@ -768,8 +768,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up config hash test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -828,8 +828,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up recreate rollout test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -907,8 +907,8 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up scale-to-zero test")
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -995,8 +995,8 @@ var _ = Describe("Firebolt Engine", func() {
 		AfterAll(func() {
 			By("Cleaning up scheduling-fields test")
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 

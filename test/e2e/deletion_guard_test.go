@@ -79,8 +79,8 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 		// class delete proceeds once the engine is gone — the guard
 		// reactively drops the finalizer via the FireboltEngine
 		// watch the class reconciler already wires.
-		_ = DeleteEngine(context.Background(), engineName)
-		_ = DeleteEngineClass(context.Background(), className)
+		Expect(DeleteEngine(context.Background(), engineName)).To(Succeed())
+		Expect(DeleteEngineClass(context.Background(), className)).To(Succeed())
 		if classOp != nil {
 			classOp.Stop()
 		}
