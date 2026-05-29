@@ -282,7 +282,6 @@ local-deploy: docker-build-local kind-load-operator manifests ## Build, load, an
 		--set metrics.secure=false \
 		--set leaderElection.enabled=false \
 		--set logging.development=true \
-		--set additionalArgs='{--enable-webhooks=false}' \
 		--set-string podAnnotations.deploy-timestamp="$(shell date +%s)"
 	$(KUBECTL) rollout status deployment/kubernetes-operator -n default --timeout=30s
 
