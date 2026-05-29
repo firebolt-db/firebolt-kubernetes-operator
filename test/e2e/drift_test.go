@@ -147,35 +147,24 @@ var _ = Describe("Drift Reconciliation", Ordered, func() {
 		const foreignAnnotationVal = "drift-test-2026-05-28"
 		const foreignFieldManager = "external-policy-tool"
 
-		// Why a top-level Deployment annotation rather than a sidecar
-		// container?
+		// This spec validates the easy SSA case: a foreign field manager
+		// adds a top-level annotation to the gateway Deployment, in a
+		// path the operator never declares (metadata.annotations). The
+		// apiserver's map-merge for annotations is keyed and the
+		// operator's ForceOwnership only claims fields it actually sets,
+		// so the foreign annotation lives in non-overlapping territory
+		// and survives every reconcile. This is the no-listMap-conflict
+		// case.
 		//
-		// SSA's load-bearing property for this PR is "the operator's
-		// apply coexists with foreign field managers — fields the
-		// operator does not declare survive across reconciles". The
-		// simplest reliable way to demonstrate that with the operator's
-		// current typed-struct apply path (controller-runtime's
-		// client.Apply on appsv1.Deployment with ForceOwnership) is a
-		// top-level Deployment annotation: the operator's
-		// ensureGatewayDeployment never declares metadata.annotations,
-		// so a foreign manager that adds a key under that path lives in
-		// non-overlapping territory and the apiserver's map-merge
-		// preserves it.
-		//
-		// Sidecar containers inside spec.template.spec.containers (the
-		// natural place a policy controller / mesh injector / debug
-		// tool wants to add fields) would be the more useful thing to
-		// validate, but controller-runtime's typed-struct
-		// client.Apply+ForceOwnership over-claims ownership of list
-		// fields the operator declares — the per-item map semantics
-		// (listMapKey=name) that should let envoy and a foreign sidecar
-		// coexist gets degraded to atomic ownership of the whole list,
-		// and the operator's next apply strips the sidecar. The fix
-		// requires switching the operator's writes to client-go
-		// applyconfiguration types (which use pointers everywhere and
-		// produce SSA-correct JSON), which is out of scope for this PR.
-		// Tracked as a follow-up; this test covers the
-		// non-overlapping-field case that DOES work today.
+		// The harder listMap-conflict case (foreign-applied sidecar
+		// container in spec.template.spec.containers) is covered by
+		// the next spec, "preserves a foreign-SSA sidecar container on
+		// the gateway Deployment". The original FB-556 comment
+		// describing that case as known-broken under typed-struct
+		// apply has been moved there pending empirical confirmation
+		// from CI; if the sidecar spec passes the punt was speculative,
+		// if it fails we have a failing assertion that justifies the
+		// applyconfiguration rewrite.
 
 		By("Applying an annotation to the gateway Deployment with a foreign field manager")
 		annotationPatch := []byte(fmt.Sprintf(`{
@@ -214,6 +203,82 @@ var _ = Describe("Drift Reconciliation", Ordered, func() {
 		_, failures := bgRunner.GetStats()
 		Expect(failures).To(BeZero(),
 			"gateway queries against the engine must not fail while the operator reconciles around a foreign annotation")
+	})
+
+	// The harder SSA case the previous spec's doc comment punted on:
+	// a foreign field manager adds a sidecar container to the
+	// operator-owned gateway Deployment's pod template. The operator's
+	// next apply must not strip the sidecar — SSA's listMap-by-name
+	// semantics for spec.template.spec.containers should grant the
+	// foreign manager ownership of containers[name=<sidecar>] and the
+	// operator ownership of containers[name=envoy] without conflict.
+	// If the operator's typed-struct apply path degrades the list to
+	// atomic ownership (as the foreign-annotation spec's comment
+	// claimed), this test fails by reporting the sidecar gone.
+	//
+	// No background query runner: a foreign sidecar that fails to come
+	// up could fail the gateway pod's readiness, which we don't want
+	// confused with an operator regression. The sidecar uses
+	// `sleep infinity` against the curl image (already in the test
+	// registry) so the pod stays Ready.
+	It("preserves a foreign-SSA sidecar container on the gateway Deployment", func() {
+		gwName := instanceName + controller.SuffixGateway
+		const foreignSidecarName = "drift-test-sidecar"
+		const foreignFieldManager = "external-mesh-injector"
+
+		By("Applying a sidecar container to the gateway Deployment with a foreign field manager")
+		sidecarPatch := []byte(fmt.Sprintf(`{
+			"apiVersion": "apps/v1",
+			"kind": "Deployment",
+			"metadata": {
+				"name": %q,
+				"namespace": %q
+			},
+			"spec": {
+				"template": {
+					"spec": {
+						"containers": [
+							{
+								"name": %q,
+								"image": %q,
+								"command": ["sh", "-c", "sleep infinity"]
+							}
+						]
+					}
+				}
+			}
+		}`, gwName, testNamespace, foreignSidecarName, curlImage))
+
+		Expect(k8sClient.AppsV1().Deployments(testNamespace).Patch(
+			ctx, gwName, types.ApplyPatchType, sidecarPatch,
+			metav1.PatchOptions{
+				FieldManager: foreignFieldManager,
+				Force:        ptr.To(true),
+			},
+		)).Error().NotTo(HaveOccurred())
+
+		By("Sidecar is observable on the Deployment immediately")
+		Eventually(func() bool {
+			return gatewayHasContainer(ctx, gwName, foreignSidecarName)
+		}, 15*time.Second, 1*time.Second).Should(BeTrue(),
+			"foreign-applied sidecar should appear on the Deployment immediately")
+
+		By("Sidecar survives the operator's periodic 30s reconcile")
+		// 45s covers a full periodic reconcile (30s) plus margin.
+		// The original drift_test punt comment predicted this assertion
+		// would fail because typed-struct client.Apply+ForceOwnership
+		// degrades listMap ownership to atomic on
+		// spec.template.spec.containers. If the assertion passes, the
+		// punt comment was wrong and we can drop it; if it fails, the
+		// applyconfiguration rewrite is genuinely required.
+		Consistently(func() bool {
+			return gatewayHasContainer(ctx, gwName, foreignSidecarName)
+		}, 45*time.Second, 5*time.Second).Should(BeTrue(),
+			"operator SSA must not strip foreign-managed sidecars from spec.template.spec.containers (listMap=name)")
+
+		By("Envoy primary container is still present after the foreign apply")
+		Expect(gatewayHasContainer(ctx, gwName, "envoy")).To(BeTrue(),
+			"operator must retain ownership of its own primary container even while a foreign manager owns a sidecar")
 	})
 
 	It("triggers a blue-green generation when the engine STS pod template is edited out-of-band", func() {
@@ -336,4 +401,24 @@ func gatewayAnnotation(ctx context.Context, deployName, key string) string {
 		return ""
 	}
 	return dep.Annotations[key]
+}
+
+// gatewayHasContainer reports whether the gateway Deployment's pod
+// template currently declares a container with the given name. Used
+// by the foreign-SSA-sidecar drift spec to assert that the operator's
+// apply preserves containers owned by a different field manager.
+func gatewayHasContainer(ctx context.Context, deployName, containerName string) bool {
+	dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			GinkgoWriter.Printf("gatewayHasContainer: get %s: %v\n", deployName, err)
+		}
+		return false
+	}
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		if c.Name == containerName {
+			return true
+		}
+	}
+	return false
 }
