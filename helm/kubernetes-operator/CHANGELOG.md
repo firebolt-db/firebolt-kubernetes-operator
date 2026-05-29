@@ -1,3 +1,14 @@
+# 1.0.25
+
+appVersion: v4.1.1
+
+## [4.1.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.1.0...v4.1.1) (2026-05-29)
+
+### Bug Fixes
+
+* **api:** preserve template.metadata on embedded PodTemplateSpec fields (FB-556) ([a933314](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a9333144c839055454761a0e47d8f7f8ab22735b))
+
+
 # 1.0.24
 
 appVersion: v4.1.0
