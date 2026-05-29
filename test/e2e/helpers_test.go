@@ -210,6 +210,25 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 // 15-second ceiling for any individual condition (AGENTS.md).
 const operatorReadyTimeout = 10 * time.Second
 
+// minMeaningfulQueries is the floor for the "background runner ran
+// at least N successful queries" assertion that almost every
+// zero-failure spec carries. The previous "> 0" form was too weak:
+// it admitted a test where the runner started, errored on every
+// attempt for the entire window, recorded zero failures because
+// recordFailure never fired, and zero successes — and still passed
+// the >0 check by accident if the operation under test ended fast
+// enough for a single query to land at the boundary.
+//
+// 10 is calibrated against the runner's 500ms tick: 10 successful
+// queries means at least 5 seconds of confirmed two-way traffic
+// through the gateway, which is the minimum window where a
+// transient outage could realistically be detected with statistical
+// confidence. Every operation in the e2e suite (blue-green rollout,
+// scale-up, image switch, drift correction) takes substantially
+// longer than 5s, so the floor never under-asserts the happy path;
+// when it fails, the test was actually broken.
+const minMeaningfulQueries = 10
+
 // waitForOperatorReady blocks until the manager's cache has finished
 // its initial list-watch or the timeout expires. The previous
 // 500-millisecond sleep at every Start* call was a guess that worked

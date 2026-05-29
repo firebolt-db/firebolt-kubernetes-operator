@@ -188,7 +188,7 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 			fmt.Fprintf(GinkgoWriter, "Gateway scaling: successes=%d failures=%d\n", successes, failures)
 			bgRunner.PrintFailureSummary()
 
-			Expect(successes).To(BeNumerically(">", 0), "Should have had successful queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 			Expect(failures).To(Equal(int32(0)), "Gateway scaling should cause zero query failures")
 			bgRunner = nil
 		})

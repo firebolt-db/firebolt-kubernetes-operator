@@ -182,7 +182,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scale up")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
@@ -275,7 +275,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scale down")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
@@ -392,7 +392,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during rapid changes")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
@@ -490,7 +490,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during harmonic scaling")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
@@ -615,7 +615,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during image switch")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
@@ -728,7 +728,8 @@ var _ = Describe("Firebolt Engine", func() {
 					runner.PrintFailureSummary()
 				}
 				Expect(failures).To(Equal(int32(0)), fmt.Sprintf("Engine %s should have no query failures", engineNames[i]))
-				Expect(successes).To(BeNumerically(">", 0), fmt.Sprintf("Engine %s should have some successful queries", engineNames[i]))
+				Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)),
+					fmt.Sprintf("engine %s background runner did not accumulate enough samples for the zero-failure assertion to be meaningful", engineNames[i]))
 			}
 
 			By("Deleting all engines")
@@ -1117,7 +1118,7 @@ var _ = Describe("Firebolt Engine", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail during scheduling-fields blue-green")
-			Expect(successes).To(BeNumerically(">", 0), "Should have some successful background queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 
 			By("Deleting engine")
 			err = DeleteEngine(ctx, engineName)
