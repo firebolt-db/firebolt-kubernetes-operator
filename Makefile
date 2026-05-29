@@ -109,6 +109,11 @@ test-property: manifests generate setup-envtest ## Run the outer-Reconcile rapid
 		go test -tags outerharness -run TestEngineOuterStateMachine -count=1 \
 		./internal/controller/... -args -rapid.checks=$(RAPID_CHECKS)
 
+.PHONY: test-webhook-integration
+test-webhook-integration: manifests generate setup-envtest ## Run the webhook-on integration suite (envtest + manager exposing the operator's admission webhooks).
+	$(ENVTEST_STOP_TIMEOUT_ENV) KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test -tags webhook_integration -count=1 ./internal/controller/...
+
 KIND_CLUSTER ?= operator-test-e2e
 
 # Local Docker registry that kind nodes mirror through (avoids per-node
