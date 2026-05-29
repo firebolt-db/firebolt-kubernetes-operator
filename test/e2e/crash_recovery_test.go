@@ -626,7 +626,7 @@ var _ = Describe("Crash Recovery", func() {
 			}
 
 			Expect(failures).To(Equal(int32(0)), "Background queries should not fail - service selector was updated before crash")
-			Expect(successes).To(BeNumerically(">", 0), "Should have successful queries")
+			Expect(successes).To(BeNumerically(">=", int32(minMeaningfulQueries)), "background runner did not accumulate enough samples for the zero-failure assertion to be meaningful")
 		})
 	})
 })
