@@ -99,10 +99,13 @@ rules:
     verbs:
       - get
       - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - compute.firebolt.io
     resources:
+      - engineclasses/finalizers
       - fireboltengines/finalizers
       - fireboltinstances/finalizers
     verbs:
