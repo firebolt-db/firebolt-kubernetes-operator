@@ -53,6 +53,13 @@ const engineClassFinalizerName = "compute.firebolt.io/engineclass-deletion-guard
 // engine still references the class.
 const reasonDeletionBlocked = "DeletionBlocked"
 
+// reasonOperatorOwnedFieldSet is the EngineClass Ready=False reason
+// stamped by classReadiness when spec.template carries a path the
+// operator owns end-to-end. The engine controller keys off this exact
+// reason in resolveEngineClassInfo to refuse rendering a StatefulSet
+// from the offending class.
+const reasonOperatorOwnedFieldSet = "OperatorOwnedFieldSet"
+
 // engineClassRequeueAfter is the steady-state safety-net requeue for
 // the EngineClass reconciler. Engine create / update / delete events
 // already enqueue the class reactively (via the FireboltEngine watch
@@ -253,7 +260,7 @@ func classReadiness(class *computev1alpha1.EngineClass) (status metav1.Condition
 	if len(errs) == 0 {
 		return metav1.ConditionTrue, "Admissible", "spec.template contains no operator-owned paths"
 	}
-	return metav1.ConditionFalse, "OperatorOwnedFieldSet", errs.ToAggregate().Error()
+	return metav1.ConditionFalse, reasonOperatorOwnedFieldSet, errs.ToAggregate().Error()
 }
 
 // engineClassStatusEqual reports whether desired status matches what's
