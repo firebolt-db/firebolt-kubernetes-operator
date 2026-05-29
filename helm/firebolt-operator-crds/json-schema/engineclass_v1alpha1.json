@@ -7248,7 +7248,7 @@
       "description": "EngineClassStatus is the observed state of an EngineClass.",
       "properties": {
         "boundEngines": {
-          "description": "BoundEngines counts the FireboltEngines in the same namespace that\nreference this class via spec.engineClassRef. Surfaced for\nvisibility (printcolumn, kubectl describe); the EngineClass\ndeletion webhook does its own live List against the namespace\nrather than trusting this cached value, so a class bound between\nreconciler runs (status still at zero) is still protected from\ndeletion.",
+          "description": "BoundEngines counts the FireboltEngines in the same namespace that\nreference this class via spec.engineClassRef. Surfaced for\nvisibility (printcolumn, kubectl describe); both the EngineClass\ndeletion webhook and the reconciler's deletion-guard finalizer\ndo their own live List against the namespace rather than trusting\nthis cached value, so a class bound between reconciler runs\n(status still at zero) is still protected from deletion.",
           "format": "int32",
           "type": "integer"
         },

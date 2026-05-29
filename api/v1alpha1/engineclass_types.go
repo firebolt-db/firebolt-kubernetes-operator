@@ -69,11 +69,11 @@ type EngineClassStatus struct {
 
 	// BoundEngines counts the FireboltEngines in the same namespace that
 	// reference this class via spec.engineClassRef. Surfaced for
-	// visibility (printcolumn, kubectl describe); the EngineClass
-	// deletion webhook does its own live List against the namespace
-	// rather than trusting this cached value, so a class bound between
-	// reconciler runs (status still at zero) is still protected from
-	// deletion.
+	// visibility (printcolumn, kubectl describe); both the EngineClass
+	// deletion webhook and the reconciler's deletion-guard finalizer
+	// do their own live List against the namespace rather than trusting
+	// this cached value, so a class bound between reconciler runs
+	// (status still at zero) is still protected from deletion.
 	// +optional
 	BoundEngines int32 `json:"boundEngines,omitempty"`
 
