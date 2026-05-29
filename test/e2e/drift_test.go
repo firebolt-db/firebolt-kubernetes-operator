@@ -273,9 +273,24 @@ var _ = Describe("Drift Reconciliation", Ordered, func() {
 		Expect(WaitForEngineReady(ctx, engineName, 1, clusterTransitionTimeout)).To(Succeed())
 
 		By("Running a query through the gateway to verify the engine is serving on the new generation")
-		output, err := RunQueryViaGateway(ctx, clientPod, instanceName, engineName, queryConfig.Query)
-		Expect(err).NotTo(HaveOccurred(),
-			"engine must be responsive once drift correction completes")
+		// The blue-green swap declares stable as soon as the cluster
+		// Service selector flips, but Envoy's endpoint discovery has a
+		// brief refresh window before it sees the new generation's
+		// pods — the same window the doc comment at the top of this
+		// spec calls out. A single query at that boundary is racy by
+		// construction (a 503 from Envoy's "no healthy upstream" is a
+		// legitimate transient outcome). Eventually with a short
+		// window matches the actual contract ("engine becomes
+		// responsive once drift correction completes") and still
+		// fails hard on a real regression where the new generation
+		// never serves traffic.
+		var output string
+		Eventually(func() error {
+			var qErr error
+			output, qErr = RunQueryViaGateway(ctx, clientPod, instanceName, engineName, queryConfig.Query)
+			return qErr
+		}, 15*time.Second, 1*time.Second).Should(Succeed(),
+			"engine must become responsive once drift correction completes and gateway endpoints converge")
 		result, err := ParseQueryResult(output)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(queryConfig.Validator(result)).To(BeTrue(),
