@@ -64,10 +64,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up single node test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should create a single node engine, run queries, and clean up", func() {
@@ -123,10 +123,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up scale up test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale up while maintaining query availability", func() {
@@ -216,10 +216,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up scale down test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale down while maintaining query availability", func() {
@@ -315,10 +315,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up rapid changes test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should only apply the last config change when multiple rapid changes occur", func() {
@@ -426,10 +426,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up harmonic scale test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale up and down through 1->2->3->2->1 without downtime", func() {
@@ -533,6 +533,7 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up image switching test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
@@ -546,7 +547,6 @@ var _ = Describe("Firebolt Engine", func() {
 			// zero, after which the next class reconcile removes the
 			// finalizer and the delete completes.
 			Expect(DeleteEngineClass(ctx, className)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should switch image without downtime", func() {
@@ -654,6 +654,7 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up multi-engine test")
+			defer TeardownTestInstance(ctx, lc)
 			for _, runner := range bgRunners {
 				if runner != nil {
 					runner.Stop()
@@ -664,7 +665,6 @@ var _ = Describe("Firebolt Engine", func() {
 				Expect(DeleteEngine(ctx, name)).To(Succeed())
 				Expect(WaitForResourcesDeleted(ctx, name, resourceCleanupTimeout)).To(Succeed())
 			}
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should manage multiple engines independently", func() {
@@ -767,10 +767,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up config hash test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should restart pods when replica count changes so engine reads correct node list", func() {
@@ -827,10 +827,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up recreate rollout test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should transition without waiting for drain when rollout is 'recreate'", func() {
@@ -907,9 +907,9 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up scale-to-zero test")
+			defer TeardownTestInstance(ctx, lc)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should scale from 2 to 0 to 2, surfacing PhaseStopped and Ready=Stopped", func() {
@@ -994,10 +994,10 @@ var _ = Describe("Firebolt Engine", func() {
 
 		AfterAll(func() {
 			By("Cleaning up scheduling-fields test")
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should re-roll the STS when nodeSelector, tolerations, and affinity are set together", func() {

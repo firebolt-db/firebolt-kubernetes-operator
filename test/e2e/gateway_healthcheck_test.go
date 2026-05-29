@@ -99,10 +99,10 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should perform active health checks against the engine HealthPort and report success", func() {

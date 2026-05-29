@@ -56,23 +56,42 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterAll(func() {
+			// Defer the operator Stop so it runs even if the
+			// DeleteInstance Expect panics via Ginkgo's Fail →
+			// runtime.Goexit. Goexit honours defers; the Expect
+			// line below does not. Without this, a transient
+			// DeleteInstance failure would leak the in-process
+			// instance-operator goroutines.
+			defer func() {
+				if instanceOp != nil {
+					instanceOp.Stop()
+				}
+			}()
 			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
-			if instanceOp != nil {
-				instanceOp.Stop()
-			}
 		})
 
 		AfterEach(func() {
 			controller.ClearCrashPointsForEngine(engineName)
+			// Defer the operator Stop for the same reason: a
+			// failing Expect on DeleteEngine /
+			// WaitForResourcesDeleted must not skip
+			// operator.Stop, which is the only call that joins
+			// the manager goroutines. The defer runs in LIFO
+			// order, so it still happens AFTER the deletes
+			// complete on the happy path — matching the
+			// original "delete before stop, finalizer needs the
+			// operator" ordering invariant called out below.
+			defer func() {
+				if operator != nil {
+					operator.Stop()
+					operator = nil
+				}
+			}()
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			if operator != nil {
-				operator.Stop()
-				operator = nil
-			}
 		})
 
 		It("should recover from crash after ConfigMap created", func() {
@@ -222,24 +241,28 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterAll(func() {
+			defer func() {
+				if instanceOp != nil {
+					instanceOp.Stop()
+				}
+			}()
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
-			if instanceOp != nil {
-				instanceOp.Stop()
-			}
 		})
 
 		AfterEach(func() {
+			defer func() {
+				if operator != nil {
+					operator.Stop()
+					operator = nil
+				}
+			}()
 			controller.ClearCrashPointsForEngine(engineName)
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			if operator != nil {
-				operator.Stop()
-				operator = nil
-			}
 		})
 
 		It("should recover from crash after service selector update (CRITICAL)", func() {
@@ -380,24 +403,28 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterAll(func() {
+			defer func() {
+				if instanceOp != nil {
+					instanceOp.Stop()
+				}
+			}()
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
-			if instanceOp != nil {
-				instanceOp.Stop()
-			}
 		})
 
 		AfterEach(func() {
+			defer func() {
+				if operator != nil {
+					operator.Stop()
+					operator = nil
+				}
+			}()
 			controller.ClearCrashPointsForEngine(engineName)
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			if operator != nil {
-				operator.Stop()
-				operator = nil
-			}
 		})
 
 		It("should recover from crash after StatefulSet deleted", func() {
@@ -539,11 +566,13 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterAll(func() {
+			defer func() {
+				if instanceOp != nil {
+					instanceOp.Stop()
+				}
+			}()
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
-			if instanceOp != nil {
-				instanceOp.Stop()
-			}
 		})
 
 		AfterEach(func() {
