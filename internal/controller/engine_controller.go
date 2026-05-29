@@ -292,13 +292,23 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// reconciler-loop log carries the missing-class name (the
 	// resolver wraps the upstream error with the name + namespace).
 	// We intentionally do NOT mint a dedicated EngineClassReady
-	// condition: the class state space is binary (exists / doesn't),
-	// not a lifecycle worth narrating like InstanceReady. A future
-	// Kubernetes Event on the engine is the right next step if the
-	// log-only signal proves insufficient.
+	// condition for the missing-class case: the state space is binary
+	// (exists / doesn't), not a lifecycle worth narrating like
+	// InstanceReady.
+	//
+	// errEngineClassUnready is treated differently: the class exists
+	// but the EngineClassReconciler stamped Ready=False/
+	// OperatorOwnedFieldSet. Refuse to render a StatefulSet off it and
+	// surface ConditionReady=False/EngineClassUnready on the engine so
+	// kubectl describe shows the pointer to the offending class. No
+	// backoff error: the engine is correctly reconciled given the
+	// unready class, and the next reconcile fires when the class
+	// reconciler updates the class status (the FireboltEngine watch on
+	// EngineClass already covers this through enqueueClassFromEngine's
+	// symmetric counterpart).
 	classInfo, classErr := r.resolveEngineClassInfo(ctx, engine)
 	if classErr != nil {
-		return ctrl.Result{}, classErr
+		return r.handleEngineClassError(ctx, engine, classErr)
 	}
 
 	result := computeEngineReconcile(
@@ -698,6 +708,32 @@ func setDrainCheckFailingCondition(status *computev1alpha1.FireboltEngineStatus,
 	return true
 }
 
+// handleEngineClassError translates a non-nil error from
+// resolveEngineClassInfo into the appropriate Reconcile result. The
+// errEngineClassUnready branch surfaces ConditionReady=False/
+// EngineClassUnready on the engine and requeues without returning an
+// error to controller-runtime (the engine is correctly reconciled
+// given the unready class; backoff would only delay the next
+// reactive watch event). Every other error — a missing class, an
+// apiserver outage — is bubbled up so controller-runtime applies
+// exponential backoff per the existing missing-class contract.
+func (r *FireboltEngineReconciler) handleEngineClassError(ctx context.Context, engine *computev1alpha1.FireboltEngine, classErr error) (ctrl.Result, error) {
+	if !stderrors.Is(classErr, errEngineClassUnready) {
+		return ctrl.Result{}, classErr
+	}
+	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: engine.Generation,
+		Reason:             reasonEngineClassUnready,
+		Message:            classErr.Error(),
+	})
+	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
 // shouldSurfaceStatefulSetEvent reports whether the Ready condition would
 // benefit from being decorated with the latest Warning event recorded on
 // the current-generation StatefulSet. The lookup is gated to keep the
@@ -825,6 +861,27 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 // different log severity on the actionable path, would key off it.
 var errEngineClassNotFound = stderrors.New("EngineClass referenced by spec.engineClassRef not found")
 
+// errEngineClassUnready is returned by resolveEngineClassInfo when the
+// referenced class exists but its EngineClassReconciler has stamped
+// Ready=False with reason OperatorOwnedFieldSet — the class carries
+// user input on a path the operator owns end-to-end and is therefore
+// not safe to render into a StatefulSet. The validating webhook
+// normally rejects such classes at admission; this case fires when
+// admission was bypassed and the EngineClassReconciler's defense-in-
+// depth check is the first observer of the violation. Surfaced on
+// the engine's ConditionReady with reason EngineClassUnready so the
+// user gets a pointer to the offending class without having to inspect
+// every dependent engine's events.
+var errEngineClassUnready = stderrors.New("EngineClass referenced by spec.engineClassRef is not Ready")
+
+// reasonEngineClassUnready is the engine ConditionReady reason set
+// when resolveEngineClassInfo refuses to consume an
+// OperatorOwnedFieldSet class. Set directly in Reconcile (rather than
+// derived inside setReadyCondition) because the gate short-circuits
+// reconciliation before the renderer runs, so the regular
+// setReadyCondition path never executes for the offending engine.
+const reasonEngineClassUnready = "EngineClassUnready"
+
 // resolveEngineClassInfo fetches the EngineClass referenced by
 // engine.spec.engineClassRef and returns the resolved template plus a
 // content hash. Returns nil info (and no error) when no class is
@@ -844,6 +901,21 @@ var errEngineClassNotFound = stderrors.New("EngineClass referenced by spec.engin
 // it from a transient API failure via stderrors.Is; today's caller
 // (Reconcile) just bubbles both kinds up to controller-runtime's
 // backoff retry.
+//
+// A second admission-bypass gate runs here: if the EngineClassReconciler
+// has stamped Ready=False/OperatorOwnedFieldSet (its defense-in-depth
+// check caught a path the operator owns end-to-end), the resolver
+// returns errEngineClassUnready and Reconcile surfaces
+// ConditionReady=False/EngineClassUnready on the engine without
+// rendering a StatefulSet off the offending class. A missing Ready
+// condition (class freshly created, EngineClassReconciler hasn't run
+// yet) is treated as "not yet evaluated" and allowed through — the
+// engine's next reconcile will pick up the status once the class
+// controller catches up. DeletionBlocked is not a gate: engines that
+// stay bound to a Terminating class are the exact reason the class
+// can't finish deleting, so blocking renders would deadlock
+// (engine stops reconciling → can't be deleted → class can't be
+// released).
 func (r *FireboltEngineReconciler) resolveEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*EngineClassInfo, error) {
 	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
 		return nil, nil
@@ -855,6 +927,11 @@ func (r *FireboltEngineReconciler) resolveEngineClassInfo(ctx context.Context, e
 			return nil, fmt.Errorf("%w: %q in namespace %q", errEngineClassNotFound, *engine.Spec.EngineClassRef, engine.Namespace)
 		}
 		return nil, fmt.Errorf("getting EngineClass %q in namespace %q: %w", *engine.Spec.EngineClassRef, engine.Namespace, err)
+	}
+	if cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.EngineClassConditionReady); cond != nil &&
+		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
+		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+			errEngineClassUnready, class.Name, class.Namespace, cond.Message)
 	}
 	return newEngineClassInfo(class), nil
 }
