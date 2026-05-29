@@ -34,6 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -44,6 +45,16 @@ import (
 )
 
 const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
+
+// reasonTemplateRejected is the per-component Ready=False reason
+// surfaced when validatePodTemplates rejects spec.gateway.template or
+// spec.metadata.template against its operator-owned-field ruleset. The
+// validating webhook normally rejects these at admission; this branch
+// fires when admission is bypassed (chart-default install) and is
+// strict enough to refuse rendering rather than silently dropping the
+// forbidden field. Reusing the existing component conditions keeps the
+// Ready roll-up consumer unchanged.
+const reasonTemplateRejected = "TemplateRejected"
 
 // errPostgresSecretRefEmpty is returned at runtime when the webhook is
 // bypassed and an instance still has an empty credentialsSecretRef.Name.
@@ -152,6 +163,28 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// touching any watched resource.
 	if instance.Status.Phase == computev1alpha1.InstancePhaseFailed {
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	}
+
+	// Defense-in-depth for the FireboltInstance validating webhook: walk
+	// spec.gateway.template and spec.metadata.template against the
+	// operator-owned-field rulesets every reconcile. Admission catches
+	// these at apply time when the webhook is enabled; when it isn't
+	// (chart default), the reconciler's pod-template merge would silently
+	// drop forbidden user input — most dangerously, a user-set
+	// containers[envoy].lifecycle.preStop that overrides Envoy's drain
+	// hook and breaks the zero-downtime contract. Refuse to render the
+	// offending component until the user fixes the template; the
+	// metadata branch runs first to match the rendering order.
+	gwTplErrs, mdTplErrs := validateInstanceTemplates(instance)
+	if len(mdTplErrs) > 0 {
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionMetadataReady, reasonTemplateRejected,
+			mdTplErrs.ToAggregate())
+	}
+	if len(gwTplErrs) > 0 {
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionGatewayReady, reasonTemplateRejected,
+			gwTplErrs.ToAggregate())
 	}
 
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
@@ -366,6 +399,33 @@ func extractItems(list client.ObjectList) []client.Object {
 	default:
 		return nil
 	}
+}
+
+// validateInstanceTemplates re-runs the FireboltInstance webhook's
+// pod-template ownership check against spec.gateway.template and
+// spec.metadata.template. Returns the per-component error lists so
+// Reconcile can surface each failure on the matching component
+// condition (GatewayReady / MetadataReady) with the field path the
+// user needs to fix.
+//
+// This is defense-in-depth, not bypass: when the validating webhook is
+// in the request path, both error lists are empty by construction
+// (admission already rejected the apply). When the webhook is off,
+// this is the only place the operator-owned-field rules are enforced.
+// A nil template returns nil, so users with no template at all pass
+// through.
+func validateInstanceTemplates(inst *computev1alpha1.FireboltInstance) (gateway, metadata field.ErrorList) {
+	gateway = computev1alpha1.ValidatePodTemplate(
+		inst.Spec.Gateway.Template,
+		field.NewPath("spec", "gateway", "template"),
+		computev1alpha1.GatewayPodTemplateRules,
+	)
+	metadata = computev1alpha1.ValidatePodTemplate(
+		inst.Spec.Metadata.Template,
+		field.NewPath("spec", "metadata", "template"),
+		computev1alpha1.MetadataPodTemplateRules,
+	)
+	return gateway, metadata
 }
 
 // checkExternalPostgresSecret verifies the Secret referenced by
