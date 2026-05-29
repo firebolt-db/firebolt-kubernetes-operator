@@ -481,22 +481,26 @@ func TestWebhook_EngineClass_RefusesDeleteWhileBound(t *testing.T) {
 		t.Fatalf("Create class: %v", err)
 	}
 
+	// Engine Create is a precondition of the deletion-guard test: the
+	// validator counts FireboltEngines that reference the class, so we
+	// need at least one binding. The validator looks the class up
+	// synchronously in the same apiserver we just wrote to, so the
+	// Get is strongly consistent and will find it. instanceRef is not
+	// validated (only engineClassRef + resources are), so the
+	// non-existent "any-instance" is fine. Any failure here is a real
+	// regression in the engine validator or a transient apiserver
+	// problem — neither should be masked as "unrelated."
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{Name: "binder", Namespace: "default"},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef:    "any-instance", // engine validator does not require the instance to exist
+			InstanceRef:    "any-instance",
 			Replicas:       1,
 			EngineClassRef: utilptr.To(class.Name),
 		},
 	}
-	// We cannot stand up a real FireboltInstance in this suite, and the
-	// engine validator's class lookup requires the class to be present
-	// (we just created it). We accept that the engine Create may fail
-	// independent of the deletion guard test; what we actually care
-	// about is the DELETE being refused while the engine exists.
 	if err := suite.cli.Create(ctx, engine); err != nil {
 		_ = suite.cli.Delete(ctx, class)
-		t.Skipf("could not create engine (unrelated to deletion guard): %v", err)
+		t.Fatalf("Create engine (binding required for the deletion-guard assertion): %v", err)
 	}
 	t.Cleanup(func() {
 		_ = suite.cli.Delete(context.Background(), engine)

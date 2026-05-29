@@ -115,17 +115,14 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(cleanupPF)
 
-			By("Dumping initial Envoy stats for diagnosis")
-			time.Sleep(3 * time.Second) // let health checks fire a few times
-			if s, serr := envoyAdminStats(adminBase); serr == nil {
-				for _, line := range strings.Split(s, "\n") {
-					if strings.Contains(line, "health") || strings.Contains(line, "cluster.") {
-						GinkgoWriter.Println(line)
-					}
-				}
-			}
-
 			// Health check interval is 1s; within 15s we expect multiple successes.
+			// The previous 3-second diagnostic sleep before this Eventually has
+			// been removed: it was a wall-clock guess that "let health checks
+			// fire a few times" and the diagnostic dump produced from it was
+			// redundant with the post-condition stats this loop already
+			// captures into `stats`. Dumping after the Eventually succeeds
+			// gives the same diagnostic value when something downstream
+			// fails, without the 3-second per-run cost.
 			By("Waiting for Envoy to record at least one health_check.success")
 			var stats string
 			Eventually(func() (int, error) {
@@ -137,6 +134,13 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 				return parseEnvoyHealthStat(stats, ".health_check.success"), nil
 			}, 15*time.Second, 1*time.Second).Should(BeNumerically(">", 0),
 				"Envoy should have performed at least one successful health check against the engine (port 3473 /health/ready)")
+
+			By("Dumping Envoy health/cluster stats for diagnosis")
+			for _, line := range strings.Split(stats, "\n") {
+				if strings.Contains(line, "health") || strings.Contains(line, "cluster.") {
+					GinkgoWriter.Println(line)
+				}
+			}
 
 			By("Verifying health_check.success dominates (log failure count)")
 			successes := parseEnvoyHealthStat(stats, ".health_check.success")
