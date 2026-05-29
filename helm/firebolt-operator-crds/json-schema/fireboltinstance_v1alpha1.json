@@ -92,11 +92,12 @@
               "type": "integer"
             },
             "template": {
-              "description": "Template is the pod template the operator merges with its\nown-rendered Envoy container, config volume mount, hardcoded\nprobes, and preStop drain hook to produce the gateway\nDeployment's pod spec. Most users set only\ntemplate.spec.containers[name==\"envoy\"].image and .resources,\nplus scheduling fields (nodeSelector / tolerations / affinity /\ntopologySpreadConstraints / priorityClassName).",
+              "description": "Template is the pod template the operator merges with its\nown-rendered Envoy container, config volume mount, hardcoded\nprobes, and preStop drain hook to produce the gateway\nDeployment's pod spec. Most users set only\ntemplate.spec.containers[name==\"envoy\"].image and .resources,\nplus scheduling fields (nodeSelector / tolerations / affinity /\ntopologySpreadConstraints / priorityClassName).\n\ntemplate.metadata is unpruned by a post-controller-gen patch (see\nthe matching note on EngineClassSpec.Template for the full\nrationale).",
               "properties": {
                 "metadata": {
                   "description": "Standard object's metadata.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
-                  "type": "object"
+                  "type": "object",
+                  "x-kubernetes-preserve-unknown-fields": true
                 },
                 "spec": {
                   "description": "Specification of the desired behavior of the pod.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status",
@@ -7393,11 +7394,12 @@
               "type": "integer"
             },
             "template": {
-              "description": "Template is the pod template the operator merges with its\nown-rendered metadata container, config volume, credentials\nmount, probes, and pod-level securityContext to produce the\nmetadata Deployment's pod spec. Most users set only\ntemplate.spec.containers[name==\"metadata\"].image and\n.resources, plus scheduling fields (nodeSelector / tolerations /\naffinity / topologySpreadConstraints / priorityClassName).",
+              "description": "Template is the pod template the operator merges with its\nown-rendered metadata container, config volume, credentials\nmount, probes, and pod-level securityContext to produce the\nmetadata Deployment's pod spec. Most users set only\ntemplate.spec.containers[name==\"metadata\"].image and\n.resources, plus scheduling fields (nodeSelector / tolerations /\naffinity / topologySpreadConstraints / priorityClassName).\n\ntemplate.metadata is unpruned by a post-controller-gen patch (see\nthe matching note on EngineClassSpec.Template for the full\nrationale).",
               "properties": {
                 "metadata": {
                   "description": "Standard object's metadata.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
-                  "type": "object"
+                  "type": "object",
+                  "x-kubernetes-preserve-unknown-fields": true
                 },
                 "spec": {
                   "description": "Specification of the desired behavior of the pod.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status",

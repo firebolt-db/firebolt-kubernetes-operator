@@ -153,6 +153,10 @@ type MetadataSpec struct {
 	// template.spec.containers[name=="metadata"].image and
 	// .resources, plus scheduling fields (nodeSelector / tolerations /
 	// affinity / topologySpreadConstraints / priorityClassName).
+	//
+	// template.metadata is unpruned by a post-controller-gen patch (see
+	// the matching note on EngineClassSpec.Template for the full
+	// rationale).
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
@@ -210,6 +214,10 @@ type GatewaySpec struct {
 	// template.spec.containers[name=="envoy"].image and .resources,
 	// plus scheduling fields (nodeSelector / tolerations / affinity /
 	// topologySpreadConstraints / priorityClassName).
+	//
+	// template.metadata is unpruned by a post-controller-gen patch (see
+	// the matching note on EngineClassSpec.Template for the full
+	// rationale).
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 }

@@ -77,6 +77,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CustomResourceDefinition objects, and CRD JSON schemas.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	python3 $(CURDIR)/scripts/patch-crd-template-metadata.py config/crd/bases/*.yaml
 	mkdir -p $(HELM_CRD_CHART_DIR)/json-schema
 	cd config/crd/bases && python3 $(CURDIR)/scripts/openapi2jsonschema.py *.yaml
 	mv config/crd/bases/*.json $(HELM_CRD_CHART_DIR)/json-schema/

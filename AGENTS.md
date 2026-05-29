@@ -100,11 +100,11 @@ A pull request that changes structure or interfaces without a documentation upda
 
 You MUST capture non-obvious problems you solve. When you encounter and fix a quirk, footgun, surprising framework behavior, environment trap, or anything that took meaningful debugging:
 
-- Add a short entry to `## Known issues` in the most-relevant `AGENTS.md` (root or scoped).
+- Add a short entry to [KNOWN_ISSUES.md](KNOWN_ISSUES.md) at the repo root, or to the scoped `KNOWN_ISSUES.md` in the module where the issue lives.
 - State the symptom, the cause, and the resolution in two or three sentences.
 - This prevents the next agent from rediscovering the same problem.
 
-If the issue is project-wide, put it in the root `AGENTS.md`. If it is scoped to one module, put it in that module's `AGENTS.md`.
+If the issue is project-wide, put it in the root `KNOWN_ISSUES.md`. If it is scoped to one module, put it in that module's `KNOWN_ISSUES.md`.
 
 ## Proactive harness
 
@@ -117,15 +117,7 @@ Code is not done until it is covered by tests where tests are reasonable.
 
 ## Known issues
 
-- **envtest's `kube-apiserver` ignores SIGTERM on macOS.** The embedded apiserver (>=1.35) does not act on SIGTERM on Darwin -- lease-renewal logs continue right up until envtest's SIGKILL fallback fires. Etcd handles SIGTERM cleanly, so this is apiserver-specific, not an envtest signalling bug. We can't fix it from this side; the workaround lives in two places: (1) `Makefile` sets `KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT=5s` only when `uname -s` reports `Darwin`, so SIGKILL fires fast instead of after the 20s upstream default; (2) `internal/controller/suite_test.go`'s `AfterSuite` swallows the resulting "timeout waiting for process kube-apiserver to stop" error, but only on `runtime.GOOS == "darwin"` and only for that exact error string. Linux/CI behaviour is unchanged -- a real teardown failure there still fails the suite. See controller-runtime#1571 / #2560 for upstream context.
-
-- **`fsGroup` does not propagate to `subPath` mounts.** A pod with `runAsUser != 0` and a `volumeMount` that uses `subPath` will see the sub-directory as root-owned with only the group changed to `fsGroup`; the kubelet's recursive chgrp/chmod runs against the volume root, not the sub-path bind mount. This breaks any container whose entrypoint calls `chmod` against the mount (postgres' `chmod 00700 $PGDATA`, `initdb`'s mode enforcement, etc.) with `EPERM`. Resolution for the internal PostgreSQL pod (`internal/controller/instance_postgres.go`): mount the PVC root at `/var/lib/postgresql/data` without `subPath`, and set `PGDATA=/var/lib/postgresql/data/pgdata` so the postgres process creates and owns the data sub-directory itself. Upstream tracking: kubernetes/kubernetes#57923.
-
-- **Engine binary refuses local-fs managed storage in dedicated-pensieve mode.** Starting with the metadata images shipped after 2026-05-13, the engine errors out at startup with "Invalid Firebolt configuration: local file system for managed storage is not supported when using dedicated Pensieve" unless `storage.bucket_name` is set (which maps internally to `firebolt.managed_storage.bucket_name_override`). The E2E suite (`test/e2e/floci_test.go`) and the helm-test scripts (`scripts/ci/lib/setup-floci.sh`) stand up [floci](https://github.com/floci-io/floci), a local S3 emulator, in the test namespace and pre-create a bucket; engines are then created with `spec.customEngineConfig.storage` set to `{type: minio, api_scheme: "s3://", bucket_name: <bucket>, minio.endpoint: http://floci.<ns>.svc:4566}`. `type: minio` flips the engine's `firebolt.aws.use_minio=true` flag, which hardcodes the S3 access/secret to `firebolt/firebolt` — floci is zero-auth so those baked-in credentials sign requests just fine, and no AWS env vars need to reach the engine pod. There is no `tmp_bucket_name` in the schema; managed and tmp tablets share `bucket_name`. Engine config reference: `src/Core/Application/Configuration/StorageConfig.h`.
-
-- **`make lint` silently runs a degraded analyzer set when the golangci-lint cache (`~/Library/Caches/golangci-lint/` on macOS, `~/.cache/golangci-lint/` on Linux) is not writable.** Symptom: `make lint` exits `0 issues` locally but CI fails the same revision on a `goconst` / `gocritic` / `gosec` / similar finding. Cause: any agent harness that sandboxes filesystem writes (Cursor's default sandbox is one) blocks the cache writes; golangci-lint emits warnings like `level=warning msg="[linters_context/goanalysis] Failed to persist facts to cache: ... operation not permitted"` followed by `level=error msg="[pkgcache] cache close: ..."`, then proceeds with incremental fact-cache-dependent analyzers as no-ops. Those warnings are NOT benign — they mean the lint pass is incomplete. Resolution: when running `make lint` from inside a sandbox, request full filesystem access (in Cursor: `required_permissions: ["all"]` on the Shell tool call). The presence of any `Failed to persist facts to cache` or `[pkgcache] cache close` line in lint output means the result cannot be trusted and the command must be re-run with cache writes allowed before declaring the change green.
-
-- **`controller-gen` DeepCopy fails on structs with `client.Reader` fields.** The `FireboltEngineCustomValidator` and similar validators hold a `client.Reader` interface so admission can do live API reads. controller-gen's `object` generator tries to synthesise `DeepCopyInto` for every type in the `api/v1alpha1` package, panics on the interface field, and fails the whole `make generate` run. Workaround: annotate the validator struct with `// +kubebuilder:object:generate=false` to opt it out of DeepCopy generation. See `api/v1alpha1/fireboltengine_webhook.go` for the canonical placement; apply the same marker to any future validator that needs a runtime client.
+See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the running log of non-obvious problems, framework footguns, and environment traps. Add new entries there, not here.
 
 ## Project-specific rules
 
