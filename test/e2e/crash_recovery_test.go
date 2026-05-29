@@ -576,15 +576,27 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterEach(func() {
+			// Defer the engine operator Stop so it runs AFTER the
+			// DeleteEngine + WaitForResourcesDeleted finalizer
+			// drain below. Stopping first would leave the engine
+			// CR stuck in Terminating because there is no
+			// reconciler to remove the engine-cleanup finalizer,
+			// and WaitForResourcesDeleted would time out — which
+			// is exactly the CI failure mode 6f471e1 fixed in the
+			// other AfterEach blocks. The original order in this
+			// spec (Stop before Delete) had been hiding behind
+			// the now-removed _ = swallow on the Wait result.
+			defer func() {
+				if operator != nil {
+					operator.Stop()
+					operator = nil
+				}
+			}()
 			if bgRunner != nil {
 				bgRunner.Stop()
 				bgRunner = nil
 			}
 			controller.ClearCrashPointsForEngine(engineName)
-			if operator != nil {
-				operator.Stop()
-				operator = nil
-			}
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 		})
