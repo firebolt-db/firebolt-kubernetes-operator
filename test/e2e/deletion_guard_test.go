@@ -74,16 +74,26 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 	})
 
 	AfterAll(func() {
-		// Best-effort cleanup. The engine CR has no finalizer (no
-		// engine reconciler ran), so its delete is immediate. The
-		// class delete proceeds once the engine is gone — the guard
-		// reactively drops the finalizer via the FireboltEngine
-		// watch the class reconciler already wires.
+		// Defer the class operator Stop so it runs even if the
+		// resource-delete Expects below panic via Ginkgo's Fail →
+		// runtime.Goexit. Goexit honours defers; the Expect lines
+		// after this defer do not. Without the defer, a transient
+		// DeleteEngine / DeleteEngineClass failure would leak the
+		// in-process EngineClassReconciler goroutines and leave the
+		// finalizer on the next test's class with no operator to
+		// drain it.
+		defer func() {
+			if classOp != nil {
+				classOp.Stop()
+			}
+		}()
+		// The engine CR has no finalizer (no engine reconciler ran),
+		// so its delete is immediate. The class delete proceeds once
+		// the engine is gone — the guard reactively drops the
+		// finalizer via the FireboltEngine watch the class
+		// reconciler already wires.
 		Expect(DeleteEngine(context.Background(), engineName)).To(Succeed())
 		Expect(DeleteEngineClass(context.Background(), className)).To(Succeed())
-		if classOp != nil {
-			classOp.Stop()
-		}
 	})
 
 	It("blocks class deletion while a bound engine exists, releases once the engine is gone", func() {

@@ -57,10 +57,10 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should create all expected sub-resources", func() {
@@ -140,10 +140,10 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should recover when PG pod is deleted", func() {
@@ -220,10 +220,10 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should recover when metadata pod is deleted", func() {
@@ -300,10 +300,10 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		It("should recover when gateway pod is deleted", func() {
@@ -376,11 +376,13 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
+			defer func() {
+				if instanceOp != nil {
+					instanceOp.Stop()
+				}
+			}()
 			// Best-effort cleanup in case the test failed before deletion.
 			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
-			if instanceOp != nil {
-				instanceOp.Stop()
-			}
 		})
 
 		It("should garbage-collect all child resources", func() {
@@ -434,7 +436,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 		})
 
 		AfterAll(func() {
-			TeardownTestInstance(ctx, lc)
+			defer TeardownTestInstance(ctx, lc)
 		})
 
 		It("should revert manual gateway ConfigMap changes", func() {

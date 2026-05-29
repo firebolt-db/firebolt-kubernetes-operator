@@ -63,10 +63,10 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		AfterEach(func() {
@@ -127,10 +127,10 @@ var _ = Describe("FireboltInstance Lifecycle", func() {
 		})
 
 		AfterAll(func() {
+			defer TeardownTestInstance(ctx, lc)
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			TeardownTestInstance(ctx, lc)
 		})
 
 		AfterEach(func() {

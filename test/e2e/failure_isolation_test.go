@@ -76,6 +76,7 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 	})
 
 	AfterAll(func() {
+		defer TeardownTestInstance(ctx, lc)
 		if bgRunner != nil {
 			bgRunner.Stop()
 		}
@@ -85,7 +86,6 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 		Expect(DeleteEngineClass(ctx, badClass)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, healthyEngine, resourceCleanupTimeout)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)).To(Succeed())
-		TeardownTestInstance(ctx, lc)
 	})
 
 	AfterEach(func() {
