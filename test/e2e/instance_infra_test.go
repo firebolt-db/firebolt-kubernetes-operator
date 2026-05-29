@@ -58,8 +58,8 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -141,8 +141,8 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -221,8 +221,8 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -301,8 +301,8 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			TeardownTestInstance(ctx, lc)
 		})
 
@@ -377,7 +377,7 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		AfterAll(func() {
 			// Best-effort cleanup in case the test failed before deletion.
-			_ = DeleteInstance(ctx, instanceName)
+			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
 			if instanceOp != nil {
 				instanceOp.Stop()
 			}

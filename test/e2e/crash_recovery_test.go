@@ -56,7 +56,7 @@ var _ = Describe("Crash Recovery", func() {
 		})
 
 		AfterAll(func() {
-			_ = DeleteInstance(ctx, instanceName)
+			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
 			if instanceOp != nil {
 				instanceOp.Stop()
 			}
@@ -67,8 +67,8 @@ var _ = Describe("Crash Recovery", func() {
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			if operator != nil {
 				operator.Stop()
 				operator = nil
@@ -223,7 +223,7 @@ var _ = Describe("Crash Recovery", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteInstance(ctx, instanceName)
+			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
 			if instanceOp != nil {
 				instanceOp.Stop()
 			}
@@ -234,8 +234,8 @@ var _ = Describe("Crash Recovery", func() {
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			if operator != nil {
 				operator.Stop()
 				operator = nil
@@ -381,7 +381,7 @@ var _ = Describe("Crash Recovery", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteInstance(ctx, instanceName)
+			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
 			if instanceOp != nil {
 				instanceOp.Stop()
 			}
@@ -392,8 +392,8 @@ var _ = Describe("Crash Recovery", func() {
 			// Delete before stopping the operator so the engine finalizer can be
 			// processed. Stopping first would leave the engine stuck "being deleted"
 			// and cause the next It block to get a 409 on CreateEngine.
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 			if operator != nil {
 				operator.Stop()
 				operator = nil
@@ -540,7 +540,7 @@ var _ = Describe("Crash Recovery", func() {
 
 		AfterAll(func() {
 			DeleteClientPod(ctx, clientPod)
-			_ = DeleteInstance(ctx, instanceName)
+			Expect(DeleteInstance(ctx, instanceName)).To(Succeed())
 			if instanceOp != nil {
 				instanceOp.Stop()
 			}
@@ -556,8 +556,8 @@ var _ = Describe("Crash Recovery", func() {
 				operator.Stop()
 				operator = nil
 			}
-			_ = DeleteEngine(ctx, engineName)
-			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 		})
 
 		It("should maintain query availability when crash occurs after service selector update", func() {

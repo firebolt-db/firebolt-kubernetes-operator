@@ -101,8 +101,8 @@ var _ = Describe("Drift Reconciliation", Ordered, func() {
 			bgRunner.Stop()
 		}
 		DeleteClientPod(ctx, clientPod)
-		_ = DeleteEngine(ctx, engineName)
-		_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
+		Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+		Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 		TeardownTestInstance(ctx, lc)
 	})
 

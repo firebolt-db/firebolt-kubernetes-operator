@@ -1723,13 +1723,22 @@ func SetupTestInstance(ctx context.Context, name string) (*TestInstanceLifecycle
 		return nil, fmt.Errorf("create instance %s: %w", name, err)
 	}
 	if err := WaitForInstanceReady(ctx, name, instanceReadyTimeout); err != nil {
-		_ = DeleteInstance(ctx, name)
+		// Best-effort rollback. We're already returning the
+		// readiness-failure error to the test, so a cleanup
+		// failure here must not overwrite that signal. Log it
+		// instead so it's visible in the test output without
+		// stealing the failure narrative.
+		if delErr := DeleteInstance(ctx, name); delErr != nil {
+			fmt.Fprintf(GinkgoWriter, "SetupTestInstance: best-effort DeleteInstance(%s) after readiness failure also failed: %v\n", name, delErr)
+		}
 		instanceOp.Stop()
 		return nil, fmt.Errorf("wait instance %s ready: %w", name, err)
 	}
 	engineOp, err := StartOperator(name)
 	if err != nil {
-		_ = DeleteInstance(ctx, name)
+		if delErr := DeleteInstance(ctx, name); delErr != nil {
+			fmt.Fprintf(GinkgoWriter, "SetupTestInstance: best-effort DeleteInstance(%s) after engine operator start failure also failed: %v\n", name, delErr)
+		}
 		instanceOp.Stop()
 		return nil, fmt.Errorf("start engine operator for %s: %w", name, err)
 	}
