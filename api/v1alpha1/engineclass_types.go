@@ -46,6 +46,17 @@ type EngineClassSpec struct {
 	// Template is the pod template merged into engines that reference this
 	// class. See the type-level doc for the precedence rules and the list
 	// of operator-owned paths the validating webhook rejects.
+	//
+	// The CRD schema for template.metadata is patched post-controller-gen
+	// (scripts/patch-crd-template-metadata.py, invoked by `make manifests`)
+	// to set x-kubernetes-preserve-unknown-fields on the embedded
+	// ObjectMeta. Without that injection, structural-schema pruning would
+	// strip template.metadata.labels and template.metadata.annotations at
+	// admission time and any GitOps controller re-applying them would
+	// drift forever. A +kubebuilder:pruning:PreserveUnknownFields marker
+	// on this Go field is not sufficient: controller-gen lands it on the
+	// template schema, but the marker does not propagate into a child
+	// that has its own typed sub-schema (metadata: {type: object}).
 	Template corev1.PodTemplateSpec `json:"template"`
 }
 

@@ -16,11 +16,12 @@
       "description": "EngineClassSpec defines the desired state of an EngineClass.\n\nTemplate is a Kubernetes PodTemplateSpec merged underneath an engine's\nown pod template when the engine references this class via\nspec.engineClassRef. Precedence on every field is:\n\n 1. operator defaults (lowest)\n 2. EngineClass template\n 3. FireboltEngine spec (highest)\n\nThe operator owns a subset of the pod template (the engine container's\nimage, command, args, ports, probes, reserved env keys; pod-level\nterminationGracePeriodSeconds, subdomain, hostname; metadata names; the\nfirebolt.io/* label/annotation prefix). These paths are rejected by the\nEngineClass validating webhook at admission time so users see the\nfailure immediately instead of via silent stripping. The authoritative\nrejection set is built from operatorauthority.go.\n\nNon-engine containers (sidecars) and additional init containers are\nfully user-owned: the webhook does not constrain their image, command,\nports, or environment.",
       "properties": {
         "template": {
-          "description": "Template is the pod template merged into engines that reference this\nclass. See the type-level doc for the precedence rules and the list\nof operator-owned paths the validating webhook rejects.",
+          "description": "Template is the pod template merged into engines that reference this\nclass. See the type-level doc for the precedence rules and the list\nof operator-owned paths the validating webhook rejects.\n\nThe CRD schema for template.metadata is patched post-controller-gen\n(scripts/patch-crd-template-metadata.py, invoked by `make manifests`)\nto set x-kubernetes-preserve-unknown-fields on the embedded\nObjectMeta. Without that injection, structural-schema pruning would\nstrip template.metadata.labels and template.metadata.annotations at\nadmission time and any GitOps controller re-applying them would\ndrift forever. A +kubebuilder:pruning:PreserveUnknownFields marker\non this Go field is not sufficient: controller-gen lands it on the\ntemplate schema, but the marker does not propagate into a child\nthat has its own typed sub-schema (metadata: {type: object}).",
           "properties": {
             "metadata": {
               "description": "Standard object's metadata.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
-              "type": "object"
+              "type": "object",
+              "x-kubernetes-preserve-unknown-fields": true
             },
             "spec": {
               "description": "Specification of the desired behavior of the pod.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status",

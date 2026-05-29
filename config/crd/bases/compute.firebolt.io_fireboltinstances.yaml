@@ -132,12 +132,17 @@ spec:
                       template.spec.containers[name=="envoy"].image and .resources,
                       plus scheduling fields (nodeSelector / tolerations / affinity /
                       topologySpreadConstraints / priorityClassName).
+
+                      template.metadata is unpruned by a post-controller-gen patch (see
+                      the matching note on EngineClassSpec.Template for the full
+                      rationale).
                     properties:
                       metadata:
                         description: |-
                           Standard object's metadata.
                           More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
                         type: object
+                        x-kubernetes-preserve-unknown-fields: true
                       spec:
                         description: |-
                           Specification of the desired behavior of the pod.
@@ -8767,12 +8772,17 @@ spec:
                       template.spec.containers[name=="metadata"].image and
                       .resources, plus scheduling fields (nodeSelector / tolerations /
                       affinity / topologySpreadConstraints / priorityClassName).
+
+                      template.metadata is unpruned by a post-controller-gen patch (see
+                      the matching note on EngineClassSpec.Template for the full
+                      rationale).
                     properties:
                       metadata:
                         description: |-
                           Standard object's metadata.
                           More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
                         type: object
+                        x-kubernetes-preserve-unknown-fields: true
                       spec:
                         description: |-
                           Specification of the desired behavior of the pod.
