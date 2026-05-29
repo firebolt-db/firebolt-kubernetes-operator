@@ -176,13 +176,29 @@ branch is uncovered (only reachable when admission is bypassed).
 **Problem.** Phase 1 (W1) and W4 need end-to-end coverage to lock
 behavior in.
 
-**Approach.** New Ginkgo specs under `test/e2e/`:
-- **Deletion guard.** Create class + engine, delete class, assert
-  `Terminating` + `Ready=False/DeletionBlocked`. Delete engine, assert
-  class is removed.
-- **Resource bounds.** Start operator with `--engine-max-cpu=8`, create
-  engine with `limits.cpu=16`, assert
-  `Ready=False/ResourceBoundsExceeded`, no STS rendered.
+**Status.**
+
+- **Deletion guard — shipped.** `test/e2e/deletion_guard_test.go`
+  starts an in-process `EngineClassReconciler`, creates a class plus
+  a "binding carrier" `FireboltEngine` CR (no engine controller
+  involved — the engine just exists so `countBoundEngines` finds
+  it), DELETEs the class, asserts Terminating +
+  `Ready=False/DeletionBlocked` with the count, then removes the
+  engine and asserts the class reaps. Spec is lightweight: no
+  `FireboltInstance`, no pods. A `StartClassOperator` helper and a
+  `CreateBareEngineWithClassRef` helper land in
+  `test/e2e/helpers_test.go`.
+- **Resource bounds — deferred.** The engine reconciler's instance
+  gate (`resolveInstanceInfo` in `engine_controller.go`) runs before
+  the bounds gate, so an e2e test that reaches `ResourceBoundsExceeded`
+  needs a fully-Ready `FireboltInstance` fixture (pods, metadata
+  service, etc.). The benefit doesn't justify the cost: W4's unit
+  tests in `engine_resource_bounds_test.go` already exercise the
+  gate against a fake instance, and the `Validate` method is shared
+  with the webhook (whose unit tests cover the same code path from
+  admission). Follow-up if it becomes load-bearing for a customer
+  use case: pair it with the upcoming W5 webhook integration suite
+  so we get over-the-wire coverage of both paths in one fixture.
 
 ---
 

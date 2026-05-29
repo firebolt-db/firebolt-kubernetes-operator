@@ -230,6 +230,34 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef)
 }
 
+// CreateBareEngineWithClassRef creates the minimum-viable
+// FireboltEngine that binds an EngineClass: instanceRef + replicas=1
+// + engineClassRef, no resources, no customEngineConfig, no drain
+// settings. Used by tests that need a binding to exist for the
+// EngineClass deletion guard to see it but don't run a
+// FireboltEngineReconciler, so the engine never reconciles past the
+// raw CR. Calling CreateEngineWithClass here would stamp the
+// floci-pointing customEngineConfig that the deletion-guard test
+// has no need for.
+func CreateBareEngineWithClassRef(ctx context.Context, instanceRef, name, classRef string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    instanceRef,
+			Replicas:       1,
+			EngineClassRef: &classRef,
+		},
+	}
+	return cl.Create(ctx, engine)
+}
+
 // CreateEngineWithResources creates a FireboltEngine with caller-supplied
 // resource requests/limits, bypassing the default 100m/2Gi the other
 // helpers stamp on. Used by failure-isolation tests that need an engine
@@ -1401,6 +1429,87 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 
 // Stop stops the instance operator
 func (o *InstanceOperator) Stop() {
+	if o.cancelFunc != nil {
+		o.cancelFunc()
+	}
+	o.wg.Wait()
+}
+
+// ClassOperator wraps an in-process EngineClassReconciler. The
+// reconciler is the only thing that adds the deletion-guard
+// finalizer on EngineClass CRs and the only thing that releases it
+// once bindings clear — without it running, classes never get the
+// finalizer and the W1 deletion guard is silently bypassed (the
+// "no finalizer, deletion proceeds" fast path). Tests that
+// exercise the guard must start a ClassOperator before creating
+// the class they intend to delete.
+type ClassOperator struct {
+	mgr        manager.Manager
+	cancelFunc context.CancelFunc
+	wg         sync.WaitGroup
+}
+
+// StartClassOperator brings up an EngineClassReconciler scoped to
+// the e2e testNamespace. Unlike StartOperator / StartInstanceOperator,
+// no name filter is applied: every EngineClass in the namespace
+// reconciles. The reconciler watches FireboltEngines so DELETE
+// reconciles fire reactively as bindings drop to zero.
+func StartClassOperator() (*ClassOperator, error) {
+	config, err := getRestConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config: %w", err)
+	}
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add client-go scheme: %w", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
+	}
+
+	mgr, err := ctrl.NewManager(config, ctrl.Options{
+		Scheme: scheme,
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				testNamespace: {},
+			},
+		},
+		Metrics: metricsserver.Options{
+			BindAddress: "0",
+		},
+		HealthProbeBindAddress: "0",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create class manager: %w", err)
+	}
+
+	reconciler := &controller.EngineClassReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}
+	if err := reconciler.SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("failed to setup class reconciler: %w", err)
+	}
+
+	ctxOp, cancel := context.WithCancel(context.Background())
+	op := &ClassOperator{mgr: mgr, cancelFunc: cancel}
+
+	op.wg.Add(1)
+	go func() {
+		defer op.wg.Done()
+		defer GinkgoRecover()
+		if err := mgr.Start(ctxOp); err != nil {
+			fmt.Fprintf(GinkgoWriter, "Class manager exited with error: %v\n", err)
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	return op, nil
+}
+
+// Stop stops the class operator.
+func (o *ClassOperator) Stop() {
 	if o.cancelFunc != nil {
 		o.cancelFunc()
 	}
