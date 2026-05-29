@@ -143,6 +143,24 @@ EngineClass holds a reusable pod-template fragment that engines in the same name
 
 When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/kubernetes-operator/templates/clusterrole.yaml`](helm/kubernetes-operator/templates/clusterrole.yaml) needs matching edits -- it is hand-maintained separately from kubebuilder output.
 
+### Admission webhooks and controller-side fallbacks
+
+The operator supports two admission postures and every invariant has to behave the same in both. The operator CLI flag `--enable-webhooks` defaults to `true`, but the Helm chart sets `webhook.enabled: false` by default (cert bootstrap is the caller's responsibility), so the realistic shipped state is **webhooks off**. `make test`, `make test-e2e`, and `make helm-test` all run with webhooks off too — the in-process operators and envtest setup do not register the webhook server.
+
+Every webhook-enforced invariant has a controller-side counterpart so the same CR write produces the same outcome regardless of admission. When touching any of these, change both sides together and add envtest coverage for the controller branch:
+
+- **`FireboltInstance.spec.id` defaulting.** Mutating defaulter mints a ULID at admission. Controller fallback at `instance_controller.go:115` mints and `Update`s on the first reconcile; the CRD's CEL rule `oldSelf == '' || self == oldSelf` (`fireboltinstance_types.go:301`) is what lets the controller's empty-to-value Update through.
+- **`FireboltInstance.spec.metadata.{postgres.credentialsSecretRef.Name,replicas}`.** Webhook rejects. CRD CEL enforces `replicas == 1`. Controller's `checkExternalPostgresSecret` surfaces the empty-secret case as `MetadataReady=False/PostgresSecretPreflightFailed`.
+- **`FireboltInstance.spec.{gateway,metadata}.template` operator-owned paths.** Webhook walks both templates with `GatewayPodTemplateRules` / `MetadataPodTemplateRules`. Controller's `validateInstanceTemplates` re-runs the same rules every reconcile and surfaces `{Gateway,Metadata}Ready=False/TemplateRejected` with the field path; the offending component is not rendered.
+- **`EngineClass.spec.template` operator-owned paths.** Webhook walks `EngineClassPodTemplateRules`. `EngineClassReconciler.classReadiness` stamps `Ready=False/OperatorOwnedFieldSet` as defense-in-depth, AND `FireboltEngineReconciler.resolveEngineClassInfo` reads that condition: when set, it returns `errEngineClassUnready` and Reconcile surfaces `engine.ConditionReady=False/EngineClassUnready` with a pointer to the offending class — the engine StatefulSet is NOT rendered until the class becomes admissible.
+- **`EngineClass` deletion while bound.** Webhook refuses DELETE. `EngineClassReconciler` carries the finalizer `compute.firebolt.io/engineclass-deletion-guard`; while a `deletionTimestamp` is set and a bound engine exists, the reconciler holds the finalizer and stamps `Ready=False/DeletionBlocked` with the count. Force-removing the finalizer (`kubectl patch metadata.finalizers`) is the legitimate escape hatch.
+- **`FireboltEngine.spec.engineClassRef`.** Webhook rejects when the named class is missing in the engine's namespace. Controller surfaces `errEngineClassNotFound` via log + backoff (no dedicated condition by design — class state is binary, missing-class is rare in practice).
+- **`FireboltEngine.spec.resources` bounds (`--engine-max-*`).** Webhook rejects. Controller's `r.ResourceBounds.Validate` runs every reconcile via the same code path and surfaces `engine.ConditionReady=False/ResourceBoundsExceeded` with the field path and the configured maximum. Plumb the bounds from `cmd/main.go` into both the webhook and the reconciler so they cannot diverge.
+
+CRD CEL rules (the third enforcement layer) are independent of webhook state — they are baked into the CRD and run inside the apiserver. Use them for invariants where webhook + controller cannot together close a race (the only current example is the `spec.id` empty-to-ULID transition).
+
+The full per-invariant matrix lives at [`docs/webhook-hardening-plan.md`](docs/webhook-hardening-plan.md).
+
 ### Local image-loading mechanism
 
 E2E and helm-test workflows publish workload images (engine, metadata, postgres, envoy, curl) to a **local Docker registry container** rather than copying each image into every kind node's containerd snapshotter via `kind load docker-image`. The legacy `kind load` flow duplicates the multi-GB engine image per node and overflows Docker Desktop's default ~64 GB VM disk on multi-node clusters.

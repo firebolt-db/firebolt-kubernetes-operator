@@ -536,11 +536,15 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			_ = DeleteEngine(ctx, engineName)
 			_ = WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)
-			// EngineClass deletion is guarded by the validating webhook
-			// while any FireboltEngine in the same namespace references
-			// the class (the gate uses a live List, not status); clearing
-			// the engine first (above) must drop the count to zero,
-			// after which the class delete goes through.
+			// EngineClass deletion is guarded by the EngineClassReconciler's
+			// deletion-guard finalizer while any FireboltEngine in the
+			// same namespace references the class (the gate uses a live
+			// List, not status). The e2e harness runs the controllers
+			// in-process and does not register the validating webhook,
+			// so the finalizer is the only enforcement here. Clearing
+			// the engine first (above) must drop the bound count to
+			// zero, after which the next class reconcile removes the
+			// finalizer and the delete completes.
 			_ = DeleteEngineClass(ctx, className)
 			TeardownTestInstance(ctx, lc)
 		})
