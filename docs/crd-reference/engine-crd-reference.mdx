@@ -10,7 +10,7 @@ sidebarTitle: FireboltEngine CRD reference
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
 | `spec.engineClassRef` | No | - | Name of an [`EngineClass`](engineclass-crd-reference) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class. There is no per-engine image override on this CR. See the EngineClass reference for the merge precedence. |
-| `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine. The CR is preserved. See [Stop and resume](../../README.md#stop-and-resume). |
+| `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine. The CR is preserved. See [Stop and resume](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/README.md#stop-and-resume). |
 | `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
 | `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. |
@@ -63,7 +63,7 @@ sidebarTitle: FireboltEngine CRD reference
 
 | Resource | Name Pattern | Purpose |
 |----------|--------------|---------|
-| **Engine Service** | `my-engine-service` | Headless Service exposing the current generation's pod IPs. See [Connecting to Engines](../../README.md#connecting-to-engines). |
+| **Engine Service** | `my-engine-service` | Headless Service exposing the current generation's pod IPs. See [Connecting to engines](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/README.md#connecting-to-engines). |
 | **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
 | **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
 | **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
