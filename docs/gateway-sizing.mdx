@@ -1,0 +1,31 @@
+---
+title: Gateway sizing
+description: Size Envoy gateway replicas and memory for zero-downtime cutovers.
+sidebarTitle: Gateway sizing
+---
+
+The Envoy gateway is the only zero-downtime entry point. Size its replica count and memory limit for both steady-state traffic and the **retry amplification** introduced by the `X-Firebolt-Drained` shutdown path.
+
+The Firebolt Operator pins Envoy's `per_connection_buffer_limit_bytes` to **2 MiB** on both the listener and the dynamic-forward-proxy cluster. The value is intentionally not exposed on the CR. See the comment on `gatewayPerConnectionBufferLimitBytes` in `internal/controller/instance_gateway.go`. This value is part of the Firebolt Operator's zero-downtime and memory-budget contract. A per-instance override could silently break retry coverage or the gateway memory limit.
+
+Two consequences this fixed value imposes on operations:
+
+- **Memory budget.** Peak buffering per gateway pod is roughly `expected_concurrent_requests x (1 + retry_factor) x 2 MiB`, where `retry_factor` is the fraction of in-flight requests you expect to be retried during a cutover. This is typically small and bounded by the active health-check interval and the size of the engine fleet behind a single authority. When expected concurrency grows, raise `spec.gateway.replicas` and `spec.gateway.template.spec.containers[name=="envoy"].resources.limits.memory` together. OOMKills here translate directly into client-visible failures because the gateway is the only zero-downtime entry point.
+- **Requests larger than 2 MiB are not retried.** Envoy can only replay a request whose body fits in the per-connection buffer. Anything bigger is dispatched without buffering. Any 503 it gets, including a retry-safe `X-Firebolt-Drained` 503 from the engine's pre-work shutdown fence, propagates to the client unretried. If your workloads send single requests above this threshold, such as multi-MiB `COPY` ingest or large multi-statement batches, split them client-side or accept that those requests can fail during a cutover.
+
+## Per-engine circuit breakers
+
+The Firebolt Operator also stamps Envoy [circuit-breaker thresholds](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/cluster/v3/circuit_breaker.proto) on the dynamic-forward-proxy cluster. Because each unique engine authority materializes its own `STRICT_DNS` sub-cluster, these thresholds apply **per engine, per gateway pod**. A runaway engine cannot consume more than its share of connection-pool slots, pending-request queue, in-flight stream budget, or retries. This prevents it from starving sibling engines on the same gateway pod.
+
+Defaults (matched in `internal/controller/instance_gateway.go` against constants of the same names, and asserted by `TestBuildEnvoyConfigYAMLCircuitBreakers`):
+
+| Field | Value | What it caps |
+|---|---|---|
+| `max_connections` | `1024` | Concurrent upstream TCP connections to one engine through one gateway pod. With `max_requests_per_connection: 1` this is also the concurrent in-flight query cap per engine. |
+| `max_pending_requests` | `1024` | Queue depth before Envoy returns a synthetic 503 with response flag `UO` (upstream overflow). |
+| `max_requests` | `1024` | HTTP/2 active streams per engine sub-cluster. Held in lockstep with `max_connections` because `max_requests_per_connection: 1` collapses the two dimensions. |
+| `max_retries` | `256` | Cluster-wide simultaneous retry budget. This is higher than Envoy's default of 3 because the route's `num_retries` is 50 and a cutover can keep many requests retrying at once. |
+
+These values are hard-coded for the same reason as `per_connection_buffer_limit_bytes`. A per-instance override would either be a no-op when limits are set high or break the per-engine isolation contract when limits are set low enough to throttle steady-state traffic on one engine while leaving the gateway's global memory budget unchanged. If you expect per-engine concurrency above `max_connections`, raise `spec.gateway.replicas` so the *total* gateway capacity grows in proportion. Do not change these per-pod caps.
+
+Operationally, a request rejected by a tripped circuit breaker shows up as a synthetic Envoy 503 with response flag `UO`, `UAEX`, or `URX` in the access log. Sustained 503s with these flags against one engine indicate that the engine is saturating the per-pod cap. Investigate the engine before raising the gateway's replica count.

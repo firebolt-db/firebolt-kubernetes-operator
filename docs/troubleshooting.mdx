@@ -1,4 +1,8 @@
-# Troubleshooting
+---
+title: Troubleshooting
+description: Common Firebolt Operator failure modes and recovery steps.
+sidebarTitle: Troubleshooting
+---
 
 ## Instance
 
@@ -13,7 +17,7 @@ kubectl logs -l firebolt.io/component=metadata -n firebolt
 
 ### Instance in "Failed" phase
 
-A terminal error occurred (e.g., multiple accounts found in the metadata service). Inspect the operator logs for details and resolve the underlying issue manually. The operator will not automatically recover from this state.
+A terminal error occurred (e.g., multiple accounts found in the metadata service). Inspect the Firebolt Operator logs for details and resolve the underlying issue manually. The Firebolt Operator will not automatically recover from this state.
 
 ## Engine
 
@@ -22,8 +26,8 @@ A terminal error occurred (e.g., multiple accounts found in the metadata service
 The referenced instance is not ready. Check instance status:
 
 ```bash
-kubectl get fi -n firebolt
-kubectl describe fi <instance-name> -n firebolt
+kubectl get fire -n firebolt
+kubectl describe fire <instance-name> -n firebolt
 ```
 
 Common causes: instance still provisioning, metadata service pods not ready, gateway pods not ready.

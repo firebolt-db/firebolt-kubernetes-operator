@@ -1,31 +1,35 @@
-# Monitoring
+---
+title: Monitoring
+description: Prometheus metrics exposed by the Firebolt Operator and managed components.
+sidebarTitle: Monitoring
+---
 
-This document describes how the Firebolt operator exposes Prometheus metrics for the components it manages.
+This document describes how the Firebolt Operator exposes Prometheus metrics for the components it manages.
 
 ## Metrics endpoints
 
 | Component | Port | Name | Path | What it exposes |
 |---|---|---|---|---|
-| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges. The operator scrapes the first two via `Pods/proxy` to drive both the drain check and the autoscaler. |
+| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges. The Firebolt Operator scrapes the first two via `Pods/proxy` to drive both the drain check and the autoscaler. |
 | Gateway pods (Envoy) | 9090 (default) | `metrics` | `/stats/prometheus` | Envoy connection, request, and cluster stats |
-| Operator pod | Configurable via `metrics.bindAddress` | `https` or `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
+| Firebolt Operator pod | Configurable via `metrics.bindAddress` | `https` or `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
 
 The gateway metrics port defaults to 9090 and is configurable per FireboltInstance CR via `spec.gateway.metricsPort`. Metadata pods do not currently expose a Prometheus metrics endpoint.
 
-### Operator metrics mode
+### Firebolt Operator metrics mode
 
-The operator metrics endpoint mode is controlled by two Helm values:
+The Firebolt Operator metrics endpoint mode is controlled by two Helm values:
 
 | Mode | `metrics.secure` | `metrics.bindAddress` | Port name | Scheme |
 |---|---|---|---|---|
 | HTTPS (default) | `true` | `:8443` | `https` | `https` with authn/authz and self-signed TLS |
 | HTTP | `false` | `:8080` | `http` | plain `http` |
 
-The operator PodMonitor template automatically adapts its port reference, scheme, bearer token, and TLS configuration based on `metrics.secure`.
+The Firebolt Operator PodMonitor template automatically adapts its port reference, scheme, bearer token, and TLS configuration based on `metrics.secure`.
 
 ## Scraping with Prometheus
 
-The operator Helm chart ships optional `PodMonitor` resources (one per component type) that can be enabled via `values.yaml`:
+The Firebolt Operator Helm chart ships optional `PodMonitor` resources (one per component type) that can be enabled via `values.yaml`:
 
 ```yaml
 podMonitor:
@@ -35,16 +39,16 @@ podMonitor:
     enabled: true
   operator:
     enabled: true
-  allNamespaces: false   # set true when the operator watches all namespaces
+  allNamespaces: false   # set true when the Firebolt Operator watches all namespaces
 ```
 
 Each PodMonitor uses label selectors to match the relevant pods:
 
-- **Engines**: `firebolt.io/engine` (exists) -- matches all engine pods regardless of engine name
+- **Engines**: `firebolt.io/engine` (exists). Matches all engine pods regardless of engine name
 - **Gateway**: `firebolt.io/component=gateway`
-- **Operator**: `control-plane=controller-manager` + chart selector labels
+- **Firebolt Operator**: `control-plane=controller-manager` + chart selector labels
 
-When `allNamespaces` is true, `namespaceSelector.any: true` is added so pods in any namespace are discovered. This does not apply to the operator PodMonitor since the operator always runs in the release namespace.
+When `allNamespaces` is true, `namespaceSelector.any: true` is added so pods in any namespace are discovered. This does not apply to the Firebolt Operator PodMonitor because the Firebolt Operator always runs in the release namespace.
 
 ### Per-instance monitoring
 
@@ -55,12 +59,12 @@ The chart-level PodMonitors apply uniform scrape configuration to all instances 
 
 ## Architecture decisions
 
-### Helm chart templates, not operator reconciliation
+### Helm chart templates, not Firebolt Operator reconciliation
 
-PodMonitor resources are shipped as Helm templates, not created by the operator's Go reconciliation loop. This follows the dominant industry pattern (used by cert-manager, Strimzi, FoundationDB operator, and others). CloudNativePG tried the operator-managed approach and deprecated it in v1.26 because:
+PodMonitor resources are shipped as Helm templates, not created by the Firebolt Operator's Go reconciliation loop. This follows the dominant industry pattern used by cert-manager, Strimzi, FoundationDB operator, and others. CloudNativePG tried a reconciler-managed approach and deprecated it in v1.26 because:
 
-- It creates a hard dependency on the Prometheus Operator CRDs — the operator fails to reconcile on clusters where the CRDs are not installed.
-- The operator overwrites user customizations (scrape intervals, relabelings, TLS config) on every reconcile.
+- It creates a hard dependency on the Prometheus Operator CRDs. The Firebolt Operator fails to reconcile on clusters where the CRDs are not installed.
+- The Firebolt Operator overwrites user customizations (scrape intervals, relabelings, TLS config) on every reconcile.
 - It adds RBAC complexity for `monitoring.coreos.com` resources.
 - Platform teams want full ownership of their monitoring configuration.
 
@@ -72,15 +76,15 @@ Instead, a separate read-only stats listener is added on the metrics port (defau
 
 ### Consistent metrics port
 
-Engine pods and gateway pods both expose Prometheus metrics on a container port named `metrics` (default 9090). The gateway override lives on the FireboltInstance at `spec.gateway.metricsPort`; the operator stamps the corresponding `metrics`-named port on the rendered Envoy container. Engine pods carry the port via the per-FireboltEngine wiring. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number. The metadata pod does not currently expose a Prometheus endpoint, so no `metrics` port is stamped there.
+Engine pods and gateway pods both expose Prometheus metrics on a container port named `metrics` (default 9090). The gateway override lives on the FireboltInstance at `spec.gateway.metricsPort`. The Firebolt Operator stamps the corresponding `metrics`-named port on the rendered Envoy container. Engine pods carry the port via the per-FireboltEngine wiring. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number. The metadata pod does not currently expose a Prometheus endpoint, so no `metrics` port is stamped there.
 
 ### Cross-namespace support
 
-When the operator watches all namespaces (`watchNamespace` is empty), engine, gateway, and metadata pods may live in namespaces other than the operator's. Setting `podMonitor.allNamespaces: true` adds `namespaceSelector.any: true` to the PodMonitors so Prometheus discovers pods across all namespaces.
+When the Firebolt Operator watches all namespaces (`watchNamespace` is empty), engine, gateway, and metadata pods may live in namespaces other than the Firebolt Operator's namespace. Setting `podMonitor.allNamespaces: true` adds `namespaceSelector.any: true` to the PodMonitors so Prometheus discovers pods across all namespaces.
 
 ### Embedded CR status metrics
 
-The operator embeds custom Prometheus metrics that expose the status of every FireboltEngine and FireboltInstance it manages. These are level-triggered gauges updated on every reconcile -- no timers or persisted timestamps, consistent with the operator's level-driven reconciliation model. Duration and trend analysis are left to PromQL.
+The Firebolt Operator embeds custom Prometheus metrics that expose the status of every FireboltEngine and FireboltInstance it manages. These are level-triggered gauges updated on every reconcile. There are no timers or persisted timestamps, which is consistent with the Firebolt Operator's level-driven reconciliation model. Duration and trend analysis are left to PromQL.
 
 This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconcile_condition`), cert-manager (`certmanager_certificate_ready_status`), and Crossplane (`crossplane_managed_resource_ready`).
 
@@ -119,7 +123,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | `phase` | Current lifecycle phase |
 | `type` | Condition type (e.g., `Ready`, `MetadataReady`) |
 | `id` | Stable instance ID (ULID) |
-| `postgres_mode` | `internal` (operator-managed) or `external` (user-provided) |
+| `postgres_mode` | `internal` (Firebolt Operator-managed) or `external` (user-provided) |
 
 ### Example PromQL queries
 
@@ -168,6 +172,6 @@ count by (namespace, instance) (firebolt_engine_status_condition{type="Ready"} =
 
 ### Cardinality
 
-Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 10 series (4 phases + 4 conditions + 1 info + 1 timestamp). For a cluster with 10 instances and 50 engines, expect roughly 850 series from the operator -- negligible for any Prometheus deployment.
+Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 10 series (4 phases + 4 conditions + 1 info + 1 timestamp). For a cluster with 10 instances and 50 engines, expect roughly 850 series from the Firebolt Operator. This is negligible for any Prometheus deployment.
 
 Metric label sets are cleaned up when CRs are deleted, so terminated engines do not leave stale series.

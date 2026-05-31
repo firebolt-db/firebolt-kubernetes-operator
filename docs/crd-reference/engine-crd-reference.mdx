@@ -1,0 +1,118 @@
+---
+title: FireboltEngine CRD reference
+description: Spec, phases, and conditions for the FireboltEngine custom resource.
+sidebarTitle: FireboltEngine CRD reference
+---
+
+## Spec reference
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
+| `spec.engineClassRef` | No | - | Name of an [`EngineClass`](engineclass-crd-reference) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class. There is no per-engine image override on this CR. See the EngineClass reference for the merge precedence. |
+| `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine. The CR is preserved. See [Stop and resume](../../README.md#stop-and-resume). |
+| `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
+| `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
+| `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. |
+| `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the Firebolt Operator-side drain check. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
+| `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status |
+| `spec.terminationGracePeriodSeconds` | No | `60` | Grace period between SIGTERM and SIGKILL for engine pods. The engine waits up to `grace - 5s` for in-flight queries after SIGTERM. Raise this for workloads with long-running queries. |
+| `spec.nodeSelector` | No | - | Node selector for engine pods |
+| `spec.tolerations` | No | - | Tolerations for engine pods |
+| `spec.podLabels` | No | - | Additional labels applied to engine pods. `firebolt.io/engine` and `firebolt.io/generation` are reserved and silently ignored. Changes trigger a new blue-green generation. |
+| `spec.podAnnotations` | No | - | Annotations applied to engine pod templates. Firebolt Operator-managed annotations always win against user-provided values with the same key. Changes trigger a new blue-green generation. |
+| `spec.serviceAccountName` | No | (namespace default) | ServiceAccount for engine pods (IRSA / Pod Identity binding). Changing this triggers a new blue-green generation. |
+| `spec.affinity` | No | - | Scheduling affinity (`nodeAffinity` / `podAffinity` / `podAntiAffinity`) for engine pods. Changes trigger a new blue-green generation. |
+| `spec.podSecurityContext` | No | (Firebolt Operator default) | Pod-level security context. The Firebolt Operator always stamps `fsGroup` (`3473`) so the kernel chowns the per-pod data volume. Changes trigger a new blue-green generation. |
+| `spec.securityContext` | No | - | Container-level security context for the engine container, passed through verbatim. Changes trigger a new blue-green generation. |
+| `spec.initContainers` | No | - | Additional init containers stamped on the engine pod template before the engine container starts (e.g. node-local data prep). Changes trigger a new blue-green generation. |
+| `spec.storage` | No | `emptyDir` | Per-pod **data volume** mounted into each engine container — engine-local regenerable cache. This is distinct from `customEngineConfig.storage` (object storage). Set exactly one of `persistentVolumeClaim`, `emptyDir`, or `hostPath`; if none is set the Firebolt Operator uses an `emptyDir`. Any change, including a backend swap, forces a new blue-green generation. |
+| `spec.customEngineConfig` | No | - | Free-form object deep-merged into the rendered engine `config.yaml`. Use `customEngineConfig.storage` to point the engine at object storage for managed tablet data — this is **required**, the engine will not start without it (see [Configure object storage](../quickstart#configure-object-storage)). Firebolt Operator-owned identity, routing, and topology paths (`schema_version`, `instance.id`, `instance.type`, `instance.multi_engine`, `engine.id`, `engine.nodes`, `engine.termination_grace_period`) are stripped from user input. Changes trigger a new blue-green generation. |
+| `spec.autoscaling` | No | disabled | Automatic replica management. When `enabled`, the autoscaler owns `spec.replicas` (HPA-style) and scales on query activity and schedule windows. |
+| `spec.metadataEndpointOverride` | No | - | Override the instance-derived metadata endpoint (for cross-cluster setups) |
+
+## Engine phases
+
+| Phase | Meaning |
+|-------|---------|
+| `stable` | Terminal. All resources match spec, `replicas > 0`, engine is serving traffic. |
+| `creating` | New generation being created. Waiting for pods to be ready. |
+| `switching` | Traffic being switched to the new generation. |
+| `draining` | Waiting for old generation pods to finish serving queries. |
+| `cleaning` | Deleting old generation resources. |
+| `stopped` | Terminal. `spec.replicas == 0`. Engine is intentionally parked. CR and active-generation resources are preserved but no pods are running. Set `spec.replicas` to a non-zero value to resume. |
+
+## Conditions
+
+| Condition | Meaning |
+|-----------|---------|
+| `InstanceReady=True` | Referenced `FireboltInstance` is ready and providing metadata. |
+| `InstanceReady=False` | Instance is missing, not ready, or lacks metadata endpoint / instance ID. |
+| `Ready=True, Reason=EngineReady` | Engine is serving traffic with all replicas ready. |
+| `Ready=False, Reason=Initializing` | First reconcile of a freshly created CR. Transient. |
+| `Ready=False, Reason=Rolling` | A blue-green transition is in progress (`creating` / `switching` / `draining` / `cleaning`). |
+| `Ready=False, Reason=PodsNotReady` | Phase is `stable` but some pods are not yet ready (e.g., image pull in progress). |
+| `Ready=False, Reason=Stopped` | `spec.replicas == 0`. The engine is intentionally parked. Not a transient failure. |
+| `Ready=False, Reason=InstanceNotReady` | The referenced `FireboltInstance` is not ready. |
+| `Ready=False, Reason=DrainCheckFailing` | The drain-readiness probe (Prometheus scrape on a draining-generation pod) cannot reach the pod or parse its metrics. The blue-green is paused until the probe recovers. |
+| `Ready=False, Reason=ExternalFinalizer` | The engine is being deleted (`metadata.deletionTimestamp` is set) and the Firebolt Operator detected one or more non-Firebolt Operator finalizers on owned children (StatefulSet / Service / ConfigMap). The condition `message` and the matching `ExternalFinalizerOnOwnedResource` Warning Event name the resources and finalizers. The engine CR is still garbage-collected. The listed resources will linger until their finalizers are removed by their owners (backup tools, service-mesh injectors, custom admission hooks). |
+
+## Firebolt Operator-managed resources
+
+**Do not modify these resources manually.** For an engine named `my-engine`:
+
+| Resource | Name Pattern | Purpose |
+|----------|--------------|---------|
+| **Engine Service** | `my-engine-service` | Headless Service exposing the current generation's pod IPs. See [Connecting to Engines](../../README.md#connecting-to-engines). |
+| **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
+| **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
+| **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
+
+## Admission resource bounds
+
+The validating webhook can be configured with per-dimension maxima for
+`spec.resources.requests` and `spec.resources.limits`. When configured,
+any FireboltEngine create or update whose `cpu`, `memory`, or
+`ephemeral-storage` value exceeds the matching maximum is rejected at
+admission with a `spec.resources.{requests,limits}.{name}` field error
+that names the offending value and the Firebolt Operator-configured ceiling.
+
+Bounds are opt-in: defaults are empty (unbounded) so existing installs
+are not broken by a Firebolt Operator upgrade. Configure via Helm values when
+the Firebolt Operator's webhook is enabled:
+
+```yaml
+webhook:
+  enabled: true
+engineResourceBounds:
+  maxCPU: "32"
+  maxMemory: "256Gi"
+  maxEphemeralStorage: "10Ti"
+```
+
+Or directly via Firebolt Operator flags:
+
+```
+--engine-max-cpu=32
+--engine-max-memory=256Gi
+--engine-max-ephemeral-storage=10Ti
+```
+
+Bounds are applied independently per dimension. Resource names without
+a configured maximum (extended resources, GPU vendors, etc.) pass
+through unchecked. Both Requests and Limits are checked against the
+same per-dimension maximum.
+
+## Check status
+
+```bash
+kubectl get fireng -n firebolt
+```
+
+```
+NAME        REPLICAS   PHASE    READY   GENERATION   AGE
+my-engine   5          stable   True    2            24h
+```
+
+## Examples
+For full examples, see the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.

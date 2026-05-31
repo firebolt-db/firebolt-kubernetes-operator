@@ -1,0 +1,109 @@
+---
+title: Instance reconciliation
+description: FireboltInstance reconciliation for PostgreSQL, metadata, and gateway infrastructure.
+sidebarTitle: Instance reconciliation
+---
+
+## FireboltInstance reconciler
+
+The `FireboltInstanceReconciler` manages the infrastructure that engines depend on: PostgreSQL, the metadata service, and the Envoy gateway proxy. It follows the same level-triggered principles as the engine reconciler.
+
+### Architecture
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│  Reconcile()                                             │
+│  Entry point: reads FireboltInstance CR, runs in order   │
+│  File: instance_controller.go                            │
+└──────┬───────────┬──────────────┬────────────────────────┘
+       │           │              │
+       ▼           ▼              ▼
+┌───────────┐ ┌──────────┐ ┌──────────────┐
+│ PostgreSQL│ │ Metadata │ │ Gateway      │
+│ (native)  │ │ (native) │ │ (native)     │
+│           │ │          │ │              │
+│ instance_ │ │ instance_│ │ instance_    │
+│ postgres  │ │ metadata │ │ gateway.go   │
+│ .go       │ │ .go      │ │              │
+└───────────┘ └──────────┘ └──────────────┘
+```
+
+### Reconcile steps
+
+Each `Reconcile` call runs through four sequential steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist).
+
+| Step | Description | Implementation |
+|---|---|---|
+| 1. Ensure PostgreSQL | Creates Secret (auto-generated credentials), StatefulSet (with volumeClaimTemplate), and headless Service for a `postgres:16-alpine` instance. The pod runs as the image's built-in non-root postgres user (UID 70) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, and emptyDir volumes for `/var/run/postgresql` and `/tmp` (the only paths the postgres entrypoint needs to write outside its data PVC). Skipped when `spec.metadata.postgres` references an external database. | `instance_postgres.go` |
+| 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. The Deployment's pod template is produced by `effectiveMetadataPodTemplate`, which merges `spec.metadata.template` (a user-supplied `PodTemplateSpec`) with Firebolt Operator-rendered fields. See [Component pod templates](#component-pod-templates) below. The XML config includes `<default_account_id>` set to `spec.id`. The metadata service uses this to provision the account on startup. The pod runs as the metadata image's built-in non-root `dedicated-pensieve` user (UID 1111) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, an emptyDir backing `/tmp`, and `automountServiceAccountToken: false` (pensieve does not call the Kubernetes API). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
+| 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
+| 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. The Deployment's pod template is produced by `effectiveGatewayPodTemplate`, which merges `spec.gateway.template` with Firebolt Operator-rendered fields. See [Component pod templates](#component-pod-templates) below. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
+
+### Instance lifecycle phases
+
+```text
+  ┌──────────────┐     all components ready     ┌────────┐
+  │ Provisioning ├─────────────────────────────►│ Ready  │
+  └──────────────┘                               └───┬────┘
+                                                     │
+  ┌──────────┐         all components recover        │ component
+  │ Degraded │◄─────────────────────────────────────-┘ becomes
+  │          ├──────────────────────────────────►Ready  unready
+  └──────────┘
+
+  ┌──────────┐
+  │ Failed   │  terminal: requires manual intervention
+  └──────────┘
+```
+
+The instance starts in `Provisioning` and transitions to `Ready` once both the metadata service and gateway have at least one ready replica. If a previously-ready component becomes unhealthy, the phase transitions to `Degraded`. It returns to `Ready` once all components recover.
+
+The `Failed` phase is terminal and indicates a condition that cannot be resolved by re-reconciliation alone. The Firebolt Operator continues to requeue but will not transition out of `Failed` without manual intervention.
+
+When the metadata service or gateway becomes not-ready, the Firebolt Operator clears the corresponding endpoint from the instance status (`metadataEndpoint` or `gatewayEndpoint`). This ensures that dependent engines observe consistent state and block until the instance is fully operational again.
+
+### Component pod templates
+
+`spec.gateway.template` and `spec.metadata.template` are raw [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) embeds with the same shape as `EngineClass.spec.template`. Two `effective*` helpers live alongside their builders and produce the resolved pod template that the Deployment carries:
+
+- `effectiveGatewayPodTemplate(...)` in `instance_gateway.go`.
+- `effectiveMetadataPodTemplate(...)` in `instance_metadata.go`.
+
+Each helper starts from a deep-copy of the user template and stamps Firebolt Operator-rendered fields on top. The validating webhook already rejected user input on any field the builder owns. See [Firebolt Operator-owned fields](../crd-reference/instance-crd-reference#firebolt-operator-owned-fields-on-component-templates) in the CRD reference. As a result, the merge is straight-stamp rather than precedence-merge:
+
+| Field | Origin | Notes |
+|---|---|---|
+| Pod-template labels | User template + Firebolt Operator base labels | Firebolt Operator keys (`firebolt.io/instance`, `firebolt.io/component`) win on conflict. User keys outside the reserved prefix pass through. |
+| Pod-template annotations | User template + Firebolt Operator-stamped `firebolt.io/config-hash` | Hash drives the rollout when the rendered config changes. |
+| `nodeSelector` / `tolerations` / `affinity` / `topologySpreadConstraints` / `priorityClassName` | User template | Pass-through. |
+| `serviceAccountName` | User template, else Firebolt Operator-built default | Firebolt Operator default for gateway is `{instance}-gateway`. Metadata has no Firebolt Operator-built default and uses the namespace default service account. |
+| `imagePullSecrets`, pod-level `securityContext`, additional `initContainers`, additional `containers` (sidecars) | User template | Pass-through. Metadata adds a non-root floor on top of the user's PodSecurityContext (RunAsUser/RunAsGroup pinned to the image's UID, `RuntimeDefault` seccomp, RunAsNonRoot true). |
+| `volumes` | Firebolt Operator config / tmp / postgres-creds volumes + user volumes | Firebolt Operator volumes prepended. User volumes appended with Firebolt Operator-reserved names filtered as defense-in-depth because the webhook already rejected collisions. |
+| `terminationGracePeriodSeconds`, `enableServiceLinks` | Firebolt Operator-stamped | 15s/false for gateway, 30s/false for metadata. |
+| Primary container at `containers[0]` | Firebolt Operator-rendered | Identity, command, args, ports, probes, securityContext, lifecycle, volumeMounts, env, and envFrom all hardcoded. `image`, `imagePullPolicy`, and `resources` taken from the user's primary-named container when set. |
+
+The Deployment's wrapper fields (`Replicas`, `Selector`, `Strategy`) stay on the builder. They aren't pod-template concerns.
+
+### Integration with engine reconciler
+
+Each `FireboltEngine` declares its parent instance via `spec.instanceRef`. During reconciliation, the engine controller resolves this reference and reads two fields from the instance's status:
+
+- `metadataEndpoint`: The in-cluster address of the metadata gRPC service.
+- `spec.id`: The instance identifier, used as the metadata account ID.
+
+These are written to the engine ConfigMap. The resolution is only required during the **stable**, **stopped**, and **creating** phases (all of which may build or re-materialize ConfigMaps). Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip instance resolution entirely, ensuring that a transient instance issue does not stall an in-flight rollout.
+
+When the instance gate blocks, it sets the `InstanceReady=False` condition on the engine's status and requeues after 10 seconds. When the instance is healthy, the condition is updated to `InstanceReady=True`. In both cases the condition update is part of the single `updateStatus` call at the end of the reconcile. The engine controller performs exactly one status write per reconcile loop, never two.
+
+The engine controller watches `FireboltInstance` resources via `Watches()` with a mapper that enqueues all engines referencing the changed instance by name. This means engines react within seconds when their parent instance becomes ready, rather than waiting for error-driven backoff to expire.
+
+The `spec.metadataEndpointOverride` field on the engine overrides the instance-derived endpoint (but not the instance ID), supporting cross-cluster scenarios where the engine connects to a metadata service via private link.
+
+### Instance resource ownership
+
+All resources created by the instance reconciler have:
+
+- An `ownerReference` pointing to the `FireboltInstance` CR.
+- A `firebolt.io/instance` label for listing/filtering.
+- A `firebolt.io/component` label (`postgres`, `metadata`, or `gateway`).
+- A finalizer on the CR to ensure cleanup of all labelled resources on deletion.

@@ -1,0 +1,38 @@
+---
+title: EngineClass design
+description: EngineClass namespacing, pod-template inheritance, and merge behavior.
+sidebarTitle: EngineClass design
+---
+
+## EngineClass merge layer
+
+When an engine sets `spec.engineClassRef`, the reconciler resolves the referenced `EngineClass` and merges its `spec.template` underneath the Firebolt Operator-built pod template before stamping it onto the StatefulSet. Precedence on every field:
+
+1. **Firebolt Operator defaults**: Image fallback, hardcoded ports / probes / command / reserved env, and headless-DNS contract fields. Always win.
+2. **EngineClass template**: Fills in user-owned fields the engine spec doesn't set.
+3. **FireboltEngine spec**: Wins over the class on conflict.
+
+Merge rules (centralized in the `effective*` helpers in `engine_reconcile.go` so `buildStatefulSet` and `stsMatchesSpec` agree on the resolved value):
+
+| Field | Rule |
+|---|---|
+| `serviceAccountName` | engine spec > class > `""` |
+| `nodeSelector` | map-merge, engine keys win |
+| `tolerations` | class slice + engine slice, concatenated |
+| `affinity` | engine wins if non-nil, else class (no field-merge) |
+| pod-template labels | Reserved keys (`firebolt.io/engine`, `firebolt.io/generation`) non-overridable. Engine `spec.podLabels` > class labels |
+| pod-template annotations | engine `spec.podAnnotations` > class annotations |
+| pod-level `securityContext` | engine spec > class > Firebolt Operator default (FSGroup, FSGroupChangePolicy always stamped) |
+| pod-level `volumes` | Firebolt Operator-owned volumes (`nodes-config`, data) come first. Class volumes appended. Class names colliding with Firebolt Operator-owned volumes are dropped |
+| pod-level `imagePullSecrets` | passed through from class |
+| init containers | class slice + engine slice, concatenated (mirrors `tolerations`) |
+| sidecar containers (anything not named `engine`) | passed through from class, appended after the Firebolt Operator-built engine container |
+| engine container `image` / `imagePullPolicy` | class > Firebolt Operator default |
+| engine container `resources` | engine spec wins wholesale if it carries any requests/limits/claims, else class fills in (no field-level merge) |
+| engine container `securityContext` | engine spec wins if non-nil, else class |
+| engine container `env` | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) first. Class env appended (reserved keys rejected at admission) |
+| engine container `envFrom` | passed through from class |
+| engine container `volumeMounts` | Firebolt Operator-owned mounts first. Class mounts appended. Mounts colliding with Firebolt Operator volume names are dropped |
+| engine container `lifecycle` | passed through from class |
+
+The engine controller watches `EngineClass` via `EnqueueRequestsFromMapFunc` so a class edit immediately enqueues every consumer engine. The validating webhook on `EngineClass` rejects user input on paths the Firebolt Operator owns end-to-end. See [engineclass-crd-reference](../crd-reference/engineclass-crd-reference). The merge layer therefore assumes the resolved template only carries fields it knows how to handle.

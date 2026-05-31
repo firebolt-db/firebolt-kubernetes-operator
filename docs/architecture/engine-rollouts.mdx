@@ -1,0 +1,55 @@
+---
+title: Engine rollouts
+description: Drain checks and rolling update parameters for Firebolt engine and instance components.
+sidebarTitle: Engine rollouts
+---
+
+## Drain check
+
+During graceful rollouts, the Firebolt Operator checks whether old-generation pods have finished serving in-flight queries before deleting them. The Firebolt Operator scrapes pod metrics from outside the pod to decide when it is safe to transition from `draining` to `cleaning` and delete the old-generation StatefulSet. At the same time, the engine process handles in-flight queries with `shutdown_wait_unfinished`: on SIGTERM it waits up to `terminationGracePeriodSeconds - 5s` for queries to finish before exiting.
+
+### Signal
+
+Both callers read the same two Prometheus gauges from the engine pod's metrics endpoint on port `9090`:
+
+- `firebolt_running_queries`: Queries currently executing.
+- `firebolt_suspended_queries`: Queries idle-waiting on a client but still holding a session.
+
+A pod is considered drained when `firebolt_running_queries + firebolt_suspended_queries == 0`.
+
+### Operator-side scrape
+
+The Firebolt Operator scrapes `/metrics` through the Kubernetes API server's `Pods/proxy` subresource, not the pod IP directly. Going through the API server means:
+
+- The Firebolt Operator works identically whether it runs in-cluster or out-of-cluster (e.g. `make run` or E2E in-process), without needing to reach pod IPs directly.
+- Required RBAC is `pods/proxy: get`. The previous `pods/exec: create` permission is no longer used.
+- Transient scrape failures (pod starting, kubelet flaky, metric temporarily missing) are treated as "not drained yet" and the drain loop simply re-polls. They never fail the reconcile.
+
+### Configuration
+
+| Field | Default | Description |
+|---|---|---|
+| `spec.terminationGracePeriodSeconds` | `60` | Pod grace period. The engine waits up to `grace - 5s` (`shutdown_wait_unfinished`) for in-flight queries after SIGTERM. Raise this for workloads with analytical queries that routinely exceed a minute. |
+| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the Firebolt Operator-side drain check entirely. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
+| `spec.drainCheckInterval` | `5s` | How often the Firebolt Operator polls each pod. Only used when drain check is enabled. |
+| `spec.rollout` | `graceful` | Set to `recreate` to skip draining and delete old pods immediately. The engine's `shutdown_wait_unfinished` still runs on pod termination regardless of rollout strategy. |
+
+When `drainCheckEnabled: false`, the Firebolt Operator transitions directly from `switching` to `cleaning` without waiting. The engine's `shutdown_wait_unfinished` still gives in-flight queries a chance to finish during Kubernetes termination. `drainCheckEnabled` only controls whether the Firebolt Operator gates the rollout on top of that.
+
+## Rolling update parameters
+
+### Metadata deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `0` | Never run two metadata pods concurrently. The metadata service assumes single-writer against Postgres |
+| `maxUnavailable` | `1` | Old pod is terminated before the new one starts. Brief metadata-unavailable window during rollouts |
+| Replicas | `1` (enforced by webhook) | Multi-replica metadata is not currently supported |
+
+### Gateway deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `25%` | Standard Kubernetes default for gradual rollout |
+| `maxUnavailable` | `0` | Maintain full capacity during image switches |
+| PodDisruptionBudget | `maxUnavailable: 1` | Allow voluntary disruptions while maintaining availability |

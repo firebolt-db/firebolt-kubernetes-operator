@@ -4,7 +4,7 @@
 
 Firebolt Kubernetes Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **EngineClass** (optional namespaced pod-template fragment shared by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently). Built with Go and controller-runtime.
 
-Engines require a ready instance. See [docs/architecture.md](docs/architecture.md) for the full design.
+Engines require a ready instance. See [docs/architecture.mdx](docs/architecture.mdx) for the full design.
 
 ## Repo structure
 
@@ -17,7 +17,8 @@ config/
   rbac/                # generated RBAC manifests (kubebuilder output)
   manager/             # manager deployment manifest
   samples/             # example CRs
-docs/                  # design documents (architecture, scaling, SDLC)
+docs/                  # published Mintlify docs (MDX + docs.json)
+docs-internal/         # internal design notes, SDLC, slides (not published)
 examples/              # user-facing example manifests
 formal/                # TLA+ specifications and model-checker configs
 helm/
@@ -91,8 +92,8 @@ You MUST keep documentation in sync with code. When making changes:
 
 - **AGENTS.md** -- update the relevant `AGENTS.md` (root or scoped) if you change structure, conventions, public interfaces, commands, config formats, or add or remove modules. If your change makes existing AGENTS.md content wrong, fix it before finishing.
 - **README.md** -- update if your change affects what a human reader needs to know to understand the project: setup, headline architecture, or what the project is for. Keep the README an overview; push detail into AGENTS.md.
-- **docs/architecture.md** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
-- **docs/** generally -- keep design documents up to date as code changes. Documents about historical or unimplemented features do not need updates.
+- **docs/architecture.mdx** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
+- **docs/** and **docs-internal/** -- keep published docs (`docs/`) and internal design notes (`docs-internal/`) up to date as code changes. Documents about historical or unimplemented features in `docs-internal/` do not need updates unless they become wrong.
 
 A pull request that changes structure or interfaces without a documentation update is incomplete.
 
@@ -119,14 +120,16 @@ Code is not done until it is covered by tests where tests are reasonable.
 
 See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the running log of non-obvious problems, framework footguns, and environment traps. Add new entries there, not here.
 
+- **GitHub Actions `pull_request.paths` filters also suppress `closed` events.** If a workflow creates external state on `opened` or `synchronize` and must clean it up on `closed`, do not rely on trigger-level `paths` filters. Put path relevance checks inside the job instead, and let `closed` events reach the workflow so cleanup can run even when the final PR diff no longer includes the original files.
+
 ## Project-specific rules
 
 ### Engine reconciler and blue-green state machine
 
-Before touching the engine reconciler -- especially `engine_reconcile.go`, `engine_state.go`, or `instance_gateway.go` -- read the relevant section of [docs/architecture.md](docs/architecture.md) first.
+Before touching the engine reconciler -- especially `engine_reconcile.go`, `engine_state.go`, or `instance_gateway.go` -- read the relevant section of [docs/architecture.mdx](docs/architecture.mdx) first.
 
 - The blue-green state machine (`creating -> switching -> draining -> cleaning`) is formalised in [formal/FireboltEngine.tla](formal/FireboltEngine.tla). A change in one belongs in both, and `make formal-verify` is the CI guard.
-- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.md` document the chain and call out a previously-removed design (FB-661) that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
+- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.mdx` document the chain and call out a previously-removed design (FB-661) that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
 
 ### EngineClass merge layer
 

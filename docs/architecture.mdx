@@ -1,0 +1,107 @@
+---
+title: Architecture
+description: High-level architecture for FireboltInstance, FireboltEngine, and EngineClass.
+sidebarTitle: Architecture
+---
+
+This document describes the reconciliation architecture used by the Firebolt Operator. The Firebolt Operator manages three custom resources:
+- **FireboltInstance** provisions the metadata infrastructure
+       - Metadata service
+       - Gateway
+       - PostgreSQL
+- **FireboltEngine** deploys compute nodes that run the query engine
+- **EngineClass** is an optional template that engines in the same namespace can reference to inherit shared pod-level properties.
+
+An engine cannot be created or updated without a ready instance in its namespace. An engine may optionally reference an `EngineClass` in the same namespace.
+
+## FireboltInstance
+
+`FireboltInstance` represents the shared infrastructure that engines need before they can run. The Firebolt Operator creates and keeps this infrastructure healthy, then publishes the endpoints that engines use to connect to it.
+
+### Metadata service
+
+The metadata service stores and serves engine metadata. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
+
+### Gateway
+
+The gateway is the entry point for client query traffic. It receives a request, identifies the target engine, and forwards the request to healthy engine pods.
+
+### PostgreSQL
+
+PostgreSQL is the backing database for the metadata service. The Firebolt Operator can provision a single node PostgreSQL instance for the metadata service. For production workloads you should provision your own PostgreSQL instance.
+
+## FireboltEngine
+
+`FireboltEngine` represents the compute nodes that run the query engine. The Firebolt Operator creates the Kubernetes resources for those nodes, rolls new generations when the spec changes, and reports whether the engine is ready to serve traffic.
+
+## EngineClass
+
+`EngineClass` is an optional namespaced class that engines can reference for shared pod-level configuration. It lets a namespace define common settings such as scheduling, service accounts, annotations, sidecars, and engine image details without repeating them on every engine.
+
+## Resource dependency model
+
+The Firebolt Operator enforces a hierarchical dependency from engines to their instance, plus an optional in-namespace dependency on EngineClass:
+
+```text
+┌───────────────────┐   1:N   ┌───────────────────┐
+│ FireboltInstance  │◄────────│  FireboltEngine   │
+│                   │  reads  │                   │
+│ Provisions:       │ status  │ spec.instanceRef  │
+│ - PostgreSQL      │         │ points to the     │
+│ - Metadata Svc    │         │ instance by name  │
+│ - Gateway         │         │                   │
+│                   │         │ Blocked until     │
+│ status:           │         │ instance has:     │
+│  metadataEndpoint │         │ - metadataEndpoint│
+│                   │         │ - spec.id         │
+└───────────────────┘         └─────────┬─────────┘
+                                        |
+                                   N:1  │ inherits properties
+                                        │ when spec.engineClassRef set
+                                        │
+                                        ▼
+                             ┌─────────────────────┐
+                             │     EngineClass     │
+                             │   (namespaced,      │
+                             │    optional)        │
+                             │                     │
+                             │  spec.template:     │
+                             │    PodTemplateSpec  │
+                             │    merged into the  │
+                             │    engine pod spec  │
+                             │                     │
+                             └─────────────────────┘
+```
+
+**Rules:**
+
+- Each `FireboltEngine` declares its parent via `spec.instanceRef` (the name of a `FireboltInstance` in the same namespace).
+- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `spec.id`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable**, **stopped**, and **creating** phases. These phases may build ConfigMaps referencing instance data. `stopped` is included because a missing ConfigMap can be re-materialized in place against the current instance info even at zero replicas. Phases that operate on already-created resources (**switching**, **draining**, **cleaning**) proceed without blocking on instance readiness.
+- The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
+- The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
+- The instance reconciler is independent and has no dependency on engines.
+- The optional `spec.engineClassRef` references a namespaced `EngineClass` **in the engine's own namespace**. The reference is checked at admission time by the FireboltEngine validating webhook. It hard-rejects if no class with that name exists in the engine's namespace, so a runtime "class missing" state is not part of the steady-state status surface. The engine controller watches `EngineClass` and re-reconciles every same-namespace referencing engine when a class is created, edited, or deleted. A class spec edit therefore rolls a fresh blue-green generation on every consumer engine immediately, rather than waiting for the 30s drift requeue.
+- EngineClass is **namespaced** rather than cluster-scoped, unlike `StorageClass` / `IngressClass` / `GatewayClass`, because its template carries namespace-resolved identifiers: `serviceAccountName`, `volumes[*].secret/configMap/persistentVolumeClaim` references, and typically per-tenant IAM annotations. Kubernetes resolves those names in the engine's own namespace at pod-admission time, so co-locating the class and its consumer engines avoids the silent-divergence trap a cluster-scoped class would have created. For example, an identical SA name in different namespaces could have different IAM bindings with no admission error.
+- `EngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines in the same namespace referencing the class) for user-facing visibility. The EngineClass validating webhook refuses deletion by listing referencing engines live from the API server, scoped to the class's namespace, at admission time rather than trusting the cached count. `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
+
+## Design principles
+
+The Firebolt Operator uses a **level-triggered** (not edge-triggered) reconciliation model. Each invocation of `Reconcile` reads the full desired state (`.spec`) and the full observed state (cluster resources), computes the delta, and applies it. The reconciler does not depend on knowing _what changed_. It only depends on _what is_.
+
+This means:
+
+- **Idempotent**: calling `Reconcile` twice with the same inputs produces the same result.
+- **Crash-safe**: If the Firebolt Operator crashes at any point, the next reconciliation will observe the actual cluster state and resume from the correct phase.
+- **No queued operations**: there is no internal queue of "things to do". The status phase and observed resources determine the next action.
+
+## Detailed pages
+
+The rest of the design is split by audience and task:
+
+- [Engine reconciliation](architecture/engine-reconciliation) describes the FireboltEngine reconcile loop, phase machine, generation model, status behavior, error handling, crash recovery, and resource ownership.
+- [Instance reconciliation](architecture/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
+- [EngineClass design](architecture/engineclass-design) describes EngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
+- [Engine rollouts](architecture/engine-rollouts) describes drain checks and rolling update parameters.
+- [Autoscaling and wake-up](architecture/autoscaling-and-wake-up) describes Firebolt Operator-driven autoscaling and the gateway wake-up annotation protocol.
+- [Gateway query routing](architecture/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.
+- [Crash-point testing](architecture/crash-point-testing) describes the E2E crash injection mechanism used to verify recovery at phase boundaries.

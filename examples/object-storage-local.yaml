@@ -1,0 +1,139 @@
+# Local object storage for development and the quickstart.
+#
+# Every FireboltEngine requires object storage for managed tablet data; the
+# Firebolt Operator does not support local filesystem storage mode and the
+# engine refuses to start without object storage. On a real cluster you point
+# the engine at S3, GCS, or Azure Blob. For local clusters (Kind, minikube)
+# this manifest deploys floci (https://github.com/floci-io/floci), a small
+# S3-compatible emulator, and creates a bucket the engine can use.
+#
+# Apply this into the SAME namespace as the FireboltInstance/FireboltEngine,
+# then point the engine at it via spec.customEngineConfig.storage:
+#
+#   customEngineConfig:
+#     storage:
+#       type: minio                 # S3-compatible / emulator mode
+#       api_scheme: "s3://"
+#       bucket_name: my-engine-bucket
+#       minio:
+#         endpoint: http://floci.firebolt.svc.cluster.local:4566
+#
+# floci is zero-auth: requests are still SigV4-signed but the credentials are
+# not validated. `type: minio` makes the engine hardcode dummy credentials
+# internally, so no Secret or AWS env vars are needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: floci
+  namespace: firebolt
+  labels:
+    app: floci
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: floci
+  template:
+    metadata:
+      labels:
+        app: floci
+    spec:
+      # The kubelet auto-injects FLOCI_PORT=tcp://<svc-ip>:4566 into pods that
+      # share a namespace with the floci Service. floci's Quarkus runtime
+      # treats FLOCI_PORT as a config key and tries to coerce "tcp://..." to an
+      # integer, which CrashLoopBackOffs the container. Disabling service links
+      # suppresses that env block; the pod still reaches the Service by DNS.
+      enableServiceLinks: false
+      containers:
+        - name: floci
+          image: floci/floci:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: api
+              containerPort: 4566
+              protocol: TCP
+          env:
+            - name: FLOCI_DEFAULT_REGION
+              value: us-east-1
+          readinessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: floci
+  namespace: firebolt
+  labels:
+    app: floci
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 4566
+      targetPort: 4566
+      protocol: TCP
+  selector:
+    app: floci
+---
+# One-shot Job that creates the bucket the engine expects. Bucket creation is
+# idempotent: a pre-existing bucket returns BucketAlreadyOwnedByYou, which the
+# `|| true` tolerates before the head-bucket post-condition asserts it exists.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: floci-create-bucket
+  namespace: firebolt
+  labels:
+    app: floci-create-bucket
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app: floci-create-bucket
+    spec:
+      enableServiceLinks: false
+      restartPolicy: Never
+      containers:
+        - name: aws
+          image: amazon/aws-cli:2.17.0
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: mock
+            - name: AWS_SECRET_ACCESS_KEY
+              value: mock
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://floci.firebolt.svc.cluster.local:4566
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              aws s3api create-bucket --bucket my-engine-bucket || true
+              aws s3api head-bucket --bucket my-engine-bucket
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

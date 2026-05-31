@@ -18,7 +18,7 @@ limitations under the License.
 
 package controller
 
-// Phase 9 of the formal-verification plan (docs/formal-verification.md):
+// Phase 9 of the formal-verification plan (docs/formal-verification.mdx):
 // rapid stateful property test that drives the FULL FireboltEngineReconciler
 // against an envtest API server. The compute-layer harnesses (Phases 2/3/6/8)
 // cannot exercise the outer Reconcile's responsibilities — instance gate,
