@@ -1,3 +1,14 @@
+# 1.0.26
+
+appVersion: v4.2.0
+
+## [4.2.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.1.1...v4.2.0) (2026-05-31)
+
+### Features
+
+* publish operator docs (FB-863) ([#81](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/81)) ([569b26c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/569b26cc5bce52968bb5cfb8b6207539ba6f23ff)), closes [#23019](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/23019)
+
+
 # 1.0.25
 
 appVersion: v4.1.1
