@@ -1,0 +1,186 @@
+---
+title: Engine reconciliation
+description: FireboltEngine reconcile loop, phase machine, generation model, status behavior, and recovery guarantees.
+sidebarTitle: Engine reconciliation
+---
+
+## Engine reconciler architecture
+
+The engine reconciler is split into three layers, with instance resolution as a hard prerequisite:
+
+```text
+┌─────────────────────────────────────────────────────────────┐       ┌─────────────────────────────────────────────────────────────┐
+│  Reconcile()                                                │       │  getEngineState                                             │
+│  Entry point: reads CR, delegates to layers below           │──────▶│  (read layer)                                               │
+│  File: engine_controller.go                                 │       │                                                             │
+└─────────────────────────────────────────────────────────────┘       │  Reads all K8s resources for this engine.                   │
+                                                                      │                                                             │
+                                                                      │  File: engine_state.go                                      │
+                                                                      └──────────────────────────────┬──────────────────────────────┘
+                                                                                                     │
+                                                                                                     ▼
+┌─────────────────────────────────────────────────────────────┐       ┌─────────────────────────────────────────────────────────────┐
+│  computeEngineReconcile                                     │       │  resolveInstanceInfo (gate)                                 │
+│  (pure logic layer)                                         │       │                                                             │
+│                                                             │◀──────│  Reads the FireboltInstance referenced by spec.instanceRef  │
+│  No I/O. Takes spec, status, observed state, and            │       │                                                             │
+│  InstanceInfo. Returns a struct describing what to          │       │  Blocks if the instance is not ready (only in               │
+│  create/update/delete.                                      │       │  stable/creating).                                          │
+│                                                             │       └─────────────────────────────────────────────────────────────┘
+│  File: engine_reconcile.go                                  │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│  applyEngineState                                           │
+│  (write layer)                                              │
+│                                                             │
+│  Takes the reconcile result and applies it to the cluster.  │
+│                                                             │
+│  File: engine_apply.go                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Layer responsibilities
+
+| Layer | File | I/O | Testability |
+|---|---|---|---|
+| Instance gate | `engine_controller.go` | Yes (reads `FireboltInstance`) | Requires envtest |
+| Read | `engine_state.go` | Yes (K8s API reads) | Requires envtest |
+| Compute | `engine_reconcile.go` | None | Pure unit tests |
+| Write | `engine_apply.go` | Yes (K8s API writes) | Requires envtest |
+
+The instance gate runs after the read layer but before the compute layer. It only blocks for phases that may build ConfigMaps containing `instance.multi_engine.metadata_endpoint` and `instance.id`: **stable**, **stopped**, and **creating**. `stopped` is included because if a ConfigMap is missing at zero replicas, the reconciler re-materializes it in place using live instance info. This is the same recovery path as `stable`. Phases that operate on existing resources (**switching**, **draining**, **cleaning**) skip the gate and proceed normally, ensuring that a transient instance issue does not stall an in-flight rollout. When the gate blocks, it sets the `InstanceReady=False` condition on the engine status and requeues. The condition update is part of the single `updateStatus` call. There is no separate status write for conditions.
+
+The compute layer is the core of the Firebolt Operator. It is a pure function with no side effects, making it easy to test exhaustively without a running cluster.
+
+## State machine
+
+The engine lifecycle is a six-phase state machine stored in `.status.phase`. Two of the six (`stable` and `stopped`) are terminal. The others are transition phases. The terminal phase is chosen by `spec.replicas`: non-zero resolves to `stable`, zero resolves to `stopped`. Every transition phase funnels through a single `terminalPhase(spec)` helper so the distinction is made in exactly one place.
+
+```text
+         spec change during creating:
+         abandon gen, bump, recreate
+         ┌──────┐
+         │      │
+         ▼      │
+     ┌────────┐ │  pods ready   ┌──────────┐   selector   ┌──────────┐
+     │creating├─┘──────────────►│switching ├────updated───►│draining  │
+     └────────┘                 └──────────┘               └────┬─────┘
+         ▲                        │                             │
+         │                        │ (initial deploy,            │ pods drained
+         │                        │  no old generation)         │ or drain
+         │                        │                             │ check disabled
+         │                   ┌────▼────────────────┐       ┌────▼─────┐
+         │                   │ stable  /  stopped  │◄──────┤cleaning  │
+         │                   └────┬────────────────┘       └──────────┘
+         │                        │                             ▲
+         │                        │ spec change                 │
+         └────────────────────────┘                             │
+                                                     old resources deleted
+```
+
+Both terminal phases route spec-change detection through the same `computeStable` code path. From the state machine's perspective `stopped` is just `stable` with `spec.replicas == 0` and a different surfaced name. The `Ready` condition distinguishes them: `stable` with ready pods is `Ready=True, Reason=EngineReady`. `stopped` is always `Ready=False, Reason=Stopped`. See [Top-level Ready condition](#top-level-ready-condition).
+
+### Phase descriptions
+
+| Phase | What happens | Next phase |
+|---|---|---|
+| **stable** | Terminal phase when `spec.replicas > 0`. All resources match spec. No work to do. Requeues after 30s for drift detection. On spec change, writes only the status intent (`Phase=creating`, bumped `currentGeneration`) and requeues. No resources are created in this pass. | `creating` (on spec change) |
+| **stopped** | Terminal phase when `spec.replicas == 0`. Structurally identical to `stable`: the active generation still exists as a zero-replica StatefulSet + headless Service + ConfigMap, but it is surfaced as a distinct phase. Spec-change detection and missing-resource re-materialization work identically to `stable`. | `creating` (on spec change) |
+| **creating** | New-generation StatefulSet, headless Service, and ConfigMap are ensured. Waits for all pods to become ready. A zero-replica StatefulSet is trivially "ready" (0/0), so scale-to-zero transitions through this phase without blocking. If the spec changes while creating, the in-progress generation is abandoned (its resources are deleted), `currentGeneration` is bumped, and a fresh generation is created on the next reconcile. This avoids patching a live STS whose pods have already read a stale config. | `switching` (all pods ready) |
+| **switching** | Updates the cluster Service selector to point to the new generation. | `draining` (if old generation exists), `stable` (initial deploy, replicas > 0), or `stopped` (initial deploy, replicas == 0) |
+| **draining** | Waits for old-generation pods to finish serving queries. Skipped entirely when `drainCheckEnabled: false` or `rollout: recreate`. | `cleaning` (drain complete) |
+| **cleaning** | Deletes old-generation StatefulSet, headless Service, and ConfigMap. Clears `drainingGeneration`. | `stable` (replicas > 0) or `stopped` (replicas == 0) |
+
+### Key invariant
+
+A spec change during `draining` or `cleaning` does **not** create a new generation. The current transition must complete before a new one begins. This prevents unbounded resource accumulation.
+
+### Top-level Ready condition
+
+`setReadyCondition` derives `status.conditions[type=Ready]` from the post-reconcile phase and pod state. Its precedence is:
+
+1. `InstanceNotReady`: The referenced `FireboltInstance` is not healthy. Wins over everything else because nothing downstream works without it.
+2. `Stopped`: `Phase == stopped`. `Ready=False, Reason=Stopped, Message="Engine is stopped (spec.replicas is 0)"`. Explicitly distinguished from `Rolling` so GitOps tooling can tell an intentionally parked engine apart from one mid-transition.
+3. `Rolling`: Phase is any non-terminal phase (`creating` / `switching` / `draining` / `cleaning`). `Ready=False, Reason=Rolling`.
+4. `PodsNotReady`: Phase is `stable` but the active-generation pods have not all reported Ready yet. `Ready=False, Reason=PodsNotReady`.
+5. `EngineReady`: Default. `Ready=True`. The engine is serving traffic on its active generation.
+
+Reason `Stopped` is the only `Ready=False` reason that is not a transient rollout or instance-dependency failure. GitOps tools that key off `Ready=True` should treat a stopped engine as deliberately not-converged-to-serving rather than retrying it indefinitely.
+
+### StatefulSet event propagation
+
+A FireboltEngine can get stuck in `creating` or in `stable` with `PodsNotReady` when its generation StatefulSet exists but the StatefulSet controller cannot create the desired pods. Common causes include a missing ServiceAccount, exceeded ResourceQuota, PodSecurity or admission rejection, RBAC denial, unbindable PVC, and similar issues. The Firebolt Operator owns the StatefulSet, but Kubernetes records the actionable error as a Warning event, typically `FailedCreate`, on the StatefulSet object. Without this propagation, you would have to run `kubectl describe sts <name>` to triage.
+
+To surface this on the FireboltEngine itself, after computing the Ready condition the reconciler queries the apiserver for Warning events on the current-generation StatefulSet whenever:
+
+- `CurrentSTS != nil`: There is an STS to look up events for.
+- `CurrentPodTotal < spec.replicas`: Pods are missing rather than just unready.
+- `Ready.Reason ∈ {Rolling, PodsNotReady}`: The existing reason is a generic "stuck" reason that we are allowed to refine. `InstanceNotReady`, `DrainCheckFailing`, `Stopped`, and `EngineReady` are higher-precedence diagnostics or healthy states and are not overridden.
+
+When a Warning event matches, the Ready condition is rewritten with that event's `Reason`, such as `FailedCreate`, and a message of the form `StatefulSet <name>: <event message> (x<count>)`. The lookup uses the Clientset, not the controller-runtime cache, with field selector `involvedObject.uid=<UID>,type=Warning`. Events are high-volume cluster-wide, and a watch would inflate the controller's cache for a signal we consult only on already-stuck engines. Fetch failures are logged and swallowed. The diagnostic is best-effort and must never poison the main reconcile path. Once pods come up the trigger gate stops firing and the next reconcile restores `EngineReady`.
+
+## Generation model
+
+Each spec change (while in `stable` or `stopped`) increments `status.currentGeneration`. Resources for each generation are named with a `-g<N>` suffix:
+
+```text
+engine-g0          # StatefulSet for generation 0
+engine-g0-hl       # Headless Service for generation 0
+engine-g0-config   # ConfigMap for generation 0
+engine-service     # Cluster Service (shared, selector changes)
+```
+
+At most two generations exist simultaneously: the active one serving traffic and the new one being created (or the old one being drained/cleaned).
+
+`stsMatchesSpec` is the central drift detector. It compares the live StatefulSet against the resolved engine spec field-by-field. Any mismatch returns false and the reconciler bumps `currentGeneration`. Two annotations on the StatefulSet act as content hashes for inputs that don't have a clean direct comparison:
+
+| Annotation | Source | What a change means |
+|---|---|---|
+| `firebolt.io/custom-engine-config-hash` | `spec.customEngineConfig` after the protected-paths strip | The engine ConfigMap content changed. Roll a new generation. |
+| `firebolt.io/engine-class-hash` | Resolved `EngineClass.spec.template` (or absent when `spec.engineClassRef` is nil) | Either the referenced class was edited in place, the engine flipped to a different class, or `engineClassRef` was cleared. Any of those rolls a new generation. |
+
+## Error handling
+
+The Firebolt Operator follows strict error propagation rules to ensure failures are always visible.
+
+**No swallowed errors.** Every error from an I/O operation is either:
+1. Returned to the caller (causing a retry via requeue), or
+2. Logged and aggregated when multiple independent cleanup operations must all be attempted (e.g. `reconcileDelete`).
+
+Specific policies:
+
+| Category | Policy |
+|---|---|
+| Status update failures | Always propagated. A failed status write returns an error so the next reconcile retries with fresh state. |
+| Resource list/delete during cleanup | Errors are logged, collected, and aggregated. The finalizer is only removed when all cleanup operations succeed. This prevents premature garbage collection when the API server is unhealthy. |
+| Pod readiness and drain checks | Errors from `checkPodsReady` are propagated rather than defaulting to "not ready". Errors from `checkDrainComplete`, such as a transient metrics-scrape failure, are logged and treated as "not drained yet". Drain is already a bounded-retry loop at the caller, so re-polling is cheaper and less noisy than blowing up the whole reconcile on a flaky scrape. |
+| JSON marshalling | Config values passed to `json.MarshalIndent` are always well-typed maps. The error path is unreachable and guarded with a panic to catch programming bugs immediately. |
+| Terminal errors | Unrecoverable conditions set the instance phase to `Failed` and surface the error, rather than entering an infinite retry loop. |
+
+## Status update strategy
+
+Status updates use `r.Status().Update()` with a single retry on conflict. If a resource version conflict occurs because a concurrent spec update changed the object, the Firebolt Operator re-fetches the latest object, applies the new status, and retries once. This avoids unnecessary reconcile-loop failures from optimistic concurrency.
+
+## Crash recovery
+
+The Firebolt Operator is crash-safe at every phase boundary. If the process terminates:
+
+- **During stable → creating transition**: The `stable` phase writes only the status intent (`Phase=creating`, bumped `currentGeneration`) in one pass, then requeues. Resources are not created until the status update is persisted. If the Firebolt Operator crashes before the status write, no resources were created and the next reconcile retries from `stable`. If it crashes after, the next reconcile enters `creating` and creates the resources normally.
+- **During creating**: The next reconcile sees an existing StatefulSet with not-ready pods and waits. All `ensure` calls are idempotent, so partial resource creation is safe. If the spec changed and the Firebolt Operator crashed after deleting the old generation's resources but before bumping `currentGeneration`, the next reconcile finds no resources for the current generation and recreates them fresh, converging to the correct state.
+- **During switching**: the next reconcile checks the service selector and either updates it or proceeds.
+- **During draining**: the next reconcile re-runs the drain check.
+- **During cleaning**: the next reconcile re-deletes any remaining old resources (delete is idempotent).
+- **During stable**: no work needed.
+
+No persistent state outside of the Kubernetes API server is required.
+
+## Resource ownership
+
+All per-engine resources have:
+
+- An `ownerReference` pointing to the `FireboltEngine` CR (for garbage collection on CR deletion).
+- A `firebolt.io/engine` label (for listing/filtering).
+- A `firebolt.io/generation` label (for generation-based selection).
+- A finalizer on the CR itself to ensure cleanup runs before the CR is removed.

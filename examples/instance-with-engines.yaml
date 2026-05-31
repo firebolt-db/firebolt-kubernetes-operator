@@ -71,10 +71,10 @@ spec:
   resources:
     requests:
       cpu: "2"
-      memory: 8Gi
+      memory: 3Gi
     limits:
       cpu: "2"
-      memory: 8Gi
+      memory: 3Gi
 ---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine

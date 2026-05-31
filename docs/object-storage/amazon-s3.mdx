@@ -1,0 +1,220 @@
+---
+title: Amazon S3
+description: Configure Amazon S3 as the backing object storage for Firebolt Operator engines.
+sidebarTitle: Amazon S3
+---
+
+Every `FireboltEngine` requires object storage for managed tablet data. The Firebolt Operator does not support local filesystem storage mode, so an engine does not start until you point it at object storage. On a production cluster, that backing store is an Amazon S3 bucket.
+
+With S3 as the backing store for table data, durability does not depend on the per-pod data volumes mounted to each engine node. Even a complete loss of those volumes does not cause data loss, because the authoritative copy of managed table data lives in the bucket.
+
+You configure S3 on the engine through `spec.customEngineConfig.storage`. The engine reads AWS credentials and region from the pod's AWS identity, which you provide with [AWS IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) or [AWS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html).
+
+## Prerequisites
+
+Before you begin, ensure that you have the following installed and configured:
+
+* A [Kubernetes](https://kubernetes.io/) cluster (v1.28+) running on AWS EKS.
+* The Firebolt Operator installed in the cluster. See [Installation](../installation).
+* A `FireboltInstance` in the `Ready` phase. See the [Quickstart](../quickstart).
+* `kubectl` command-line tool configured to access your cluster.
+* `helm` (v3+) installed on your local machine.
+* An AWS account with permissions to create S3 buckets, IAM roles, and IAM policies.
+
+## Use Amazon S3
+
+The following examples use an S3 bucket named `firebolt-engine-demo-data`, but you can choose any name you like.
+
+### Create an S3 bucket
+
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+export BUCKET_NAME=firebolt-engine-demo-data
+
+aws s3api create-bucket \
+  --bucket "${BUCKET_NAME}"
+
+aws s3api put-public-access-block \
+  --bucket "${BUCKET_NAME}" \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+aws s3api put-bucket-encryption \
+  --bucket "${BUCKET_NAME}" \
+  --server-side-encryption-configuration '{
+    "Rules": [
+      {
+        "ApplyServerSideEncryptionByDefault": {
+          "SSEAlgorithm": "AES256"
+        }
+      }
+    ]
+  }'
+
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket "${BUCKET_NAME}" \
+  --lifecycle-configuration '{
+    "Rules": [
+      {
+        "ID": "expire_soft_deleted_objects",
+        "Status": "Enabled",
+        "Filter": {
+          "Tag": {
+            "Key": "IsDeleted",
+            "Value": "true"
+          }
+        },
+        "Expiration": {
+          "Date": "2016-01-12T00:00:00+00:00"
+        }
+      },
+      {
+        "ID": "abort_incomplete_multipart_upload",
+        "Status": "Enabled",
+        "Filter": {
+          "Prefix": ""
+        },
+        "AbortIncompleteMultipartUpload": {
+          "DaysAfterInitiation": 1
+        }
+      }
+    ]
+  }'
+```
+
+### Create an IAM role and policy
+
+Create an IAM role with the following IAM policy. It grants the engine permission to manage objects in the bucket. Use [AWS IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) or [AWS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) to bind this role to the Kubernetes ServiceAccount that the engine pods run as. The next step shows how to attach that ServiceAccount to the engine.
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "s3:GetBucketLocation",
+                "s3:ListBucket"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::{{BUCKET_NAME}}"
+            ],
+            "Sid": "StorageBuckets"
+        },
+        {
+            "Action": [
+                "s3:GetObject*",
+                "s3:PutObject*"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "arn:aws:s3:::{{BUCKET_NAME}}/*"
+            ],
+            "Sid": "ObjectAccess"
+        }
+    ]
+}
+```
+
+### Configure the engine to use S3
+
+Point the engine at the bucket through `spec.customEngineConfig.storage` and run its pods under the ServiceAccount that carries the IAM role.
+
+The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Amazon S3, set `type` to `s3`.
+
+The following manifest creates the ServiceAccount, an `EngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-engine
+  namespace: firebolt
+  annotations:
+    # Bind the IAM role from the previous step (AWS IRSA).
+    eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<engine-s3-role>
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: default
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:dev
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  engineClassRef: default
+  serviceAccountName: my-engine
+  replicas: 2
+  customEngineConfig:
+    storage:
+      type: s3
+      api_scheme: "s3://"
+      bucket_name: firebolt-engine-demo-data
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+```
+
+Apply the manifest:
+
+```bash
+kubectl apply -f engine-s3.yaml
+```
+
+The engine resolves the AWS region and credentials from the pod's AWS environment, which IRSA or Pod Identity provides. On EKS, the identity webhook injects the region automatically. To set the region explicitly, add an `AWS_REGION` environment variable to the engine container through the `EngineClass`:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: EngineClass
+metadata:
+  name: default
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:dev
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+```
+
+For the full set of engine fields, including `customEngineConfig` and `serviceAccountName`, see the [FireboltEngine CRD reference](../crd-reference/engine-crd-reference).
+
+### Confirm that object storage is working
+
+To confirm that managed storage works, create a table and check that new prefixes appear in your bucket. Engine pods follow the name pattern `<engine>-g<generation>-<index>`, so the first pod of generation `0` for `my-engine` is `my-engine-g0-0`.
+
+```bash
+kubectl port-forward pod/my-engine-g0-0 3473:3473 -n firebolt
+
+curl -s "http://localhost:3473" --data-binary "create table test (val int);"
+curl -s "http://localhost:3473" --data-binary "insert into test values (1);"
+
+aws s3 ls firebolt-engine-demo-data
+# expected output similar to:
+#    PRE SRd8FBoIadUX_Jd-pxV9qQ~31~all~0/
+#    PRE drU1S3fjduVWesJyToDXDQ~33~all~0/
+```
+
+If the queries hang, check the engine pod logs for AWS IAM access-denied errors:
+
+```bash
+kubectl logs my-engine-g0-0 -n firebolt
+```

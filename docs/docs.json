@@ -1,0 +1,45 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Firebolt Operator",
+        "pages": [
+          "installation",
+          "quickstart",
+          {
+            "group": "Object storage",
+            "pages": [
+              "object-storage/amazon-s3"
+            ]
+          },
+          "architecture",
+          {
+            "group": "Architecture details",
+            "pages": [
+              "architecture/engine-reconciliation",
+              "architecture/instance-reconciliation",
+              "architecture/engineclass-design",
+              "architecture/engine-rollouts",
+              "architecture/autoscaling-and-wake-up",
+              "architecture/gateway-query-routing",
+              "architecture/crash-point-testing"
+            ]
+          },
+          {
+            "group": "CRD reference",
+            "pages": [
+              "crd-reference/instance-crd-reference",
+              "crd-reference/engine-crd-reference",
+              "crd-reference/engineclass-crd-reference"
+            ]
+          },
+          "gateway-sizing",
+          "monitoring",
+          "security",
+          "troubleshooting"
+        ]
+      }
+    ]
+  }
+}

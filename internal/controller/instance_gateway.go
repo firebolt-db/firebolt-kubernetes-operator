@@ -102,7 +102,7 @@ const (
 	//      change this value, change it in the helm chart's values.yaml
 	//      in the same release so the two paths do not drift.
 	//
-	// See docs/architecture.md "Gateway query routing" → "Graceful pod
+	// See docs/architecture.mdx "Gateway query routing" → "Graceful pod
 	// shutdown" → step 5 for the retry-coverage caveat as a user-facing
 	// constraint, and the README's "Gateway sizing" section for the
 	// memory-budget formula.

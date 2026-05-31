@@ -233,6 +233,10 @@ formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any g
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	"$(GOLANGCI_LINT)" run --fix $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
 
+.PHONY: docs-check
+docs-check: ## Validate Mintlify navigation (path depth and lost pages)
+	$(MAKE) -C docs check
+
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify

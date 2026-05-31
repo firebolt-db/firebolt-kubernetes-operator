@@ -1,0 +1,99 @@
+---
+title: Installation
+description: Install the Firebolt Operator and its CRDs with Helm.
+sidebarTitle: Installation
+---
+
+This page explains how to install the Firebolt Operator in a Kubernetes cluster.
+
+## Prerequisites
+
+- Kubernetes 1.28 or later. The CRDs use CEL transition rules for field immutability.
+- Helm installed on the machine or automation that deploys the Firebolt Operator.
+- Access to the OCI Helm chart registry that hosts the Firebolt Operator charts.
+
+## Install the CRDs
+
+The Firebolt Operator needs its CustomResourceDefinitions before any `FireboltInstance`,
+`FireboltEngine`, or `EngineClass` resources can be created. There are two
+supported installation patterns.
+
+### Option 1: Separate CRD chart
+
+Install the CRD chart before installing the Firebolt Operator controller:
+
+```bash
+helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
+```
+
+This chart installs the API types used by the Firebolt Operator:
+
+- `FireboltInstance`
+- `FireboltEngine`
+- `EngineClass`
+
+Use this option when you want Helm to manage CRD updates independently from the
+Firebolt Operator release. The separate CRD chart renders CRDs from `templates/`, so a
+future `helm upgrade firebolt-crds ...` can update the CRD definitions. When
+you later install the Firebolt Operator chart in this flow, pass `--skip-crds` so Helm
+does not also run the Firebolt Operator chart's bundled CRD install step.
+
+### Option 2: Firebolt Operator chart `crds/` directory
+
+The Firebolt Operator chart also bundles CRDs in its `crds/` directory. Helm gives this
+directory special handling: on `helm install`, CRDs in `crds/` are installed
+before the chart templates are rendered. If a CRD already exists, Helm skips it
+with a warning. You can opt out of this bundled CRD installation with
+`--skip-crds`.
+
+Helm does not upgrade or delete CRDs from a chart's `crds/` directory. This
+option is useful for first-install bootstrapping, but CRD schema changes must be
+applied separately later, either with the `firebolt-operator-crds` chart or a
+direct `kubectl apply` of the CRD manifests.
+
+## Install the Firebolt Operator
+
+Install the Firebolt Operator controller:
+
+```bash
+helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/kubernetes-operator --skip-crds
+```
+
+Omit `--skip-crds` if you chose the bundled `crds/` directory option above.
+
+The Firebolt Operator watches Firebolt custom resources and reconciles the Kubernetes objects needed to run instances, gateways, metadata services, and engines.
+
+## Firebolt Operator flags
+
+The Firebolt Operator supports these runtime flags. The binary default is what
+the manager uses when you run it directly. The Helm chart default is what the
+`kubernetes-operator` chart passes with its default `values.yaml`.
+
+| Flag | Binary default | Helm chart default | Description |
+|------|----------------|--------------------|-------------|
+| `--version` | `false` | Not set | Print the version and exit. |
+| `--namespace` | `""` | Not set | Namespace to watch. Watches all namespaces when empty. |
+| `--metrics-bind-address` | `0` | `:8443` | Address for the metrics endpoint. Use `0` to disable metrics. |
+| `--metrics-secure` | `true` | `true` | Serve metrics over HTTPS with Kubernetes authentication and authorization. |
+| `--metrics-cert-path` | `""` | Not set | Directory that contains the metrics server certificate. |
+| `--metrics-cert-name` | `tls.crt` | Not set | Metrics server certificate file name. |
+| `--metrics-cert-key` | `tls.key` | Not set | Metrics server key file name. |
+| `--health-probe-bind-address` | `:8081` | `:8081` | Address for health probes. |
+| `--leader-elect` | `false` | `true` | Enable leader election for HA deployments. |
+| `--enable-webhooks` | `true` | `false` | Enable the admission webhook server. |
+| `--webhook-cert-path` | `""` | Not set | Directory that contains the webhook certificate. The chart sets `/tmp/k8s-webhook-server/serving-certs` when `webhook.enabled=true`. |
+| `--webhook-cert-name` | `tls.crt` | Not set | Webhook certificate file name. |
+| `--webhook-cert-key` | `tls.key` | Not set | Webhook key file name. |
+| `--enable-http2` | `false` | Not set | Enable HTTP/2 for the metrics and webhook servers. |
+| `--engine-max-cpu` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` CPU request and limit. Empty disables the bound. |
+| `--engine-max-memory` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` memory request and limit. Empty disables the bound. |
+| `--engine-max-ephemeral-storage` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` ephemeral-storage request and limit. Empty disables the bound. |
+| `--zap-devel` | `false` | Not set | Enable controller-runtime development logging defaults. |
+| `--zap-encoder` | `json` | `json` | Log encoding. Valid values are `json` and `console`. |
+| `--zap-log-level` | `info` | `info` | Minimum log level. Valid values include `debug`, `info`, `error`, and `panic`. |
+| `--zap-stacktrace-level` | `error` | `error` | Level at and above which stack traces are captured. |
+| `--zap-time-encoding` | `rfc3339` | Not set | Timestamp encoding for zap logs. |
+
+## Next step
+
+After installation, follow the [quickstart](quickstart) to create a `FireboltInstance`, an `EngineClass`, and a `FireboltEngine`.

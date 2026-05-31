@@ -16,7 +16,7 @@ limitations under the License.
 
 package controller
 
-// Phase 2 of the formal verification plan (docs/formal-verification.md):
+// Phase 2 of the formal verification plan (docs/formal-verification.mdx):
 // stateful property tests that drive computeEngineReconcile with random
 // operation sequences and check the same invariants modeled in
 // formal/FireboltEngine.tla after every step.

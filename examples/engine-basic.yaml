@@ -1,4 +1,14 @@
 # Minimal Instance + Engine. The engine uses the operator's default image.
+#
+# The engine requires object storage for managed tablet data — local
+# filesystem storage mode is unsupported and the engine will not start
+# without it. For local clusters, deploy floci and create the bucket first
+# (into the SAME namespace as this engine):
+#
+#   kubectl apply -f examples/object-storage-local.yaml
+#
+# On a real cluster, replace the storage block below with your bucket (S3,
+# GCS, or Azure Blob) and grant access via your platform's workload identity.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
 metadata:
@@ -14,6 +24,14 @@ metadata:
 spec:
   instanceRef: firebolt
   replicas: 1
+  customEngineConfig:
+    storage:
+      type: minio
+      api_scheme: "s3://"
+      bucket_name: my-engine-bucket
+      minio:
+        # Same-namespace short name; floci must run in this engine's namespace.
+        endpoint: http://floci:4566
   resources:
     requests:
       cpu: "1"

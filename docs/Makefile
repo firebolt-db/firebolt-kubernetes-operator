@@ -1,0 +1,40 @@
+SHELL := bash
+
+# .ONESHELL and multi-line recipes require GNU Make 4.2+ (.FEATURES includes "oneshell").
+ifeq ($(filter oneshell,$(.FEATURES)),)
+$(error \
+  GNU Make 4.2+ is required (found: $(or $(MAKE_VERSION),non-GNU make)). \
+  On macOS: brew install make, then run gmake or add \
+  /opt/homebrew/opt/make/libexec/gnubin to PATH)
+endif
+
+.ONESHELL:
+.PHONY:
+
+.SHELLFLAGS := -euo pipefail -c
+MAKEFLAGS += --warn-undefined-variables
+MAKEFLAGS += --no-builtin-rules
+
+PYTHON ?= python3
+
+.PHONY: default
+default: check
+
+.PHONY: check
+check: test check-navigation
+	@echo "☑ Operator docs checks passed"
+
+.PHONY: test
+test:
+	@echo "Running docs script tests..."
+	$(PYTHON) scripts/test_check_operator_navigation.py
+	@echo "☑ Docs script tests passed"
+
+.PHONY: check-navigation
+check-navigation:
+	@echo "Checking navigation path depth (post-packdb aggregation rules)..."
+	$(PYTHON) scripts/check_operator_navigation.py
+	@echo "☑ Navigation path depth is valid"
+	@echo "Checking for MDX files missing from navigation..."
+	$(PYTHON) scripts/check_lost_pages.py
+	@echo "☑ All MDX files are listed in navigation"

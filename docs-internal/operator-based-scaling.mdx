@@ -1,6 +1,10 @@
-# Operator-Based Zero-Downtime Scaling Design
+---
+title: Operator-based scaling
+description: Zero-downtime engine scaling with the Firebolt Kubernetes operator.
+sidebarTitle: Operator-based scaling
+---
 
-This document describes the architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator. The operator manages three CRDs: `FireboltInstance` (shared infrastructure), `FireboltEngine` (compute nodes), and the optional namespaced `EngineClass` (pod-template fragment shared by multiple engines in the same namespace — see [engineclass-crd-reference.md](engineclass-crd-reference.md)).
+This document describes the architecture for zero-downtime scaling of Firebolt engines using a lightweight Kubernetes operator. The operator manages three CRDs: `FireboltInstance` (shared infrastructure), `FireboltEngine` (compute nodes), and the optional namespaced `EngineClass` (pod-template fragment shared by multiple engines in the same namespace — see [engineclass-crd-reference](crd-reference/engineclass-crd-reference)).
 
 ## Goals
 
@@ -13,7 +17,7 @@ This document describes the architecture for zero-downtime scaling of Firebolt e
 
 ## Architecture Overview
 
-```
+```text
 ┌────────────────────────────────────────────────────────────┐
 │                        Operator                            │
 │                                                            │
@@ -149,7 +153,7 @@ Generation numbering: `activeGeneration` starts at `-1` (no active generation). 
 
 ### State Machine
 
-```
+```text
               ┌────────────────┐                 ┌────────────────┐
               │     stable     │                 │    stopped     │
               │ (replicas > 0) │                 │ (replicas == 0)│
@@ -341,7 +345,7 @@ For the end-user contract on both entry points (gateway vs direct headless Servi
 
 ## Reconciliation Loop
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    Operator Watch Loop                      │
 │            (per FireboltEngine CR found)                    │
@@ -382,7 +386,7 @@ For the end-user contract on both entry points (gateway vs direct headless Servi
 
 ### Scale Up: 3 → 5 nodes
 
-```
+```text
 Phase: stable (g0 active, 3 nodes)
         │
         ▼
@@ -475,7 +479,7 @@ Resuming is symmetric. Setting `spec.replicas` back to a non-zero value triggers
 **Client-facing contract while stopped:**
 
 - The engine Service's headless DNS returns zero A-records (no ready endpoints).
-- Requests through the instance gateway with `X-Firebolt-Engine: <stopped-engine>` return HTTP 503, because Envoy's `dynamic_forward_proxy` resolves the engine Service and finds no upstream. The response is indistinguishable from a request to a non-existent engine. See `docs/option-b-per-engine-envoy-clusters.md` for the gateway resolution model.
+- Requests through the instance gateway with `X-Firebolt-Engine: <stopped-engine>` return HTTP 503, because Envoy's `dynamic_forward_proxy` resolves the engine Service and finds no upstream. The response is indistinguishable from a request to a non-existent engine. See docs-internal/option-b-per-engine-envoy-clusters.md for the gateway resolution model.
 - No gateway reconfiguration happens on stop/resume — the gateway is engine-set agnostic and discovers engines at request time. Existing gateway retry semantics apply unchanged.
 - In-flight requests during the selector flip behave the same as during any other blue-green transition: pods entering termination continue serving in-flight queries until `shutdown_wait_unfinished` expires or they complete, then exit before `terminationGracePeriodSeconds`.
 
@@ -494,7 +498,7 @@ The scrape goes through the Kubernetes API server's `Pods/proxy` subresource (no
 
 On SIGTERM, the engine process waits up to `terminationGracePeriodSeconds − 5s` (`shutdown_wait_unfinished`) for in-flight queries to finish before exiting. Envoy's active health checks eject the pod from routing within ~1s of SIGTERM, so no new queries are routed to a draining pod.
 
-See `docs/architecture.md` for the full drain-check specification.
+See [architecture](architecture) for the full drain-check specification.
 
 ## Spec Change Handling
 
@@ -533,7 +537,7 @@ This ensures:
 
 Queries flow through an Envoy proxy, which routes to engine services based on the `X-Firebolt-Engine` header. A Lua filter extracts the engine name and sets the upstream hostname to `{engine}-service:3473`, then the dynamic forward proxy resolves it via DNS:
 
-```
+```text
 Client (X-Firebolt-Engine: engine-production)
    │
    ▼
@@ -677,7 +681,7 @@ When `spec.autoscaling.enabled=true`, the operator owns `spec.replicas` (HPA-sty
 - `idleTimeout` (default 30m) measured from `status.lastActivityTime`;
 - optional UTC `schedule[]` windows that pin replicas at `maxReplicas` regardless of activity.
 
-Scale events are level-driven: the autoscaler patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. The autoscaler runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [`docs/architecture.md`](architecture.md#autoscaler) for the full decision precedence and configuration reference.
+Scale events are level-driven: the autoscaler patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. The autoscaler runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [architecture](architecture#autoscaler) for the full decision precedence and configuration reference.
 
 ### Gateway wake-up
 
