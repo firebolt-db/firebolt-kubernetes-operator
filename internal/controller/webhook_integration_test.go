@@ -28,7 +28,7 @@ limitations under the License.
 //
 // What this exercises that nothing else does today: the wire
 // behavior of every webhook the helm chart installs — defaulter
-// fills in spec.id over the network, EngineClass validation rejects
+// fills in spec.id over the network, FireboltEngineClass validation rejects
 // operator-owned-field writes over the network, and the deletion
 // guard refuses DELETE while a bound engine exists over the network.
 // Regressions in cert wiring, the rendered Service / WebhookConfig
@@ -164,8 +164,8 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("setup FireboltInstance webhook: %w", err)
 	}
-	if err := computev1alpha1.SetupEngineClassWebhookWithManager(mgr); err != nil {
-		return fmt.Errorf("setup EngineClass webhook: %w", err)
+	if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup FireboltEngineClass webhook: %w", err)
 	}
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
@@ -282,12 +282,12 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 				AdmissionReviewVersions: []string{"v1"},
 			},
 			{
-				Name: "vengineclass.compute.firebolt.io",
+				Name: "vfireboltengineclass.compute.firebolt.io",
 				ClientConfig: admissionregistrationv1.WebhookClientConfig{
 					Service: &admissionregistrationv1.ServiceReference{
 						Namespace: "default",
 						Name:      "webhook-service",
-						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-engineclass"),
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-fireboltengineclass"),
 					},
 				},
 				Rules: []admissionregistrationv1.RuleWithOperations{{
@@ -299,7 +299,7 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 					Rule: admissionregistrationv1.Rule{
 						APIGroups:   []string{"compute.firebolt.io"},
 						APIVersions: []string{"v1alpha1"},
-						Resources:   []string{"engineclasses"},
+						Resources:   []string{"fireboltengineclasses"},
 						Scope:       &scopeNamespaced,
 					},
 				}},
@@ -416,21 +416,21 @@ func TestWebhook_Defaulter_MintsULID(t *testing.T) {
 	}
 }
 
-// TestWebhook_EngineClass_RejectsOwnedField verifies the validating
-// webhook over the wire: an EngineClass.spec.template carrying a
+// TestWebhook_FireboltEngineClass_RejectsOwnedField verifies the validating
+// webhook over the wire: a FireboltEngineClass.spec.template carrying a
 // path the operator owns end-to-end (engine container command in
 // this case) must be rejected at admission with a field.Forbidden
 // pointing at the offending coordinate. Same shape as the table
-// rows in api/v1alpha1/engineclass_webhook_test.go, but driven
+// rows in api/v1alpha1/fireboltengineclass_webhook_test.go, but driven
 // through the apiserver.
-func TestWebhook_EngineClass_RejectsOwnedField(t *testing.T) {
+func TestWebhook_FireboltEngineClass_RejectsOwnedField(t *testing.T) {
 	requireWebhookSuite(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	class := &computev1alpha1.EngineClass{
+	class := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "bad-class", Namespace: "default"},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
@@ -452,21 +452,21 @@ func TestWebhook_EngineClass_RejectsOwnedField(t *testing.T) {
 	}
 }
 
-// TestWebhook_EngineClass_RefusesDeleteWhileBound verifies the
-// delete-time gate over the wire: a DELETE on an EngineClass that
+// TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound verifies the
+// delete-time gate over the wire: a DELETE on a FireboltEngineClass that
 // has at least one FireboltEngine referencing it via
 // spec.engineClassRef must be refused with the bound-count message.
 // The validator does a live List rather than reading
-// status.boundEngines so it works without the EngineClass
+// status.boundEngines so it works without the FireboltEngineClass
 // controller running.
-func TestWebhook_EngineClass_RefusesDeleteWhileBound(t *testing.T) {
+func TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound(t *testing.T) {
 	requireWebhookSuite(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	class := &computev1alpha1.EngineClass{
+	class := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "bound-class", Namespace: "default"},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{

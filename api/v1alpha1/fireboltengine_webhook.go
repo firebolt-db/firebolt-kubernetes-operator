@@ -120,11 +120,11 @@ func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev
 // FireboltEngineCustomValidator validates FireboltEngine resources at
 // admission time. It performs two checks:
 //
-//  1. spec.engineClassRef, when set, points to an EngineClass that exists
-//     in the engine's own namespace — the reference is hard-rejected so
-//     users see a typo (or a class-applied-in-the-wrong-namespace mistake)
+//  1. spec.engineClassRef, when set, points to a FireboltEngineClass that
+//     exists in the engine's own namespace — the reference is hard-rejected
+//     so users see a typo (or a class-applied-in-the-wrong-namespace mistake)
 //     immediately at apply time rather than via engine status. Apply
-//     ordering matters: an EngineClass must exist in the same namespace
+//     ordering matters: a FireboltEngineClass must exist in the same namespace
 //     before any FireboltEngine that references it (GitOps tooling such as
 //     Argo CD sync-waves or Flux dependsOn handles this in practice).
 //
@@ -135,8 +135,8 @@ func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev
 //     and an engine whose limits would OOM the node hosting it.
 //
 // The validator reads through mgr.GetAPIReader (live, non-cached) because
-// the informer cache may not yet have the EngineClass at the moment of
-// admission — particularly in `kubectl apply -f class.yaml -f engine.yaml`
+// the informer cache may not yet have the FireboltEngineClass at the moment
+// of admission — particularly in `kubectl apply -f class.yaml -f engine.yaml`
 // where both objects land within the same poll interval.
 //
 // +kubebuilder:object:generate=false
@@ -166,7 +166,7 @@ func SetupFireboltEngineWebhookWithManager(mgr ctrl.Manager, bounds *EngineResou
 }
 
 // ValidateCreate rejects a new FireboltEngine when spec.engineClassRef
-// references an EngineClass that does not exist, or when spec.resources
+// references a FireboltEngineClass that does not exist, or when spec.resources
 // carries a value above the configured bound.
 func (v *FireboltEngineCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	eng, ok := obj.(*FireboltEngine)
@@ -212,8 +212,8 @@ func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *Fireb
 }
 
 // validateEngineClassRef returns field.NotFound when spec.engineClassRef
-// names an EngineClass that does not exist in the engine's namespace.
-// EngineClass is namespaced; the lookup is therefore scoped to
+// names a FireboltEngineClass that does not exist in the engine's namespace.
+// FireboltEngineClass is namespaced; the lookup is therefore scoped to
 // engine.Namespace, matching how Kubernetes will resolve the reference
 // at reconcile time. A nil ref is allowed (the engine falls back to
 // operator defaults). Any non-NotFound API error surfaces as a generic
@@ -224,13 +224,13 @@ func (v *FireboltEngineCustomValidator) validateEngineClassRef(ctx context.Conte
 		return nil
 	}
 	classPath := field.NewPath("spec", "engineClassRef")
-	class := &EngineClass{}
+	class := &FireboltEngineClass{}
 	key := client.ObjectKey{Name: *eng.Spec.EngineClassRef, Namespace: eng.Namespace}
 	if err := v.Reader.Get(ctx, key, class); err != nil {
 		if apierrors.IsNotFound(err) {
 			return field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
 		}
-		return field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up EngineClass: %w", err))}
+		return field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up FireboltEngineClass: %w", err))}
 	}
 	return nil
 }

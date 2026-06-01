@@ -1125,11 +1125,11 @@ spec:
                 type: string
               engineClassRef:
                 description: |-
-                  EngineClassRef is the name of an EngineClass in this engine's own
-                  namespace whose pod template is merged underneath this engine's
+                  EngineClassRef is the name of a FireboltEngineClass in this engine's
+                  own namespace whose pod template is merged underneath this engine's
                   pod template when the engine's StatefulSet is built. Engine spec
                   fields take precedence over class fields; operator defaults sit
-                  beneath both. EngineClass is namespaced because its template
+                  beneath both. FireboltEngineClass is namespaced because its template
                   carries namespace-resolved identifiers (ServiceAccount names,
                   Secret / ConfigMap / PVC volume references, per-tenant IAM
                   annotations); the class and the engines that reference it must
@@ -1145,8 +1145,8 @@ spec:
                   referenced class does not exist in the engine's namespace, so
                   users see the typo (or a class-in-the-wrong-namespace mistake)
                   immediately instead of via engine status. Apply ordering matters:
-                  GitOps tooling must apply the EngineClass before any engine that
-                  references it (Argo sync-waves / Flux dependsOn).
+                  GitOps tooling must apply the FireboltEngineClass before any
+                  engine that references it (Argo sync-waves / Flux dependsOn).
                 minLength: 1
                 type: string
               initContainers:

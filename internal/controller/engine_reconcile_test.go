@@ -2189,7 +2189,7 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 
 // TestBuildStatefulSet_DefaultImage pins the operator-default image as the
 // only image source for the engine container. Per-engine image overrides
-// were removed when EngineClass-based template merging became the single
+// were removed when FireboltEngineClass-based template merging became the single
 // source of truth for the pod template's image. constants_test.go covers
 // the resolveImageRef partial-override semantics that still apply to
 // instance components (gateway, metadata) where the ImageSpec field

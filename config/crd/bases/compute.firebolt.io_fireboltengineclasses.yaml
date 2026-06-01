@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: engineclasses.compute.firebolt.io
+  name: fireboltengineclasses.compute.firebolt.io
 spec:
   group: compute.firebolt.io
   names:
-    kind: EngineClass
-    listKind: EngineClassList
-    plural: engineclasses
+    kind: FireboltEngineClass
+    listKind: FireboltEngineClassList
+    plural: fireboltengineclasses
     shortNames:
-    - firec
-    singular: engineclass
+    - firengc
+    singular: fireboltengineclass
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,15 +30,15 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          EngineClass is a reusable pod-template fragment shared by multiple
-          FireboltEngines in the same namespace. Engines reference an EngineClass
+          FireboltEngineClass is a reusable pod-template fragment shared by multiple
+          FireboltEngines in the same namespace. Engines reference a FireboltEngineClass
           by name through spec.engineClassRef and inherit its template,
           eliminating the need to repeat identical per-engine settings
           (serviceAccountName, nodeSelector, tolerations, pod annotations —
           including the cloud-provider IAM binding for kube2iam, IRSA, and Pod
           Identity).
 
-          EngineClass is namespaced (not cluster-scoped like IngressClass /
+          FireboltEngineClass is namespaced (not cluster-scoped like IngressClass /
           GatewayClass) because its template carries namespace-resolved
           identifiers — ServiceAccount names, Secret / ConfigMap / PVC volume
           references, and the per-tenant IAM annotations that the engine pod
@@ -68,21 +68,21 @@ spec:
             type: object
           spec:
             description: |-
-              EngineClassSpec defines the desired state of an EngineClass.
+              FireboltEngineClassSpec defines the desired state of a FireboltEngineClass.
 
               Template is a Kubernetes PodTemplateSpec merged underneath an engine's
               own pod template when the engine references this class via
               spec.engineClassRef. Precedence on every field is:
 
                1. operator defaults (lowest)
-               2. EngineClass template
+               2. FireboltEngineClass template
                3. FireboltEngine spec (highest)
 
               The operator owns a subset of the pod template (the engine container's
               image, command, args, ports, probes, reserved env keys; pod-level
               terminationGracePeriodSeconds, subdomain, hostname; metadata names; the
               firebolt.io/* label/annotation prefix). These paths are rejected by the
-              EngineClass validating webhook at admission time so users see the
+              FireboltEngineClass validating webhook at admission time so users see the
               failure immediately instead of via silent stripping. The authoritative
               rejection set is built from operatorauthority.go.
 
@@ -8581,13 +8581,13 @@ spec:
             - template
             type: object
           status:
-            description: EngineClassStatus is the observed state of an EngineClass.
+            description: FireboltEngineClassStatus is the observed state of a FireboltEngineClass.
             properties:
               boundEngines:
                 description: |-
                   BoundEngines counts the FireboltEngines in the same namespace that
                   reference this class via spec.engineClassRef. Surfaced for
-                  visibility (printcolumn, kubectl describe); both the EngineClass
+                  visibility (printcolumn, kubectl describe); both the FireboltEngineClass
                   deletion webhook and the reconciler's deletion-guard finalizer
                   do their own live List against the namespace rather than trusting
                   this cached value, so a class bound between reconciler runs
@@ -8595,7 +8595,8 @@ spec:
                 format: int32
                 type: integer
               conditions:
-                description: Conditions surface the EngineClass's high-level state.
+                description: Conditions surface the FireboltEngineClass's high-level
+                  state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -8654,7 +8655,7 @@ spec:
               observedGeneration:
                 description: |-
                   ObservedGeneration is the metadata.generation last reconciled by the
-                  EngineClass controller. Lets tooling detect stale status.
+                  FireboltEngineClass controller. Lets tooling detect stale status.
                 format: int64
                 type: integer
             type: object

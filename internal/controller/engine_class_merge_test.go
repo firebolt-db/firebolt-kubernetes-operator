@@ -26,12 +26,12 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// classWith returns an EngineClass whose spec.template carries the given
-// pod-template metadata and spec values. The helper is intentionally
+// classWith returns a FireboltEngineClass whose spec.template carries the
+// given pod-template metadata and spec values. The helper is intentionally
 // permissive: callers compose minimal fixtures and pass them to
-// newEngineClassInfo, which is the public entrypoint exercised by these
-// tests.
-func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.EngineClass {
+// newFireboltEngineClassInfo, which is the public entrypoint exercised by
+// these tests.
+func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.FireboltEngineClass {
 	tmplMeta := metav1.ObjectMeta{}
 	if meta != nil {
 		tmplMeta = *meta
@@ -40,9 +40,9 @@ func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.E
 	if spec != nil {
 		tmplSpec = *spec
 	}
-	return &computev1alpha1.EngineClass{
+	return &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized"},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: tmplMeta,
 				Spec:       tmplSpec,
@@ -52,7 +52,7 @@ func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.E
 }
 
 func TestEffectiveServiceAccountName(t *testing.T) {
-	classWithSA := newEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
+	classWithSA := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
 	specWithSA := testSpec()
 	sa := "engine-sa"
 	specWithSA.ServiceAccountName = &sa
@@ -60,7 +60,7 @@ func TestEffectiveServiceAccountName(t *testing.T) {
 	tests := []struct {
 		name      string
 		spec      *computev1alpha1.FireboltEngineSpec
-		classInfo *EngineClassInfo
+		classInfo *FireboltEngineClassInfo
 		want      string
 	}{
 		{"engine wins over class", specWithSA, classWithSA, "engine-sa"},
@@ -78,7 +78,7 @@ func TestEffectiveServiceAccountName(t *testing.T) {
 }
 
 func TestEffectiveNodeSelector_MergesKeys(t *testing.T) {
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		NodeSelector: map[string]string{"pool": "engine", "zone": "a"},
 	}))
 	spec := testSpec()
@@ -101,7 +101,7 @@ func TestEffectiveNodeSelector_MergesKeys(t *testing.T) {
 }
 
 func TestEffectiveTolerations_ConcatenatesClassThenEngine(t *testing.T) {
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Tolerations: []corev1.Toleration{{Key: "from-class", Operator: corev1.TolerationOpExists}},
 	}))
 	spec := testSpec()
@@ -124,7 +124,7 @@ func TestEffectivePodAnnotations_EngineWinsOnConflict(t *testing.T) {
 	// annotation. IRSA's eks.amazonaws.com/role-arn lives on the
 	// ServiceAccount, not the pod, so this fixture would teach the
 	// wrong pattern.
-	classInfo := newEngineClassInfo(classWith(
+	classInfo := newFireboltEngineClassInfo(classWith(
 		&metav1.ObjectMeta{Annotations: map[string]string{
 			"shared":                 "class",
 			"iam.amazonaws.com/role": "arn:class",
@@ -150,7 +150,7 @@ func TestEffectivePodAnnotations_EngineWinsOnConflict(t *testing.T) {
 }
 
 func TestBuildStatefulSet_MergesClassTemplate(t *testing.T) {
-	classInfo := newEngineClassInfo(classWith(
+	classInfo := newFireboltEngineClassInfo(classWith(
 		&metav1.ObjectMeta{
 			Labels: map[string]string{"team": "data"},
 			// kube2iam-style pod annotation; IRSA's role-arn lives on
@@ -214,12 +214,12 @@ func TestBuildStatefulSet_MergesClassTemplate(t *testing.T) {
 
 func TestStsMatchesSpec_ClassHashDrift(t *testing.T) {
 	specA := testSpec()
-	classA := newEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-a"}))
+	classA := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-a"}))
 	sts := buildStatefulSet(specA, testEngineName, testNamespace, 0, classA)
 
 	// Class spec edited (different SA) → class hash changes. stsMatchesSpec
 	// must report drift even though the engine spec is identical.
-	classB := newEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-b"}))
+	classB := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-b"}))
 	if stsMatchesSpec(sts, specA, classB) {
 		t.Error("stsMatchesSpec returned true after class edit; AnnotationEngineClassHash drift not detected")
 	}
@@ -227,7 +227,7 @@ func TestStsMatchesSpec_ClassHashDrift(t *testing.T) {
 
 func TestStsMatchesSpec_ClassRemovedDrift(t *testing.T) {
 	spec := testSpec()
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-x"}))
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-x"}))
 	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, classInfo)
 
 	// engineClassRef cleared. The annotation is still on the STS but the
@@ -249,7 +249,7 @@ func TestEffectiveEngineResources_SpecWinsElseClass(t *testing.T) {
 			corev1.ResourceMemory: resource.MustParse("16Gi"),
 		},
 	}
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Containers: []corev1.Container{
 			{Name: computev1alpha1.EngineContainerName, Resources: classRes},
 		},
@@ -293,7 +293,7 @@ func TestEffectiveEngineResources_SpecWinsElseClass(t *testing.T) {
 // is appended; operator volumeMounts stay first and the class mount
 // appears after.
 func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Containers: []corev1.Container{
 			{
 				Name: computev1alpha1.EngineContainerName,
@@ -382,7 +382,7 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 // imagePullSecrets pass-through. Without it, class sidecars pulled from
 // a private registry can't authenticate.
 func TestBuildStatefulSet_AppendsClassImagePullSecrets(t *testing.T) {
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		ImagePullSecrets: []corev1.LocalObjectReference{
 			{Name: "ghcr-creds"},
 			{Name: "ecr-creds"},
@@ -403,14 +403,14 @@ func TestBuildStatefulSet_AppendsClassImagePullSecrets(t *testing.T) {
 // TestAppendClassPodVolumes_OperatorReservedNamesWin covers the
 // defense against a class redefining the operator-owned volume names
 // (DataVolumeName, "nodes-config"): the operator entry must remain.
-// Otherwise an EngineClass author could silently break engine startup
+// Otherwise a FireboltEngineClass author could silently break engine startup
 // or data persistence by collision.
 func TestAppendClassPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 	operator := []corev1.Volume{
 		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
 		{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Volumes: []corev1.Volume{
 			// Names colliding with operator-owned volumes are dropped.
 			{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "class-cfg"}}}},
@@ -465,7 +465,7 @@ func TestSidecarsMatch_TolerantOfAPIServerDefaults(t *testing.T) {
 
 // TestEffectiveEngineContainerSecurityContext_Default pins down the
 // production path that buildStatefulSet and stsMatchesSpec take when
-// neither the engine spec nor the EngineClass supplies a
+// neither the engine spec nor the FireboltEngineClass supplies a
 // container-level SecurityContext. The operator must stamp the
 // hardened firebolt-instance-helm-parity default (drop ALL, non-root
 // 3473, no privilege escalation) — otherwise the pod runs with
@@ -515,7 +515,7 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 	t.Run("class fills in when spec unset", func(t *testing.T) {
 		spec := testSpec()
 		classRunAsUser := int64(5555)
-		classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+		classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 			Containers: []corev1.Container{{
 				Name: computev1alpha1.EngineContainerName,
 				SecurityContext: &corev1.SecurityContext{
@@ -556,7 +556,7 @@ func TestEffectivePodSecurityContext_Precedence(t *testing.T) {
 	specFsGroup := int64(8888)
 	runAsNonRoot := true
 
-	classInfo := newEngineClassInfo(classWith(nil, &corev1.PodSpec{
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		SecurityContext: &corev1.PodSecurityContext{
 			FSGroup:      &classFsGroup,
 			RunAsNonRoot: &runAsNonRoot,

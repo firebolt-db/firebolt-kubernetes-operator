@@ -29,8 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// EngineClassCustomValidator implements the validating admission webhook
-// for EngineClass. The webhook rejects any spec.template input that lands
+// FireboltEngineClassCustomValidator implements the validating admission webhook
+// for FireboltEngineClass. The webhook rejects any spec.template input that lands
 // at a path the operator manages exclusively (the engine container's
 // identity / command / probes / reserved env keys; pod-template metadata
 // keys under firebolt.io/; pod-level fields tied to the StatefulSet and
@@ -45,7 +45,7 @@ import (
 // deletion window that would orphan referencing engines.
 //
 // +kubebuilder:object:generate=false
-type EngineClassCustomValidator struct {
+type FireboltEngineClassCustomValidator struct {
 	// Reader is an uncached API client used by ValidateDelete to list
 	// FireboltEngines at admission time. Wired from mgr.GetAPIReader() so
 	// the gate is consistent with API-server state and not subject to
@@ -53,50 +53,50 @@ type EngineClassCustomValidator struct {
 	Reader client.Reader
 }
 
-var _ webhook.CustomValidator = &EngineClassCustomValidator{}
+var _ webhook.CustomValidator = &FireboltEngineClassCustomValidator{}
 
-// SetupEngineClassWebhookWithManager registers the validating webhook with
-// the manager. EngineClass has no defaulting webhook today: every
-// kubebuilder default is enforced via openapi schema rather than mutating
-// admission, so a Default() implementation would have nothing to do.
-func SetupEngineClassWebhookWithManager(mgr ctrl.Manager) error {
+// SetupFireboltEngineClassWebhookWithManager registers the validating webhook
+// with the manager. FireboltEngineClass has no defaulting webhook today:
+// every kubebuilder default is enforced via openapi schema rather than
+// mutating admission, so a Default() implementation would have nothing to do.
+func SetupFireboltEngineClassWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
-		For(&EngineClass{}).
-		WithValidator(&EngineClassCustomValidator{Reader: mgr.GetAPIReader()}).
+		For(&FireboltEngineClass{}).
+		WithValidator(&FireboltEngineClassCustomValidator{Reader: mgr.GetAPIReader()}).
 		Complete()
 }
 
-// ValidateCreate runs on every EngineClass create. It enforces the
+// ValidateCreate runs on every FireboltEngineClass create. It enforces the
 // operator-owned-path rejection set against spec.template via
 // ValidateOperatorOwnedPodTemplate, returning every violation in one
 // admission response so users see all errors at once.
-func (v *EngineClassCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	ec, ok := obj.(*EngineClass)
+func (v *FireboltEngineClassCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
+	ec, ok := obj.(*FireboltEngineClass)
 	if !ok {
-		return nil, fmt.Errorf("expected EngineClass, got %T", obj)
+		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", obj)
 	}
-	return nil, validateEngineClassSpec(ec).ToAggregate()
+	return nil, validateFireboltEngineClassSpec(ec).ToAggregate()
 }
 
 // ValidateUpdate enforces the same path rejection set as ValidateCreate.
-// EngineClass spec is mutable (per the FB-1145 design call), but every
-// rejected path stays rejected: a typo that admission caught at Create
-// must still be caught on a subsequent Update.
-func (v *EngineClassCustomValidator) ValidateUpdate(
+// FireboltEngineClass spec is mutable (per the FB-1145 design call), but
+// every rejected path stays rejected: a typo that admission caught at
+// Create must still be caught on a subsequent Update.
+func (v *FireboltEngineClassCustomValidator) ValidateUpdate(
 	_ context.Context, _, newObj runtime.Object,
 ) (admission.Warnings, error) {
-	ec, ok := newObj.(*EngineClass)
+	ec, ok := newObj.(*FireboltEngineClass)
 	if !ok {
-		return nil, fmt.Errorf("expected EngineClass, got %T", newObj)
+		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", newObj)
 	}
-	return nil, validateEngineClassSpec(ec).ToAggregate()
+	return nil, validateFireboltEngineClassSpec(ec).ToAggregate()
 }
 
 // ValidateDelete rejects deletion while at least one FireboltEngine in
 // the same namespace references this class via spec.engineClassRef.
-// EngineClass is namespaced so engineClassRef resolves in the engine's
-// own namespace; only engines in the class's namespace can bind to it,
-// and only those count toward the deletion gate.
+// FireboltEngineClass is namespaced so engineClassRef resolves in the
+// engine's own namespace; only engines in the class's namespace can bind
+// to it, and only those count toward the deletion gate.
 //
 // The count is recomputed live from the API server, not read from
 // status.boundEngines, because status defaults to zero on a freshly
@@ -108,13 +108,13 @@ func (v *EngineClassCustomValidator) ValidateUpdate(
 // so that a webhook outage cannot bypass this guard. List errors
 // propagate as admission errors for the same reason: better to refuse
 // the delete than to admit it on incomplete information.
-func (v *EngineClassCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	ec, ok := obj.(*EngineClass)
+func (v *FireboltEngineClassCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	ec, ok := obj.(*FireboltEngineClass)
 	if !ok {
-		return nil, fmt.Errorf("expected EngineClass, got %T", obj)
+		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", obj)
 	}
 	if v.Reader == nil {
-		return nil, errors.New("EngineClass delete webhook has no API reader configured")
+		return nil, errors.New("FireboltEngineClass delete webhook has no API reader configured")
 	}
 	var engines FireboltEngineList
 	if err := v.Reader.List(ctx, &engines, client.InNamespace(ec.Namespace)); err != nil {
@@ -133,16 +133,16 @@ func (v *EngineClassCustomValidator) ValidateDelete(ctx context.Context, obj run
 	return nil, field.Forbidden(
 		field.NewPath("metadata", "name"),
 		fmt.Sprintf(
-			"EngineClass %q in namespace %q is referenced by %d FireboltEngine(s); "+
+			"FireboltEngineClass %q in namespace %q is referenced by %d FireboltEngine(s); "+
 				"clear spec.engineClassRef on those engines before deleting the class",
 			ec.Name, ec.Namespace, count),
 	)
 }
 
-// validateEngineClassSpec is the central spec check called by
+// validateFireboltEngineClassSpec is the central spec check called by
 // ValidateCreate and ValidateUpdate. Returning a field.ErrorList lets the
 // caller convert all errors into one aggregate response without losing
 // per-field paths.
-func validateEngineClassSpec(ec *EngineClass) field.ErrorList {
+func validateFireboltEngineClassSpec(ec *FireboltEngineClass) field.ErrorList {
 	return ValidateOperatorOwnedPodTemplate(&ec.Spec.Template, field.NewPath("spec", "template"))
 }

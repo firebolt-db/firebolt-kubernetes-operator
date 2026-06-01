@@ -250,11 +250,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.EngineClassReconciler{
+	if err := (&controller.FireboltEngineClassReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EngineClass")
+		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngineClass")
 		os.Exit(1)
 	}
 	if enableWebhooks {
@@ -262,8 +262,8 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
 			os.Exit(1)
 		}
-		if err := computev1alpha1.SetupEngineClassWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "EngineClass")
+		if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngineClass")
 			os.Exit(1)
 		}
 		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, &engineBounds); err != nil {

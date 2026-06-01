@@ -27,7 +27,7 @@ import (
 
 // This file is the single source of truth for fields the operator owns
 // across user-supplied templating surfaces (spec.customEngineConfig,
-// EngineClass.spec.template, and reserved label/annotation key prefixes
+// FireboltEngineClass.spec.template, and reserved label/annotation key prefixes
 // on every CR that lets users set metadata). Consumers reference these
 // declarations directly instead of restating the path lists, so a future
 // addition lands in one place and propagates to every strip / reject
@@ -43,7 +43,7 @@ const ReservedFireboltKeyPrefix = "firebolt.io/"
 
 // EngineContainerName is the fixed name of the firebolt engine container
 // inside each generation's StatefulSet pod template. The drain check, the
-// stsMatchesSpec drift detection, and the EngineClass validating webhook
+// stsMatchesSpec drift detection, and the FireboltEngineClass validating webhook
 // all rely on it being stable and operator-owned. The name matches the
 // public CRD ("engine"); the binary entrypoint inside the image is still
 // `firebolt-core`, but that's an image-internal path and doesn't surface
@@ -67,7 +67,7 @@ const MetadataContainerName = "metadata"
 // keys carry pod-index plumbing (POD_INDEX) and AWS SDK + runtime mode
 // signals that the operator must control end to end: a user override
 // would either crash the engine or silently divert its identity. They
-// are rejected at admission time on EngineClass spec.template and would
+// are rejected at admission time on FireboltEngineClass spec.template and would
 // be stripped if injected through another template channel.
 const (
 	EnginePodIndexEnvKey                    = "POD_INDEX"
@@ -282,13 +282,13 @@ type PrimaryContainerFields struct {
 	Lifecycle       bool
 }
 
-// EngineClassPodTemplateRules is the ruleset for EngineClass.spec.template.
+// FireboltEngineClassPodTemplateRules is the ruleset for FireboltEngineClass.spec.template.
 // The engine container is the user-extension point most heavily used —
 // users routinely set image, env, volumeMounts, securityContext — so the
 // allowlist is wide. Sidecars and additional init containers pass
-// through; the EngineClass merge layer in engine_reconcile.go appends
+// through; the FireboltEngineClass merge layer in engine_reconcile.go appends
 // them onto the operator-rendered pod spec.
-var EngineClassPodTemplateRules = PodTemplateRules{
+var FireboltEngineClassPodTemplateRules = PodTemplateRules{
 	Component:            "engine",
 	PrimaryContainerName: EngineContainerName,
 	AllowedPrimaryFields: PrimaryContainerFields{
@@ -347,13 +347,13 @@ var MetadataPodTemplateRules = PodTemplateRules{
 	AllowInitContainers:             true,
 }
 
-// ValidateOperatorOwnedPodTemplate is the EngineClass entry point for
+// ValidateOperatorOwnedPodTemplate is the FireboltEngineClass entry point for
 // pod-template validation. Kept as a stable named function because the
-// EngineClass webhook references it directly; the implementation
+// FireboltEngineClass webhook references it directly; the implementation
 // delegates to the generic ValidatePodTemplate walker driven by
-// EngineClassPodTemplateRules.
+// FireboltEngineClassPodTemplateRules.
 func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *field.Path) field.ErrorList {
-	return ValidatePodTemplate(template, base, EngineClassPodTemplateRules)
+	return ValidatePodTemplate(template, base, FireboltEngineClassPodTemplateRules)
 }
 
 // ValidatePodTemplate walks a user-supplied PodTemplateSpec and rejects
@@ -381,7 +381,7 @@ func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *fi
 //
 // base is the field.Path the caller used to reach this PodTemplateSpec
 // in its own object (e.g. field.NewPath("spec","template") for
-// EngineClass; field.NewPath("spec","gateway","template") for the
+// FireboltEngineClass; field.NewPath("spec","gateway","template") for the
 // FireboltInstance gateway). Returned errors carry the full nested
 // path so kubectl apply surfaces every violation at the offending
 // coordinate.

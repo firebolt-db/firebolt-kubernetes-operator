@@ -21,28 +21,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EngineClassSpec defines the desired state of an EngineClass.
+// FireboltEngineClassSpec defines the desired state of a FireboltEngineClass.
 //
 // Template is a Kubernetes PodTemplateSpec merged underneath an engine's
 // own pod template when the engine references this class via
 // spec.engineClassRef. Precedence on every field is:
 //
 //  1. operator defaults (lowest)
-//  2. EngineClass template
+//  2. FireboltEngineClass template
 //  3. FireboltEngine spec (highest)
 //
 // The operator owns a subset of the pod template (the engine container's
 // image, command, args, ports, probes, reserved env keys; pod-level
 // terminationGracePeriodSeconds, subdomain, hostname; metadata names; the
 // firebolt.io/* label/annotation prefix). These paths are rejected by the
-// EngineClass validating webhook at admission time so users see the
+// FireboltEngineClass validating webhook at admission time so users see the
 // failure immediately instead of via silent stripping. The authoritative
 // rejection set is built from operatorauthority.go.
 //
 // Non-engine containers (sidecars) and additional init containers are
 // fully user-owned: the webhook does not constrain their image, command,
 // ports, or environment.
-type EngineClassSpec struct {
+type FireboltEngineClassSpec struct {
 	// Template is the pod template merged into engines that reference this
 	// class. See the type-level doc for the precedence rules and the list
 	// of operator-owned paths the validating webhook rejects.
@@ -60,16 +60,16 @@ type EngineClassSpec struct {
 	Template corev1.PodTemplateSpec `json:"template"`
 }
 
-// EngineClassStatus is the observed state of an EngineClass.
-type EngineClassStatus struct {
+// FireboltEngineClassStatus is the observed state of a FireboltEngineClass.
+type FireboltEngineClassStatus struct {
 	// ObservedGeneration is the metadata.generation last reconciled by the
-	// EngineClass controller. Lets tooling detect stale status.
+	// FireboltEngineClass controller. Lets tooling detect stale status.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// BoundEngines counts the FireboltEngines in the same namespace that
 	// reference this class via spec.engineClassRef. Surfaced for
-	// visibility (printcolumn, kubectl describe); both the EngineClass
+	// visibility (printcolumn, kubectl describe); both the FireboltEngineClass
 	// deletion webhook and the reconciler's deletion-guard finalizer
 	// do their own live List against the namespace rather than trusting
 	// this cached value, so a class bound between reconciler runs
@@ -77,34 +77,34 @@ type EngineClassStatus struct {
 	// +optional
 	BoundEngines int32 `json:"boundEngines,omitempty"`
 
-	// Conditions surface the EngineClass's high-level state.
+	// Conditions surface the FireboltEngineClass's high-level state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// EngineClassConditionReady is the top-level roll-up condition on an
-// EngineClass: True when the class is admissible and safe to bind. The
+// FireboltEngineClassConditionReady is the top-level roll-up condition on a
+// FireboltEngineClass: True when the class is admissible and safe to bind. The
 // validating webhook normally rejects offending specs at admission time;
 // the condition is a defense in depth for classes admitted under an older
 // operator with a narrower rejection set.
-const EngineClassConditionReady = "Ready"
+const FireboltEngineClassConditionReady = "Ready"
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=firec
+// +kubebuilder:resource:shortName=firengc
 // +kubebuilder:printcolumn:name="Bound",type=integer,JSONPath=`.status.boundEngines`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// EngineClass is a reusable pod-template fragment shared by multiple
-// FireboltEngines in the same namespace. Engines reference an EngineClass
+// FireboltEngineClass is a reusable pod-template fragment shared by multiple
+// FireboltEngines in the same namespace. Engines reference a FireboltEngineClass
 // by name through spec.engineClassRef and inherit its template,
 // eliminating the need to repeat identical per-engine settings
 // (serviceAccountName, nodeSelector, tolerations, pod annotations —
 // including the cloud-provider IAM binding for kube2iam, IRSA, and Pod
 // Identity).
 //
-// EngineClass is namespaced (not cluster-scoped like IngressClass /
+// FireboltEngineClass is namespaced (not cluster-scoped like IngressClass /
 // GatewayClass) because its template carries namespace-resolved
 // identifiers — ServiceAccount names, Secret / ConfigMap / PVC volume
 // references, and the per-tenant IAM annotations that the engine pod
@@ -114,23 +114,23 @@ const EngineClassConditionReady = "Ready"
 // referenced from two namespaces would silently bind to two different
 // ServiceAccounts (and possibly two different IAM roles) without
 // admission catching the divergence.
-type EngineClass struct {
+type FireboltEngineClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   EngineClassSpec   `json:"spec,omitempty"`
-	Status EngineClassStatus `json:"status,omitempty"`
+	Spec   FireboltEngineClassSpec   `json:"spec,omitempty"`
+	Status FireboltEngineClassStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// EngineClassList contains a list of EngineClass.
-type EngineClassList struct {
+// FireboltEngineClassList contains a list of FireboltEngineClass.
+type FireboltEngineClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []EngineClass `json:"items"`
+	Items           []FireboltEngineClass `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&EngineClass{}, &EngineClassList{})
+	SchemeBuilder.Register(&FireboltEngineClass{}, &FireboltEngineClassList{})
 }
