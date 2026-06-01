@@ -192,13 +192,13 @@ var _ = SynchronizedBeforeSuite(func() {
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
 	crds := []string{
-		"compute.firebolt.io_engineclasses.yaml",
+		"compute.firebolt.io_fireboltengineclasses.yaml",
 		"compute.firebolt.io_fireboltengines.yaml",
 		"compute.firebolt.io_fireboltinstances.yaml",
 	}
 	for _, crd := range crds {
 		crdPath := filepath.Join(projectRoot, "config", "crd", "bases", crd)
-		// --server-side: the EngineClass CRD is >600KB (the embedded
+		// --server-side: the FireboltEngineClass CRD is >600KB (the embedded
 		// PodTemplateSpec schema), well past the 256KB cap kubectl's
 		// client-side apply writes into the
 		// last-applied-configuration annotation. Server-side apply does
@@ -385,10 +385,13 @@ func ensureMinK8sVersion(cs *kubernetes.Clientset, minMajor, minMinor int) {
 // cleanupStaleResources strips finalizers from CRDs left by a previous test
 // run, then deletes the namespace. Without this, the namespace hangs in
 // Terminating because no controller is running to process the finalizers.
+// FireboltEngineClass carries compute.firebolt.io/fireboltengineclass-deletion-guard,
+// added by FireboltEngineClassReconciler on first reconcile, so a class left
+// behind by an aborted run blocks namespace delete identically to a stale
+// FireboltEngine.
 func cleanupStaleResources(ctx context.Context) {
-	// Strip finalizers from FireboltInstances
 	patchNoFinalizers := []byte(`{"metadata":{"finalizers":null}}`)
-	for _, kind := range []string{"fireboltinstances", "fireboltengines"} {
+	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses"} {
 		args := []string{"get", kind, "-n", testNamespace, "-o", "jsonpath={.items[*].metadata.name}"}
 		if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
 			args = append([]string{"--context", "kind-" + kindCluster}, args...)

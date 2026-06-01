@@ -502,14 +502,14 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 	})
 
-	// Test 6: Image switching via EngineClass mutation.
+	// Test 6: Image switching via FireboltEngineClass mutation.
 	//
 	// Image override moved from spec.image on FireboltEngine to
-	// containers[engine].image on the referenced EngineClass (FB-1145).
+	// containers[engine].image on the referenced FireboltEngineClass (FB-1145).
 	// The engine is created with spec.engineClassRef pointing at a
 	// dedicated class; mutating the class's container image is the
 	// canonical path for runtime version upgrades. The engine controller's
-	// EngineClass watch fires immediately, stsMatchesSpec detects the
+	// FireboltEngineClass watch fires immediately, stsMatchesSpec detects the
 	// AnnotationEngineClassHash drift, and a clean blue-green rolls.
 	Describe("Image Switching", Ordered, func() {
 		var (
@@ -537,7 +537,7 @@ var _ = Describe("Firebolt Engine", func() {
 			DeleteClientPod(ctx, clientPod)
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-			// EngineClass deletion is guarded by the EngineClassReconciler's
+			// FireboltEngineClass deletion is guarded by the FireboltEngineClassReconciler's
 			// deletion-guard finalizer while any FireboltEngine in the
 			// same namespace references the class (the gate uses a live
 			// List, not status). The e2e harness runs the controllers
@@ -546,15 +546,15 @@ var _ = Describe("Firebolt Engine", func() {
 			// the engine first (above) must drop the bound count to
 			// zero, after which the next class reconcile removes the
 			// finalizer and the delete completes.
-			Expect(DeleteEngineClass(ctx, className)).To(Succeed())
+			Expect(DeleteFireboltEngineClass(ctx, className)).To(Succeed())
 		})
 
 		It("should switch image without downtime", func() {
-			By("Creating EngineClass with the initial image")
-			err := CreateEngineClass(ctx, className, testImage+":"+testTag)
+			By("Creating FireboltEngineClass with the initial image")
+			err := CreateFireboltEngineClass(ctx, className, testImage+":"+testTag)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating engine with 3 replicas, referencing the EngineClass")
+			By("Creating engine with 3 replicas, referencing the FireboltEngineClass")
 			err = CreateEngineWithClass(ctx, instanceName, engineName, 3, className)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -577,12 +577,12 @@ var _ = Describe("Firebolt Engine", func() {
 			bgRunner = NewGatewayBackgroundQueryRunnerWithValidator(clientPod, instanceName, engineName, queryConfig.Query, queryConfig.Validator)
 			bgRunner.Start(ctx)
 
-			By("Switching the EngineClass to the new image tag")
-			err = UpdateEngineClassImage(ctx, className, testImage+":"+newImageTag)
+			By("Switching the FireboltEngineClass to the new image tag")
+			err = UpdateFireboltEngineClassImage(ctx, className, testImage+":"+newImageTag)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for engine to leave the pre-mutation PhaseStable")
-			// EngineClass watch enqueues this engine for re-reconcile;
+			// FireboltEngineClass watch enqueues this engine for re-reconcile;
 			// stsMatchesSpec returns false on the new class hash and the
 			// controller bumps currentGeneration. No FireboltEngine spec
 			// edit is involved, so observedGeneration cannot be used as
