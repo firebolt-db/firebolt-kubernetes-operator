@@ -10,7 +10,7 @@ metadata:
   namespace: firebolt
 spec:
   replicas: 1
-  # Image flows from the operator-default (or an EngineClass when set via
+  # Image flows from the operator-default (or a FireboltEngineClass when set via
   # spec.engineClassRef); no per-engine image override.
   resources:
     requests:

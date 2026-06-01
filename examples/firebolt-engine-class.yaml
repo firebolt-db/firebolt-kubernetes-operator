@@ -1,14 +1,14 @@
-# An EngineClass with every supported field set. Most are optional.
+# A FireboltEngineClass with every supported field set. Most are optional.
 #
-# An EngineClass holds a reusable pod-template fragment that multiple
+# A FireboltEngineClass holds a reusable pod-template fragment that multiple
 # FireboltEngines in the same namespace can reference via
 # spec.engineClassRef. It eliminates the need to repeat identical
 # per-engine pod-level settings — most notably the cloud-provider IAM
 # binding (kube2iam pod annotation / IRSA service account / Pod
 # Identity) which is identical for every engine of one instance.
 #
-# EngineClass is namespaced (not cluster-scoped). The template carries
-# namespace-resolved identifiers — ServiceAccount names, Secret /
+# FireboltEngineClass is namespaced (not cluster-scoped). The template
+# carries namespace-resolved identifiers — ServiceAccount names, Secret /
 # ConfigMap / PVC volume references, per-tenant IAM annotations — that
 # Kubernetes resolves in the engine's own namespace at pod admission
 # time. Co-locating the class and its consumer engines avoids the
@@ -16,7 +16,7 @@
 # name in two namespaces, possibly different IAM roles).
 #
 # Field precedence on the rendered engine pod:
-#   operator defaults  <  EngineClass template  <  FireboltEngine spec
+#   operator defaults  <  FireboltEngineClass template  <  FireboltEngine spec
 #
 # Fields the operator owns end-to-end are rejected at admission time on
 # this CR — the validating webhook refuses any spec.template that
@@ -27,7 +27,7 @@
 # keys under the firebolt.io/ prefix. Sidecar containers and additional
 # init containers are fully user-owned.
 apiVersion: compute.firebolt.io/v1alpha1
-kind: EngineClass
+kind: FireboltEngineClass
 metadata:
   name: compute-optimized
   namespace: firebolt
@@ -36,7 +36,7 @@ spec:
     metadata:
       # Pod annotations on every engine pod. kube2iam reads its IAM
       # binding from here. Operator-managed annotations under
-      # firebolt.io/ are reserved and rejected by the EngineClass webhook.
+      # firebolt.io/ are reserved and rejected by the FireboltEngineClass webhook.
       annotations:
         iam.amazonaws.com/role: arn:aws:iam::123456789012:role/firebolt-engine
         prometheus.io/scrape: "true"
