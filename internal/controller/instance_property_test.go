@@ -16,7 +16,7 @@ limitations under the License.
 
 package controller
 
-// Phase 5 of the formal-verification plan (docs/formal-verification.mdx):
+// Phase 5 of the formal-verification plan (docs-internal/formal-verification.md):
 // stateful property tests for the FireboltInstance reconciler, mirroring
 // the engine_property_test.go harness for the second CRD.
 //

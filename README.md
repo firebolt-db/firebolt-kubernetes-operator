@@ -229,8 +229,8 @@ make lint               # golangci-lint
 ### Design
 
 - [docs/architecture.mdx](docs/architecture.mdx) -- full architecture and reconciliation model
-- [docs/operator-based-scaling.mdx](docs/operator-based-scaling.mdx) -- zero-downtime blue-green scaling design
-- [docs/formal-verification.mdx](docs/formal-verification.mdx) -- TLA+ specifications and model checking
+- [docs-internal/operator-based-scaling.md](docs-internal/operator-based-scaling.md) -- zero-downtime blue-green scaling design
+- [docs-internal/formal-verification.md](docs-internal/formal-verification.md) -- TLA+ specifications and model checking
 - [docs-internal/SDLC.md](docs-internal/SDLC.md) -- release lifecycle and image tagging conventions
 - [docs-internal/option-b-per-engine-envoy-clusters.md](docs-internal/option-b-per-engine-envoy-clusters.md) -- per-engine Envoy cluster model (proposal, not implemented)
 

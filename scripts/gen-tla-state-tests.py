@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 """Generate the TLA+ state-cover test fixture for the FireboltEngine reconciler.
 
-Phase 3 of the formal-verification plan (docs/formal-verification.mdx): for each
+Phase 3 of the formal-verification plan (docs-internal/formal-verification.md): for each
 reachable state in the TLC state graph, the generated Go test materialises the
 state in the in-memory engineSim, calls computeEngineReconcile, and verifies
 that the resulting state is one the TLA+ model considers reachable from the
@@ -138,7 +138,7 @@ def reconciler_closure(
     Cycles back to `start` via 2+ edges are still respected — they are
     discovered during BFS and `start` re-enters `seen` via the cycle.
 
-    The remaining gap (acknowledged in docs/formal-verification.mdx): a
+    The remaining gap (acknowledged in docs-internal/formal-verification.md): a
     reconciler that takes a *valid* multi-step path but skips an
     intermediate step that has no observable downstream effect on the
     projection would slip through. The closure check pairs with the
