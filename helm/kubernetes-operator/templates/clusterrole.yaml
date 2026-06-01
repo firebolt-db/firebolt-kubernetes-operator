@@ -95,7 +95,7 @@ rules:
   - apiGroups:
       - compute.firebolt.io
     resources:
-      - engineclasses
+      - fireboltengineclasses
     verbs:
       - get
       - list
@@ -105,7 +105,7 @@ rules:
   - apiGroups:
       - compute.firebolt.io
     resources:
-      - engineclasses/finalizers
+      - fireboltengineclasses/finalizers
       - fireboltengines/finalizers
       - fireboltinstances/finalizers
     verbs:
@@ -113,7 +113,7 @@ rules:
   - apiGroups:
       - compute.firebolt.io
     resources:
-      - engineclasses/status
+      - fireboltengineclasses/status
       - fireboltengines/status
       - fireboltinstances/status
     verbs:

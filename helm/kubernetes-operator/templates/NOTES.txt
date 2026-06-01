@@ -9,18 +9,18 @@ Check the operator is running:
 NOTE: Admission webhooks are disabled (webhook.enabled=false). The
 operator runs with --enable-webhooks=false, so CRD writes go straight
 through admission without the FireboltInstance defaulter or the
-FireboltInstance / EngineClass / FireboltEngine validating webhooks.
+FireboltInstance / FireboltEngineClass / FireboltEngine validating webhooks.
 Controller-side defense-in-depth still enforces the same invariants
 at reconcile time:
 
-  - EngineClass deletion-guard finalizer holds Terminating classes
+  - FireboltEngineClass deletion-guard finalizer holds Terminating classes
     until no FireboltEngine binds (Ready=False/DeletionBlocked).
   - FireboltInstance pod-template ownership check surfaces
     {Gateway,Metadata}Ready=False/TemplateRejected with the offending
     field path.
-  - EngineClass owned-field consumption gate refuses to render a
+  - FireboltEngineClass owned-field consumption gate refuses to render a
     StatefulSet when a bound class is Ready=False/OperatorOwnedFieldSet
-    (engine Ready=False/EngineClassUnready).
+    (engine Ready=False/FireboltEngineClassUnready).
 {{- if or .Values.engineResourceBounds.maxCPU .Values.engineResourceBounds.maxMemory .Values.engineResourceBounds.maxEphemeralStorage }}
   - engineResourceBounds (cpu={{ .Values.engineResourceBounds.maxCPU | default "<unset>" }}, memory={{ .Values.engineResourceBounds.maxMemory | default "<unset>" }}, ephemeral-storage={{ .Values.engineResourceBounds.maxEphemeralStorage | default "<unset>" }})
     are enforced controller-side: FireboltEngines that exceed a bound
