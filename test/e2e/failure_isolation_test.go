@@ -83,7 +83,7 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 		DeleteClientPod(ctx, clientPod)
 		Expect(DeleteEngine(ctx, healthyEngine)).To(Succeed())
 		Expect(DeleteEngine(ctx, badEngine)).To(Succeed())
-		Expect(DeleteEngineClass(ctx, badClass)).To(Succeed())
+		Expect(DeleteFireboltEngineClass(ctx, badClass)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, healthyEngine, resourceCleanupTimeout)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)).To(Succeed())
 	})
@@ -97,7 +97,7 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 		// starts from the same baseline (healthy engine alone, no class).
 		Expect(DeleteEngine(ctx, badEngine)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, badEngine, resourceCleanupTimeout)).To(Succeed())
-		Expect(DeleteEngineClass(ctx, badClass)).To(Succeed())
+		Expect(DeleteFireboltEngineClass(ctx, badClass)).To(Succeed())
 	})
 
 	// assertHealthyEngineStaysServing runs the gateway background query
@@ -139,11 +139,11 @@ var _ = Describe("Engine Failure Isolation", Ordered, func() {
 		By("Starting background query runner on the healthy engine")
 		startRunnerOnHealthyEngine()
 
-		By("Creating an EngineClass pointing at a non-existent image")
+		By("Creating an FireboltEngineClass pointing at a non-existent image")
 		// Tag intentionally absurd so kubelet returns ErrImagePull / ImagePullBackOff
 		// rather than pulling any cached layer; "ghcr.io" exists but the
 		// repo path does not so the registry returns 404 on the manifest.
-		Expect(CreateEngineClass(ctx, badClass, "ghcr.io/firebolt-db/does-not-exist:v0.0.0")).To(Succeed())
+		Expect(CreateFireboltEngineClass(ctx, badClass, "ghcr.io/firebolt-db/does-not-exist:v0.0.0")).To(Succeed())
 
 		By("Creating the broken peer that references the bad class")
 		Expect(CreateEngineWithClass(ctx, instanceName, badEngine, 1, badClass)).To(Succeed())

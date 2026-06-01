@@ -267,9 +267,9 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 	return createEngine(ctx, instanceName, name, replicas, rollout, nil)
 }
 
-// CreateEngineWithClass creates a FireboltEngine that references an
-// EngineClass in the same testNamespace via spec.engineClassRef.
-// EngineClass is namespaced, so the class must live in testNamespace
+// CreateEngineWithClass creates a FireboltEngine that references a
+// FireboltEngineClass in the same testNamespace via spec.engineClassRef.
+// FireboltEngineClass is namespaced, so the class must live in testNamespace
 // for the engine to resolve it. Image override and shared pod-spec
 // defaults flow from the class template.
 func CreateEngineWithClass(ctx context.Context, instanceName, name string, replicas int, classRef string) error {
@@ -277,10 +277,10 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 }
 
 // CreateBareEngineWithClassRef creates the minimum-viable
-// FireboltEngine that binds an EngineClass: instanceRef + replicas=1
+// FireboltEngine that binds a FireboltEngineClass: instanceRef + replicas=1
 // + engineClassRef, no resources, no customEngineConfig, no drain
 // settings. Used by tests that need a binding to exist for the
-// EngineClass deletion guard to see it but don't run a
+// FireboltEngineClass deletion guard to see it but don't run a
 // FireboltEngineReconciler, so the engine never reconciles past the
 // raw CR. Calling CreateEngineWithClass here would stamp the
 // floci-pointing customEngineConfig that the deletion-guard test
@@ -369,21 +369,21 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 	return cl.Create(ctx, engine)
 }
 
-// CreateEngineClass creates an EngineClass in testNamespace whose
-// spec.template carries the engine container image. The class is the
+// CreateFireboltEngineClass creates a FireboltEngineClass in testNamespace
+// whose spec.template carries the engine container image. The class is the
 // canonical knob for switching engine images at runtime — mutating
 // containers[engine].image on the class triggers a blue-green rollout
 // on every FireboltEngine in the same namespace that references it
-// (FB-1145). EngineClass is namespaced; the class and its consumer
+// (FB-1145). FireboltEngineClass is namespaced; the class and its consumer
 // engines must share a namespace.
-func CreateEngineClass(ctx context.Context, name, image string) error {
+func CreateFireboltEngineClass(ctx context.Context, name, image string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
-	class := &computev1alpha1.EngineClass{
+	class := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -399,19 +399,19 @@ func CreateEngineClass(ctx context.Context, name, image string) error {
 	return cl.Create(ctx, class)
 }
 
-// UpdateEngineClassImage mutates the engine container image on an
-// existing EngineClass in testNamespace. Used by the e2e Image
+// UpdateFireboltEngineClassImage mutates the engine container image on an
+// existing FireboltEngineClass in testNamespace. Used by the e2e Image
 // Switching test as the canonical path for changing the running engine
-// version: the engine controller's EngineClass watch fires immediately,
-// stsMatchesSpec detects the class hash drift, and a new generation
-// rolls.
-func UpdateEngineClassImage(ctx context.Context, name, image string) error {
+// version: the engine controller's FireboltEngineClass watch fires
+// immediately, stsMatchesSpec detects the class hash drift, and a new
+// generation rolls.
+func UpdateFireboltEngineClassImage(ctx context.Context, name, image string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
 	for i := 0; i < 10; i++ {
-		class := &computev1alpha1.EngineClass{}
+		class := &computev1alpha1.FireboltEngineClass{}
 		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, class); err != nil {
 			return err
 		}
@@ -423,12 +423,12 @@ func UpdateEngineClassImage(ctx context.Context, name, image string) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("updating EngineClass %q image to %q: conflict after 10 retries", name, image)
+	return fmt.Errorf("updating FireboltEngineClass %q image to %q: conflict after 10 retries", name, image)
 }
 
 // setEngineContainerImage updates (or appends) the engine container's
-// image in a PodSpec. Centralised so both CreateEngineClass and
-// UpdateEngineClassImage produce a class shape the operator's merge
+// image in a PodSpec. Centralised so both CreateFireboltEngineClass and
+// UpdateFireboltEngineClassImage produce a class shape the operator's merge
 // layer recognises.
 func setEngineContainerImage(podSpec *corev1.PodSpec, image string) {
 	for i := range podSpec.Containers {
@@ -443,14 +443,14 @@ func setEngineContainerImage(podSpec *corev1.PodSpec, image string) {
 	})
 }
 
-// DeleteEngineClass deletes an EngineClass in testNamespace. Tolerates
-// NotFound so the helper is safe in AfterAll cleanup paths.
-func DeleteEngineClass(ctx context.Context, name string) error {
+// DeleteFireboltEngineClass deletes a FireboltEngineClass in testNamespace.
+// Tolerates NotFound so the helper is safe in AfterAll cleanup paths.
+func DeleteFireboltEngineClass(ctx context.Context, name string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
-	class := &computev1alpha1.EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	class := &computev1alpha1.FireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
 	err = cl.Delete(ctx, class)
 	if errors.IsNotFound(err) {
 		return nil
@@ -1040,7 +1040,7 @@ func WaitForEnginePhase(ctx context.Context, engineName string, phase computev1a
 // WaitForEnginePhaseChange is the inverse of WaitForEnginePhase: it
 // blocks until the engine's phase becomes anything other than the given
 // phase. Used by tests that trigger drift via a sibling resource
-// (EngineClass mutation, FireboltInstance change) where there is no
+// (FireboltEngineClass mutation, FireboltInstance change) where there is no
 // FireboltEngine spec edit to wait on via observedGeneration.
 func WaitForEnginePhaseChange(ctx context.Context, engineName string, phase computev1alpha1.EnginePhase, timeout time.Duration) error {
 	cl, err := getCRDClient()
@@ -1484,10 +1484,10 @@ func (o *InstanceOperator) Stop() {
 	o.wg.Wait()
 }
 
-// ClassOperator wraps an in-process EngineClassReconciler. The
+// ClassOperator wraps an in-process FireboltEngineClassReconciler. The
 // reconciler is the only thing that adds the deletion-guard
-// finalizer on EngineClass CRs and the only thing that releases it
-// once bindings clear — without it running, classes never get the
+// finalizer on FireboltEngineClass CRs and the only thing that releases
+// it once bindings clear — without it running, classes never get the
 // finalizer and the W1 deletion guard is silently bypassed (the
 // "no finalizer, deletion proceeds" fast path). Tests that
 // exercise the guard must start a ClassOperator before creating
@@ -1498,9 +1498,9 @@ type ClassOperator struct {
 	wg         sync.WaitGroup
 }
 
-// StartClassOperator brings up an EngineClassReconciler scoped to
+// StartClassOperator brings up a FireboltEngineClassReconciler scoped to
 // the e2e testNamespace. Unlike StartOperator / StartInstanceOperator,
-// no name filter is applied: every EngineClass in the namespace
+// no name filter is applied: every FireboltEngineClass in the namespace
 // reconciles. The reconciler watches FireboltEngines so DELETE
 // reconciles fire reactively as bindings drop to zero.
 func StartClassOperator() (*ClassOperator, error) {
@@ -1533,7 +1533,7 @@ func StartClassOperator() (*ClassOperator, error) {
 		return nil, fmt.Errorf("failed to create class manager: %w", err)
 	}
 
-	reconciler := &controller.EngineClassReconciler{
+	reconciler := &controller.FireboltEngineClassReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}

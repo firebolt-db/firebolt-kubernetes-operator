@@ -34,8 +34,8 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// EngineClass deletion guard end-to-end coverage. Pins the W1
-// finalizer-based guard in a real cluster with the EngineClassReconciler
+// FireboltEngineClass deletion guard end-to-end coverage. Pins the W1
+// finalizer-based guard in a real cluster with the FireboltEngineClassReconciler
 // running in-process. The validating webhook is NOT registered in the
 // e2e harness (see test/e2e/helpers_test.go's StartOperator family and
 // the project-wide note in AGENTS.md), so this spec exercises the
@@ -44,8 +44,8 @@ import (
 //
 // What this locks in:
 //
-//   - The EngineClassReconciler stamps the finalizer
-//     compute.firebolt.io/engineclass-deletion-guard on first reconcile.
+//   - The FireboltEngineClassReconciler stamps the finalizer
+//     compute.firebolt.io/fireboltengineclass-deletion-guard on first reconcile.
 //   - DELETE on a class with at least one bound FireboltEngine leaves
 //     the class Terminating with Ready=False/DeletionBlocked and the
 //     bound count in the message.
@@ -58,7 +58,7 @@ import (
 // FireboltEngine CR exists only as a "binding carrier" so the class
 // reconciler's countBoundEngines List finds it; the engine doesn't
 // need pods, condition status, or any reconcile activity.
-var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-guard"), func() {
+var _ = Describe("FireboltEngineClass deletion guard", Ordered, Label("e2e", "deletion-guard"), func() {
 	const (
 		className   = "deletion-guard-class"
 		engineName  = "deletion-guard-binder"
@@ -70,7 +70,7 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 	BeforeAll(func() {
 		var err error
 		classOp, err = StartClassOperator()
-		Expect(err).NotTo(HaveOccurred(), "Failed to start EngineClassReconciler")
+		Expect(err).NotTo(HaveOccurred(), "Failed to start FireboltEngineClassReconciler")
 	})
 
 	AfterAll(func() {
@@ -78,8 +78,8 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 		// resource-delete Expects below panic via Ginkgo's Fail →
 		// runtime.Goexit. Goexit honours defers; the Expect lines
 		// after this defer do not. Without the defer, a transient
-		// DeleteEngine / DeleteEngineClass failure would leak the
-		// in-process EngineClassReconciler goroutines and leave the
+		// DeleteEngine / DeleteFireboltEngineClass failure would leak the
+		// in-process FireboltEngineClassReconciler goroutines and leave the
 		// finalizer on the next test's class with no operator to
 		// drain it.
 		defer func() {
@@ -93,24 +93,24 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 		// finalizer via the FireboltEngine watch the class
 		// reconciler already wires.
 		Expect(DeleteEngine(context.Background(), engineName)).To(Succeed())
-		Expect(DeleteEngineClass(context.Background(), className)).To(Succeed())
+		Expect(DeleteFireboltEngineClass(context.Background(), className)).To(Succeed())
 	})
 
 	It("blocks class deletion while a bound engine exists, releases once the engine is gone", func() {
 		ctx := context.Background()
 		key := types.NamespacedName{Name: className, Namespace: testNamespace}
 
-		By("Creating the EngineClass")
-		Expect(CreateEngineClass(ctx, className, testImage+":"+testTag)).To(Succeed())
+		By("Creating the FireboltEngineClass")
+		Expect(CreateFireboltEngineClass(ctx, className, testImage+":"+testTag)).To(Succeed())
 
 		cl, err := getCRDClient()
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for the deletion-guard finalizer to be added")
 		Eventually(func(g Gomega) {
-			class := &computev1alpha1.EngineClass{}
+			class := &computev1alpha1.FireboltEngineClass{}
 			g.Expect(cl.Get(ctx, key, class)).To(Succeed())
-			g.Expect(class.Finalizers).To(ContainElement("compute.firebolt.io/engineclass-deletion-guard"),
+			g.Expect(class.Finalizers).To(ContainElement("compute.firebolt.io/fireboltengineclass-deletion-guard"),
 				"finalizer must be stamped before the bound-engine count matters")
 		}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
@@ -122,16 +122,16 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 		Expect(CreateBareEngineWithClassRef(ctx, instanceRef, engineName, className)).To(Succeed())
 
 		By("Attempting to delete the class")
-		Expect(DeleteEngineClass(ctx, className)).To(Succeed(),
+		Expect(DeleteFireboltEngineClass(ctx, className)).To(Succeed(),
 			"DELETE returns success because the apiserver accepts the request; the finalizer holds the object alive")
 
 		By("Asserting the class is Terminating with Ready=False/DeletionBlocked")
 		Eventually(func(g Gomega) {
-			class := &computev1alpha1.EngineClass{}
+			class := &computev1alpha1.FireboltEngineClass{}
 			g.Expect(cl.Get(ctx, key, class)).To(Succeed())
 			g.Expect(class.DeletionTimestamp.IsZero()).To(BeFalse(),
 				"DeletionTimestamp must be set after the DELETE call")
-			cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.EngineClassConditionReady)
+			cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady)
 			g.Expect(cond).NotTo(BeNil(), "Ready condition must be present once reconcileDelete runs")
 			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			g.Expect(cond.Reason).To(Equal("DeletionBlocked"))
@@ -155,7 +155,7 @@ var _ = Describe("EngineClass deletion guard", Ordered, Label("e2e", "deletion-g
 		// next reconcile pass sees boundEngines == 0 and removes the
 		// finalizer. The apiserver then reaps the class.
 		Eventually(func(g Gomega) {
-			class := &computev1alpha1.EngineClass{}
+			class := &computev1alpha1.FireboltEngineClass{}
 			err := cl.Get(ctx, key, class)
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
 				"class should be fully reaped after the bound engine is removed (got err=%v)", err)
