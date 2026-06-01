@@ -47,10 +47,10 @@ func fireboltEngineWithRef(ref *string) *FireboltEngine {
 }
 
 // fakeReaderWithClasses builds a controller-runtime fake client preloaded
-// with the named EngineClasses in the test engine's namespace ("default").
-// EngineClass is namespaced, so the validator's Get includes the engine's
-// namespace; the fixtures live in the same namespace to satisfy that
-// lookup.
+// with the named FireboltEngineClasses in the test engine's namespace
+// ("default"). FireboltEngineClass is namespaced, so the validator's Get
+// includes the engine's namespace; the fixtures live in the same namespace
+// to satisfy that lookup.
 func fakeReaderWithClasses(t *testing.T, names ...string) client.Reader {
 	t.Helper()
 	sch := runtime.NewScheme()
@@ -62,7 +62,7 @@ func fakeReaderWithClasses(t *testing.T, names ...string) client.Reader {
 	}
 	objs := make([]client.Object, 0, len(names))
 	for _, name := range names {
-		objs = append(objs, &EngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
+		objs = append(objs, &FireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
 	}
 	return fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
 }
@@ -107,8 +107,8 @@ func TestFireboltEngineValidator_MissingClassIsRejected(t *testing.T) {
 }
 
 // TestFireboltEngineValidator_ClassInDifferentNamespaceIsRejected pins
-// down the namespace-coupled lookup: an EngineClass with the right name
-// existing in a different namespace must NOT satisfy
+// down the namespace-coupled lookup: a FireboltEngineClass with the right
+// name existing in a different namespace must NOT satisfy
 // spec.engineClassRef. Kubernetes resolves the reference in the
 // engine's own namespace at reconcile / pod-admission time; the webhook
 // must agree.
@@ -122,7 +122,7 @@ func TestFireboltEngineValidator_ClassInDifferentNamespaceIsRejected(t *testing.
 	}
 	// Class lives in "other-ns"; the engine is in "default".
 	reader := fake.NewClientBuilder().WithScheme(sch).WithObjects(
-		&EngineClass{ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "other-ns"}},
+		&FireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "other-ns"}},
 	).Build()
 	v := &FireboltEngineCustomValidator{Reader: reader}
 	eng := fireboltEngineWithRef(ptr.To("compute-optimized"))
@@ -143,8 +143,8 @@ func TestFireboltEngineValidator_DeleteIsNoOp(t *testing.T) {
 }
 
 // engineWithResources returns a minimal valid FireboltEngine with the
-// supplied resources block. nil ref keeps the EngineClass lookup out of
-// the way so the resource-bound assertions are not entangled with
+// supplied resources block. nil ref keeps the FireboltEngineClass lookup
+// out of the way so the resource-bound assertions are not entangled with
 // reader fixtures.
 func engineWithResources(req, lim corev1.ResourceList) *FireboltEngine {
 	eng := fireboltEngineWithRef(nil)

@@ -1,5 +1,5 @@
 {
-  "description": "EngineClass is a reusable pod-template fragment shared by multiple\nFireboltEngines in the same namespace. Engines reference an EngineClass\nby name through spec.engineClassRef and inherit its template,\neliminating the need to repeat identical per-engine settings\n(serviceAccountName, nodeSelector, tolerations, pod annotations \u2014\nincluding the cloud-provider IAM binding for kube2iam, IRSA, and Pod\nIdentity).\n\nEngineClass is namespaced (not cluster-scoped like IngressClass /\nGatewayClass) because its template carries namespace-resolved\nidentifiers \u2014 ServiceAccount names, Secret / ConfigMap / PVC volume\nreferences, and the per-tenant IAM annotations that the engine pod\nneeds. Kubernetes resolves those names in the engine's own namespace\nat pod admission time, so the class and its consumer engines must\nlive together. A cluster-scoped class with `serviceAccountName: foo`\nreferenced from two namespaces would silently bind to two different\nServiceAccounts (and possibly two different IAM roles) without\nadmission catching the divergence.",
+  "description": "FireboltEngineClass is a reusable pod-template fragment shared by multiple\nFireboltEngines in the same namespace. Engines reference a FireboltEngineClass\nby name through spec.engineClassRef and inherit its template,\neliminating the need to repeat identical per-engine settings\n(serviceAccountName, nodeSelector, tolerations, pod annotations \u2014\nincluding the cloud-provider IAM binding for kube2iam, IRSA, and Pod\nIdentity).\n\nFireboltEngineClass is namespaced (not cluster-scoped like IngressClass /\nGatewayClass) because its template carries namespace-resolved\nidentifiers \u2014 ServiceAccount names, Secret / ConfigMap / PVC volume\nreferences, and the per-tenant IAM annotations that the engine pod\nneeds. Kubernetes resolves those names in the engine's own namespace\nat pod admission time, so the class and its consumer engines must\nlive together. A cluster-scoped class with `serviceAccountName: foo`\nreferenced from two namespaces would silently bind to two different\nServiceAccounts (and possibly two different IAM roles) without\nadmission catching the divergence.",
   "properties": {
     "apiVersion": {
       "description": "APIVersion defines the versioned schema of this representation of an object.\nServers should convert recognized schemas to the latest internal value, and\nmay reject unrecognized values.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
@@ -13,7 +13,7 @@
       "type": "object"
     },
     "spec": {
-      "description": "EngineClassSpec defines the desired state of an EngineClass.\n\nTemplate is a Kubernetes PodTemplateSpec merged underneath an engine's\nown pod template when the engine references this class via\nspec.engineClassRef. Precedence on every field is:\n\n 1. operator defaults (lowest)\n 2. EngineClass template\n 3. FireboltEngine spec (highest)\n\nThe operator owns a subset of the pod template (the engine container's\nimage, command, args, ports, probes, reserved env keys; pod-level\nterminationGracePeriodSeconds, subdomain, hostname; metadata names; the\nfirebolt.io/* label/annotation prefix). These paths are rejected by the\nEngineClass validating webhook at admission time so users see the\nfailure immediately instead of via silent stripping. The authoritative\nrejection set is built from operatorauthority.go.\n\nNon-engine containers (sidecars) and additional init containers are\nfully user-owned: the webhook does not constrain their image, command,\nports, or environment.",
+      "description": "FireboltEngineClassSpec defines the desired state of a FireboltEngineClass.\n\nTemplate is a Kubernetes PodTemplateSpec merged underneath an engine's\nown pod template when the engine references this class via\nspec.engineClassRef. Precedence on every field is:\n\n 1. operator defaults (lowest)\n 2. FireboltEngineClass template\n 3. FireboltEngine spec (highest)\n\nThe operator owns a subset of the pod template (the engine container's\nimage, command, args, ports, probes, reserved env keys; pod-level\nterminationGracePeriodSeconds, subdomain, hostname; metadata names; the\nfirebolt.io/* label/annotation prefix). These paths are rejected by the\nFireboltEngineClass validating webhook at admission time so users see the\nfailure immediately instead of via silent stripping. The authoritative\nrejection set is built from operatorauthority.go.\n\nNon-engine containers (sidecars) and additional init containers are\nfully user-owned: the webhook does not constrain their image, command,\nports, or environment.",
       "properties": {
         "template": {
           "description": "Template is the pod template merged into engines that reference this\nclass. See the type-level doc for the precedence rules and the list\nof operator-owned paths the validating webhook rejects.\n\nThe CRD schema for template.metadata is patched post-controller-gen\n(scripts/patch-crd-template-metadata.py, invoked by `make manifests`)\nto set x-kubernetes-preserve-unknown-fields on the embedded\nObjectMeta. Without that injection, structural-schema pruning would\nstrip template.metadata.labels and template.metadata.annotations at\nadmission time and any GitOps controller re-applying them would\ndrift forever. A +kubebuilder:pruning:PreserveUnknownFields marker\non this Go field is not sufficient: controller-gen lands it on the\ntemplate schema, but the marker does not propagate into a child\nthat has its own typed sub-schema (metadata: {type: object}).",
@@ -7245,15 +7245,15 @@
       "additionalProperties": false
     },
     "status": {
-      "description": "EngineClassStatus is the observed state of an EngineClass.",
+      "description": "FireboltEngineClassStatus is the observed state of a FireboltEngineClass.",
       "properties": {
         "boundEngines": {
-          "description": "BoundEngines counts the FireboltEngines in the same namespace that\nreference this class via spec.engineClassRef. Surfaced for\nvisibility (printcolumn, kubectl describe); both the EngineClass\ndeletion webhook and the reconciler's deletion-guard finalizer\ndo their own live List against the namespace rather than trusting\nthis cached value, so a class bound between reconciler runs\n(status still at zero) is still protected from deletion.",
+          "description": "BoundEngines counts the FireboltEngines in the same namespace that\nreference this class via spec.engineClassRef. Surfaced for\nvisibility (printcolumn, kubectl describe); both the FireboltEngineClass\ndeletion webhook and the reconciler's deletion-guard finalizer\ndo their own live List against the namespace rather than trusting\nthis cached value, so a class bound between reconciler runs\n(status still at zero) is still protected from deletion.",
           "format": "int32",
           "type": "integer"
         },
         "conditions": {
-          "description": "Conditions surface the EngineClass's high-level state.",
+          "description": "Conditions surface the FireboltEngineClass's high-level state.",
           "items": {
             "description": "Condition contains details for one aspect of the current state of this API Resource.",
             "properties": {
@@ -7309,7 +7309,7 @@
           "type": "array"
         },
         "observedGeneration": {
-          "description": "ObservedGeneration is the metadata.generation last reconciled by the\nEngineClass controller. Lets tooling detect stale status.",
+          "description": "ObservedGeneration is the metadata.generation last reconciled by the\nFireboltEngineClass controller. Lets tooling detect stale status.",
           "format": "int64",
           "type": "integer"
         }

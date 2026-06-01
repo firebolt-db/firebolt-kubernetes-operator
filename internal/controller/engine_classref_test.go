@@ -39,7 +39,7 @@ import (
 )
 
 // engineRefingClassFixture returns a FireboltEngine in the given
-// namespace referencing the named EngineClass. classRef == "" produces
+// namespace referencing the named FireboltEngineClass. classRef == "" produces
 // an engine with nil spec.engineClassRef (no class).
 func engineRefingClassFixture(name, namespace, classRef string) *computev1alpha1.FireboltEngine {
 	spec := computev1alpha1.FireboltEngineSpec{InstanceRef: "inst", Replicas: 1}
@@ -53,14 +53,14 @@ func engineRefingClassFixture(name, namespace, classRef string) *computev1alpha1
 	}
 }
 
-// classOnlyFixture returns an EngineClass in the given namespace with a
+// classOnlyFixture returns a FireboltEngineClass in the given namespace with a
 // minimal user-allowed template (ServiceAccountName). Used by lookup
 // tests that don't care about the rendered pod spec, only that
-// resolveEngineClassInfo finds (or does not find) the class.
-func classOnlyFixture(name, namespace string) *computev1alpha1.EngineClass {
-	return &computev1alpha1.EngineClass{
+// resolveFireboltEngineClassInfo finds (or does not find) the class.
+func classOnlyFixture(name, namespace string) *computev1alpha1.FireboltEngineClass {
+	return &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{ServiceAccountName: name + "-sa"},
 			},
@@ -91,12 +91,12 @@ func engineRefTestReconciler(cli client.Client, sch *runtime.Scheme) *FireboltEn
 	}
 }
 
-// TestResolveEngineClassInfo_NamespacedLookup pins down the
-// namespace-coupled resolver: an EngineClass with the right name in a
+// TestResolveFireboltEngineClassInfo_NamespacedLookup pins down the
+// namespace-coupled resolver: a FireboltEngineClass with the right name in a
 // different namespace must NOT satisfy spec.engineClassRef. Kubernetes
 // resolves the reference in the engine's own namespace; the resolver
 // must agree.
-func TestResolveEngineClassInfo_NamespacedLookup(t *testing.T) {
+func TestResolveFireboltEngineClassInfo_NamespacedLookup(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		// Class exists in "ns-a" only.
@@ -106,9 +106,9 @@ func TestResolveEngineClassInfo_NamespacedLookup(t *testing.T) {
 
 	t.Run("same-namespace engine resolves", func(t *testing.T) {
 		eng := engineRefingClassFixture("e", "ns-a", "compute-optimized")
-		info, err := r.resolveEngineClassInfo(context.Background(), eng)
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 		if err != nil {
-			t.Fatalf("resolveEngineClassInfo: %v", err)
+			t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
 		}
 		if info == nil {
 			t.Fatal("info = nil, want non-nil")
@@ -124,9 +124,9 @@ func TestResolveEngineClassInfo_NamespacedLookup(t *testing.T) {
 	t.Run("cross-namespace engine fails to resolve", func(t *testing.T) {
 		// Engine in "ns-b" referencing a class that exists only in "ns-a".
 		eng := engineRefingClassFixture("e", "ns-b", "compute-optimized")
-		_, err := r.resolveEngineClassInfo(context.Background(), eng)
+		_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 		if err == nil {
-			t.Fatal("resolveEngineClassInfo: expected error for cross-namespace reference, got nil")
+			t.Fatal("resolveFireboltEngineClassInfo: expected error for cross-namespace reference, got nil")
 		}
 		if !strings.Contains(err.Error(), "ns-b") {
 			t.Errorf("error %q does not name the engine's namespace", err.Error())
@@ -135,9 +135,9 @@ func TestResolveEngineClassInfo_NamespacedLookup(t *testing.T) {
 
 	t.Run("nil ref returns nil info", func(t *testing.T) {
 		eng := engineRefingClassFixture("e", "ns-a", "")
-		info, err := r.resolveEngineClassInfo(context.Background(), eng)
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 		if err != nil {
-			t.Fatalf("resolveEngineClassInfo: %v", err)
+			t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
 		}
 		if info != nil {
 			t.Errorf("info = %+v, want nil for engine without engineClassRef", info)
@@ -145,13 +145,13 @@ func TestResolveEngineClassInfo_NamespacedLookup(t *testing.T) {
 	})
 }
 
-// TestEngineClassToEngines_NamespaceScoped pins down the watch handler:
+// TestFireboltEngineClassToEngines_NamespaceScoped pins down the watch handler:
 // a class event in namespace X enqueues only engines in namespace X
 // that reference the class by name. Cross-namespace engines with
 // matching ref are ignored — they could not have admitted (per the
 // FireboltEngine validating webhook) and cannot resolve at reconcile
 // time anyway.
-func TestEngineClassToEngines_NamespaceScoped(t *testing.T) {
+func TestFireboltEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		// Same namespace + matching ref → enqueued.
@@ -166,7 +166,7 @@ func TestEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	class := &computev1alpha1.EngineClass{
+	class := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "ns-a"},
 	}
 	got := r.engineClassToEngines(context.Background(), class)
@@ -185,12 +185,12 @@ func TestEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	}
 }
 
-// TestEngineClassToEngines_HonorsNamespaceFilter pins down the
+// TestFireboltEngineClassToEngines_HonorsNamespaceFilter pins down the
 // interaction with the reconciler's optional namespace filter
 // (--watch-namespace). A class event for a namespace outside the
 // filter must produce zero requests, otherwise the reconciler would
 // try to reconcile engines it does not have RBAC for.
-func TestEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
+func TestFireboltEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		engineRefingClassFixture("a", "ns-a", "compute-optimized"),
@@ -200,7 +200,7 @@ func TestEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
 
 	// Class event from a different namespace than the filter — must
 	// produce no requests even though a matching engine in ns-a exists.
-	classOutside := &computev1alpha1.EngineClass{
+	classOutside := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "ns-b"},
 	}
 	if got := r.engineClassToEngines(context.Background(), classOutside); len(got) != 0 {
@@ -208,7 +208,7 @@ func TestEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
 	}
 
 	// Class event inside the filter still works.
-	classInside := &computev1alpha1.EngineClass{
+	classInside := &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "ns-a"},
 	}
 	got := r.engineClassToEngines(context.Background(), classInside)
@@ -219,12 +219,12 @@ func TestEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
 
 // classWithReadyCondition returns a class fixture (always in
 // namespace "ns-a", matching the rest of this file's fixtures) with a
-// specific EngineClassConditionReady status / reason / message
+// specific FireboltEngineClassConditionReady status / reason / message
 // stamped. Used by the consumption-gate tests below.
-func classWithReadyCondition(name string, status metav1.ConditionStatus, reason, message string) *computev1alpha1.EngineClass {
+func classWithReadyCondition(name string, status metav1.ConditionStatus, reason, message string) *computev1alpha1.FireboltEngineClass {
 	class := classOnlyFixture(name, "ns-a")
 	apimeta.SetStatusCondition(&class.Status.Conditions, metav1.Condition{
-		Type:    computev1alpha1.EngineClassConditionReady,
+		Type:    computev1alpha1.FireboltEngineClassConditionReady,
 		Status:  status,
 		Reason:  reason,
 		Message: message,
@@ -232,13 +232,13 @@ func classWithReadyCondition(name string, status metav1.ConditionStatus, reason,
 	return class
 }
 
-// TestResolveEngineClassInfo_BlocksOnOperatorOwnedFieldSet pins the
-// consumption gate: a class the EngineClassReconciler marked
+// TestResolveFireboltEngineClassInfo_BlocksOnOperatorOwnedFieldSet pins the
+// consumption gate: a class the FireboltEngineClassReconciler marked
 // Ready=False/OperatorOwnedFieldSet must not be rendered into a
-// StatefulSet. The resolver returns errEngineClassUnready wrapping the
+// StatefulSet. The resolver returns errFireboltEngineClassUnready wrapping the
 // class name + namespace + condition message so the caller can surface
 // an actionable pointer on the engine condition.
-func TestResolveEngineClassInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
+func TestResolveFireboltEngineClassInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		classWithReadyCondition("bad-class",
@@ -248,12 +248,12 @@ func TestResolveEngineClassInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "bad-class")
-	_, err := r.resolveEngineClassInfo(context.Background(), eng)
+	_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 	if err == nil {
-		t.Fatal("resolveEngineClassInfo: expected error for unready class, got nil")
+		t.Fatal("resolveFireboltEngineClassInfo: expected error for unready class, got nil")
 	}
-	if !stderrors.Is(err, errEngineClassUnready) {
-		t.Errorf("error %q does not wrap errEngineClassUnready", err.Error())
+	if !stderrors.Is(err, errFireboltEngineClassUnready) {
+		t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
 	}
 	if !strings.Contains(err.Error(), "bad-class") {
 		t.Errorf("error %q does not name the class", err.Error())
@@ -266,11 +266,11 @@ func TestResolveEngineClassInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
 	}
 }
 
-// TestResolveEngineClassInfo_PassesOnReadyTrue is the false-positive
+// TestResolveFireboltEngineClassInfo_PassesOnReadyTrue is the false-positive
 // guard: a class with Ready=True/Admissible (the happy path the class
 // reconciler stamps on every valid template) resolves cleanly, matching
 // the pre-W3 behavior for well-formed classes.
-func TestResolveEngineClassInfo_PassesOnReadyTrue(t *testing.T) {
+func TestResolveFireboltEngineClassInfo_PassesOnReadyTrue(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		classWithReadyCondition("ok-class",
@@ -280,23 +280,23 @@ func TestResolveEngineClassInfo_PassesOnReadyTrue(t *testing.T) {
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "ok-class")
-	info, err := r.resolveEngineClassInfo(context.Background(), eng)
+	info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 	if err != nil {
-		t.Fatalf("resolveEngineClassInfo: %v", err)
+		t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
 	}
 	if info == nil || info.Name != "ok-class" {
 		t.Errorf("info = %+v, want non-nil with Name=ok-class", info)
 	}
 }
 
-// TestResolveEngineClassInfo_PassesWhenReadyConditionMissing pins the
+// TestResolveFireboltEngineClassInfo_PassesWhenReadyConditionMissing pins the
 // race-tolerance behavior: a class freshly created where the
-// EngineClassReconciler has not yet stamped a Ready condition must not
+// FireboltEngineClassReconciler has not yet stamped a Ready condition must not
 // be gated as unready (that would deadlock the engine until the class
 // controller catches up). Resolution proceeds; the next reconcile,
-// driven by the engine controller's EngineClass watch, will re-evaluate
+// driven by the engine controller's FireboltEngineClass watch, will re-evaluate
 // once the class status appears.
-func TestResolveEngineClassInfo_PassesWhenReadyConditionMissing(t *testing.T) {
+func TestResolveFireboltEngineClassInfo_PassesWhenReadyConditionMissing(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		// No status conditions set.
@@ -305,34 +305,34 @@ func TestResolveEngineClassInfo_PassesWhenReadyConditionMissing(t *testing.T) {
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "fresh-class")
-	info, err := r.resolveEngineClassInfo(context.Background(), eng)
+	info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 	if err != nil {
-		t.Fatalf("resolveEngineClassInfo: %v", err)
+		t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
 	}
 	if info == nil {
 		t.Error("info = nil, want non-nil while class is awaiting its first status stamp")
 	}
 }
 
-// TestResolveEngineClassInfo_PassesOnDeletionBlocked pins the no-
+// TestResolveFireboltEngineClassInfo_PassesOnDeletionBlocked pins the no-
 // deadlock invariant for the W1 deletion guard: a class Terminating
 // with Ready=False/DeletionBlocked must keep resolving so its bound
 // engines continue to reconcile normally. Blocking here would prevent
 // engines from being deleted, which is the exact action that unbinds
 // them from the class and lets the deletion finalize.
-func TestResolveEngineClassInfo_PassesOnDeletionBlocked(t *testing.T) {
+func TestResolveFireboltEngineClassInfo_PassesOnDeletionBlocked(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		classWithReadyCondition("terminating-class",
 			metav1.ConditionFalse, reasonDeletionBlocked,
-			"EngineClass \"terminating-class\" in namespace \"ns-a\" is referenced by 2 FireboltEngine(s)"),
+			"FireboltEngineClass \"terminating-class\" in namespace \"ns-a\" is referenced by 2 FireboltEngine(s)"),
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "terminating-class")
-	info, err := r.resolveEngineClassInfo(context.Background(), eng)
+	info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 	if err != nil {
-		t.Fatalf("resolveEngineClassInfo: %v", err)
+		t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
 	}
 	if info == nil {
 		t.Error("info = nil, want non-nil so bound engines keep reconciling against a Terminating class")
@@ -341,8 +341,8 @@ func TestResolveEngineClassInfo_PassesOnDeletionBlocked(t *testing.T) {
 
 // TestEngineReconcile_UnreadyClassSurfacesCondition pins the Reconcile-
 // level wiring of the consumption gate: when the resolver returns
-// errEngineClassUnready, Reconcile must set the engine's
-// ConditionReady=False with reason EngineClassUnready and a message
+// errFireboltEngineClassUnready, Reconcile must set the engine's
+// ConditionReady=False with reason FireboltEngineClassUnready and a message
 // that points at the unready class, persist that status, and short-
 // circuit before any StatefulSet is rendered. Verifies the end-to-end
 // translation of "class status says no" → "engine status says why".
@@ -411,8 +411,8 @@ func TestEngineReconcile_UnreadyClassSurfacesCondition(t *testing.T) {
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("Ready.Status = %s, want False", cond.Status)
 	}
-	if cond.Reason != reasonEngineClassUnready {
-		t.Errorf("Ready.Reason = %q, want %q", cond.Reason, reasonEngineClassUnready)
+	if cond.Reason != reasonFireboltEngineClassUnready {
+		t.Errorf("Ready.Reason = %q, want %q", cond.Reason, reasonFireboltEngineClassUnready)
 	}
 	if !strings.Contains(cond.Message, className) {
 		t.Errorf("Ready.Message = %q, want it to name the offending class %q", cond.Message, className)

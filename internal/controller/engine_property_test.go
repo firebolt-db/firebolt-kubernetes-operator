@@ -115,12 +115,12 @@ type engineSim struct {
 	// buildState. Lags behind api until CacheCatchesUp fires.
 	cache clusterView
 
-	// classInfo carries the resolved EngineClass template when the engine
-	// has spec.engineClassRef set. nil here models "no class referenced";
-	// ApplyClassChange flips it between nil, classA, classB, … to
-	// exercise the stsMatchesSpec class-hash drift path. The Go-side
+	// classInfo carries the resolved FireboltEngineClass template when the
+	// engine has spec.engineClassRef set. nil here models "no class
+	// referenced"; ApplyClassChange flips it between nil, classA, classB, …
+	// to exercise the stsMatchesSpec class-hash drift path. The Go-side
 	// equivalent of a class spec edit at runtime.
-	classInfo *EngineClassInfo
+	classInfo *FireboltEngineClassInfo
 
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
 	// Reset to false whenever currentGen is bumped.
@@ -366,15 +366,15 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 // spec drift detection. ServiceAccountName is used as the carrier because
 // it is single-valued, lives on FireboltEngineSpec, and participates in
 // stsMatchesSpec — same drift semantics the previous image-tag carrier
-// produced before image moved out of FireboltEngineSpec into EngineClass.
+// produced before image moved out of FireboltEngineSpec into FireboltEngineClass.
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
 	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
 	sa := fmt.Sprintf("sa-v%d", v)
 	m.spec.ServiceAccountName = &sa
 }
 
-// ApplyClassChange mutates the resolved EngineClass that this engine
-// references. Models a real EngineClass spec edit OR a flip of
+// ApplyClassChange mutates the resolved FireboltEngineClass that this engine
+// references. Models a real FireboltEngineClass spec edit OR a flip of
 // spec.engineClassRef to a different class — both surface in the
 // reconciler as a fresh classInfo with a new content hash. Drawing a
 // nil class (no engineClassRef) is included so the harness exercises
@@ -387,7 +387,7 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 		m.classInfo = nil
 		return
 	}
-	m.classInfo = &EngineClassInfo{
+	m.classInfo = &FireboltEngineClassInfo{
 		Name: fmt.Sprintf("class-v%d", v),
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{

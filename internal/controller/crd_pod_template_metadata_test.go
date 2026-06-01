@@ -26,7 +26,7 @@ import (
 )
 
 // These specs pin the structural-schema contract for the three CR fields
-// that embed corev1.PodTemplateSpec — EngineClass.spec.template,
+// that embed corev1.PodTemplateSpec — FireboltEngineClass.spec.template,
 // FireboltInstance.spec.gateway.template, FireboltInstance.spec.metadata.template.
 //
 // controller-gen renders the embedded ObjectMeta in those templates as a
@@ -80,11 +80,11 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 			"template.metadata.annotations was pruned by the apiserver — check that scripts/patch-crd-template-metadata.py ran during `make manifests` and injected x-kubernetes-preserve-unknown-fields on the embedded ObjectMeta")
 	}
 
-	It("preserves labels and annotations on EngineClass.spec.template.metadata", func() {
+	It("preserves labels and annotations on FireboltEngineClass.spec.template.metadata", func() {
 		name := "class-meta-" + utilrand.String(6)
-		class := &computev1alpha1.EngineClass{
+		class := &computev1alpha1.FireboltEngineClass{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-			Spec: computev1alpha1.EngineClassSpec{
+			Spec: computev1alpha1.FireboltEngineClassSpec{
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels:      wantLabels,
@@ -102,7 +102,7 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 			_ = k8sClient.Delete(context.Background(), class)
 		})
 
-		got := &computev1alpha1.EngineClass{}
+		got := &computev1alpha1.FireboltEngineClass{}
 		Expect(k8sClient.Get(testCtx, client.ObjectKeyFromObject(class), got)).To(Succeed())
 		expectMetaSurvives(got.Spec.Template.ObjectMeta)
 	})

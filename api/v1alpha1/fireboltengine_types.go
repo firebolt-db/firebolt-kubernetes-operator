@@ -285,11 +285,11 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="instanceRef is immutable"
 	InstanceRef string `json:"instanceRef"`
 
-	// EngineClassRef is the name of an EngineClass in this engine's own
-	// namespace whose pod template is merged underneath this engine's
+	// EngineClassRef is the name of a FireboltEngineClass in this engine's
+	// own namespace whose pod template is merged underneath this engine's
 	// pod template when the engine's StatefulSet is built. Engine spec
 	// fields take precedence over class fields; operator defaults sit
-	// beneath both. EngineClass is namespaced because its template
+	// beneath both. FireboltEngineClass is namespaced because its template
 	// carries namespace-resolved identifiers (ServiceAccount names,
 	// Secret / ConfigMap / PVC volume references, per-tenant IAM
 	// annotations); the class and the engines that reference it must
@@ -305,8 +305,8 @@ type FireboltEngineSpec struct {
 	// referenced class does not exist in the engine's namespace, so
 	// users see the typo (or a class-in-the-wrong-namespace mistake)
 	// immediately instead of via engine status. Apply ordering matters:
-	// GitOps tooling must apply the EngineClass before any engine that
-	// references it (Argo sync-waves / Flux dependsOn).
+	// GitOps tooling must apply the FireboltEngineClass before any
+	// engine that references it (Argo sync-waves / Flux dependsOn).
 	// +kubebuilder:validation:MinLength=1
 	// +optional
 	EngineClassRef *string `json:"engineClassRef,omitempty"`
@@ -319,11 +319,11 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
-	// The engine container image is sourced from the referenced EngineClass
+	// The engine container image is sourced from the referenced FireboltEngineClass
 	// template (spec.template.containers[name=="engine"].image) when set, or
 	// from the operator's embedded default otherwise. There is no per-engine
 	// image override on this CR: image is a class-level concern so that
-	// platform teams can audit image rollouts through EngineClass changes
+	// platform teams can audit image rollouts through FireboltEngineClass changes
 	// rather than across N FireboltEngine CRs. Override the operator default
 	// at install time via Helm values.
 

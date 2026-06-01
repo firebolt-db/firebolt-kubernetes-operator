@@ -155,7 +155,7 @@ type MetadataSpec struct {
 	// affinity / topologySpreadConstraints / priorityClassName).
 	//
 	// template.metadata is unpruned by a post-controller-gen patch (see
-	// the matching note on EngineClassSpec.Template for the full
+	// the matching note on FireboltEngineClassSpec.Template for the full
 	// rationale).
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
@@ -216,7 +216,7 @@ type GatewaySpec struct {
 	// topologySpreadConstraints / priorityClassName).
 	//
 	// template.metadata is unpruned by a post-controller-gen patch (see
-	// the matching note on EngineClassSpec.Template for the full
+	// the matching note on FireboltEngineClassSpec.Template for the full
 	// rationale).
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`

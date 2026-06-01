@@ -42,7 +42,7 @@ import (
 // (specVer, specWantsStop). specVer is encoded into ServiceAccountName so
 // stsMatchesSpec correctly tracks per-generation drift — the same convention
 // used by ApplySpecChange in the rapid property test. (The image tag carried
-// this role until FireboltEngineSpec.Image moved into EngineClass.)
+// this role until FireboltEngineSpec.Image moved into FireboltEngineClass.)
 func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 	replicas := int32(3)
 	if s.SpecWantsStop {
@@ -74,7 +74,7 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 // pod-template ServiceAccountName is then overridden so the TLA+ relation
 // `StsMatchesSpec(g) ⟺ stsSpecVer[g] = specVer` matches Go's stsMatchesSpec.
 // (Previously this used the container image; the image moved out of
-// FireboltEngineSpec into EngineClass, so SA is the carrier now.)
+// FireboltEngineSpec into FireboltEngineClass, so SA is the carrier now.)
 func tlaMakeSTS(spec *computev1alpha1.FireboltEngineSpec, gen, stsSpecVer int) *appsv1.StatefulSet {
 	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, nil)
 	sts.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", stsSpecVer)

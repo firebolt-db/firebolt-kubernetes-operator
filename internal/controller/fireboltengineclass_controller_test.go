@@ -45,7 +45,7 @@ func engineClassTestScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-// newClassFixture returns an EngineClass whose spec.template is valid
+// newClassFixture returns a FireboltEngineClass whose spec.template is valid
 // (passes ValidateOperatorOwnedPodTemplate). The status starts zeroed so
 // the reconciler's first pass produces a deterministic Status.Update.
 // The deletion-guard finalizer is pre-stamped so tests focused on the
@@ -53,20 +53,20 @@ func engineClassTestScheme(t *testing.T) *runtime.Scheme {
 // finalizer and Requeues, returning before any status work happens).
 // Tests that explicitly cover the finalizer-add path should drop the
 // finalizer on the returned fixture before priming the client.
-// EngineClass is namespaced; tests use namespace "firebolt" by default.
-func newClassFixture(name string) *computev1alpha1.EngineClass {
+// FireboltEngineClass is namespaced; tests use namespace "firebolt" by default.
+func newClassFixture(name string) *computev1alpha1.FireboltEngineClass {
 	return newClassFixtureIn(name, "firebolt")
 }
 
-func newClassFixtureIn(name, namespace string) *computev1alpha1.EngineClass {
-	return &computev1alpha1.EngineClass{
+func newClassFixtureIn(name, namespace string) *computev1alpha1.FireboltEngineClass {
+	return &computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  namespace,
 			Generation: 1,
 			Finalizers: []string{engineClassFinalizerName},
 		},
-		Spec: computev1alpha1.EngineClassSpec{
+		Spec: computev1alpha1.FireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					ServiceAccountName: "my-sa",
@@ -93,7 +93,7 @@ func newEngineFixture(name, namespace, classRef string) *computev1alpha1.Firebol
 	}
 }
 
-func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
+func TestFireboltEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixtureIn("compute-optimized", "firebolt")
 	objs := []client.Object{
@@ -105,9 +105,9 @@ func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 		newEngineFixture("c", "firebolt", "other-class"),
 		// Same namespace, no ref → not counted.
 		newEngineFixture("d", "firebolt", ""),
-		// Different namespace, matching name → NOT counted. EngineClass is
-		// namespaced, so an engine in another namespace cannot bind to
-		// this class. Includes a same-named EngineClass in that other
+		// Different namespace, matching name → NOT counted. FireboltEngineClass
+		// is namespaced, so an engine in another namespace cannot bind to
+		// this class. Includes a same-named FireboltEngineClass in that other
 		// namespace so the cross-namespace separation is exercised end
 		// to end.
 		newClassFixtureIn("compute-optimized", "other-ns"),
@@ -116,16 +116,16 @@ func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(objs...).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "compute-optimized", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	updated := &computev1alpha1.EngineClass{}
+	updated := &computev1alpha1.FireboltEngineClass{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "compute-optimized", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 	if updated.Status.ObservedGeneration != 1 {
 		t.Errorf("ObservedGeneration = %d, want 1", updated.Status.ObservedGeneration)
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.EngineClassConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -147,29 +147,29 @@ func TestEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 	}
 }
 
-func TestEngineClassReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
+func TestFireboltEngineClassReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("bad-class")
-	// Simulate an EngineClass admitted by an older operator whose
+	// Simulate a FireboltEngineClass admitted by an older operator whose
 	// rejection set did not yet cover Subdomain. The reconciler must mark
 	// the class Ready=False with the offending path in the message.
 	class.Spec.Template.Spec.Subdomain = "headless"
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(class).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "bad-class", Namespace: "firebolt"}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	updated := &computev1alpha1.EngineClass{}
+	updated := &computev1alpha1.FireboltEngineClass{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "bad-class", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.EngineClassConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -181,14 +181,14 @@ func TestEngineClassReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
 	}
 }
 
-func TestEngineClassReconcile_NotFoundIsNoOp(t *testing.T) {
+func TestFireboltEngineClassReconcile_NotFoundIsNoOp(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "missing", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -201,13 +201,13 @@ func TestEngineClassReconcile_NotFoundIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
+func TestFireboltEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("steady")
 	class.Status.BoundEngines = 0
 	class.Status.ObservedGeneration = 1
 	apimeta.SetStatusCondition(&class.Status.Conditions, metav1.Condition{
-		Type:               computev1alpha1.EngineClassConditionReady,
+		Type:               computev1alpha1.FireboltEngineClassConditionReady,
 		Status:             metav1.ConditionTrue,
 		ObservedGeneration: 1,
 		Reason:             "Admissible",
@@ -216,10 +216,10 @@ func TestEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(class).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "steady", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -229,22 +229,22 @@ func TestEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 	}
 }
 
-// TestEngineClassReconcile_AddsFinalizerOnFirstReconcile pins the
+// TestFireboltEngineClassReconcile_AddsFinalizerOnFirstReconcile pins the
 // finalizer-add path: a class created without the deletion-guard
 // finalizer must have it added by the first reconcile, with a Requeue
 // so no other work fires until the persisted finalizer is observable
 // on a subsequent Get.
-func TestEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
+func TestFireboltEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("fresh")
 	class.Finalizers = nil // drop the fixture's pre-stamped finalizer
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(class).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "fresh", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -253,7 +253,7 @@ func TestEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
 		t.Error("Requeue = false, want true after finalizer add")
 	}
 
-	updated := &computev1alpha1.EngineClass{}
+	updated := &computev1alpha1.FireboltEngineClass{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "fresh", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -266,11 +266,11 @@ func TestEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
 	}
 }
 
-// TestEngineClassReconcile_DeletionBlockedWhileBound pins the data-
+// TestFireboltEngineClassReconcile_DeletionBlockedWhileBound pins the data-
 // integrity guard: a class with a deletionTimestamp and at least one
 // bound engine must keep its finalizer and surface
 // Ready=False/DeletionBlocked with the count.
-func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
+func TestFireboltEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("doomed")
 	cli := fake.NewClientBuilder().
@@ -280,7 +280,7 @@ func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 			newEngineFixture("a", "firebolt", "doomed"),
 			newEngineFixture("b", "firebolt", "doomed"),
 		).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
 	// Trigger deletion through the client so DeletionTimestamp is set
@@ -289,7 +289,7 @@ func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "doomed", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -298,7 +298,7 @@ func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 		t.Errorf("RequeueAfter = 0, want %s (deletion held)", engineClassRequeueAfter)
 	}
 
-	updated := &computev1alpha1.EngineClass{}
+	updated := &computev1alpha1.FireboltEngineClass{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "doomed", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 	if updated.DeletionTimestamp.IsZero() {
 		t.Error("DeletionTimestamp = zero, want non-zero (class should still be Terminating)")
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.EngineClassConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -323,23 +323,23 @@ func TestEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 	}
 }
 
-// TestEngineClassReconcile_DeletionAllowedWhenUnbound pins the release
+// TestFireboltEngineClassReconcile_DeletionAllowedWhenUnbound pins the release
 // path: a class being deleted with no bound engines has its finalizer
 // removed, after which the API server would complete the delete.
-func TestEngineClassReconcile_DeletionAllowedWhenUnbound(t *testing.T) {
+func TestFireboltEngineClassReconcile_DeletionAllowedWhenUnbound(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("orphan")
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(class).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
 	if err := cli.Delete(context.Background(), class); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "orphan", Namespace: "firebolt"}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestEngineClassReconcile_DeletionAllowedWhenUnbound(t *testing.T) {
 	// Once the finalizer is removed and no other finalizer remains, the
 	// fake client (like real Kubernetes) completes the delete and the
 	// next Get returns NotFound.
-	updated := &computev1alpha1.EngineClass{}
+	updated := &computev1alpha1.FireboltEngineClass{}
 	err := cli.Get(context.Background(), client.ObjectKey{Name: "orphan", Namespace: "firebolt"}, updated)
 	if err == nil {
 		t.Fatalf("Get: expected NotFound after finalizer removal, got class with finalizers=%v", updated.Finalizers)
@@ -357,32 +357,32 @@ func TestEngineClassReconcile_DeletionAllowedWhenUnbound(t *testing.T) {
 	}
 }
 
-// TestEngineClassReconcile_DeletionLifecycle covers the end-to-end
+// TestFireboltEngineClassReconcile_DeletionLifecycle covers the end-to-end
 // transition the guard exists for: a delete arrives while an engine is
 // bound (deletion is held), the engine is then removed, and the next
 // reconcile releases the finalizer so the class can finish deleting.
-func TestEngineClassReconcile_DeletionLifecycle(t *testing.T) {
+func TestFireboltEngineClassReconcile_DeletionLifecycle(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	class := newClassFixture("lifecycle")
 	engine := newEngineFixture("only-binder", "firebolt", "lifecycle")
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(class, engine).
-		WithStatusSubresource(&computev1alpha1.EngineClass{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
 	if err := cli.Delete(context.Background(), class); err != nil {
 		t.Fatalf("initial Delete: %v", err)
 	}
 
-	r := &EngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
 	key := client.ObjectKey{Name: "lifecycle", Namespace: "firebolt"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
 		t.Fatalf("first Reconcile (blocked): %v", err)
 	}
 
-	blocked := &computev1alpha1.EngineClass{}
+	blocked := &computev1alpha1.FireboltEngineClass{}
 	if err := cli.Get(context.Background(), key, blocked); err != nil {
 		t.Fatalf("Get blocked: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestEngineClassReconcile_DeletionLifecycle(t *testing.T) {
 		t.Fatalf("second Reconcile (release): %v", err)
 	}
 
-	released := &computev1alpha1.EngineClass{}
+	released := &computev1alpha1.FireboltEngineClass{}
 	err := cli.Get(context.Background(), key, released)
 	if err == nil {
 		t.Fatalf("Get released: expected NotFound after release, got class with finalizers=%v", released.Finalizers)
