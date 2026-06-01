@@ -43,13 +43,13 @@ kubectl get fire -n firebolt
 
 Wait until the instance is `Ready` before creating an engine. See the [FireboltInstance CRD reference](./crd-reference/instance-crd-reference) for all supported fields and phases.
 
-## Create an EngineClass
+## Create a FireboltEngineClass
 
-The engine container image lives on an `EngineClass` rather than on the engine itself. The class can also hold shared pod-level settings for engines in the same namespace.
+The engine container image lives on a `FireboltEngineClass` rather than on the engine itself. The class can also hold shared pod-level settings for engines in the same namespace.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
-kind: EngineClass
+kind: FireboltEngineClass
 metadata:
   name: default
   namespace: firebolt
@@ -64,10 +64,10 @@ spec:
 Apply the manifest:
 
 ```bash
-kubectl apply -f engineclass.yaml
+kubectl apply -f firebolt-engine-class.yaml
 ```
 
-See the [EngineClass CRD reference](./crd-reference/engineclass-crd-reference) for the full field surface.
+See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference) for the full field surface.
 
 ## Configure object storage
 
@@ -83,7 +83,7 @@ This deploys floci into the `firebolt` namespace, exposes it at `http://floci.fi
 
 ## Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it and the `EngineClass`. The `customEngineConfig.storage` block points the engine at the object storage configured above.
+Once the instance is `Ready`, create an engine that references it and the `FireboltEngineClass`. The `customEngineConfig.storage` block points the engine at the object storage configured above.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1

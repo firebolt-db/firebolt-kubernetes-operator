@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: High-level architecture for FireboltInstance, FireboltEngine, and EngineClass.
+description: High-level architecture for FireboltInstance, FireboltEngine, and FireboltEngineClass.
 sidebarTitle: Architecture
 ---
 
@@ -10,9 +10,9 @@ This document describes the reconciliation architecture used by the Firebolt Ope
        - Gateway
        - PostgreSQL
 - **FireboltEngine** deploys compute nodes that run the query engine
-- **EngineClass** is an optional template that engines in the same namespace can reference to inherit shared pod-level properties.
+- **FireboltEngineClass** is an optional template that engines in the same namespace can reference to inherit shared pod-level properties.
 
-An engine cannot be created or updated without a ready instance in its namespace. An engine may optionally reference an `EngineClass` in the same namespace.
+An engine cannot be created or updated without a ready instance in its namespace. An engine may optionally reference an `FireboltEngineClass` in the same namespace.
 
 ## FireboltInstance
 
@@ -34,13 +34,13 @@ PostgreSQL is the backing database for the metadata service. The Firebolt Operat
 
 `FireboltEngine` represents the compute nodes that run the query engine. The Firebolt Operator creates the Kubernetes resources for those nodes, rolls new generations when the spec changes, and reports whether the engine is ready to serve traffic.
 
-## EngineClass
+## FireboltEngineClass
 
-`EngineClass` is an optional namespaced class that engines can reference for shared pod-level configuration. It lets a namespace define common settings such as scheduling, service accounts, annotations, sidecars, and engine image details without repeating them on every engine.
+`FireboltEngineClass` is an optional namespaced class that engines can reference for shared pod-level configuration. It lets a namespace define common settings such as scheduling, service accounts, annotations, sidecars, and engine image details without repeating them on every engine.
 
 ## Resource dependency model
 
-The Firebolt Operator enforces a hierarchical dependency from engines to their instance, plus an optional in-namespace dependency on EngineClass:
+The Firebolt Operator enforces a hierarchical dependency from engines to their instance, plus an optional in-namespace dependency on FireboltEngineClass:
 
 ```text
 ┌───────────────────┐   1:N   ┌───────────────────┐
@@ -61,7 +61,7 @@ The Firebolt Operator enforces a hierarchical dependency from engines to their i
                                         │
                                         ▼
                              ┌─────────────────────┐
-                             │     EngineClass     │
+                             │     FireboltEngineClass     │
                              │   (namespaced,      │
                              │    optional)        │
                              │                     │
@@ -80,9 +80,9 @@ The Firebolt Operator enforces a hierarchical dependency from engines to their i
 - The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
 - The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
 - The instance reconciler is independent and has no dependency on engines.
-- The optional `spec.engineClassRef` references a namespaced `EngineClass` **in the engine's own namespace**. The reference is checked at admission time by the FireboltEngine validating webhook. It hard-rejects if no class with that name exists in the engine's namespace, so a runtime "class missing" state is not part of the steady-state status surface. The engine controller watches `EngineClass` and re-reconciles every same-namespace referencing engine when a class is created, edited, or deleted. A class spec edit therefore rolls a fresh blue-green generation on every consumer engine immediately, rather than waiting for the 30s drift requeue.
-- EngineClass is **namespaced** rather than cluster-scoped, unlike `StorageClass` / `IngressClass` / `GatewayClass`, because its template carries namespace-resolved identifiers: `serviceAccountName`, `volumes[*].secret/configMap/persistentVolumeClaim` references, and typically per-tenant IAM annotations. Kubernetes resolves those names in the engine's own namespace at pod-admission time, so co-locating the class and its consumer engines avoids the silent-divergence trap a cluster-scoped class would have created. For example, an identical SA name in different namespaces could have different IAM bindings with no admission error.
-- `EngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines in the same namespace referencing the class) for user-facing visibility. The EngineClass validating webhook refuses deletion by listing referencing engines live from the API server, scoped to the class's namespace, at admission time rather than trusting the cached count. `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
+- The optional `spec.engineClassRef` references a namespaced `FireboltEngineClass` **in the engine's own namespace**. The reference is checked at admission time by the FireboltEngine validating webhook. It hard-rejects if no class with that name exists in the engine's namespace, so a runtime "class missing" state is not part of the steady-state status surface. The engine controller watches `FireboltEngineClass` and re-reconciles every same-namespace referencing engine when a class is created, edited, or deleted. A class spec edit therefore rolls a fresh blue-green generation on every consumer engine immediately, rather than waiting for the 30s drift requeue.
+- FireboltEngineClass is **namespaced** rather than cluster-scoped, unlike `StorageClass` / `IngressClass` / `GatewayClass`, because its template carries namespace-resolved identifiers: `serviceAccountName`, `volumes[*].secret/configMap/persistentVolumeClaim` references, and typically per-tenant IAM annotations. Kubernetes resolves those names in the engine's own namespace at pod-admission time, so co-locating the class and its consumer engines avoids the silent-divergence trap a cluster-scoped class would have created. For example, an identical SA name in different namespaces could have different IAM bindings with no admission error.
+- `FireboltEngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines in the same namespace referencing the class) for user-facing visibility. The FireboltEngineClass validating webhook refuses deletion by listing referencing engines live from the API server, scoped to the class's namespace, at admission time rather than trusting the cached count. `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
 
 ## Design principles
 
@@ -100,7 +100,7 @@ The rest of the design is split by audience and task:
 
 - [Engine reconciliation](./architecture/engine-reconciliation) describes the FireboltEngine reconcile loop, phase machine, generation model, status behavior, error handling, crash recovery, and resource ownership.
 - [Instance reconciliation](./architecture/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
-- [EngineClass design](./architecture/engineclass-design) describes EngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
+- [FireboltEngineClass design](./architecture/fireboltengineclass-design) describes FireboltEngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
 - [Engine rollouts](./architecture/engine-rollouts) describes drain checks and rolling update parameters.
 - [Autoscaling and wake-up](./architecture/autoscaling-and-wake-up) describes Firebolt Operator-driven autoscaling and the gateway wake-up annotation protocol.
 - [Gateway query routing](./architecture/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.

@@ -122,7 +122,7 @@ Point the engine at the bucket through `spec.customEngineConfig.storage` and run
 
 The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Amazon S3, set `type` to `s3`.
 
-The following manifest creates the ServiceAccount, an `EngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
+The following manifest creates the ServiceAccount, an `FireboltEngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
 
 ```yaml
 apiVersion: v1
@@ -135,7 +135,7 @@ metadata:
     eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<engine-s3-role>
 ---
 apiVersion: compute.firebolt.io/v1alpha1
-kind: EngineClass
+kind: FireboltEngineClass
 metadata:
   name: default
   namespace: firebolt
@@ -176,11 +176,11 @@ Apply the manifest:
 kubectl apply -f engine-s3.yaml
 ```
 
-The engine resolves the AWS region and credentials from the pod's AWS environment, which IRSA or Pod Identity provides. On EKS, the identity webhook injects the region automatically. To set the region explicitly, add an `AWS_REGION` environment variable to the engine container through the `EngineClass`:
+The engine resolves the AWS region and credentials from the pod's AWS environment, which IRSA or Pod Identity provides. On EKS, the identity webhook injects the region automatically. To set the region explicitly, add an `AWS_REGION` environment variable to the engine container through the `FireboltEngineClass`:
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
-kind: EngineClass
+kind: FireboltEngineClass
 metadata:
   name: default
   namespace: firebolt

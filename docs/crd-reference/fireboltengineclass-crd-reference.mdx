@@ -1,15 +1,15 @@
 ---
-title: EngineClass CRD reference
+title: FireboltEngineClass CRD reference
 description: Pod-template fragment shared by engines in the same namespace.
-sidebarTitle: EngineClass CRD reference
+sidebarTitle: FireboltEngineClass CRD reference
 ---
 
-`EngineClass` is a namespaced CRD that holds a reusable pod-template
+`FireboltEngineClass` is a namespaced CRD that holds a reusable pod-template
 fragment referenced by `FireboltEngine` via `spec.engineClassRef`.
 Engines in the same namespace inherit shared pod-level settings from a single declaration: service account, scheduling, pod annotations, sidecars, and engine container image. The same value does not have to be repeated on every engine.
 
 The pattern echoes `StorageClass` / `IngressClass` / `GatewayClass` in
-the "shared template referenced by name" sense, but `EngineClass` is
+the "shared template referenced by name" sense, but `FireboltEngineClass` is
 **namespaced** rather than cluster-scoped because its template carries
 namespace-resolved identifiers: ServiceAccount names, Secret /
 ConfigMap / PVC volume references, and the per-tenant IAM annotations
@@ -93,7 +93,7 @@ with the Firebolt Operator-rendered engine container during the merge.
 
 The validating webhook **refuses** `DELETE` while any FireboltEngine in
 the class's namespace references the class via `spec.engineClassRef`.
-EngineClass is namespaced, so cross-namespace references are not
+FireboltEngineClass is namespaced, so cross-namespace references are not
 possible. Only engines in the same namespace count toward the gate.
 The check lists FireboltEngines live from the API server at admission
 time rather than reading `status.boundEngines`, so a class bound
@@ -107,7 +107,7 @@ a bound class could be removed.
 
 Editing the class spec triggers a blue-green rollout on every
 referencing engine in the same namespace. The mechanism: the engine
-controller watches `EngineClass`. On event it enqueues every engine in
+controller watches `FireboltEngineClass`. On event it enqueues every engine in
 the class's namespace whose `spec.engineClassRef` matches.
 `stsMatchesSpec` compares the resolved class content hash against the
 `firebolt.io/engine-class-hash` annotation on the StatefulSet. Any
@@ -119,7 +119,7 @@ was cleared.
 ## Check status
 
 ```bash
-kubectl get firec -n firebolt
+kubectl get firengc -n firebolt
 ```
 
 ```
@@ -130,10 +130,10 @@ compute-optimized   3       True    24h
 Or across all namespaces:
 
 ```bash
-kubectl get firec --all-namespaces
+kubectl get firengc --all-namespaces
 ```
 
 ## Examples
-For a worked example, see [`examples/engine-class.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/engine-class.yaml).
+For a worked example, see [`examples/firebolt-engine-class.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/firebolt-engine-class.yaml).
 For multi-engine usage that shares a class across two engines, see
 [`examples/instance-with-engines.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/instance-with-engines.yaml).

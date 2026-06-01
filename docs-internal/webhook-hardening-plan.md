@@ -8,9 +8,9 @@ test coverage gaps, surfaced by the audit on branch
 
 | # | Workstream | Phase | Why |
 |---|---|---|---|
-| W1 | EngineClass deletion guard (finalizer) | 1 | Data integrity — chart-default install has zero protection today |
+| W1 | FireboltEngineClass deletion guard (finalizer) | 1 | Data integrity — chart-default install has zero protection today |
 | W2 | FireboltInstance template defense-in-depth | 2 | Silent override of Envoy preStop drain hook breaks zero-downtime |
-| W3 | EngineClass owned-field consumption gate | 2 | `Ready=False` is currently non-blocking; engine still consumes |
+| W3 | FireboltEngineClass owned-field consumption gate | 2 | `Ready=False` is currently non-blocking; engine still consumes |
 | W4 | Engine resource bounds controller-side | 2 | `--engine-max-*` is documented but unenforced in default deploys |
 | W5 | Webhook-on integration suite (envtest) | 3 | Cert / Service / WebhookConfiguration rendering untested in CI |
 | W6 | Controller `spec.id` ULID fallback envtest | 3 | Uncovered controller branch |
@@ -26,15 +26,15 @@ conventions (`AGENTS.md` → "Planning work").
 
 ## Phase 1 — Data integrity
 
-### W1. EngineClass deletion guard (controller-side)
+### W1. FireboltEngineClass deletion guard (controller-side)
 
-**Problem.** With webhooks off, deleting a bound `EngineClass` succeeds and
+**Problem.** With webhooks off, deleting a bound `FireboltEngineClass` succeeds and
 orphans every engine referencing it. The validating webhook is the only
 enforcement, and the chart ships webhooks off by default.
 
 **Approach.** Add a finalizer
-`compute.firebolt.io/engineclass-deletion-guard` managed by
-`EngineClassReconciler`:
+`compute.firebolt.io/fireboltengineclass-deletion-guard` managed by
+`FireboltEngineClassReconciler`:
 
 - Add the finalizer at first reconcile (idempotent Update + requeue).
 - Branch on `deletionTimestamp`:
@@ -52,8 +52,8 @@ finalizer never sees the delete.
 '{"metadata":{"finalizers":null}}'` — the legitimate "I really mean it"
 override.
 
-**Files.** `internal/controller/engineclass_controller.go`,
-`api/v1alpha1/engineclass_types.go` (new condition reason).
+**Files.** `internal/controller/fireboltengineclass_controller.go`,
+`api/v1alpha1/fireboltengineclass_types.go` (new condition reason).
 
 **Tests.**
 - envtest: finalizer added on first reconcile; blocked transition with bound engine; unblocked transition after engine delete; force-remove path.
@@ -71,7 +71,7 @@ ports, …). The reconciler rebuilds the pod spec from a small allowlist, so
 user input is silently dropped — no status signal. Most dangerous: a silent
 override of Envoy's `preStop` drain hook breaks the zero-downtime contract.
 
-**Approach.** Mirror the EngineClass `Ready=False/OperatorOwnedFieldSet`
+**Approach.** Mirror the FireboltEngineClass `Ready=False/OperatorOwnedFieldSet`
 pattern at the FireboltInstance level:
 
 - Run `ValidatePodTemplate(spec.gateway.template, GatewayPodTemplateRules)`
@@ -93,23 +93,23 @@ rejected. When off, the user gets the same field-path error in
 - envtest: forbidden gateway field → `GatewayReady=False/TemplateRejected` with field path; same for metadata.
 - envtest: valid template → reconcile produces expected Deployments (false-positive guard).
 
-### W3. EngineClass owned-field consumption gate
+### W3. FireboltEngineClass owned-field consumption gate
 
 **Problem.** `classReadiness` already stamps
 `Ready=False/OperatorOwnedFieldSet`, but the engine reconciler still
 consumes that class and builds a misshapen StatefulSet off it. The status
 is non-blocking.
 
-**Approach.** In `resolveEngineClassInfo` (or its caller), read
+**Approach.** In `resolveFireboltEngineClassInfo` (or its caller), read
 `class.Status.Conditions[Ready]`. If `False/OperatorOwnedFieldSet`, surface
-`EngineConditionReady=False/EngineClassUnready` on the engine, skip applying
+`EngineConditionReady=False/FireboltEngineClassUnready` on the engine, skip applying
 the new STS, bubble for backoff. Same shape as how a missing class is
 handled today.
 
 **Files.** `internal/controller/engine_controller.go`.
 
 **Tests.**
-- envtest: class admitted with operator-owned field (direct write to bypass admission), engine referencing it stays at `EngineClassUnready`, no STS produced.
+- envtest: class admitted with operator-owned field (direct write to bypass admission), engine referencing it stays at `FireboltEngineClassUnready`, no STS produced.
 - envtest: clear the bad field → engine progresses normally.
 
 ### W4. Engine resource bounds (controller-side)
@@ -150,8 +150,8 @@ controller-runtime's `envtest.WebhookInstallOptions` to install the
 operator's webhook configurations and exercises at least:
 
 - `spec.id` defaulting via the network path.
-- EngineClass owned-field rejection via the network path.
-- EngineClass `DELETE` refused while bound, via the network path.
+- FireboltEngineClass owned-field rejection via the network path.
+- FireboltEngineClass `DELETE` refused while bound, via the network path.
 
 **Tests.** The three above; reuses existing fixtures.
 
@@ -179,7 +179,7 @@ behavior in.
 **Status.**
 
 - **Deletion guard — shipped.** `test/e2e/deletion_guard_test.go`
-  starts an in-process `EngineClassReconciler`, creates a class plus
+  starts an in-process `FireboltEngineClassReconciler`, creates a class plus
   a "binding carrier" `FireboltEngine` CR (no engine controller
   involved — the engine just exists so `countBoundEngines` finds
   it), DELETEs the class, asserts Terminating +

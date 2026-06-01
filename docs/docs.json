@@ -19,7 +19,7 @@
             "pages": [
               "architecture/engine-reconciliation",
               "architecture/instance-reconciliation",
-              "architecture/engineclass-design",
+              "architecture/fireboltengineclass-design",
               "architecture/engine-rollouts",
               "architecture/autoscaling-and-wake-up",
               "architecture/gateway-query-routing",
@@ -31,7 +31,7 @@
             "pages": [
               "crd-reference/instance-crd-reference",
               "crd-reference/engine-crd-reference",
-              "crd-reference/engineclass-crd-reference"
+              "crd-reference/fireboltengineclass-crd-reference"
             ]
           },
           "gateway-sizing",

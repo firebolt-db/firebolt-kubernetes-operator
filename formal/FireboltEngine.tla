@@ -43,7 +43,7 @@
 \*     TerminalPhase: zero-replica specs land in "stopped", non-zero in
 \*     "stable". Drift detection and re-materialization treat "stopped"
 \*     identically to "stable".
-\*   - EngineClass edits are modeled implicitly by specVer increments. The
+\*   - FireboltEngineClass edits are modeled implicitly by specVer increments. The
 \*     reconciler's class watch + stsMatchesSpec class-hash comparison
 \*     make a class spec edit observationally identical to a FireboltEngine
 \*     spec edit: both flip StsMatchesSpec(g) to FALSE and the next

@@ -64,7 +64,7 @@ When the metadata service or gateway becomes not-ready, the Firebolt Operator cl
 
 ### Component pod templates
 
-`spec.gateway.template` and `spec.metadata.template` are raw [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) embeds with the same shape as `EngineClass.spec.template`. Two `effective*` helpers live alongside their builders and produce the resolved pod template that the Deployment carries:
+`spec.gateway.template` and `spec.metadata.template` are raw [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) embeds with the same shape as `FireboltEngineClass.spec.template`. Two `effective*` helpers live alongside their builders and produce the resolved pod template that the Deployment carries:
 
 - `effectiveGatewayPodTemplate(...)` in `instance_gateway.go`.
 - `effectiveMetadataPodTemplate(...)` in `instance_metadata.go`.
