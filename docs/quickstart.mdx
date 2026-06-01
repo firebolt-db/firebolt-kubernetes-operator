@@ -41,7 +41,7 @@ Check progress:
 kubectl get fire -n firebolt
 ```
 
-Wait until the instance is `Ready` before creating an engine. See the [FireboltInstance CRD reference](crd-reference/instance-crd-reference) for all supported fields and phases.
+Wait until the instance is `Ready` before creating an engine. See the [FireboltInstance CRD reference](./crd-reference/instance-crd-reference) for all supported fields and phases.
 
 ## Create an EngineClass
 
@@ -67,13 +67,13 @@ Apply the manifest:
 kubectl apply -f engineclass.yaml
 ```
 
-See the [EngineClass CRD reference](crd-reference/engineclass-crd-reference) for the full field surface.
+See the [EngineClass CRD reference](./crd-reference/engineclass-crd-reference) for the full field surface.
 
 ## Configure object storage
 
 Every FireboltEngine requires object storage for managed tablet data. Local filesystem storage mode is not supported by the Firebolt Operator and the engine will refuse to start without object storage.
 
-On a real cluster, point the engine at an existing bucket (S3, GCS, or Azure Blob) and grant access through your platform's workload identity. For Amazon S3, see [Amazon S3](object-storage/amazon-s3). For a local cluster (Kind, minikube), deploy a small S3-compatible emulator ([floci](https://github.com/floci-io/floci)) and create a bucket:
+On a real cluster, point the engine at an existing bucket (S3, GCS, or Azure Blob) and grant access through your platform's workload identity. For Amazon S3, see [Amazon S3](./object-storage/amazon-s3). For a local cluster (Kind, minikube), deploy a small S3-compatible emulator ([floci](https://github.com/floci-io/floci)) and create a bucket:
 
 ```bash
 kubectl apply -f examples/object-storage-local.yaml
@@ -117,7 +117,7 @@ Apply the manifest:
 kubectl apply -f engine.yaml
 ```
 
-See the [FireboltEngine CRD reference](crd-reference/engine-crd-reference) for the full field surface.
+See the [FireboltEngine CRD reference](./crd-reference/engine-crd-reference) for the full field surface.
 
 ## Scale or update
 
