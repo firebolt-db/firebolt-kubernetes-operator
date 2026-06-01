@@ -1,3 +1,21 @@
+# 1.0.27
+
+appVersion: v4.3.0
+
+## [4.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.2.0...v4.3.0) (2026-06-01)
+
+### Features
+
+* **controller:** defense-in-depth for FireboltInstance pod templates (FB-1298) ([5073e8c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5073e8c9b72a6c6cb38ce92728ad25c70815b0bc))
+* **controller:** enforce engine resource bounds at reconcile time (FB-1298) ([ae2720c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ae2720ca78d70005b39a0586c1337bf4b298f5d3))
+* **controller:** EngineClass deletion-guard finalizer (FB-1298) ([2548b77](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2548b773a7b91a11f5aac6782769f49c6309a6de))
+* **controller:** gate engine renders on EngineClass Ready (FB-1298) ([5a39733](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5a39733a7c0279b0bb0953af77dc23797e579c68))
+
+### Bug Fixes
+
+* **e2e:** wrap drift-test convergence query in Eventually (FB-1298) ([d0827ca](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d0827caa956bb0b53ee724d684eb2b6deda6989b))
+
+
 # 1.0.26
 
 appVersion: v4.2.0
