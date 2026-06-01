@@ -17,7 +17,7 @@ spec:
   serviceAccountName: firebolt-engine
 
   # Image is sourced from the operator-default at install time or from a
-  # referenced EngineClass's pod template (spec.engineClassRef). There is
+  # referenced FireboltEngineClass's pod template (spec.engineClassRef). There is
   # no per-engine image override on FireboltEngine — engine-level
   # configuration that varies per workload (replicas, resources, scheduling)
   # stays here; image is governed at the operator / class level so
