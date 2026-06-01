@@ -33,7 +33,7 @@ spec:
     # serviceAccount live on a pod template. The operator stamps the
     # command, ports, probes, securityContext, and reserved volume
     # mounts on top; the validating webhook rejects user input on any
-    # of those (see docs/instance-crd-reference.md).
+    # of those (see docs/crd-reference/instance-crd-reference.mdx).
     template:
       spec:
         serviceAccountName: metadata
