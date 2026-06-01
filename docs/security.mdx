@@ -21,7 +21,7 @@ creates and is non-overridable by user input (see
 | PostgreSQL (internal) | 70 / 70 (Alpine image's `postgres` user) | true | drop ALL | `RuntimeDefault` | yes (PGDATA via PVC) |
 | Gateway (Envoy) | 101 / 101 | true | drop ALL | `RuntimeDefault` | yes |
 
-The validating webhooks on FireboltInstance and EngineClass reject
+The validating webhooks on FireboltInstance and FireboltEngineClass reject
 user input that would weaken these defaults. The metadata pod also
 floors any user-supplied PodSecurityContext to RunAsNonRoot with the
 pinned UID/GID. A user template cannot drop privileges below what
@@ -189,7 +189,7 @@ decision (test cluster vs. multi-tenant production).
 ### Image provenance and supply-chain attestation
 
 The Firebolt Operator pulls whatever image the user supplies via
-`FireboltEngine.spec.engineClassRef` → `EngineClass.spec.template`,
+`FireboltEngine.spec.engineClassRef` → `FireboltEngineClass.spec.template`,
 or the embedded defaults shipped with the Firebolt Operator binary. The
 Firebolt Operator does not validate signatures, attestations, or SBOMs. Use a
 cluster-level admission controller (Kyverno, Sigstore Policy
@@ -228,4 +228,4 @@ events, or logs.
 - [architecture](./architecture): Full Firebolt Operator architecture.
 - [monitoring](./monitoring): Metrics and alerts the Firebolt Operator exposes.
 - [instance-crd-reference](./crd-reference/instance-crd-reference): Firebolt Operator-owned vs. user-owned fields on FireboltInstance.
-- [engineclass-crd-reference](./crd-reference/engineclass-crd-reference): Firebolt Operator-owned vs. user-owned fields on EngineClass.
+- [fireboltengineclass-crd-reference](./crd-reference/fireboltengineclass-crd-reference): Firebolt Operator-owned vs. user-owned fields on FireboltEngineClass.

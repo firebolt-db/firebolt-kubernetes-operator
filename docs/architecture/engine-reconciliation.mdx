@@ -139,7 +139,7 @@ At most two generations exist simultaneously: the active one serving traffic and
 | Annotation | Source | What a change means |
 |---|---|---|
 | `firebolt.io/custom-engine-config-hash` | `spec.customEngineConfig` after the protected-paths strip | The engine ConfigMap content changed. Roll a new generation. |
-| `firebolt.io/engine-class-hash` | Resolved `EngineClass.spec.template` (or absent when `spec.engineClassRef` is nil) | Either the referenced class was edited in place, the engine flipped to a different class, or `engineClassRef` was cleared. Any of those rolls a new generation. |
+| `firebolt.io/engine-class-hash` | Resolved `FireboltEngineClass.spec.template` (or absent when `spec.engineClassRef` is nil) | Either the referenced class was edited in place, the engine flipped to a different class, or `engineClassRef` was cleared. Any of those rolls a new generation. |
 
 ## Error handling
 

@@ -9,7 +9,7 @@ sidebarTitle: FireboltEngine CRD reference
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace |
-| `spec.engineClassRef` | No | - | Name of an [`EngineClass`](./engineclass-crd-reference) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class. There is no per-engine image override on this CR. See the EngineClass reference for the merge precedence. |
+| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) **in this engine's namespace**. When set, the class's `spec.template` is merged underneath this engine's pod template (engine spec wins on conflict). The engine container image is sourced from the class. There is no per-engine image override on this CR. See the FireboltEngineClass reference for the merge precedence. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine. The CR is preserved. See [Stop and resume](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/README.md#stop-and-resume). |
 | `spec.resources.requests` | No | - | Kubernetes resource requests for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |
 | `spec.resources.limits` | No | - | Kubernetes resource limits for engine pods, e.g. `cpu`, `memory`. Subject to Firebolt Operator-configured maxima (see [Admission resource bounds](#admission-resource-bounds)). |

@@ -8,9 +8,9 @@ The operator manages three custom resources:
 
 - **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, and an Envoy gateway proxy.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
-- **EngineClass** *(optional, namespaced)* holds a reusable pod-template fragment that multiple engines in the same namespace can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Namespaced (not cluster-scoped) because the template carries namespace-resolved identifiers like ServiceAccount names and Secret/PVC volume references.
+- **FireboltEngineClass** *(optional, namespaced)* holds a reusable pod-template fragment that multiple engines in the same namespace can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Namespaced (not cluster-scoped) because the template carries namespace-resolved identifiers like ServiceAccount names and Secret/PVC volume references.
 
-When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `EngineClass` triggers the same blue-green flow on every consumer engine.
+When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `FireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
 ## Prerequisites
 
@@ -86,11 +86,11 @@ This deploys floci into the `firebolt` namespace at `http://floci.firebolt.svc.c
 
 ### Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it. The engine container image lives on an `EngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. The `customEngineConfig.storage` block points the engine at the object storage configured above. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) and the [EngineClass CRD Reference](docs/crd-reference/engineclass-crd-reference.mdx) for the full field surface.
+Once the instance is `Ready`, create an engine that references it. The engine container image lives on a `FireboltEngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. The `customEngineConfig.storage` block points the engine at the object storage configured above. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) and the [FireboltEngineClass CRD Reference](docs/crd-reference/fireboltengineclass-crd-reference.mdx) for the full field surface.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
-kind: EngineClass
+kind: FireboltEngineClass
 metadata:
   name: default
   namespace: firebolt
@@ -220,7 +220,7 @@ make lint               # golangci-lint
 
 - [docs/crd-reference/instance-crd-reference.mdx](docs/crd-reference/instance-crd-reference.mdx) -- FireboltInstance spec, phases, and monitoring
 - [docs/crd-reference/engine-crd-reference.mdx](docs/crd-reference/engine-crd-reference.mdx) -- FireboltEngine spec, phases, conditions, and managed resources
-- [docs/crd-reference/engineclass-crd-reference.mdx](docs/crd-reference/engineclass-crd-reference.mdx) -- EngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
+- [docs/crd-reference/fireboltengineclass-crd-reference.mdx](docs/crd-reference/fireboltengineclass-crd-reference.mdx) -- FireboltEngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
 - [docs/gateway-sizing.mdx](docs/gateway-sizing.mdx) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
 - [docs/troubleshooting.mdx](docs/troubleshooting.mdx) -- common issues with instances and engines
 - [docs/monitoring.mdx](docs/monitoring.mdx) -- observability and metrics

@@ -9,7 +9,7 @@ sidebarTitle: FireboltInstance CRD reference
 Pod configuration for the gateway and metadata components lives on a
 raw [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/)
 under `spec.gateway.template` and `spec.metadata.template` respectively.
-They use the same shape as `EngineClass.spec.template`. The validating webhook
+They use the same shape as `FireboltEngineClass.spec.template`. The validating webhook
 restricts what users may set on those templates. See
 [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates)
 below.

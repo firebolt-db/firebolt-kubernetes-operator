@@ -1,15 +1,15 @@
 ---
-title: EngineClass design
-description: EngineClass namespacing, pod-template inheritance, and merge behavior.
-sidebarTitle: EngineClass design
+title: FireboltEngineClass design
+description: FireboltEngineClass namespacing, pod-template inheritance, and merge behavior.
+sidebarTitle: FireboltEngineClass design
 ---
 
-## EngineClass merge layer
+## FireboltEngineClass merge layer
 
-When an engine sets `spec.engineClassRef`, the reconciler resolves the referenced `EngineClass` and merges its `spec.template` underneath the Firebolt Operator-built pod template before stamping it onto the StatefulSet. Precedence on every field:
+When an engine sets `spec.engineClassRef`, the reconciler resolves the referenced `FireboltEngineClass` and merges its `spec.template` underneath the Firebolt Operator-built pod template before stamping it onto the StatefulSet. Precedence on every field:
 
 1. **Firebolt Operator defaults**: Image fallback, hardcoded ports / probes / command / reserved env, and headless-DNS contract fields. Always win.
-2. **EngineClass template**: Fills in user-owned fields the engine spec doesn't set.
+2. **FireboltEngineClass template**: Fills in user-owned fields the engine spec doesn't set.
 3. **FireboltEngine spec**: Wins over the class on conflict.
 
 Merge rules (centralized in the `effective*` helpers in `engine_reconcile.go` so `buildStatefulSet` and `stsMatchesSpec` agree on the resolved value):
@@ -35,4 +35,4 @@ Merge rules (centralized in the `effective*` helpers in `engine_reconcile.go` so
 | engine container `volumeMounts` | Firebolt Operator-owned mounts first. Class mounts appended. Mounts colliding with Firebolt Operator volume names are dropped |
 | engine container `lifecycle` | passed through from class |
 
-The engine controller watches `EngineClass` via `EnqueueRequestsFromMapFunc` so a class edit immediately enqueues every consumer engine. The validating webhook on `EngineClass` rejects user input on paths the Firebolt Operator owns end-to-end. See [engineclass-crd-reference](../crd-reference/engineclass-crd-reference). The merge layer therefore assumes the resolved template only carries fields it knows how to handle.
+The engine controller watches `FireboltEngineClass` via `EnqueueRequestsFromMapFunc` so a class edit immediately enqueues every consumer engine. The validating webhook on `FireboltEngineClass` rejects user input on paths the Firebolt Operator owns end-to-end. See [fireboltengineclass-crd-reference](../crd-reference/fireboltengineclass-crd-reference). The merge layer therefore assumes the resolved template only carries fields it knows how to handle.
