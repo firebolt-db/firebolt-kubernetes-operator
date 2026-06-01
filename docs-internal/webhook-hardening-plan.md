@@ -224,7 +224,7 @@ behavior in.
 - **`Makefile:280`.** Drop the redundant
   `--set additionalArgs='{--enable-webhooks=false}'` from `local-deploy`;
   the chart template already emits the flag.
-- **`docs/architecture.md`.** One paragraph on how deletion-guard,
+- **`docs/architecture.mdx`.** One paragraph on how deletion-guard,
   template defense-in-depth, and resource-bound enforcement compose
   between admission and reconcile.
 

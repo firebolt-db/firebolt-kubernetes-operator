@@ -159,7 +159,7 @@ Every webhook-enforced invariant has a controller-side counterpart so the same C
 
 CRD CEL rules (the third enforcement layer) are independent of webhook state — they are baked into the CRD and run inside the apiserver. Use them for invariants where webhook + controller cannot together close a race (the only current example is the `spec.id` empty-to-ULID transition).
 
-The full per-invariant matrix lives at [`docs/webhook-hardening-plan.md`](docs/webhook-hardening-plan.md).
+The full per-invariant matrix lives at [`docs-internal/webhook-hardening-plan.md`](docs-internal/webhook-hardening-plan.md).
 
 ### Local image-loading mechanism
 

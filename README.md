@@ -53,7 +53,7 @@ make local-deploy       # builds operator, loads into Kind, deploys via Helm
 
 ### Create a FireboltInstance
 
-An instance provisions the metadata infrastructure. See the [FireboltInstance CRD Reference](docs/instance-crd-reference.mdx) for all fields, phases, gateway sizing, and examples.
+An instance provisions the metadata infrastructure. See the [FireboltInstance CRD Reference](docs/crd-reference/instance-crd-reference.mdx) for all fields, phases, gateway sizing, and examples.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
@@ -86,7 +86,7 @@ This deploys floci into the `firebolt` namespace at `http://floci.firebolt.svc.c
 
 ### Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it. The engine container image lives on an `EngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. The `customEngineConfig.storage` block points the engine at the object storage configured above. See the [FireboltEngine CRD Reference](docs/engine-crd-reference.mdx) and the [EngineClass CRD Reference](docs/engineclass-crd-reference.mdx) for the full field surface.
+Once the instance is `Ready`, create an engine that references it. The engine container image lives on an `EngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. The `customEngineConfig.storage` block points the engine at the object storage configured above. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) and the [EngineClass CRD Reference](docs/crd-reference/engineclass-crd-reference.mdx) for the full field surface.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
@@ -218,9 +218,9 @@ make lint               # golangci-lint
 
 ### Reference
 
-- [docs/instance-crd-reference.mdx](docs/instance-crd-reference.mdx) -- FireboltInstance spec, phases, and monitoring
-- [docs/engine-crd-reference.mdx](docs/engine-crd-reference.mdx) -- FireboltEngine spec, phases, conditions, and managed resources
-- [docs/engineclass-crd-reference.mdx](docs/engineclass-crd-reference.mdx) -- EngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
+- [docs/crd-reference/instance-crd-reference.mdx](docs/crd-reference/instance-crd-reference.mdx) -- FireboltInstance spec, phases, and monitoring
+- [docs/crd-reference/engine-crd-reference.mdx](docs/crd-reference/engine-crd-reference.mdx) -- FireboltEngine spec, phases, conditions, and managed resources
+- [docs/crd-reference/engineclass-crd-reference.mdx](docs/crd-reference/engineclass-crd-reference.mdx) -- EngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
 - [docs/gateway-sizing.mdx](docs/gateway-sizing.mdx) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
 - [docs/troubleshooting.mdx](docs/troubleshooting.mdx) -- common issues with instances and engines
 - [docs/monitoring.mdx](docs/monitoring.mdx) -- observability and metrics

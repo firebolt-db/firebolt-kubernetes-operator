@@ -49,7 +49,7 @@ func gatewayServiceAccountName(instanceName string) string {
 // did not set one. Treated as the explicit opt-out signal for
 // operator-managed gateway RBAC: when non-empty, ensureGatewayRBAC is
 // skipped and the user takes ownership of the ServiceAccount + RBAC.
-// See docs/instance-crd-reference.md "Gateway custom ServiceAccount"
+// See docs/crd-reference/instance-crd-reference.mdx "Gateway custom ServiceAccount"
 // for the verb set the user must bind.
 func userGatewayServiceAccountName(instance *computev1alpha1.FireboltInstance) string {
 	if t := instance.Spec.Gateway.Template; t != nil {

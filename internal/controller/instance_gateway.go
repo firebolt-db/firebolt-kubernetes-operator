@@ -146,7 +146,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 	// spec.gateway.template.spec.serviceAccountName. Setting that field
 	// is the explicit opt-out signal: the user is taking responsibility
 	// for the SA and the RBAC it needs (see
-	// docs/instance-crd-reference.md "Gateway custom ServiceAccount"
+	// docs/crd-reference/instance-crd-reference.mdx "Gateway custom ServiceAccount"
 	// for the verb set). Operator-managed RBAC would otherwise bind to
 	// a different SA name than the one the gateway pod runs as, and
 	// the wake-on-zero patch would silently 403 at runtime — worse
@@ -468,7 +468,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       #     worst case per engine) is bounded; operators that expect
       #     higher per-engine concurrency raise gateway.replicas rather
       #     than this value, so the memory budget per pod stays
-      #     predictable (see docs/gateway-sizing.md).
+      #     predictable (see docs/gateway-sizing.mdx).
       #
       #   - max_pending_requests: 1024. Queue depth before Envoy starts
       #     returning a synthetic "upstream connection pool overflow"
