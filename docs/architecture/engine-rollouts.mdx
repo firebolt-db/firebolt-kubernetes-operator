@@ -29,10 +29,16 @@ The Firebolt Operator scrapes `/metrics` through the Kubernetes API server's `Po
 
 | Field | Default | Description |
 |---|---|---|
-| `spec.terminationGracePeriodSeconds` | `60` | Pod grace period. The engine waits up to `grace - 5s` (`shutdown_wait_unfinished`) for in-flight queries after SIGTERM. Raise this for workloads with analytical queries that routinely exceed a minute. |
 | `spec.drainCheckEnabled` | `true` | Set to `false` to skip the Firebolt Operator-side drain check entirely. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | `5s` | How often the Firebolt Operator polls each pod. Only used when drain check is enabled. |
 | `spec.rollout` | `graceful` | Set to `recreate` to skip draining and delete old pods immediately. The engine's `shutdown_wait_unfinished` still runs on pod termination regardless of rollout strategy. |
+
+Pod `terminationGracePeriodSeconds` is operator-owned at a fixed 60 s
+(the engine then waits up to `grace - 5s` for in-flight queries on
+SIGTERM via `shutdown_wait_unfinished`). The validating webhook
+rejects user-supplied `terminationGracePeriodSeconds` on both
+`FireboltEngine.spec.template.spec` and
+`FireboltEngineClass.spec.template.spec`.
 
 When `drainCheckEnabled: false`, the Firebolt Operator transitions directly from `switching` to `cleaning` without waiting. The engine's `shutdown_wait_unfinished` still gives in-flight queries a chance to finish during Kubernetes termination. `drainCheckEnabled` only controls whether the Firebolt Operator gates the rollout on top of that.
 

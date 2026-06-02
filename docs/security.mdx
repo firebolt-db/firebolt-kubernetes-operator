@@ -35,7 +35,9 @@ resources. The Firebolt Operator does not request `*` on any namespaced verb
 and does not request `nodes`, `clusterrolebindings`, or any other
 cluster-scope mutation.
 
-Resource maxima on `FireboltEngine.spec.resources` are enforced by
+Resource maxima on the engine container's `resources` block (set
+under `FireboltEngine.spec.template.spec.containers[name=="engine"]`
+or inherited from a referenced `FireboltEngineClass`) are enforced by
 the validating webhook (see "Resource bounds" below). The bounds
 protect a namespace from accidentally admitting an engine whose
 requests would starve sibling workloads at scheduling time.
@@ -189,20 +191,32 @@ decision (test cluster vs. multi-tenant production).
 ### Image provenance and supply-chain attestation
 
 The Firebolt Operator pulls whatever image the user supplies via
-`FireboltEngine.spec.engineClassRef` → `FireboltEngineClass.spec.template`,
-or the embedded defaults shipped with the Firebolt Operator binary. The
-Firebolt Operator does not validate signatures, attestations, or SBOMs. Use a
-cluster-level admission controller (Kyverno, Sigstore Policy
-Controller, etc.) if image-policy enforcement is required.
+`FireboltEngine.spec.template.spec.containers[engine].image`, the
+referenced `FireboltEngineClass.spec.template.spec.containers[engine].image`,
+or the embedded defaults shipped with the Firebolt Operator binary
+(merged in that order, top wins). The Firebolt Operator does not
+validate signatures, attestations, or SBOMs. Use a cluster-level
+admission controller (Kyverno, Sigstore Policy Controller, etc.) if
+image-policy enforcement is required.
 
 ## Resource bounds
 
-The FireboltEngine validating webhook rejects `spec.resources`
-requests/limits above Firebolt Operator-configured maxima. This is a
-defense-in-depth control against accidental over-provisioning. A
-typoed `100Gi` instead of `10Gi` is caught at admission rather than
-at scheduling time when it would silently exhaust namespace capacity
-and block other engines.
+The FireboltEngine validating webhook rejects engine-container
+`resources` entries above Firebolt Operator-configured maxima. The
+gate resolves the effective container the same way the reconciler
+will: the engine's own
+`spec.template.spec.containers[name=="engine"].resources` wins
+wholesale when set, otherwise the referenced FireboltEngineClass's
+container resources fill in. Both sources are checked, so a class
+with oversized requests cannot escape admission by being referenced
+from an engine that omits its own resources. The error message names
+the source class when the offending value came from class so the
+user knows which side to edit.
+
+This is a defense-in-depth control against accidental
+over-provisioning. A typoed `100Gi` instead of `10Gi` is caught at
+admission rather than at scheduling time when it would silently
+exhaust namespace capacity and block other engines.
 
 The maxima are configurable at Firebolt Operator install time. Defaults are
 sized for typical production deployments. Override via Helm values
