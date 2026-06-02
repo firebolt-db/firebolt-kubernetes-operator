@@ -13,7 +13,7 @@ helm install firebolt-crds ./helm/firebolt-operator-crds
 Then install the operator without CRDs:
 
 ```bash
-helm install firebolt-operator ./helm/kubernetes-operator --skip-crds
+helm install firebolt-operator ./helm/firebolt-operator --skip-crds
 ```
 
 ## Upgrading CRDs

@@ -24,7 +24,7 @@ When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the o
 
 ```bash
 helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
-helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/kubernetes-operator --skip-crds
+helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator --skip-crds
 ```
 
 There are two supported ways to install the CRDs:
@@ -179,7 +179,7 @@ With this entry point the caller is responsible for
 
 The Firebolt Operator supports these runtime flags. The binary default is what
 the manager uses when you run it directly. The Helm chart default is what the
-`kubernetes-operator` chart passes with its default `values.yaml`.
+`firebolt-operator` chart passes with its default `values.yaml`.
 
 | Flag | Binary default | Helm chart default | Description |
 |------|----------------|--------------------|-------------|

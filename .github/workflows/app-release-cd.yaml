@@ -2,7 +2,7 @@
 name: App - Release CD
 
 env:
-  GHCR_IMAGE: ghcr.io/firebolt-db/kubernetes-operator
+  GHCR_IMAGE: ghcr.io/firebolt-db/firebolt-operator
   GHCR_REGISTRY: ghcr.io
 
 on:
@@ -87,15 +87,15 @@ jobs:
           RELEASE_NOTES: ${{ steps.semantic_release.outputs.new_release_notes }}
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          CURRENT=$(yq '.version' helm/kubernetes-operator/Chart.yaml)
+          CURRENT=$(yq '.version' helm/firebolt-operator/Chart.yaml)
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
           MINOR=$(echo "$CURRENT" | cut -d. -f2)
           PATCH=$(echo "$CURRENT" | cut -d. -f3)
           CHART_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
           echo "chart_version=$CHART_VERSION" >> "$GITHUB_OUTPUT"
 
-          yq -i ".appVersion = \"$TAG\""           helm/kubernetes-operator/Chart.yaml
-          yq -i ".version    = \"$CHART_VERSION\""  helm/kubernetes-operator/Chart.yaml
+          yq -i ".appVersion = \"$TAG\""           helm/firebolt-operator/Chart.yaml
+          yq -i ".version    = \"$CHART_VERSION\""  helm/firebolt-operator/Chart.yaml
 
           CRD_CURRENT=$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)
           CRD_MAJOR=$(echo "$CRD_CURRENT" | cut -d. -f1)
@@ -110,14 +110,14 @@ jobs:
 
           printf "# %s\n\nappVersion: %s\n\n%s\n\n" \
             "$CHART_VERSION" "$TAG" "$RELEASE_NOTES" \
-            | cat - helm/kubernetes-operator/CHANGELOG.md > /tmp/CHANGELOG.md
-          mv /tmp/CHANGELOG.md helm/kubernetes-operator/CHANGELOG.md
+            | cat - helm/firebolt-operator/CHANGELOG.md > /tmp/CHANGELOG.md
+          mv /tmp/CHANGELOG.md helm/firebolt-operator/CHANGELOG.md
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add helm/kubernetes-operator/Chart.yaml \
-                  helm/kubernetes-operator/CHANGELOG.md \
-                  helm/kubernetes-operator/README.md \
+          git add helm/firebolt-operator/Chart.yaml \
+                  helm/firebolt-operator/CHANGELOG.md \
+                  helm/firebolt-operator/README.md \
                   helm/firebolt-operator-crds/Chart.yaml \
                   helm/firebolt-operator-crds/README.md
           git diff --cached --name-only
