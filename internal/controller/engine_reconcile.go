@@ -601,45 +601,8 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	podSecurityContext := effectivePodSecurityContext(spec, classInfo)
 	containerSecurityContext := effectiveEngineContainerSecurityContext(spec, classInfo)
 
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      "nodes-config",
-			MountPath: ConfigMountPath,
-			SubPath:   ConfigFileName,
-			ReadOnly:  true,
-		},
-		{
-			Name:      DataVolumeName,
-			MountPath: DataMountPath,
-		},
-	}
-	volumeMounts = append(volumeMounts, effectiveEngineVolumeMounts(spec, classInfo)...)
-	engineEnv := []corev1.EnvVar{
-		{
-			Name: computev1alpha1.EnginePodIndexEnvKey,
-			ValueFrom: &corev1.EnvVarSource{
-				FieldRef: &corev1.ObjectFieldSelector{
-					// Set explicitly so it matches the API-server-defaulted value on read-back.
-					APIVersion: "v1",
-					FieldPath:  "metadata.labels['apps.kubernetes.io/pod-index']",
-				},
-			},
-		},
-		// Allows the default AWS SDK EC2 metadata detection (required for IRSA).
-		{
-			Name:  computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
-			Value: "true",
-		},
-		// Selects the firebolt-core code path inside the unified
-		// `firebolt` binary (packdb FB-914): the operator-rendered
-		// config (config.yaml at the data-dir root) is honored as-is
-		// and not rewritten at startup.
-		{
-			Name:  computev1alpha1.EngineCoreModeEnvKey,
-			Value: "1",
-		},
-	}
-	engineEnv = append(engineEnv, effectiveEngineEnv(spec, classInfo)...)
+	volumeMounts := buildEngineContainerVolumeMounts(spec, classInfo)
+	engineEnv := buildEngineContainerEnv(spec, classInfo)
 	// The "data" volume backing /firebolt-core/volume is either a per-pod
 	// PVC (the default; the StatefulSet controller synthesizes the pod
 	// Volume from the VolumeClaimTemplate) or a node-local emptyDir /
@@ -773,18 +736,23 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					ImagePullSecrets:   effectiveImagePullSecrets(spec, classInfo),
 					Containers: append([]corev1.Container{
 						{
-							Name:            computev1alpha1.EngineContainerName,
-							Image:           image,
-							ImagePullPolicy: pullPolicy,
-							SecurityContext: containerSecurityContext,
-							Resources:       effectiveEngineResources(spec, classInfo),
-							Env:             engineEnv,
-							EnvFrom:         effectiveEngineEnvFrom(spec, classInfo),
-							Ports:           GetContainerPorts(),
-							Command:         []string{"/bin/bash", "-c"},
-							Args:            []string{strings.TrimSpace(EngineStartupScript)},
-							VolumeMounts:    volumeMounts,
-							Lifecycle:       effectiveEngineLifecycle(spec, classInfo),
+							Name:                     computev1alpha1.EngineContainerName,
+							Image:                    image,
+							ImagePullPolicy:          pullPolicy,
+							SecurityContext:          containerSecurityContext,
+							Resources:                effectiveEngineResources(spec, classInfo),
+							Env:                      engineEnv,
+							EnvFrom:                  effectiveEngineEnvFrom(spec, classInfo),
+							Ports:                    GetContainerPorts(),
+							Command:                  []string{"/bin/bash", "-c"},
+							Args:                     []string{strings.TrimSpace(EngineStartupScript)},
+							VolumeMounts:             volumeMounts,
+							Lifecycle:                effectiveEngineLifecycle(spec, classInfo),
+							WorkingDir:               effectiveEngineWorkingDir(spec, classInfo),
+							TerminationMessagePath:   effectiveEngineTerminationMessagePath(spec, classInfo),
+							TerminationMessagePolicy: effectiveEngineTerminationMessagePolicy(spec, classInfo),
+							VolumeDevices:            effectiveEngineVolumeDevices(spec, classInfo),
+							ResizePolicy:             effectiveEngineResizePolicy(spec, classInfo),
 							ReadinessProbe: &corev1.Probe{
 								InitialDelaySeconds: 1,
 								PeriodSeconds:       3,
@@ -1498,6 +1466,64 @@ func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngin
 	return defaultEngineContainerSecurityContext()
 }
 
+// buildEngineContainerVolumeMounts returns the volumeMounts stamped
+// on the rendered engine container: operator-owned mounts first
+// (config + data), then class then engine user-supplied mounts in that
+// order (excluding any that try to redefine an operator-owned name).
+// Shared between buildStatefulSet and the drift comparator so the
+// order and filtering stays consistent across both paths.
+func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
+	out := []corev1.VolumeMount{
+		{
+			Name:      "nodes-config",
+			MountPath: ConfigMountPath,
+			SubPath:   ConfigFileName,
+			ReadOnly:  true,
+		},
+		{
+			Name:      DataVolumeName,
+			MountPath: DataMountPath,
+		},
+	}
+	return append(out, effectiveEngineVolumeMounts(spec, classInfo)...)
+}
+
+// buildEngineContainerEnv returns the env stamped on the rendered
+// engine container: operator-injected vars first (POD_INDEX,
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE), then class
+// then engine user-supplied entries in that order. Shared between
+// buildStatefulSet (write path) and engineContainerExtraFieldsMatch
+// (drift comparator) so a future env injection or reordering lands
+// in both at once.
+func buildEngineContainerEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.EnvVar {
+	out := []corev1.EnvVar{
+		{
+			Name: computev1alpha1.EnginePodIndexEnvKey,
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					// Set explicitly so it matches the API-server-defaulted value on read-back.
+					APIVersion: "v1",
+					FieldPath:  "metadata.labels['apps.kubernetes.io/pod-index']",
+				},
+			},
+		},
+		// Allows the default AWS SDK EC2 metadata detection (required for IRSA).
+		{
+			Name:  computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
+			Value: "true",
+		},
+		// Selects the firebolt-core code path inside the unified
+		// `firebolt` binary (packdb FB-914): the operator-rendered
+		// config (config.yaml at the data-dir root) is honored as-is
+		// and not rewritten at startup.
+		{
+			Name:  computev1alpha1.EngineCoreModeEnvKey,
+			Value: "1",
+		},
+	}
+	return append(out, effectiveEngineEnv(spec, classInfo)...)
+}
+
 // effectiveEngineLifecycle resolves the Lifecycle hooks stamped on
 // the engine container. Engine wins if set, else class, else nil.
 // Whole-struct ownership (no merge of preStop / postStart).
@@ -1509,6 +1535,92 @@ func effectiveEngineLifecycle(spec *computev1alpha1.FireboltEngineSpec, classInf
 		return c.Lifecycle.DeepCopy()
 	}
 	return nil
+}
+
+// effectiveEngineWorkingDir picks the engine container's WorkingDir
+// from engine template if set, else class, else "" (image default).
+func effectiveEngineWorkingDir(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) string {
+	if c := engineSpecContainer(spec); c != nil && c.WorkingDir != "" {
+		return c.WorkingDir
+	}
+	if c := classEngineContainer(classInfo); c != nil {
+		return c.WorkingDir
+	}
+	return ""
+}
+
+// effectiveEngineTerminationMessagePath picks the engine container's
+// TerminationMessagePath from engine template if set, else class,
+// else "" (apiserver defaults to /dev/termination-log).
+func effectiveEngineTerminationMessagePath(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) string {
+	if c := engineSpecContainer(spec); c != nil && c.TerminationMessagePath != "" {
+		return c.TerminationMessagePath
+	}
+	if c := classEngineContainer(classInfo); c != nil {
+		return c.TerminationMessagePath
+	}
+	return ""
+}
+
+// effectiveEngineTerminationMessagePolicy picks the engine container's
+// TerminationMessagePolicy from engine template if set, else class,
+// else "" (apiserver defaults to File).
+func effectiveEngineTerminationMessagePolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.TerminationMessagePolicy {
+	if c := engineSpecContainer(spec); c != nil && c.TerminationMessagePolicy != "" {
+		return c.TerminationMessagePolicy
+	}
+	if c := classEngineContainer(classInfo); c != nil {
+		return c.TerminationMessagePolicy
+	}
+	return ""
+}
+
+// effectiveEngineVolumeDevices concatenates engine-container
+// volumeDevices from class and engine template, class first, mirroring
+// the volumeMounts merge pattern. Names colliding with operator-owned
+// volumes are not filtered here because the operator does not mount
+// block devices; user input is passed through verbatim.
+func effectiveEngineVolumeDevices(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeDevice {
+	var classDevs, engineDevs []corev1.VolumeDevice
+	if c := classEngineContainer(classInfo); c != nil {
+		classDevs = c.VolumeDevices
+	}
+	if c := engineSpecContainer(spec); c != nil {
+		engineDevs = c.VolumeDevices
+	}
+	if len(classDevs) == 0 && len(engineDevs) == 0 {
+		return nil
+	}
+	out := make([]corev1.VolumeDevice, 0, len(classDevs)+len(engineDevs))
+	for i := range classDevs {
+		out = append(out, *classDevs[i].DeepCopy())
+	}
+	for i := range engineDevs {
+		out = append(out, *engineDevs[i].DeepCopy())
+	}
+	return out
+}
+
+// effectiveEngineResizePolicy concatenates engine-container
+// resizePolicy entries from class and engine template, class first.
+// ResizePolicy entries are keyed by ResourceName and Kubernetes
+// itself doesn't deduplicate them; the operator preserves what the
+// user wrote so the failing pair (if any) surfaces at admission.
+func effectiveEngineResizePolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.ContainerResizePolicy {
+	var classRP, engineRP []corev1.ContainerResizePolicy
+	if c := classEngineContainer(classInfo); c != nil {
+		classRP = c.ResizePolicy
+	}
+	if c := engineSpecContainer(spec); c != nil {
+		engineRP = c.ResizePolicy
+	}
+	if len(classRP) == 0 && len(engineRP) == 0 {
+		return nil
+	}
+	out := make([]corev1.ContainerResizePolicy, 0, len(classRP)+len(engineRP))
+	out = append(out, classRP...)
+	out = append(out, engineRP...)
+	return out
 }
 
 // effectiveImagePullSecrets concatenates pod-level imagePullSecrets
@@ -1884,6 +1996,72 @@ func overheadEqual(a, b corev1.ResourceList) bool {
 	return true
 }
 
+// engineContainerExtraFieldsMatch is the drift comparator for engine-
+// container fields the operator passes through from the engine
+// template (with the FireboltEngineClass template's value as a
+// fallback): Env, EnvFrom, VolumeMounts, Lifecycle, plus the FB-1426
+// follow-up surface (WorkingDir, TerminationMessagePath/Policy,
+// VolumeDevices, ResizePolicy). Image, ImagePullPolicy, Resources,
+// SecurityContext have their own per-field comparisons in
+// stsMatchesSpec because they precede the field-by-field block by a
+// long history of regression tests; the rest live here so adding a
+// new container field requires touching one helper.
+//
+// Env and VolumeMounts are compared against the same recipes
+// buildStatefulSet uses (buildEngineContainerEnv,
+// buildEngineContainerVolumeMounts) so the operator-injected entries
+// don't produce false drift on read-back.
+func engineContainerExtraFieldsMatch(c *corev1.Container, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+	if !reflect.DeepEqual(c.Env, buildEngineContainerEnv(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(c.EnvFrom, effectiveEngineEnvFrom(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(c.VolumeMounts, buildEngineContainerVolumeMounts(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(c.Lifecycle, effectiveEngineLifecycle(spec, classInfo)) {
+		return false
+	}
+	if c.WorkingDir != effectiveEngineWorkingDir(spec, classInfo) {
+		return false
+	}
+	if !engineTerminationMessagePathEqual(c.TerminationMessagePath, effectiveEngineTerminationMessagePath(spec, classInfo)) {
+		return false
+	}
+	if !engineTerminationMessagePolicyEqual(c.TerminationMessagePolicy, effectiveEngineTerminationMessagePolicy(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(c.VolumeDevices, effectiveEngineVolumeDevices(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(c.ResizePolicy, effectiveEngineResizePolicy(spec, classInfo)) {
+		return false
+	}
+	return true
+}
+
+// engineTerminationMessagePathEqual treats the apiserver-defaulted
+// "/dev/termination-log" as equivalent to "" so an engine that does
+// not override the field compares equal to the same container read
+// back from the apiserver.
+func engineTerminationMessagePathEqual(actual, expected string) bool {
+	if expected == "" {
+		return actual == "" || actual == defaultTerminationMessagePath
+	}
+	return actual == expected
+}
+
+// engineTerminationMessagePolicyEqual is the policy sibling of
+// engineTerminationMessagePathEqual: "" and File compare equal.
+func engineTerminationMessagePolicyEqual(actual, expected corev1.TerminationMessagePolicy) bool {
+	if expected == "" {
+		return actual == "" || actual == corev1.TerminationMessageReadFile
+	}
+	return actual == expected
+}
+
 // extraPodSpecFieldsMatch is the drift comparator for the pod-spec
 // fields the operator passes through verbatim from the engine template
 // (with the FireboltEngineClass template's value as a fallback).
@@ -2020,6 +2198,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 	if !reflect.DeepEqual(container.SecurityContext, effectiveEngineContainerSecurityContext(spec, classInfo)) {
+		return false
+	}
+
+	if !engineContainerExtraFieldsMatch(&container, spec, classInfo) {
 		return false
 	}
 
