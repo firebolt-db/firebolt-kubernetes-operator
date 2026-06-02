@@ -49,7 +49,7 @@ jobs:
           changed_files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
           while IFS= read -r file; do
             case "$file" in
-              docs/*|.github/workflows/docs-sync.yml)
+              docs/*|.github/workflows/docs-sync.yaml)
                 relevant_changed=true
                 break
                 ;;
@@ -67,6 +67,13 @@ jobs:
           private-key: ${{ secrets.GH_APP_FBA_DOCS_INTEGRATION_APP_KEY_PEM }}
           owner: firebolt-analytics
           repositories: packdb
+          # Defense-in-depth: narrow the minted token to exactly what this
+          # workflow needs -- read the aggregate branch state (contents:read)
+          # and trigger the packdb aggregation via workflow_dispatch
+          # (actions:write). The cross-repo dispatcher App is itself installed
+          # on packdb with only these two permissions.
+          permission-actions: write
+          permission-contents: read
 
       - name: Resolve dispatch action
         id: dispatch
@@ -123,14 +130,14 @@ jobs:
           OPERATOR_PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          payload="$(jq -n \
-            --arg action "$DISPATCH_ACTION" \
-            --argjson pr "$OPERATOR_PR" \
-            '{
-              event_type: "operator-docs-changed",
-              client_payload: {
-                action: $action,
-                operator_pr_number: $pr
-              }
-            }')"
-          gh api repos/firebolt-analytics/packdb/dispatches --input - <<< "$payload"
+          # workflow_dispatch (not repository_dispatch): it only needs
+          # actions:write on packdb instead of contents:write, so the
+          # cross-repo dispatcher App stays least-privilege. The workflow file
+          # is resolved on packdb's default branch, so the renamed
+          # docs-multirepo-aggregate.yaml must already be on master.
+          gh workflow run docs-multirepo-aggregate.yaml \
+            --repo firebolt-analytics/packdb \
+            --ref master \
+            -f action="$DISPATCH_ACTION" \
+            -f source=operator \
+            -f source_pr_number="$OPERATOR_PR"
