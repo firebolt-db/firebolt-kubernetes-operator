@@ -444,6 +444,72 @@ func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 	}
 }
 
+// TestAppendUserPodVolumes_PVCBackendDropsCollidingData covers the
+// PVC-backend collision footgun: on the PVC backend the data volume
+// comes from spec.volumeClaimTemplates rather than from
+// spec.template.spec.volumes, so the rendered operator-level Volumes
+// list omits DataVolumeName entirely. Without a static reserved set,
+// a user volume named "data" would slip through and collide at pod
+// creation time with the PVC-synthesized data volume, leaving every
+// engine pod Pending with DuplicateVolumeName.
+//
+// The static reservation in operatorOwnedPodVolumeNames must catch
+// this even when the operator-built slice happens not to carry "data".
+func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
+	// PVC backend: only "nodes-config" is in the operator slice — the
+	// data volume is provisioned by VolumeClaimTemplates and never
+	// appears in pod-level Volumes.
+	operator := []corev1.Volume{
+		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
+	}
+	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
+		Volumes: []corev1.Volume{
+			// Same name as the PVC-synthesized data volume → must be dropped.
+			{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mnt"}}},
+			{Name: "extra", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		},
+	}))
+
+	got := appendUserPodVolumes(operator, testSpec(), classInfo)
+	for _, v := range got {
+		if v.Name == DataVolumeName {
+			t.Fatalf("PVC backend: user volume named %q must be dropped to avoid pod-admission collision with VCT-synthesized data volume, got %+v", DataVolumeName, v)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d volumes, want 2 (operator nodes-config + non-colliding class extra)", len(got))
+	}
+}
+
+// TestAppendUserPodVolumes_PVCBackendDropsCollidingEngineData mirrors
+// the class-side test above for the engine-template path: an engine
+// that sets spec.template.spec.volumes[name=="data"] on the PVC
+// backend must not introduce a duplicate-volume admission failure
+// either. The post-FB-1426 engine template surfaces this path; before
+// FB-1426 only the class could trigger it.
+func TestAppendUserPodVolumes_PVCBackendDropsCollidingEngineData(t *testing.T) {
+	operator := []corev1.Volume{
+		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
+	}
+	spec := testSpec()
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+		p.Volumes = []corev1.Volume{
+			{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mnt"}}},
+			{Name: "engine-extra", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+	})
+
+	got := appendUserPodVolumes(operator, spec, nil)
+	for _, v := range got {
+		if v.Name == DataVolumeName {
+			t.Fatalf("PVC backend: engine-template volume named %q must be dropped, got %+v", DataVolumeName, v)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d volumes, want 2", len(got))
+	}
+}
+
 // TestSidecarsMatch_TolerantOfAPIServerDefaults pins down the fix for
 // the read-back drift bug: the API server fills in imagePullPolicy /
 // terminationMessagePath / terminationMessagePolicy on every sidecar
