@@ -532,7 +532,7 @@ type FireboltEngineStatus struct {
 
 	// AutoscalerReason is a short token describing the most recent autoscaler
 	// decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
-	// "Disabled", "Stopped".
+	// "Disabled", "Stopped", "Initializing", "WakeRequested".
 	// +optional
 	AutoscalerReason string `json:"autoscalerReason,omitempty"`
 

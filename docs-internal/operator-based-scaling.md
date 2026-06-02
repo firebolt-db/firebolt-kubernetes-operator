@@ -671,7 +671,7 @@ For the complete list of configurable fields in the engine spec, see the [README
 | `conditions` | list | Status conditions (e.g. `InstanceReady`) |
 | `lastActivityTime` | timestamp/null | Most recent autoscaler observation that recorded activity |
 | `autoscaledAt` | timestamp/null | Most recent autoscaler-driven `spec.replicas` mutation |
-| `autoscalerReason` | string | One of `Disabled`/`ScheduleActive`/`Stopped`/`ActivityObserved`/`ScrapeFailed`/`Idle` |
+| `autoscalerReason` | string | One of `Disabled`/`ScheduleActive`/`Stopped`/`Initializing`/`ActivityObserved`/`ScrapeFailed`/`Idle`/`WakeRequested` |
 
 ### Autoscaling
 
