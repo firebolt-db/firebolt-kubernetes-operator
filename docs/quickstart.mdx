@@ -6,6 +6,10 @@ sidebarTitle: Quickstart
 
 This quickstart creates the minimal resources needed to run a Firebolt engine with the Firebolt Operator.
 
+## Apply manifests with server-side apply
+
+Use `kubectl apply --server-side` (and `--force-conflicts` when you are the field owner) for every Firebolt custom resource in this guide. The CRDs embed the full Kubernetes `PodTemplateSpec` schema under `spec.template` (engine and class) and `spec.gateway` / `spec.metadata` (instance). Client-side apply records the full submitted object in the `kubectl.kubernetes.io/last-applied-configuration` annotation, which Kubernetes caps at 256 KB. Even a moderately sized `spec.template` can exceed that limit, so client-side apply will be rejected with `metadata.annotations: Too long`. Server-side apply does not use the annotation and tracks field ownership in `metadata.managedFields` instead, which has no such ceiling. The examples below show the `--server-side` flag everywhere it matters.
+
 ## Create a namespace
 
 Create a namespace for the instance and engine:
@@ -32,7 +36,7 @@ spec:
 Apply the manifest:
 
 ```bash
-kubectl apply -f instance.yaml
+kubectl apply --server-side -f instance.yaml
 ```
 
 Check progress:
@@ -64,7 +68,7 @@ spec:
 Apply the manifest:
 
 ```bash
-kubectl apply -f firebolt-engine-class.yaml
+kubectl apply --server-side -f firebolt-engine-class.yaml
 ```
 
 See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference) for the full field surface.
@@ -102,19 +106,23 @@ spec:
       bucket_name: my-engine-bucket
       minio:
         endpoint: http://floci.firebolt.svc.cluster.local:4566
-  resources:
-    requests:
-      cpu: "2"
-      memory: "4Gi"
-    limits:
-      cpu: "2"
-      memory: "4Gi"
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
 ```
 
 Apply the manifest:
 
 ```bash
-kubectl apply -f engine.yaml
+kubectl apply --server-side -f engine.yaml
 ```
 
 See the [FireboltEngine CRD reference](./crd-reference/engine-crd-reference) for the full field surface.
