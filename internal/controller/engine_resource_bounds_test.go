@@ -87,6 +87,8 @@ func boundsTestEngine(name, ns, instanceRef string, resources corev1.ResourceReq
 // fields resolveInstanceInfo requires (MetadataEndpoint non-empty,
 // Spec.ID non-empty) so the engine reconciler's instance gate
 // passes before the bounds gate fires.
+//
+//nolint:unparam // ns is always "ns-a" today but the helper is namespace-parametric by design — every test that uses it pins its own ns constant for readability.
 func boundsTestInstance(name, ns string) *computev1alpha1.FireboltInstance {
 	return &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
@@ -269,5 +271,102 @@ func TestEngineReconcile_EmptyResourceBoundsIsNoOp(t *testing.T) {
 	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
 	if cond != nil && cond.Reason == reasonResourceBoundsExceeded {
 		t.Errorf("Ready.Reason = %q with empty bounds, want gate to be a no-op", cond.Reason)
+	}
+}
+
+// TestEngineReconcile_ClassResourceBoundsExceeded pins the FB-1426
+// class-blindness fix on the controller side: an engine that omits
+// spec.template resources but references a class whose engine
+// container carries oversized resources must trip the bounds gate
+// just like the webhook does. Otherwise the webhook-disabled path
+// would render and apply a StatefulSet with class-supplied resources
+// that the operator's caps were configured to forbid.
+func TestEngineReconcile_ClassResourceBoundsExceeded(t *testing.T) {
+	sch := resourceBoundsTestScheme(t)
+	const (
+		ns        = "ns-a"
+		instName  = "parent-with-class"
+		engName   = "class-overbound"
+		className = "compute-big"
+	)
+
+	instance := boundsTestInstance(instName, ns)
+	class := &computev1alpha1.FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className, Namespace: ns},
+		Spec: computev1alpha1.FireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("64"),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	// Engine omits its own template — falls through to class container.
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    instName,
+			Replicas:       1,
+			EngineClassRef: &class.Name,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase: computev1alpha1.PhaseCreating,
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, class, engine).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
+		ResourceBounds: computev1alpha1.EngineResourceBounds{
+			MaxCPU: resource.MustParse("32"),
+		},
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+	}); err != nil {
+		t.Fatalf("Reconcile: unexpected error (gate should set status and requeue, not return err): %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
+	if cond == nil {
+		t.Fatal("Ready condition missing")
+	}
+	if cond.Reason != reasonResourceBoundsExceeded {
+		t.Errorf("Ready.Reason = %q, want %q (class resources should trip the gate)",
+			cond.Reason, reasonResourceBoundsExceeded)
+	}
+	if !strings.Contains(cond.Message, className) {
+		t.Errorf("Ready.Message = %q, want it to name the source class %q so users know where to edit",
+			cond.Message, className)
+	}
+
+	var stsList appsv1.StatefulSetList
+	if err := cli.List(context.Background(), &stsList, client.InNamespace(ns)); err != nil {
+		t.Fatalf("List StatefulSets: %v", err)
+	}
+	if len(stsList.Items) > 0 {
+		t.Errorf("StatefulSets = %d, want 0 (bounds gate must short-circuit before applyEngineState)", len(stsList.Items))
 	}
 }

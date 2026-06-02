@@ -204,11 +204,16 @@ func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ runt
 // surfaces every problem in a single round-trip — users editing a
 // resource that fails on both a class-ref typo and a resources bound
 // see both issues at once rather than fixing one and re-submitting.
+//
+// The class is loaded at most once per admission so the resources
+// gate can fall through to class-supplied values without a second
+// round-trip to the API server.
 func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *FireboltEngine) field.ErrorList {
 	var errs field.ErrorList
-	errs = append(errs, v.validateEngineClassRef(ctx, eng)...)
+	class, refErrs := v.resolveEngineClass(ctx, eng)
+	errs = append(errs, refErrs...)
 	errs = append(errs, v.validateTemplate(eng)...)
-	errs = append(errs, v.validateResources(eng)...)
+	errs = append(errs, v.validateResources(eng, class)...)
 	return errs
 }
 
@@ -225,53 +230,75 @@ func (v *FireboltEngineCustomValidator) validateTemplate(eng *FireboltEngine) fi
 	)
 }
 
-// validateEngineClassRef returns field.NotFound when spec.engineClassRef
-// names a FireboltEngineClass that does not exist in the engine's namespace.
-// FireboltEngineClass is namespaced; the lookup is therefore scoped to
-// engine.Namespace, matching how Kubernetes will resolve the reference
-// at reconcile time. A nil ref is allowed (the engine falls back to
-// operator defaults). Any non-NotFound API error surfaces as a generic
-// internal error so the user can retry once the API server / RBAC
-// issue clears.
-func (v *FireboltEngineCustomValidator) validateEngineClassRef(ctx context.Context, eng *FireboltEngine) field.ErrorList {
+// resolveEngineClass loads the FireboltEngineClass referenced by
+// spec.engineClassRef from the engine's own namespace (FireboltEngineClass
+// is namespaced; the lookup matches how Kubernetes will resolve the
+// reference at reconcile time). It returns the loaded class on success
+// or a non-nil ErrorList on failure (NotFound for typos / wrong-
+// namespace; InternalError for transient API problems). A nil ref is
+// allowed and returns (nil, nil) — the engine falls back to operator
+// defaults.
+//
+// The returned class is consumed by downstream validators (notably
+// validateResources, which has to inspect class-supplied container
+// resources when the engine template does not declare its own). Loading
+// once per admission keeps the round-trip count to the API server
+// bounded.
+func (v *FireboltEngineCustomValidator) resolveEngineClass(
+	ctx context.Context, eng *FireboltEngine,
+) (*FireboltEngineClass, field.ErrorList) {
 	if eng.Spec.EngineClassRef == nil || *eng.Spec.EngineClassRef == "" {
-		return nil
+		return nil, nil
 	}
 	classPath := field.NewPath("spec", "engineClassRef")
 	class := &FireboltEngineClass{}
 	key := client.ObjectKey{Name: *eng.Spec.EngineClassRef, Namespace: eng.Namespace}
 	if err := v.Reader.Get(ctx, key, class); err != nil {
 		if apierrors.IsNotFound(err) {
-			return field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
+			return nil, field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
 		}
-		return field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up FireboltEngineClass: %w", err))}
+		return nil, field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up FireboltEngineClass: %w", err))}
 	}
-	return nil
+	return class, nil
 }
 
 // validateResources rejects engine-container resources entries whose
-// value exceeds the operator-configured maximum. Resources now live on
-// spec.template.spec.containers[name=="engine"].resources after FB-1426
-// moved the per-engine pod-template surface under a single embedded
-// PodTemplateSpec. Delegates to ResourceBounds.Validate so the webhook
-// and the FireboltEngineReconciler's controller-side defense-in-depth
-// check (admission-bypass path) report identical field-path errors.
+// effective value (after the operator's merge layer) exceeds the
+// operator-configured maximum.
 //
-// When the engine declares no template, or its template declares no
-// "engine" container, there is nothing to bound and the function
-// short-circuits with an empty error list — the operator will fall
-// back to either the class's resources or empty (no requests/limits)
-// at render time, neither of which can exceed an admin-configured
-// ceiling.
-func (v *FireboltEngineCustomValidator) validateResources(eng *FireboltEngine) field.ErrorList {
-	c := EngineContainerInTemplate(eng.Spec.Template)
-	if c == nil {
-		return nil
+// Effective resources follow the same precedence the engine reconciler
+// uses: when the engine's own spec.template carries an engine container
+// with any requests/limits, that wins wholesale. Otherwise the class's
+// container resources fill in. Either way the value rendered onto the
+// StatefulSet pod must clear the ceiling, so both sources are checked
+// here (and not only the engine's own template — that pre-FB-1426 gap
+// let a class with oversized requests escape admission whenever the
+// engine relied on class-supplied resources).
+//
+// The error's field path points at the merged location
+// (spec.template.spec.containers[engine].resources.*) regardless of
+// source: it is where the user should edit to override. When the value
+// came from class, the error detail names the class so the user knows
+// they can fix it on either side.
+func (v *FireboltEngineCustomValidator) validateResources(eng *FireboltEngine, class *FireboltEngineClass) field.ErrorList {
+	mergedPath := field.NewPath("spec", "template", "spec", "containers").Key(EngineContainerName).Child("resources")
+
+	if c := EngineContainerInTemplate(eng.Spec.Template); c != nil && HasContainerResources(c.Resources) {
+		return v.ResourceBounds.Validate(c.Resources, mergedPath)
 	}
-	return v.ResourceBounds.Validate(
-		c.Resources,
-		field.NewPath("spec", "template", "spec", "containers").Key(EngineContainerName).Child("resources"),
-	)
+	if class != nil {
+		if c := EngineContainerInTemplate(&class.Spec.Template); c != nil && HasContainerResources(c.Resources) {
+			errs := v.ResourceBounds.Validate(c.Resources, mergedPath)
+			for i := range errs {
+				errs[i].Detail = fmt.Sprintf(
+					"%s (inherited from FireboltEngineClass %q; set spec.template on this engine to override)",
+					errs[i].Detail, class.Name,
+				)
+			}
+			return errs
+		}
+	}
+	return nil
 }
 
 // EngineContainerInTemplate returns the container named

@@ -330,15 +330,14 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// silent no-op would mislead operators who set them. Same field
 	// path and "exceeds operator-configured maximum" message as the
 	// webhook so diagnostics are stable across admission paths.
-	// Resources are now nested under spec.template; admission already
-	// rejects out-of-bounds values, but the defense-in-depth check
-	// here keeps the controller's behavior identical on the
+	//
+	// Mirrors the webhook's resolution: check the engine's own template
+	// container first, then fall back to the class container. Otherwise
+	// a class with oversized resources, referenced by an engine that
+	// inherits them, would bypass the controller-side gate even on the
 	// webhook-disabled path.
-	if c := computev1alpha1.EngineContainerInTemplate(engine.Spec.Template); c != nil {
-		path := field.NewPath("spec", "template", "spec", "containers").Key(computev1alpha1.EngineContainerName).Child("resources")
-		if boundsErrs := r.ResourceBounds.Validate(c.Resources, path); len(boundsErrs) > 0 {
-			return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
-		}
+	if boundsErrs := r.validateMergedEngineResources(engine, classInfo); len(boundsErrs) > 0 {
+		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
 	}
 
 	result := computeEngineReconcile(
@@ -751,6 +750,37 @@ func (r *FireboltEngineReconciler) handleFireboltEngineClassError(ctx context.Co
 		return ctrl.Result{}, updateErr
 	}
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// validateMergedEngineResources is the controller-side counterpart of
+// the webhook's validateResources gate. It computes the effective
+// engine-container resources the way the reconciler will: engine
+// template wins wholesale when set, else class container, else empty
+// (which trivially passes any bound).
+//
+// The merged field path stays on the engine
+// (spec.template.spec.containers[engine].resources.*) regardless of
+// source so error messages match the webhook's exactly. When the value
+// came from a class, the message detail names the class so the user
+// knows which side to edit.
+func (r *FireboltEngineReconciler) validateMergedEngineResources(engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo) field.ErrorList {
+	mergedPath := field.NewPath("spec", "template", "spec", "containers").
+		Key(computev1alpha1.EngineContainerName).Child("resources")
+
+	if c := computev1alpha1.EngineContainerInTemplate(engine.Spec.Template); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
+		return r.ResourceBounds.Validate(c.Resources, mergedPath)
+	}
+	if c := classEngineContainer(classInfo); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
+		errs := r.ResourceBounds.Validate(c.Resources, mergedPath)
+		for i := range errs {
+			errs[i].Detail = fmt.Sprintf(
+				"%s (inherited from FireboltEngineClass %q; set spec.template on this engine to override)",
+				errs[i].Detail, classInfo.Name,
+			)
+		}
+		return errs
+	}
+	return nil
 }
 
 // handleResourceBoundsViolation surfaces a ResourceBounds.Validate
