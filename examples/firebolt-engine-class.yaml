@@ -15,17 +15,18 @@
 # silent-divergence trap a cluster-scoped class would have (same SA
 # name in two namespaces, possibly different IAM roles).
 #
-# Field precedence on the rendered engine pod:
-#   operator defaults  <  FireboltEngineClass template  <  FireboltEngine spec
+# Field precedence on the rendered engine pod, top wins:
+#   operator defaults < FireboltEngineClass.spec.template < FireboltEngine.spec.template
 #
-# Fields the operator owns end-to-end are rejected at admission time on
-# this CR — the validating webhook refuses any spec.template that
-# touches the engine container's hardcoded identity (name, command,
-# ports, probes, reserved env keys), pod-level fields tied to the
-# StatefulSet contract (terminationGracePeriodSeconds, subdomain,
-# hostname, restartPolicy, activeDeadlineSeconds), or label/annotation
-# keys under the firebolt.io/ prefix. Sidecar containers and additional
-# init containers are fully user-owned.
+# The same allowlist applies to both FireboltEngineClass.spec.template
+# and FireboltEngine.spec.template (FB-1426): the validating webhook
+# refuses anything that touches the engine container's hardcoded
+# identity (name, command, ports, probes, reserved env keys),
+# pod-level fields tied to the StatefulSet contract
+# (terminationGracePeriodSeconds, subdomain, hostname, restartPolicy,
+# activeDeadlineSeconds), or label/annotation keys under the
+# firebolt.io/ prefix. Sidecar containers and additional init
+# containers are fully user-owned.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngineClass
 metadata:
@@ -47,11 +48,12 @@ spec:
         team: data
     spec:
       # ServiceAccountName is the IRSA / Pod-Identity binding point.
-      # Engines whose own spec.serviceAccountName is set override this.
+      # Engines whose own spec.template.spec.serviceAccountName is set
+      # override this.
       serviceAccountName: firebolt-engine
       # Scheduling: every engine that references this class lands on
       # the same node pool. nodeSelector keys merge with the engine's
-      # own spec.nodeSelector (engine keys win on conflict).
+      # own spec.template.spec.nodeSelector (engine keys win on conflict).
       nodeSelector:
         firebolt.dev/pool: engine-compute
       tolerations:
@@ -87,10 +89,11 @@ spec:
           image: busybox:1.36
           command: ["sh", "-c", "echo warming cache"]
 ---
-# A FireboltEngine that inherits all the above through spec.engineClassRef.
-# The engine sets nothing about IAM, scheduling, or image — those flow
-# from the class. Engine spec stays focused on what varies per-engine
-# (replicas, resources, rollout strategy, drain checks).
+# A FireboltEngine that inherits IAM, scheduling, and image from
+# the class via spec.engineClassRef. Per-engine resources live on
+# spec.template (FB-1426) and ride above the class template in the
+# merge order, so the values below override anything the class
+# defines for the engine container's resources block.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
@@ -100,10 +103,14 @@ spec:
   instanceRef: firebolt
   engineClassRef: compute-optimized
   replicas: 3
-  resources:
-    requests:
-      cpu: "4"
-      memory: 16Gi
-    limits:
-      cpu: "4"
-      memory: 16Gi
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
+            limits:
+              cpu: "4"
+              memory: 16Gi

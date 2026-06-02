@@ -124,8 +124,15 @@ func newReconcileDeleteTestEnv(t *testing.T, children ...runtime.Object) *reconc
 		Spec: computev1alpha1.FireboltEngineSpec{
 			InstanceRef: "inst",
 			Replicas:    1,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m")},
+						},
+					}},
+				},
 			},
 		},
 	}

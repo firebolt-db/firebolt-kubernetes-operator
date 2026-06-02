@@ -49,14 +49,21 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 	return &computev1alpha1.FireboltEngineSpec{
 		InstanceRef: "test-instance",
 		Replicas:    3,
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("2"),
-				corev1.ResourceMemory: resource.MustParse("8Gi"),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("2"),
-				corev1.ResourceMemory: resource.MustParse("8Gi"),
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: computev1alpha1.EngineContainerName,
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+					},
+				}},
 			},
 		},
 		// Pre-default-flip the storage suite assumed empty Storage
@@ -71,6 +78,51 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 		},
 		Rollout: computev1alpha1.RolloutGraceful,
 	}
+}
+
+// setSpecTemplateContainer mutates spec.Template (creating it as needed)
+// so the engine container carries the provided customization. Tests
+// that previously wrote spec.Resources / spec.SecurityContext directly
+// reach the equivalent post-FB-1426 shape through this helper.
+func setSpecTemplateContainer(spec *computev1alpha1.FireboltEngineSpec, mutate func(*corev1.Container)) {
+	if spec.Template == nil {
+		spec.Template = &corev1.PodTemplateSpec{}
+	}
+	idx := -1
+	for i := range spec.Template.Spec.Containers {
+		if spec.Template.Spec.Containers[i].Name == computev1alpha1.EngineContainerName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		spec.Template.Spec.Containers = append(spec.Template.Spec.Containers,
+			corev1.Container{Name: computev1alpha1.EngineContainerName})
+		idx = len(spec.Template.Spec.Containers) - 1
+	}
+	mutate(&spec.Template.Spec.Containers[idx])
+}
+
+// setSpecTemplatePod mutates spec.Template.Spec (creating Template as
+// needed). The previous flat fields (NodeSelector, Tolerations,
+// Affinity, ServiceAccountName, etc.) now live on the pod-template
+// pod spec; this helper centralizes the dispatch so the existing
+// per-field tests do not need to duplicate the lazy-init dance.
+func setSpecTemplatePod(spec *computev1alpha1.FireboltEngineSpec, mutate func(*corev1.PodSpec)) {
+	if spec.Template == nil {
+		spec.Template = &corev1.PodTemplateSpec{}
+	}
+	mutate(&spec.Template.Spec)
+}
+
+// setSpecTemplateMeta mutates spec.Template.ObjectMeta (creating
+// Template as needed). Used by tests that previously set
+// spec.PodLabels / spec.PodAnnotations.
+func setSpecTemplateMeta(spec *computev1alpha1.FireboltEngineSpec, mutate func(*metav1.ObjectMeta)) {
+	if spec.Template == nil {
+		spec.Template = &corev1.PodTemplateSpec{}
+	}
+	mutate(&spec.Template.ObjectMeta)
 }
 
 func stableStatus() *computev1alpha1.FireboltEngineStatus {
@@ -115,9 +167,9 @@ func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
-					NodeSelector:                  spec.NodeSelector,
-					Tolerations:                   spec.Tolerations,
-					Affinity:                      spec.Affinity,
+					NodeSelector:                  effectiveNodeSelector(spec, nil),
+					Tolerations:                   effectiveTolerations(spec, nil),
+					Affinity:                      effectiveAffinity(spec, nil),
 					TerminationGracePeriodSeconds: &defaultTGPS,
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
@@ -165,9 +217,9 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.Statefu
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            enginePodServiceAccountName(spec),
-					NodeSelector:                  spec.NodeSelector,
-					Tolerations:                   spec.Tolerations,
-					Affinity:                      spec.Affinity,
+					NodeSelector:                  effectiveNodeSelector(spec, nil),
+					Tolerations:                   effectiveTolerations(spec, nil),
+					Affinity:                      effectiveAffinity(spec, nil),
 					TerminationGracePeriodSeconds: &defaultTGPS,
 					SecurityContext:               getEnginePodSecurityContext(spec),
 					Containers: []corev1.Container{
@@ -339,8 +391,8 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 			// Trigger pod-template drift via a spec field that lives on
 			// FireboltEngineSpec. The image is no longer engine-owned, so
 			// we use ServiceAccountName (also drift-affecting via
-			// stsMatchesSpec).
-			spec.ServiceAccountName = ptr("sa-v2")
+			// stsMatchesSpec) — now nested under spec.template.spec.
+			setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.ServiceAccountName = "sa-v2" })
 			// Build the seeded STS from a spec on the same backend so
 			// the storage shape is consistent — the gen bump under
 			// test must come from the spec change, not from a
@@ -780,7 +832,7 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 	drainingGen := 0
 	spec := testSpec()
-	spec.ServiceAccountName = ptr("sa-v3")
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.ServiceAccountName = "sa-v3" })
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:              computev1alpha1.PhaseDraining,
 		CurrentGeneration:  1,
@@ -806,7 +858,7 @@ func TestComputeEngineReconcile_OC1_NoNewGenDuringDraining(t *testing.T) {
 
 func TestComputeEngineReconcile_SpecChangeDuringCreating(t *testing.T) {
 	spec := testSpec()
-	spec.ServiceAccountName = ptr("sa-v3")
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.ServiceAccountName = "sa-v3" })
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:             computev1alpha1.PhaseCreating,
 		CurrentGeneration: 1,
@@ -1039,7 +1091,7 @@ func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {
 
 func TestComputeEngineReconcile_CreatingPodsReadyButSTSStale(t *testing.T) {
 	spec := testSpec()
-	spec.ServiceAccountName = ptr("sa-v3")
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.ServiceAccountName = "sa-v3" })
 	status := &computev1alpha1.FireboltEngineStatus{
 		Phase:             computev1alpha1.PhaseCreating,
 		CurrentGeneration: 1,
@@ -1154,7 +1206,9 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("no resources matches empty container resources", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.Resources = corev1.ResourceRequirements{}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{}
+		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
 		if !stsMatchesSpec(sts, customSpec, nil) {
@@ -1164,12 +1218,14 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("requests only matches", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("500m"),
-				corev1.ResourceMemory: resource.MustParse("1Gi"),
-			},
-		}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("500m"),
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec, nil) {
@@ -1179,12 +1235,14 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("limits only matches", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.Resources = corev1.ResourceRequirements{
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("1"),
-				corev1.ResourceMemory: resource.MustParse("2Gi"),
-			},
-		}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("1"),
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			}
+		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec, nil) {
@@ -1194,14 +1252,16 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("partial requests and limits match", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU: resource.MustParse("750m"),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("2Gi"),
-			},
-		}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("750m"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("2Gi"),
+				},
+			}
+		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
 		if !stsMatchesSpec(sts, customSpec, nil) {
@@ -1228,11 +1288,13 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("equivalent quantities match", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.Resources = corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceMemory: resource.MustParse("1Gi"),
-			},
-		}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceMemory: resource.MustParse("1Gi"),
+				},
+			}
+		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
@@ -1246,10 +1308,9 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("explicit serviceAccountName matches STS", func(t *testing.T) {
 		customSpec := testSpec()
-		sa := "custom-sa"
-		customSpec.ServiceAccountName = &sa
+		setSpecTemplatePod(customSpec, func(p *corev1.PodSpec) { p.ServiceAccountName = "custom-sa" })
 		sts := makeSTS(testEngineName, 0, 3)
-		sts.Spec.Template.Spec.ServiceAccountName = sa
+		sts.Spec.Template.Spec.ServiceAccountName = "custom-sa"
 		if !stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
 		}
@@ -1267,9 +1328,11 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("container security context drift triggers mismatch", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.SecurityContext = &corev1.SecurityContext{
-			ReadOnlyRootFilesystem: boolPtr(true),
-		}
+		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
+			c.SecurityContext = &corev1.SecurityContext{
+				ReadOnlyRootFilesystem: boolPtr(true),
+			}
+		})
 		// STS still has the old (nil) container SC, so a spec change must
 		// not be silently absorbed by an in-place update.
 		sts := makeSTS(testEngineName, 0, 3)
@@ -1282,10 +1345,12 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		userFSGroup := int64(9999)
 		runAsGroup := int64(2000)
-		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
-			FSGroup:    &userFSGroup,
-			RunAsGroup: &runAsGroup,
-		}
+		setSpecTemplatePod(customSpec, func(p *corev1.PodSpec) {
+			p.SecurityContext = &corev1.PodSecurityContext{
+				FSGroup:    &userFSGroup,
+				RunAsGroup: &runAsGroup,
+			}
+		})
 		got := getEnginePodSecurityContext(customSpec)
 		if got.FSGroup == nil || *got.FSGroup != userFSGroup {
 			t.Fatalf("expected user FSGroup=%d to win over operator default, got %+v", userFSGroup, got.FSGroup)
@@ -1312,9 +1377,11 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("user-supplied FSGroupChangePolicy is preserved", func(t *testing.T) {
 		customSpec := testSpec()
 		always := corev1.FSGroupChangeAlways
-		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
-			FSGroupChangePolicy: &always,
-		}
+		setSpecTemplatePod(customSpec, func(p *corev1.PodSpec) {
+			p.SecurityContext = &corev1.PodSecurityContext{
+				FSGroupChangePolicy: &always,
+			}
+		})
 		got := getEnginePodSecurityContext(customSpec)
 		if got.FSGroupChangePolicy == nil || *got.FSGroupChangePolicy != corev1.FSGroupChangeAlways {
 			t.Fatalf("expected user FSGroupChangePolicy=Always to win, got %+v", got.FSGroupChangePolicy)
@@ -1323,9 +1390,11 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	t.Run("operator preserves user fields without clobbering them", func(t *testing.T) {
 		customSpec := testSpec()
-		customSpec.PodSecurityContext = &corev1.PodSecurityContext{
-			Sysctls: []corev1.Sysctl{{Name: "net.core.somaxconn", Value: "1024"}},
-		}
+		setSpecTemplatePod(customSpec, func(p *corev1.PodSpec) {
+			p.SecurityContext = &corev1.PodSecurityContext{
+				Sysctls: []corev1.Sysctl{{Name: "net.core.somaxconn", Value: "1024"}},
+			}
+		})
 		got := getEnginePodSecurityContext(customSpec)
 		if len(got.Sysctls) != 1 || got.Sysctls[0].Name != "net.core.somaxconn" {
 			t.Fatalf("expected user Sysctls pass-through, got %+v", got.Sysctls)
@@ -1360,9 +1429,11 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("getEngineContainerSecurityContext passes spec value through unchanged", func(t *testing.T) {
 		spec := testSpec()
 		runAsUser := int64(2222)
-		spec.SecurityContext = &corev1.SecurityContext{
-			RunAsUser: &runAsUser,
-		}
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.SecurityContext = &corev1.SecurityContext{
+				RunAsUser: &runAsUser,
+			}
+		})
 		got := getEngineContainerSecurityContext(spec)
 		if got == nil || got.RunAsUser == nil || *got.RunAsUser != 2222 {
 			t.Errorf("RunAsUser = %v, want 2222 (spec wins wholesale)", got)
@@ -1376,19 +1447,21 @@ func TestStsMatchesSpec(t *testing.T) {
 func TestBuildStatefulSet_Affinity(t *testing.T) {
 	t.Run("nodeAffinity propagates to pod template", func(t *testing.T) {
 		spec := testSpec()
-		spec.Affinity = &corev1.Affinity{
-			NodeAffinity: &corev1.NodeAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-						MatchExpressions: []corev1.NodeSelectorRequirement{{
-							Key:      "pool",
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"engine"},
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+							MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      "pool",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"engine"},
+							}},
 						}},
-					}},
+					},
 				},
-			},
-		}
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.NodeAffinity == nil {
@@ -1402,16 +1475,18 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 
 	t.Run("podAntiAffinity propagates to pod template", func(t *testing.T) {
 		spec := testSpec()
-		spec.Affinity = &corev1.Affinity{
-			PodAntiAffinity: &corev1.PodAntiAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
-					TopologyKey: "kubernetes.io/hostname",
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"app": "firebolt-engine"},
-					},
-				}},
-			},
-		}
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Affinity = &corev1.Affinity{
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+						TopologyKey: "kubernetes.io/hostname",
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"app": "firebolt-engine"},
+						},
+					}},
+				},
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.PodAntiAffinity == nil {
@@ -1425,7 +1500,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 
 	t.Run("nil affinity produces nil pod template affinity", func(t *testing.T) {
 		spec := testSpec()
-		spec.Affinity = nil
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.Affinity = nil })
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		if sts.Spec.Template.Spec.Affinity != nil {
 			t.Fatalf("expected nil Affinity in pod template, got %+v", sts.Spec.Template.Spec.Affinity)
@@ -1434,16 +1509,18 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 
 	t.Run("affinity drift detected by stsMatchesSpec", func(t *testing.T) {
 		spec := testSpec()
-		spec.Affinity = &corev1.Affinity{
-			PodAffinity: &corev1.PodAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
-					TopologyKey: "topology.kubernetes.io/zone",
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"firebolt.io/engine": testEngineName},
-					},
-				}},
-			},
-		}
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Affinity = &corev1.Affinity{
+				PodAffinity: &corev1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+						TopologyKey: "topology.kubernetes.io/zone",
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"firebolt.io/engine": testEngineName},
+						},
+					}},
+				},
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// The STS matches spec because we built it from spec.
 		if !stsMatchesSpec(sts, spec, nil) {
@@ -1462,19 +1539,21 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		// Spec now requires nodeAffinity — STS must be re-rolled.
 		spec := testSpec()
-		spec.Affinity = &corev1.Affinity{
-			NodeAffinity: &corev1.NodeAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-					NodeSelectorTerms: []corev1.NodeSelectorTerm{{
-						MatchExpressions: []corev1.NodeSelectorRequirement{{
-							Key:      "pool",
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"engine"},
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+							MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      "pool",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"engine"},
+							}},
 						}},
-					}},
+					},
 				},
-			},
-		}
+			}
+		})
 		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
 		}
@@ -1484,7 +1563,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 func TestBuildStatefulSet_PodLabels(t *testing.T) {
 	t.Run("base labels always present", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodLabels = nil
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Labels = nil })
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2, nil)
 		labels := sts.Spec.Template.Labels
 		if labels[LabelEngine] != testEngineName {
@@ -1497,11 +1576,13 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 
 	t.Run("user labels merged with base labels", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodLabels = map[string]string{
-			"app":         "packdb",
-			"environment": "prod",
-			"team":        "control-plane",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{
+				"app":         "packdb",
+				"environment": "prod",
+				"team":        "control-plane",
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
 		labels := sts.Spec.Template.Labels
 		// Base labels must be present.
@@ -1525,11 +1606,13 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 
 	t.Run("reserved labels cannot be overridden", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodLabels = map[string]string{
-			LabelEngine:     "user-engine-override",
-			LabelGeneration: "999",
-			"custom":        "value",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{
+				LabelEngine:     "user-engine-override",
+				LabelGeneration: "999",
+				"custom":        "value",
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5, nil)
 		labels := sts.Spec.Template.Labels
 		// Reserved labels must be operator-owned.
@@ -1547,9 +1630,9 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 
 	t.Run("pod labels drift detected by stsMatchesSpec", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodLabels = map[string]string{
-			"version": "1.0",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{"version": "1.0"}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod labels")
@@ -1566,9 +1649,9 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		// Spec now has extra labels — STS must be re-rolled.
 		spec := testSpec()
-		spec.PodLabels = map[string]string{
-			"new-label": "new-value",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{"new-label": "new-value"}
+		})
 		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod labels added to spec but STS has none")
 		}
@@ -1576,15 +1659,15 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 
 	t.Run("changing pod label value is detected as drift", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodLabels = map[string]string{
-			"version": "1.0",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{"version": "1.0"}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// Change the label value.
 		specChanged := testSpec()
-		specChanged.PodLabels = map[string]string{
-			"version": "2.0",
-		}
+		setSpecTemplateMeta(specChanged, func(m *metav1.ObjectMeta) {
+			m.Labels = map[string]string{"version": "2.0"}
+		})
 		if stsMatchesSpec(sts, specChanged, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod label value changed")
 		}
@@ -1594,7 +1677,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 	t.Run("nil pod annotations produce no pod template annotations", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodAnnotations = nil
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Annotations = nil })
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		// We intentionally render no annotations on the pod template
 		// when the spec contributes none, so existing StatefulSets
@@ -1607,16 +1690,17 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 
 	t.Run("user annotations propagate to pod template", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodAnnotations = map[string]string{
+		userAnnotations := map[string]string{
 			"prometheus.io/scrape":        "true",
 			"prometheus.io/port":          "9090",
 			"firebolt.dev/cost-center":    "analytics",
 			"karpenter.sh/do-not-disrupt": "true",
 			"kubernetes.io/description":   "engine pod",
 		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Annotations = userAnnotations })
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
 		got := sts.Spec.Template.Annotations
-		for k, want := range spec.PodAnnotations {
+		for k, want := range userAnnotations {
 			if got[k] != want {
 				t.Errorf("expected annotation %q = %q, got %q", k, want, got[k])
 			}
@@ -1632,10 +1716,12 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		override := "metadata.example.com:7000"
 		spec := testSpec()
 		spec.MetadataEndpointOverride = &override
-		spec.PodAnnotations = map[string]string{
-			AnnotationMetadataOverride: "user-override-should-not-take-effect",
-			"unrelated":                "value",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Annotations = map[string]string{
+				AnnotationMetadataOverride: "user-override-should-not-take-effect",
+				"unrelated":                "value",
+			}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
 		if got := sts.Annotations[AnnotationMetadataOverride]; got != override {
@@ -1653,9 +1739,9 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 
 	t.Run("pod annotations drift detected by stsMatchesSpec", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodAnnotations = map[string]string{
-			"prometheus.io/scrape": "true",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Annotations = map[string]string{"prometheus.io/scrape": "true"}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		if !stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod annotations")
@@ -1669,9 +1755,9 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 	t.Run("adding pod annotations to spec is detected as drift", func(t *testing.T) {
 		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 		spec := testSpec()
-		spec.PodAnnotations = map[string]string{
-			"new-annotation": "new-value",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Annotations = map[string]string{"new-annotation": "new-value"}
+		})
 		if stsMatchesSpec(sts, spec, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotations added to spec but STS has none")
 		}
@@ -1679,14 +1765,14 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 
 	t.Run("changing pod annotation value is detected as drift", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodAnnotations = map[string]string{
-			"version": "1.0",
-		}
+		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+			m.Annotations = map[string]string{"version": "1.0"}
+		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		specChanged := testSpec()
-		specChanged.PodAnnotations = map[string]string{
-			"version": "2.0",
-		}
+		setSpecTemplateMeta(specChanged, func(m *metav1.ObjectMeta) {
+			m.Annotations = map[string]string{"version": "2.0"}
+		})
 		if stsMatchesSpec(sts, specChanged, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotation value changed")
 		}
@@ -1701,7 +1787,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 		sts.Spec.Template.Annotations = map[string]string{}
 		if !stsMatchesSpec(sts, spec, nil) {
-			t.Fatal("stsMatchesSpec() want true when pod template annotations is empty map and spec.PodAnnotations is nil")
+			t.Fatal("stsMatchesSpec() want true when pod template annotations is empty map and spec.template.metadata.annotations is nil")
 		}
 	})
 }
@@ -1719,12 +1805,16 @@ func TestEnginePodAnnotations(t *testing.T) {
 		// buildStatefulSet might otherwise share state across
 		// generations if future code grows the map in place.
 		spec := &computev1alpha1.FireboltEngineSpec{
-			PodAnnotations: map[string]string{"k": "v"},
+			Template: &corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{"k": "v"},
+				},
+			},
 		}
 		got := enginePodAnnotations(spec)
 		got["mutated"] = "yes"
-		if _, ok := spec.PodAnnotations["mutated"]; ok {
-			t.Fatal("enginePodAnnotations must return a copy, not the underlying spec map")
+		if _, ok := spec.Template.Annotations["mutated"]; ok {
+			t.Fatal("enginePodAnnotations must return a copy, not the underlying template annotations map")
 		}
 	})
 }
@@ -1755,7 +1845,7 @@ func TestAnnotationsEqual(t *testing.T) {
 
 func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 	spec := testSpec()
-	spec.Resources = corev1.ResourceRequirements{
+	want := corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU: resource.MustParse("750m"),
 		},
@@ -1763,11 +1853,12 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 			corev1.ResourceMemory: resource.MustParse("3Gi"),
 		},
 	}
+	setSpecTemplateContainer(spec, func(c *corev1.Container) { c.Resources = want })
 
 	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.Containers[0].Resources
-	if !resourceRequirementsEqual(got, spec.Resources) {
-		t.Fatalf("buildStatefulSet resources = %#v, want %#v", got, spec.Resources)
+	if !resourceRequirementsEqual(got, want) {
+		t.Fatalf("buildStatefulSet resources = %#v, want %#v", got, want)
 	}
 }
 
@@ -2209,19 +2300,21 @@ func TestBuildStatefulSet_DefaultImage(t *testing.T) {
 
 func TestBuildStatefulSet_InitContainers(t *testing.T) {
 	spec := testSpec()
-	spec.InitContainers = []corev1.Container{{
-		Name:    "prep-disk",
-		Image:   "busybox:1.36",
-		Command: []string{"sh", "-c"},
-		Args:    []string{"chown -R 3473:3473 /firebolt-core/volume"},
-		SecurityContext: &corev1.SecurityContext{
-			RunAsUser: boolPtrInt64(0),
-		},
-		VolumeMounts: []corev1.VolumeMount{{
-			Name:      DataVolumeName,
-			MountPath: DataMountPath,
-		}},
-	}}
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+		p.InitContainers = []corev1.Container{{
+			Name:    "prep-disk",
+			Image:   "busybox:1.36",
+			Command: []string{"sh", "-c"},
+			Args:    []string{"chown -R 3473:3473 /firebolt-core/volume"},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: boolPtrInt64(0),
+			},
+			VolumeMounts: []corev1.VolumeMount{{
+				Name:      DataVolumeName,
+				MountPath: DataMountPath,
+			}},
+		}}
+	})
 
 	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.InitContainers
@@ -2237,10 +2330,12 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 
 	t.Run("API server defaults on read-back", func(t *testing.T) {
 		specWithInit := testSpec()
-		specWithInit.InitContainers = []corev1.Container{{
-			Name:  "prep-disk",
-			Image: "busybox:1.36",
-		}}
+		setSpecTemplatePod(specWithInit, func(p *corev1.PodSpec) {
+			p.InitContainers = []corev1.Container{{
+				Name:  "prep-disk",
+				Image: "busybox:1.36",
+			}}
+		})
 		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0, nil)
 		// Simulate what the API server stamps on every container after create.
 		stsWithInit.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = corev1.PullIfNotPresent
@@ -2251,7 +2346,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 		}
 	})
 
-	spec.InitContainers = nil
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.InitContainers = nil })
 	if stsMatchesSpec(sts, spec, nil) {
 		t.Fatal("stsMatchesSpec() want false when init containers removed from spec")
 	}

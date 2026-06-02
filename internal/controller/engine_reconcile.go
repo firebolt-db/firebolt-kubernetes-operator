@@ -556,11 +556,12 @@ func buildHeadlessService(engineName, namespace string, gen int) *corev1.Service
 // any future operator-owned pod-template annotation can be added in one
 // place without re-opening the override-protection question.
 func enginePodAnnotations(spec *computev1alpha1.FireboltEngineSpec) map[string]string {
-	if len(spec.PodAnnotations) == 0 {
+	src := engineTemplate(spec).Annotations
+	if len(src) == 0 {
 		return nil
 	}
-	annotations := make(map[string]string, len(spec.PodAnnotations))
-	for k, v := range spec.PodAnnotations {
+	annotations := make(map[string]string, len(src))
+	for k, v := range src {
 		annotations[k] = v
 	}
 	return annotations
@@ -590,10 +591,11 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		annotations[AnnotationEngineClassHash] = classInfo.Hash
 	}
 
-	// Engine container image flows from the referenced FireboltEngineClass's
-	// containers[name=="engine"].image when set, falling back to the
-	// operator's embedded default.
-	image, pullPolicy := effectiveEngineImage(classInfo)
+	// Engine container image flows from the engine's own spec.template's
+	// "engine" container image when set, falling back to the referenced
+	// FireboltEngineClass's containers[name=="engine"].image, then to
+	// the operator's embedded default.
+	image, pullPolicy := effectiveEngineImage(spec, classInfo)
 
 	gracePeriod := getTerminationGracePeriod(spec)
 	podSecurityContext := effectivePodSecurityContext(spec, classInfo)
@@ -611,7 +613,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			MountPath: DataMountPath,
 		},
 	}
-	volumeMounts = append(volumeMounts, engineClassEngineVolumeMounts(classInfo)...)
+	volumeMounts = append(volumeMounts, effectiveEngineVolumeMounts(spec, classInfo)...)
 	engineEnv := []corev1.EnvVar{
 		{
 			Name: computev1alpha1.EnginePodIndexEnvKey,
@@ -637,7 +639,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			Value: "1",
 		},
 	}
-	engineEnv = append(engineEnv, engineClassEngineEnv(classInfo)...)
+	engineEnv = append(engineEnv, effectiveEngineEnv(spec, classInfo)...)
 	// The "data" volume backing /firebolt-core/volume is either a per-pod
 	// PVC (the default; the StatefulSet controller synthesizes the pod
 	// Volume from the VolumeClaimTemplate) or a node-local emptyDir /
@@ -711,7 +713,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	if extraDataVolume != nil {
 		podVolumes = append(podVolumes, *extraDataVolume)
 	}
-	podVolumes = appendClassPodVolumes(podVolumes, classInfo)
+	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
 
 	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
 	// during blue-green cleaning. WhenScaled stays Retain so a within-
@@ -756,7 +758,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					// firebolt-core's own config keys (cf. floci's
 					// `FLOCI_PORT` collision in FB-1215).
 					EnableServiceLinks: boolPtr(false),
-					ImagePullSecrets:   effectiveImagePullSecrets(classInfo),
+					ImagePullSecrets:   effectiveImagePullSecrets(spec, classInfo),
 					Containers: append([]corev1.Container{
 						{
 							Name:            computev1alpha1.EngineContainerName,
@@ -765,12 +767,12 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 							SecurityContext: containerSecurityContext,
 							Resources:       effectiveEngineResources(spec, classInfo),
 							Env:             engineEnv,
-							EnvFrom:         engineClassEngineEnvFrom(classInfo),
+							EnvFrom:         effectiveEngineEnvFrom(spec, classInfo),
 							Ports:           GetContainerPorts(),
 							Command:         []string{"/bin/bash", "-c"},
 							Args:            []string{strings.TrimSpace(EngineStartupScript)},
 							VolumeMounts:    volumeMounts,
-							Lifecycle:       effectiveEngineLifecycle(classInfo),
+							Lifecycle:       effectiveEngineLifecycle(spec, classInfo),
 							ReadinessProbe: &corev1.Probe{
 								InitialDelaySeconds: 1,
 								PeriodSeconds:       3,
@@ -807,7 +809,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								},
 							},
 						},
-					}, engineClassSidecars(classInfo)...),
+					}, effectiveSidecars(spec, classInfo)...),
 					Volumes: podVolumes,
 				},
 			},
@@ -873,16 +875,38 @@ func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec) time.Durati
 	return DefaultDrainCheckInterval
 }
 
-// getTerminationGracePeriod returns the TGPS value to stamp on the engine
-// StatefulSet's pod template: the spec override when set, otherwise the
-// operator's default. Defaulting is done here (not relying on the kubebuilder
-// default alone) so unit tests that construct a FireboltEngineSpec literal
-// get the same value as the cluster-loaded CRs.
-func getTerminationGracePeriod(spec *computev1alpha1.FireboltEngineSpec) int64 {
-	if spec.TerminationGracePeriodSeconds != nil {
-		return *spec.TerminationGracePeriodSeconds
-	}
+// getTerminationGracePeriod returns the TGPS value to stamp on the
+// engine StatefulSet's pod template. Always the operator's default —
+// TGPS is operator-owned end-to-end since FB-1426: the engine pod
+// template validator rejects user input on
+// spec.template.spec.terminationGracePeriodSeconds (matching the
+// existing rejection on the class template), so there is no user
+// surface to consult here. Kept as a function (rather than inlining
+// the constant) so a future change that surfaces the knob lands in
+// one place.
+func getTerminationGracePeriod(_ *computev1alpha1.FireboltEngineSpec) int64 {
 	return DefaultTerminationGracePeriodSeconds
+}
+
+// engineTemplate returns the user-supplied pod template, or an empty
+// PodTemplateSpec when spec.Template is nil. Returning a non-nil
+// pointer everywhere lets callers read pod-spec / object-meta fields
+// without nil-guarding at every site. The empty PodTemplateSpec is a
+// throwaway local value — callers MUST NOT retain it beyond the
+// expression.
+func engineTemplate(spec *computev1alpha1.FireboltEngineSpec) *corev1.PodTemplateSpec {
+	if spec.Template != nil {
+		return spec.Template
+	}
+	return &corev1.PodTemplateSpec{}
+}
+
+// engineSpecContainer returns the engine container (name=
+// EngineContainerName) from the engine's own template, or nil when
+// no template or no engine container is declared. Different from
+// classEngineContainer (which reads from the merged-class side).
+func engineSpecContainer(spec *computev1alpha1.FireboltEngineSpec) *corev1.Container {
+	return computev1alpha1.EngineContainerInTemplate(spec.Template)
 }
 
 // engineShutdownWaitSeconds returns the engine's post-SIGTERM in-flight-query
@@ -897,13 +921,12 @@ func engineShutdownWaitSeconds(gracePeriod int64) int64 {
 	return shutdownWait
 }
 
-// enginePodServiceAccountName returns the ServiceAccount name stamped on engine
-// pods, or "" when unset (namespace default).
+// enginePodServiceAccountName returns the ServiceAccount name the user
+// declared on spec.template.spec.serviceAccountName, or "" when not
+// declared (namespace default). Post-FB-1426 the field lives on the
+// template rather than on the spec directly.
 func enginePodServiceAccountName(spec *computev1alpha1.FireboltEngineSpec) string {
-	if spec.ServiceAccountName == nil || *spec.ServiceAccountName == "" {
-		return ""
-	}
-	return *spec.ServiceAccountName
+	return engineTemplate(spec).Spec.ServiceAccountName
 }
 
 // effectiveServiceAccountName resolves the SA stamped on the engine pod
@@ -930,14 +953,15 @@ func effectiveNodeSelector(spec *computev1alpha1.FireboltEngineSpec, classInfo *
 	if classInfo != nil && classInfo.Template != nil {
 		classSel = classInfo.Template.Spec.NodeSelector
 	}
-	if len(classSel) == 0 && len(spec.NodeSelector) == 0 {
+	engineSel := engineTemplate(spec).Spec.NodeSelector
+	if len(classSel) == 0 && len(engineSel) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(classSel)+len(spec.NodeSelector))
+	out := make(map[string]string, len(classSel)+len(engineSel))
 	for k, v := range classSel {
 		out[k] = v
 	}
-	for k, v := range spec.NodeSelector {
+	for k, v := range engineSel {
 		out[k] = v
 	}
 	return out
@@ -953,12 +977,13 @@ func effectiveTolerations(spec *computev1alpha1.FireboltEngineSpec, classInfo *F
 	if classInfo != nil && classInfo.Template != nil {
 		classTols = classInfo.Template.Spec.Tolerations
 	}
-	if len(classTols) == 0 && len(spec.Tolerations) == 0 {
+	engineTols := engineTemplate(spec).Spec.Tolerations
+	if len(classTols) == 0 && len(engineTols) == 0 {
 		return nil
 	}
-	out := make([]corev1.Toleration, 0, len(classTols)+len(spec.Tolerations))
+	out := make([]corev1.Toleration, 0, len(classTols)+len(engineTols))
 	out = append(out, classTols...)
-	out = append(out, spec.Tolerations...)
+	out = append(out, engineTols...)
 	return out
 }
 
@@ -968,8 +993,8 @@ func effectiveTolerations(spec *computev1alpha1.FireboltEngineSpec, classInfo *F
 // term agreeing, so partial overrides are dangerous. Whoever sets the
 // field owns the whole tree.
 func effectiveAffinity(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.Affinity {
-	if spec.Affinity != nil {
-		return spec.Affinity
+	if a := engineTemplate(spec).Spec.Affinity; a != nil {
+		return a
 	}
 	if classInfo != nil && classInfo.Template != nil {
 		return classInfo.Template.Spec.Affinity
@@ -995,7 +1020,7 @@ func effectivePodLabels(spec *computev1alpha1.FireboltEngineSpec, engineName str
 			labels[k] = v
 		}
 	}
-	for k, v := range spec.PodLabels {
+	for k, v := range engineTemplate(spec).Labels {
 		if k == LabelEngine || k == LabelGeneration {
 			continue
 		}
@@ -1013,73 +1038,79 @@ func effectivePodAnnotations(spec *computev1alpha1.FireboltEngineSpec, classInfo
 	if classInfo != nil && classInfo.Template != nil {
 		classAnno = classInfo.Template.Annotations
 	}
-	if len(classAnno) == 0 && len(spec.PodAnnotations) == 0 {
+	engineAnno := engineTemplate(spec).Annotations
+	if len(classAnno) == 0 && len(engineAnno) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(classAnno)+len(spec.PodAnnotations))
+	out := make(map[string]string, len(classAnno)+len(engineAnno))
 	for k, v := range classAnno {
 		out[k] = v
 	}
-	for k, v := range spec.PodAnnotations {
+	for k, v := range engineAnno {
 		out[k] = v
 	}
 	return out
 }
 
-// effectiveEngineImage resolves the engine container image. If the class
-// template carries a non-empty image on the engine container (name
-// EngineContainerName), it wins; otherwise the operator's embedded
-// default is used. The FireboltEngineClass webhook does not reject image on
-// the engine container, so this is the documented user-extension point.
-func effectiveEngineImage(classInfo *FireboltEngineClassInfo) (image string, pullPolicy corev1.PullPolicy) {
-	defaultImage := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
-	defaultPullPolicy := resolveImagePullPolicy(nil)
-	if classInfo == nil || classInfo.Template == nil {
-		return defaultImage, defaultPullPolicy
-	}
-	for i := range classInfo.Template.Spec.Containers {
-		c := &classInfo.Template.Spec.Containers[i]
-		if c.Name != computev1alpha1.EngineContainerName {
-			continue
-		}
+// effectiveEngineImage resolves the engine container image and pull
+// policy. Precedence: engine spec.template's "engine" container >
+// class template's "engine" container > operator default. Image and
+// ImagePullPolicy are tracked independently so a user can override
+// just one (e.g. set ImagePullPolicy=Always without redeclaring the
+// image, or vice versa).
+func effectiveEngineImage(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) (image string, pullPolicy corev1.PullPolicy) {
+	image = resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+	pullPolicy = resolveImagePullPolicy(nil)
+	if c := classEngineContainer(classInfo); c != nil {
 		if c.Image != "" {
-			defaultImage = c.Image
+			image = c.Image
 		}
 		if c.ImagePullPolicy != "" {
-			defaultPullPolicy = c.ImagePullPolicy
+			pullPolicy = c.ImagePullPolicy
 		}
-		return defaultImage, defaultPullPolicy
 	}
-	return defaultImage, defaultPullPolicy
+	if c := engineSpecContainer(spec); c != nil {
+		if c.Image != "" {
+			image = c.Image
+		}
+		if c.ImagePullPolicy != "" {
+			pullPolicy = c.ImagePullPolicy
+		}
+	}
+	return image, pullPolicy
 }
 
-// engineClassSidecars returns the sidecar containers (every container
-// whose name is not EngineContainerName) from the class template. The
-// FireboltEngineClass webhook leaves these fully user-owned, so the result
-// is passed through verbatim — image, command, ports, env, mounts.
-func engineClassSidecars(classInfo *FireboltEngineClassInfo) []corev1.Container {
-	if classInfo == nil || classInfo.Template == nil {
-		return nil
+// effectiveSidecars merges sidecar containers (every container whose
+// name is not EngineContainerName) from both the class template and
+// the engine spec's template, in that order. Class sidecars run
+// first, engine sidecars appended after. API-server defaults
+// (imagePullPolicy, terminationMessage*) are stamped on each entry
+// so stsMatchesSpec doesn't see drift on read-back.
+func effectiveSidecars(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Container {
+	out := make([]corev1.Container, 0)
+	if classInfo != nil && classInfo.Template != nil {
+		out = appendSidecars(out, classInfo.Template.Spec.Containers)
 	}
-	out := make([]corev1.Container, 0, len(classInfo.Template.Spec.Containers))
-	for i := range classInfo.Template.Spec.Containers {
-		c := classInfo.Template.Spec.Containers[i]
-		if c.Name == computev1alpha1.EngineContainerName {
-			continue
-		}
-		copied := *c.DeepCopy()
-		// Stamp API-server defaults so the built pod template matches
-		// what stsMatchesSpec will read back. Without this, every
-		// reconcile sees the API-server-filled imagePullPolicy /
-		// terminationMessage* as drift and rolls a fresh blue-green
-		// generation forever.
-		applyContainerAPIServerDefaults(&copied)
-		out = append(out, copied)
-	}
+	out = appendSidecars(out, engineTemplate(spec).Spec.Containers)
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// appendSidecars deep-copies every container in src whose name is
+// not EngineContainerName, stamps API-server defaults so the result
+// compares equal on read-back, and appends them to dst.
+func appendSidecars(dst []corev1.Container, src []corev1.Container) []corev1.Container {
+	for i := range src {
+		if src[i].Name == computev1alpha1.EngineContainerName {
+			continue
+		}
+		copied := *src[i].DeepCopy()
+		applyContainerAPIServerDefaults(&copied)
+		dst = append(dst, copied)
+	}
+	return dst
 }
 
 // engineClassInitContainers returns the init containers from the class
@@ -1139,8 +1170,8 @@ func classEngineContainer(classInfo *FireboltEngineClassInfo) *corev1.Container 
 // partial spec override does not silently inherit the rest from the
 // class.
 func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.ResourceRequirements {
-	if computev1alpha1.HasContainerResources(spec.Resources) {
-		return *spec.Resources.DeepCopy()
+	if c := engineSpecContainer(spec); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
+		return *c.Resources.DeepCopy()
 	}
 	if c := classEngineContainer(classInfo); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		return *c.Resources.DeepCopy()
@@ -1148,61 +1179,83 @@ func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInf
 	return corev1.ResourceRequirements{}
 }
 
-// engineClassEngineEnv returns the env vars declared on the class's
-// engine container, deep-copied for downstream mutation safety. The
-// validating webhook rejects reserved keys (POD_INDEX,
-// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE) so the result can be
-// appended verbatim to the operator-injected list.
-func engineClassEngineEnv(classInfo *FireboltEngineClassInfo) []corev1.EnvVar {
-	c := classEngineContainer(classInfo)
-	if c == nil || len(c.Env) == 0 {
-		return nil
-	}
-	out := make([]corev1.EnvVar, len(c.Env))
-	for i := range c.Env {
-		c.Env[i].DeepCopyInto(&out[i])
-	}
-	return out
-}
-
-// engineClassEngineEnvFrom returns the envFrom entries declared on the
-// class's engine container, deep-copied. Class-only — engine spec has no
-// envFrom field.
-func engineClassEngineEnvFrom(classInfo *FireboltEngineClassInfo) []corev1.EnvFromSource {
-	c := classEngineContainer(classInfo)
-	if c == nil || len(c.EnvFrom) == 0 {
-		return nil
-	}
-	out := make([]corev1.EnvFromSource, len(c.EnvFrom))
-	for i := range c.EnvFrom {
-		c.EnvFrom[i].DeepCopyInto(&out[i])
-	}
-	return out
-}
-
-// engineClassEngineVolumeMounts returns the additional volumeMounts
-// declared on the class's engine container. Entries whose name collides
-// with an operator-reserved volume ("nodes-config", DataVolumeName) are
-// skipped: the operator owns those mount paths and a class override
-// would silently break startup (config volume) or data persistence
-// (data volume).
-func engineClassEngineVolumeMounts(classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
-	c := classEngineContainer(classInfo)
-	if c == nil || len(c.VolumeMounts) == 0 {
-		return nil
-	}
-	out := make([]corev1.VolumeMount, 0, len(c.VolumeMounts))
-	for i := range c.VolumeMounts {
-		name := c.VolumeMounts[i].Name
-		if name == "nodes-config" || name == DataVolumeName {
-			continue
+// effectiveEngineEnv concatenates env vars declared on the engine
+// container of both the class template and the engine spec's
+// template — class first, engine after. The validating webhook
+// rejects reserved keys (POD_INDEX, FB_AWS_EC2_METADATA_CLIENT_ENABLED,
+// FIREBOLT_CORE_MODE) on both surfaces, so the result is safe to
+// append to the operator-injected env list without further filtering.
+func effectiveEngineEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.EnvVar {
+	var out []corev1.EnvVar
+	if c := classEngineContainer(classInfo); c != nil {
+		for i := range c.Env {
+			var v corev1.EnvVar
+			c.Env[i].DeepCopyInto(&v)
+			out = append(out, v)
 		}
-		out = append(out, *c.VolumeMounts[i].DeepCopy())
+	}
+	if c := engineSpecContainer(spec); c != nil {
+		for i := range c.Env {
+			var v corev1.EnvVar
+			c.Env[i].DeepCopyInto(&v)
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// effectiveEngineEnvFrom concatenates envFrom entries on the engine
+// container from both class and engine templates, class first.
+func effectiveEngineEnvFrom(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.EnvFromSource {
+	var out []corev1.EnvFromSource
+	if c := classEngineContainer(classInfo); c != nil {
+		for i := range c.EnvFrom {
+			var v corev1.EnvFromSource
+			c.EnvFrom[i].DeepCopyInto(&v)
+			out = append(out, v)
+		}
+	}
+	if c := engineSpecContainer(spec); c != nil {
+		for i := range c.EnvFrom {
+			var v corev1.EnvFromSource
+			c.EnvFrom[i].DeepCopyInto(&v)
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// effectiveEngineVolumeMounts concatenates additional volumeMounts on
+// the engine container from both class and engine templates, class
+// first. Entries whose name collides with an operator-reserved volume
+// ("nodes-config", DataVolumeName) are skipped on both sides: the
+// operator owns those mount paths and a user override would silently
+// break startup (config volume) or data persistence (data volume).
+func effectiveEngineVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
+	out := make([]corev1.VolumeMount, 0)
+	if c := classEngineContainer(classInfo); c != nil {
+		out = appendUserVolumeMounts(out, c.VolumeMounts)
+	}
+	if c := engineSpecContainer(spec); c != nil {
+		out = appendUserVolumeMounts(out, c.VolumeMounts)
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// appendUserVolumeMounts deep-copies entries from src into dst,
+// skipping any that name an operator-reserved volume.
+func appendUserVolumeMounts(dst, src []corev1.VolumeMount) []corev1.VolumeMount {
+	for i := range src {
+		name := src[i].Name
+		if name == "nodes-config" || name == DataVolumeName {
+			continue
+		}
+		dst = append(dst, *src[i].DeepCopy())
+	}
+	return dst
 }
 
 // effectiveEngineContainerSecurityContext resolves the container-level
@@ -1216,8 +1269,8 @@ func engineClassEngineVolumeMounts(classInfo *FireboltEngineClassInfo) []corev1.
 // chart's engine StatefulSet, so an engine migrated between deployment
 // paths keeps the same security posture.
 func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.SecurityContext {
-	if spec.SecurityContext != nil {
-		return spec.SecurityContext.DeepCopy()
+	if c := engineSpecContainer(spec); c != nil && c.SecurityContext != nil {
+		return c.SecurityContext.DeepCopy()
 	}
 	if c := classEngineContainer(classInfo); c != nil && c.SecurityContext != nil {
 		return c.SecurityContext.DeepCopy()
@@ -1225,59 +1278,67 @@ func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngin
 	return defaultEngineContainerSecurityContext()
 }
 
-// effectiveEngineLifecycle returns the Lifecycle hooks for the engine
-// container, taken from the class. Class-only — engine spec has no
-// Lifecycle field.
-func effectiveEngineLifecycle(classInfo *FireboltEngineClassInfo) *corev1.Lifecycle {
-	c := classEngineContainer(classInfo)
-	if c == nil || c.Lifecycle == nil {
-		return nil
+// effectiveEngineLifecycle resolves the Lifecycle hooks stamped on
+// the engine container. Engine wins if set, else class, else nil.
+// Whole-struct ownership (no merge of preStop / postStart).
+func effectiveEngineLifecycle(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.Lifecycle {
+	if c := engineSpecContainer(spec); c != nil && c.Lifecycle != nil {
+		return c.Lifecycle.DeepCopy()
 	}
-	return c.Lifecycle.DeepCopy()
+	if c := classEngineContainer(classInfo); c != nil && c.Lifecycle != nil {
+		return c.Lifecycle.DeepCopy()
+	}
+	return nil
 }
 
-// effectiveImagePullSecrets returns the pod-level imagePullSecrets from
-// the class template, deep-copied. Class-only — engine spec has no
-// equivalent. Typical use is to authenticate sidecar pulls from a
-// private registry.
-func effectiveImagePullSecrets(classInfo *FireboltEngineClassInfo) []corev1.LocalObjectReference {
-	if classInfo == nil || classInfo.Template == nil {
+// effectiveImagePullSecrets concatenates pod-level imagePullSecrets
+// from the class template and the engine template, class first.
+// Typical use is to authenticate sidecar / init-container pulls from
+// a private registry. Returns nil when neither side contributes.
+func effectiveImagePullSecrets(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.LocalObjectReference {
+	var classRefs []corev1.LocalObjectReference
+	if classInfo != nil && classInfo.Template != nil {
+		classRefs = classInfo.Template.Spec.ImagePullSecrets
+	}
+	engineRefs := engineTemplate(spec).Spec.ImagePullSecrets
+	if len(classRefs) == 0 && len(engineRefs) == 0 {
 		return nil
 	}
-	refs := classInfo.Template.Spec.ImagePullSecrets
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]corev1.LocalObjectReference, len(refs))
-	copy(out, refs)
+	out := make([]corev1.LocalObjectReference, 0, len(classRefs)+len(engineRefs))
+	out = append(out, classRefs...)
+	out = append(out, engineRefs...)
 	return out
 }
 
-// appendClassPodVolumes appends the class's pod-level volumes to the
-// operator-rendered list. Volume names already present in operator are
-// skipped: the operator owns DataVolumeName and "nodes-config" and a
-// class redefinition would break those mounts.
-func appendClassPodVolumes(operator []corev1.Volume, classInfo *FireboltEngineClassInfo) []corev1.Volume {
-	if classInfo == nil || classInfo.Template == nil {
-		return operator
-	}
-	classVols := classInfo.Template.Spec.Volumes
-	if len(classVols) == 0 {
-		return operator
-	}
+// appendUserPodVolumes appends pod-level volumes from both the class
+// template and the engine template to the operator-rendered list, in
+// that order. Volume names already present in operator are skipped:
+// the operator owns DataVolumeName and "nodes-config" and a user
+// redefinition would break those mounts.
+func appendUserPodVolumes(operator []corev1.Volume, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Volume {
 	reserved := make(map[string]struct{}, len(operator))
 	for i := range operator {
 		reserved[operator[i].Name] = struct{}{}
 	}
-	out := make([]corev1.Volume, 0, len(operator)+len(classVols))
+	out := make([]corev1.Volume, 0, len(operator))
 	out = append(out, operator...)
-	for i := range classVols {
-		if _, ok := reserved[classVols[i].Name]; ok {
+	if classInfo != nil && classInfo.Template != nil {
+		out = appendUserVolumesFrom(out, classInfo.Template.Spec.Volumes, reserved)
+	}
+	out = appendUserVolumesFrom(out, engineTemplate(spec).Spec.Volumes, reserved)
+	return out
+}
+
+// appendUserVolumesFrom deep-copies entries from src into dst,
+// skipping any whose name is in the reserved set.
+func appendUserVolumesFrom(dst, src []corev1.Volume, reserved map[string]struct{}) []corev1.Volume {
+	for i := range src {
+		if _, taken := reserved[src[i].Name]; taken {
 			continue
 		}
-		out = append(out, *classVols[i].DeepCopy())
+		dst = append(dst, *src[i].DeepCopy())
 	}
-	return out
+	return dst
 }
 
 // effectivePodSecurityContext resolves the pod-level PodSecurityContext.
@@ -1289,8 +1350,8 @@ func appendClassPodVolumes(operator []corev1.Volume, classInfo *FireboltEngineCl
 func effectivePodSecurityContext(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.PodSecurityContext {
 	var psc *corev1.PodSecurityContext
 	switch {
-	case spec.PodSecurityContext != nil:
-		psc = spec.PodSecurityContext.DeepCopy()
+	case engineTemplate(spec).Spec.SecurityContext != nil:
+		psc = engineTemplate(spec).Spec.SecurityContext.DeepCopy()
 	case classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.SecurityContext != nil:
 		psc = classInfo.Template.Spec.SecurityContext.DeepCopy()
 	default:
@@ -1386,37 +1447,25 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec) string {
 // pass-through. The result is independent of spec (deep-copied) so callers
 // can mutate it safely.
 func getEnginePodSecurityContext(spec *computev1alpha1.FireboltEngineSpec) *corev1.PodSecurityContext {
-	var psc *corev1.PodSecurityContext
-	if spec.PodSecurityContext != nil {
-		psc = spec.PodSecurityContext.DeepCopy()
-	} else {
-		psc = &corev1.PodSecurityContext{}
-	}
-	if psc.FSGroup == nil {
-		fsg := DefaultEngineFSGroup
-		psc.FSGroup = &fsg
-	}
-	if psc.FSGroupChangePolicy == nil {
-		policy := corev1.FSGroupChangeOnRootMismatch
-		psc.FSGroupChangePolicy = &policy
-	}
-	return psc
+	return effectivePodSecurityContext(spec, nil)
 }
 
 const defaultTerminationMessagePath = "/dev/termination-log"
 
-// engineInitContainers returns a deep copy of spec.InitContainers for the pod
-// template, or nil when unset so nil and empty compare equal in stsMatchesSpec.
-// API-server defaults (imagePullPolicy, terminationMessagePath/Policy) are
-// applied so a freshly-built STS compares equal to the same object read back
-// from the API.
+// engineInitContainers returns a deep copy of the engine spec
+// template's initContainers, or nil when none are declared so nil
+// and empty compare equal in stsMatchesSpec. API-server defaults
+// (imagePullPolicy, terminationMessagePath/Policy) are applied so a
+// freshly-built STS compares equal to the same object read back from
+// the API.
 func engineInitContainers(spec *computev1alpha1.FireboltEngineSpec) []corev1.Container {
-	if len(spec.InitContainers) == 0 {
+	src := engineTemplate(spec).Spec.InitContainers
+	if len(src) == 0 {
 		return nil
 	}
-	out := make([]corev1.Container, len(spec.InitContainers))
-	for i := range spec.InitContainers {
-		spec.InitContainers[i].DeepCopyInto(&out[i])
+	out := make([]corev1.Container, len(src))
+	for i := range src {
+		src[i].DeepCopyInto(&out[i])
 		applyContainerAPIServerDefaults(&out[i])
 	}
 	return out
@@ -1498,8 +1547,12 @@ func defaultEngineContainerSecurityContext() *corev1.SecurityContext {
 	}
 }
 
+// engineContainerResources returns the engine container's Resources
+// as declared on spec.template (the no-class shorthand around
+// effectiveEngineResources). Used by test fixtures that build an
+// expected STS to compare against the buildStatefulSet output.
 func engineContainerResources(spec *computev1alpha1.FireboltEngineSpec) corev1.ResourceRequirements {
-	return *spec.Resources.DeepCopy()
+	return effectiveEngineResources(spec, nil)
 }
 
 func resourceRequirementsEqual(actual, desired corev1.ResourceRequirements) bool {
@@ -1555,7 +1608,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 	container := podSpec.Containers[0]
 
-	expectedImage, expectedPullPolicy := effectiveEngineImage(classInfo)
+	expectedImage, expectedPullPolicy := effectiveEngineImage(spec, classInfo)
 	if container.Image != expectedImage {
 		return false
 	}
@@ -1579,7 +1632,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !sidecarsMatch(podSpec.Containers, engineClassSidecars(classInfo)) {
+	if !sidecarsMatch(podSpec.Containers, effectiveSidecars(spec, classInfo)) {
 		return false
 	}
 

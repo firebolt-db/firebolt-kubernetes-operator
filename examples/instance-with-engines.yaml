@@ -69,13 +69,19 @@ spec:
   instanceRef: firebolt
   engineClassRef: shared-compute
   replicas: 2
-  resources:
-    requests:
-      cpu: "2"
-      memory: 3Gi
-    limits:
-      cpu: "2"
-      memory: 3Gi
+  # Per-engine pod overrides (FB-1426). Merge order, top wins:
+  #   operator defaults < class template (shared-compute) < spec.template
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: 3Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
 ---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
@@ -86,10 +92,14 @@ spec:
   instanceRef: firebolt
   engineClassRef: shared-compute
   replicas: 1
-  resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "1"
-      memory: 4Gi
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi

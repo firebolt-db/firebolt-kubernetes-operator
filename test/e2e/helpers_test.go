@@ -308,7 +308,8 @@ func CreateBareEngineWithClassRef(ctx context.Context, instanceRef, name, classR
 // resource requests/limits, bypassing the default 100m/2Gi the other
 // helpers stamp on. Used by failure-isolation tests that need an engine
 // to fail at startup (e.g. memory limit small enough to OOMKill the
-// container before its first health probe).
+// container before its first health probe). Resources now live under
+// spec.template.spec.containers[engine] (FB-1426).
 func CreateEngineWithResources(ctx context.Context, instanceName, name string, replicas int, resources corev1.ResourceRequirements) error {
 	cl, err := getCRDClient()
 	if err != nil {
@@ -321,9 +322,16 @@ func CreateEngineWithResources(ctx context.Context, instanceName, name string, r
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef:        instanceName,
-			Replicas:           int32(replicas),
-			Resources:          resources,
+			InstanceRef: instanceName,
+			Replicas:    int32(replicas),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:      computev1alpha1.EngineContainerName,
+						Resources: resources,
+					}},
+				},
+			},
 			DrainCheckEnabled:  &drainCheckEnabled,
 			DrainCheckInterval: &metav1.Duration{Duration: 2 * time.Second},
 			Rollout:            computev1alpha1.RolloutStrategy("graceful"),
@@ -349,14 +357,21 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 			InstanceRef:    instanceName,
 			Replicas:       int32(replicas),
 			EngineClassRef: classRef,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("100m"),
-					corev1.ResourceMemory: resource.MustParse("2Gi"),
-				},
-				Limits: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("100m"),
-					corev1.ResourceMemory: resource.MustParse("2Gi"),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+							},
+						},
+					}},
 				},
 			},
 			DrainCheckEnabled:  &drainCheckEnabled,

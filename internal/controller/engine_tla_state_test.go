@@ -50,17 +50,24 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 	}
 	sa := fmt.Sprintf("sa-v%d", s.SpecVer)
 	return computev1alpha1.FireboltEngineSpec{
-		InstanceRef:        "test-instance",
-		Replicas:           replicas,
-		ServiceAccountName: &sa,
-		Resources: corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("2"),
-				corev1.ResourceMemory: resource.MustParse("8Gi"),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("2"),
-				corev1.ResourceMemory: resource.MustParse("8Gi"),
+		InstanceRef: "test-instance",
+		Replicas:    replicas,
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				ServiceAccountName: sa,
+				Containers: []corev1.Container{{
+					Name: computev1alpha1.EngineContainerName,
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("2"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+					},
+				}},
 			},
 		},
 		Rollout: computev1alpha1.RolloutGraceful,
@@ -173,7 +180,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		CurrentGen:    m.status.CurrentGeneration,
 		ActiveGen:     m.status.ActiveGeneration,
 		DrainingGen:   -1,
-		SpecVer:       parseSAVer(m.spec.ServiceAccountName),
+		SpecVer:       parseSpecTemplateSAVer(m.spec),
 		SpecWantsStop: m.spec.Replicas == 0,
 		SvcTargetGen:  -1,
 		PodsReady:     m.podsReady,
@@ -205,15 +212,16 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 	return st
 }
 
-// parseSAVer extracts the integer N from a "sa-v<N>" ServiceAccountName
-// pointer used by the TLA+ harness to encode specVer. Returns -1 if the
-// pointer is nil or the name does not parse — every test state uses the
-// canonical form so this is a defensive guard, not a behavior.
-func parseSAVer(sa *string) int {
-	if sa == nil {
+// parseSpecTemplateSAVer extracts the integer N from a "sa-v<N>"
+// ServiceAccountName found on spec.template.spec, used by the TLA+
+// harness to encode specVer. Returns -1 if the template is nil or the
+// SA does not parse — every test state uses the canonical form so this
+// is a defensive guard, not a behavior.
+func parseSpecTemplateSAVer(spec computev1alpha1.FireboltEngineSpec) int {
+	if spec.Template == nil {
 		return -1
 	}
-	return parseSAToken(*sa)
+	return parseSANameVer(spec.Template.Spec.ServiceAccountName)
 }
 
 // parseSANameVer is the StatefulSet-side counterpart of parseSAVer: the

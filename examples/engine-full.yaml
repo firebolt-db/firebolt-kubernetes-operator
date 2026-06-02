@@ -13,23 +13,6 @@ spec:
   instanceRef: firebolt
   replicas: 2
 
-  # Dedicated ServiceAccount for pods (see manifest above). Bind RBAC as needed.
-  serviceAccountName: firebolt-engine
-
-  # Image is sourced from the operator-default at install time or from a
-  # referenced FireboltEngineClass's pod template (spec.engineClassRef). There is
-  # no per-engine image override on FireboltEngine — engine-level
-  # configuration that varies per workload (replicas, resources, scheduling)
-  # stays here; image is governed at the operator / class level so
-  # platform teams can audit image rollouts in one place.
-  resources:
-    requests:
-      cpu: "2"
-      memory: 4Gi
-    limits:
-      cpu: "2"
-      memory: 4Gi
-
   # Per-replica engine data volume at /firebolt-core/volume. Changing storage
   # triggers a blue-green rollout. Omit storage entirely (or set it to {}) to
   # accept the operator default of an emptyDir; opt into a PersistentVolumeClaim
@@ -47,52 +30,76 @@ spec:
   rollout: graceful                 # graceful (default) | recreate
   drainCheckEnabled: true
   drainCheckInterval: 10s
-  terminationGracePeriodSeconds: 60
 
-  # Pod annotations. Forwarded to .spec.template.metadata.annotations on the
-  # generated StatefulSet. Use these for integrations that key off pod
-  # metadata: Prometheus scrape config, vertical-pod-autoscaler / Karpenter
-  # disruption hints, mesh sidecar opt-in, cost allocation, policy engines.
-  # Operator-managed annotations always win against user-provided values with
-  # the same key. Changes here trigger a blue-green rollout.
-  podAnnotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9090"
-    karpenter.sh/do-not-disrupt: "true"
+  # Per-engine pod overrides (FB-1426). All pod-template surface area —
+  # serviceAccountName, resources, env, volume mounts, scheduling, pod
+  # annotations / labels — lives under spec.template. The operator
+  # owns container name "engine" and the StatefulSet-level
+  # terminationGracePeriodSeconds; both are rejected at admission if
+  # you try to override them here. Merge order, top wins:
+  #   operator defaults < class template (spec.engineClassRef) < spec.template
+  template:
+    metadata:
+      # Pod annotations. Forwarded to the generated StatefulSet's
+      # .spec.template.metadata.annotations. Use these for integrations
+      # that key off pod metadata: Prometheus scrape config,
+      # vertical-pod-autoscaler / Karpenter disruption hints, mesh
+      # sidecar opt-in, cost allocation, policy engines. Operator-managed
+      # annotations always win against user-provided values with the
+      # same key. Changes trigger a blue-green rollout.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      # Dedicated ServiceAccount for pods (see manifest above). Bind RBAC as needed.
+      serviceAccountName: firebolt-engine
 
-  # Scheduling
-  nodeSelector:
-    firebolt.dev/pool: engine
-    topology.kubernetes.io/zone: us-east-1a
-  tolerations:
-    - key: firebolt.dev/pool
-      operator: Equal
-      value: engine
-      effect: NoSchedule
-  # Affinity supports the full corev1.Affinity shape. Changes trigger a rollout.
-  # Note: matchLabels values below reference this CR's metadata.name ("engine");
-  # rename the engine and you MUST update them, or the selectors match no pods.
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: firebolt.dev/pool
-                operator: In
-                values: ["engine"]
-    # Preferred (not required): required podAffinity on the pod's own label
-    # deadlocks ParallelPodManagement — neither parallel pod has a peer yet.
-    podAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            topologyKey: topology.kubernetes.io/zone
-            labelSelector:
-              matchLabels:
-                firebolt.io/engine: engine
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - topologyKey: kubernetes.io/hostname
-          labelSelector:
-            matchLabels:
-              firebolt.io/engine: engine
+      containers:
+        # Operator-owned engine container. Resources, env, envFrom,
+        # volumeMounts, lifecycle, securityContext go here.
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+
+      # Scheduling
+      nodeSelector:
+        firebolt.dev/pool: engine
+        topology.kubernetes.io/zone: us-east-1a
+      tolerations:
+        - key: firebolt.dev/pool
+          operator: Equal
+          value: engine
+          effect: NoSchedule
+      # Affinity supports the full corev1.Affinity shape. Changes trigger a rollout.
+      # Note: matchLabels values below reference this CR's metadata.name ("engine");
+      # rename the engine and you MUST update them, or the selectors match no pods.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: firebolt.dev/pool
+                    operator: In
+                    values: ["engine"]
+        # Preferred (not required): required podAffinity on the pod's own label
+        # deadlocks ParallelPodManagement — neither parallel pod has a peer yet.
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: topology.kubernetes.io/zone
+                labelSelector:
+                  matchLabels:
+                    firebolt.io/engine: engine
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  firebolt.io/engine: engine
