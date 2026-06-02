@@ -270,6 +270,112 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			},
 			wantField: "spec.template.spec.initContainers[1].name",
 		},
+		// Security / footgun pod-level fields (FB-1426 follow-up).
+		{
+			name: "pod hostNetwork",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.HostNetwork = true
+			},
+			wantField: "spec.template.spec.hostNetwork",
+		},
+		{
+			name: "pod hostPID",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.HostPID = true
+			},
+			wantField: "spec.template.spec.hostPID",
+		},
+		{
+			name: "pod hostIPC",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.HostIPC = true
+			},
+			wantField: "spec.template.spec.hostIPC",
+		},
+		{
+			name: "pod shareProcessNamespace",
+			mutate: func(ec *FireboltEngineClass) {
+				v := true
+				ec.Spec.Template.Spec.ShareProcessNamespace = &v
+			},
+			wantField: "spec.template.spec.shareProcessNamespace",
+		},
+		{
+			name: "pod hostUsers",
+			mutate: func(ec *FireboltEngineClass) {
+				v := false
+				ec.Spec.Template.Spec.HostUsers = &v
+			},
+			wantField: "spec.template.spec.hostUsers",
+		},
+		// Engine-container interactive-orchestration rejections.
+		{
+			name: "engine container restartPolicy",
+			mutate: func(ec *FireboltEngineClass) {
+				v := corev1.ContainerRestartPolicyAlways
+				ec.Spec.Template.Spec.Containers[0].RestartPolicy = &v
+			},
+			wantField: "spec.template.spec.containers[0].restartPolicy",
+		},
+		{
+			name: "engine container stdin",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[0].Stdin = true
+			},
+			wantField: "spec.template.spec.containers[0].stdin",
+		},
+		{
+			name: "engine container stdinOnce",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[0].StdinOnce = true
+			},
+			wantField: "spec.template.spec.containers[0].stdinOnce",
+		},
+		{
+			name: "engine container tty",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[0].TTY = true
+			},
+			wantField: "spec.template.spec.containers[0].tty",
+		},
+		// Pod-template metadata silent-drop fields.
+		{
+			name: "pod template metadata.name",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Name = "user-named-pod"
+			},
+			wantField: "spec.template.metadata.name",
+		},
+		{
+			name: "pod template metadata.generateName",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.GenerateName = "user-generated-"
+			},
+			wantField: "spec.template.metadata.generateName",
+		},
+		{
+			name: "pod template metadata.namespace",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Namespace = "elsewhere"
+			},
+			wantField: "spec.template.metadata.namespace",
+		},
+		{
+			name: "pod template metadata.ownerReferences",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.OwnerReferences = []metav1.OwnerReference{{
+					APIVersion: "v1", Kind: "Pod", Name: "x", UID: "00000000-0000-0000-0000-000000000000",
+				}}
+			},
+			wantField: "spec.template.metadata.ownerReferences",
+		},
+		{
+			name: "pod template metadata.finalizers",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Finalizers = []string{"user.example.com/protect"}
+			},
+			wantField: "spec.template.metadata.finalizers",
+		},
 	}
 
 	v := &FireboltEngineClassCustomValidator{}
