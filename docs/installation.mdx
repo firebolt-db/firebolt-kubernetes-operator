@@ -18,6 +18,21 @@ The Firebolt Operator needs its CustomResourceDefinitions before any `FireboltIn
 `FireboltEngine`, or `FireboltEngineClass` resources can be created. There are two
 supported installation patterns.
 
+The Firebolt CRDs embed the full Kubernetes `PodTemplateSpec` schema and are
+several hundred kilobytes each, well above the 256 KB ceiling on the
+`kubectl.kubernetes.io/last-applied-configuration` annotation that client-side
+`kubectl apply` uses. Helm bypasses this annotation entirely and installs the
+CRDs cleanly with either option below. If you ever install the CRDs directly
+with `kubectl`, use server-side apply:
+
+```bash
+kubectl apply --server-side --force-conflicts -f config/crd/bases/
+```
+
+The same guidance applies to the custom resources (`FireboltInstance`,
+`FireboltEngine`, `FireboltEngineClass`): always apply them with
+`--server-side`. The Quickstart shows the flag in every `kubectl apply` example.
+
 ### Option 1: Separate CRD chart
 
 Install the CRD chart before installing the Firebolt Operator controller:
