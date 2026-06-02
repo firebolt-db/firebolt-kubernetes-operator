@@ -1558,6 +1558,43 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
 		}
 	})
+
+	t.Run("rendered affinity is not aliased to spec", func(t *testing.T) {
+		// Regression guard: pre-FB-1426 effectiveAffinity returned the
+		// spec pointer directly, asymmetric with the other effective*
+		// helpers that copy. Mutating the rendered STS's Affinity must
+		// not bleed back into the spec.
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+							MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      "pool",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"engine"},
+							}},
+						}},
+					},
+				},
+			}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+
+		// Mutate the rendered STS's Affinity in place — must not reach
+		// the spec's Affinity.
+		sts.Spec.Template.Spec.Affinity.NodeAffinity.
+			RequiredDuringSchedulingIgnoredDuringExecution.
+			NodeSelectorTerms[0].MatchExpressions[0].Values[0] = "mutated"
+
+		specVal := spec.Template.Spec.Affinity.NodeAffinity.
+			RequiredDuringSchedulingIgnoredDuringExecution.
+			NodeSelectorTerms[0].MatchExpressions[0].Values[0]
+		if specVal != "engine" {
+			t.Fatalf("aliasing: spec.Affinity was mutated via rendered STS, got %q want \"engine\"", specVal)
+		}
+	})
 }
 
 func TestBuildStatefulSet_PodLabels(t *testing.T) {
