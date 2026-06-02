@@ -1,0 +1,57 @@
+# FireboltEngine that pins its own engine image (and pull policy) directly
+# on spec.template, without going through a FireboltEngineClass. Useful for:
+#
+#   - Pre-release / dev tag validation on a single engine in a shared
+#     namespace.
+#   - One-off canaries: ship a new engine image to one engine while peers
+#     stay on the operator default or on a class-managed tag.
+#   - Local-cluster experimentation where standing up a class for one
+#     engine would be more boilerplate than the override itself.
+#
+# Prefer spec.engineClassRef when many engines share a pinned image — the
+# class is the single point of edit and every consumer rolls together.
+# Reach for spec.template.containers[engine].image when exactly one
+# engine needs a different image than its peers.
+#
+# Merge order, top wins: operator default < FireboltEngineClass.spec.template
+# (when set) < FireboltEngine.spec.template. The image set below therefore
+# always wins on this engine even when an engineClassRef is also set.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: firebolt
+spec:
+  metadata: {}
+  gateway: {}
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: engine
+spec:
+  instanceRef: firebolt
+  replicas: 1
+  customEngineConfig:
+    storage:
+      type: minio
+      api_scheme: "s3://"
+      bucket_name: my-engine-bucket
+      minio:
+        endpoint: http://floci:4566
+  template:
+    spec:
+      containers:
+        - name: engine
+          # Direct image override on this engine, no class needed.
+          # Always: a dev tag should pair with imagePullPolicy: Always so
+          # a re-pushed mutable tag actually reaches the node on the next
+          # pod replacement. Pinned digests can drop back to IfNotPresent.
+          image: ghcr.io/firebolt-db/firebolt:dev-feature-x
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi
