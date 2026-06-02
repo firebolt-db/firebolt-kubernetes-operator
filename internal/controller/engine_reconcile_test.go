@@ -1597,6 +1597,184 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 	})
 }
 
+// TestBuildStatefulSet_HonorsExtraPodSpecFields covers the FB-1426
+// follow-up that wired through every PodSpec field the operator
+// embeds via spec.template but did not previously consume. Each
+// sub-test sets one field on the engine template and asserts both:
+// (a) the value lands on the rendered StatefulSet's pod template,
+// (b) stsMatchesSpec sees it (no false drift) and detects removal
+// (false-positive drift guard skipped — covered by the existing
+// "drift detected" tests for the other carriers).
+func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
+	t.Run("topologySpreadConstraints", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{
+				MaxSkew:           1,
+				TopologyKey:       "topology.kubernetes.io/zone",
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{LabelEngine: testEngineName}},
+			}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if len(sts.Spec.Template.Spec.TopologySpreadConstraints) != 1 {
+			t.Fatalf("topologySpreadConstraints not propagated: %+v", sts.Spec.Template.Spec.TopologySpreadConstraints)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching topologySpreadConstraints")
+		}
+	})
+
+	t.Run("priorityClassName", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.PriorityClassName = "critical" })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.PriorityClassName != "critical" {
+			t.Fatalf("PriorityClassName = %q, want critical", sts.Spec.Template.Spec.PriorityClassName)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching priorityClassName")
+		}
+		if stsMatchesSpec(sts, testSpec(), nil) {
+			t.Error("stsMatchesSpec: failed to detect drift after priorityClassName removed from spec")
+		}
+	})
+
+	t.Run("runtimeClassName", func(t *testing.T) {
+		spec := testSpec()
+		rc := "gvisor"
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.RuntimeClassName = &rc })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.RuntimeClassName == nil || *sts.Spec.Template.Spec.RuntimeClassName != "gvisor" {
+			t.Fatalf("RuntimeClassName = %+v, want gvisor", sts.Spec.Template.Spec.RuntimeClassName)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching runtimeClassName")
+		}
+	})
+
+	t.Run("dnsPolicy + dnsConfig", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+			p.DNSConfig = &corev1.PodDNSConfig{
+				Nameservers: []string{"1.1.1.1"},
+				Searches:    []string{"svc.cluster.local"},
+			}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.DNSPolicy != corev1.DNSClusterFirstWithHostNet {
+			t.Errorf("DNSPolicy = %q, want ClusterFirstWithHostNet", sts.Spec.Template.Spec.DNSPolicy)
+		}
+		if sts.Spec.Template.Spec.DNSConfig == nil || len(sts.Spec.Template.Spec.DNSConfig.Nameservers) != 1 {
+			t.Errorf("DNSConfig = %+v, want nameservers", sts.Spec.Template.Spec.DNSConfig)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching dnsPolicy/dnsConfig")
+		}
+	})
+
+	t.Run("schedulerName", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.SchedulerName = "custom-scheduler" })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.SchedulerName != "custom-scheduler" {
+			t.Fatalf("SchedulerName = %q, want custom-scheduler", sts.Spec.Template.Spec.SchedulerName)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching schedulerName")
+		}
+	})
+
+	t.Run("preemptionPolicy", func(t *testing.T) {
+		spec := testSpec()
+		p := corev1.PreemptNever
+		setSpecTemplatePod(spec, func(s *corev1.PodSpec) { s.PreemptionPolicy = &p })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.PreemptionPolicy == nil || *sts.Spec.Template.Spec.PreemptionPolicy != corev1.PreemptNever {
+			t.Fatalf("PreemptionPolicy = %+v, want Never", sts.Spec.Template.Spec.PreemptionPolicy)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching preemptionPolicy")
+		}
+	})
+
+	t.Run("readinessGates", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "example.com/Ready"}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if len(sts.Spec.Template.Spec.ReadinessGates) != 1 {
+			t.Fatalf("ReadinessGates = %+v, want 1", sts.Spec.Template.Spec.ReadinessGates)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching readinessGates")
+		}
+	})
+
+	t.Run("hostAliases", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.HostAliases = []corev1.HostAlias{{IP: "10.0.0.1", Hostnames: []string{"db.local"}}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if len(sts.Spec.Template.Spec.HostAliases) != 1 || sts.Spec.Template.Spec.HostAliases[0].IP != "10.0.0.1" {
+			t.Fatalf("HostAliases = %+v, want one entry", sts.Spec.Template.Spec.HostAliases)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching hostAliases")
+		}
+	})
+
+	t.Run("pod OS", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.OS = &corev1.PodOS{Name: corev1.Linux} })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if sts.Spec.Template.Spec.OS == nil || sts.Spec.Template.Spec.OS.Name != corev1.Linux {
+			t.Fatalf("OS = %+v, want linux", sts.Spec.Template.Spec.OS)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching OS")
+		}
+	})
+
+	t.Run("overhead", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Overhead = corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Overhead[corev1.ResourceMemory]; got.String() != "128Mi" {
+			t.Fatalf("Overhead[memory] = %s, want 128Mi", got.String())
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching overhead")
+		}
+		// Semantic equivalence: 128Mi == 131072Ki via Quantity.Cmp.
+		sts.Spec.Template.Spec.Overhead = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("131072Ki")}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on semantically equivalent overhead quantity")
+		}
+	})
+
+	t.Run("resourceClaims", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.ResourceClaims = []corev1.PodResourceClaim{{Name: "gpu"}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if len(sts.Spec.Template.Spec.ResourceClaims) != 1 || sts.Spec.Template.Spec.ResourceClaims[0].Name != "gpu" {
+			t.Fatalf("ResourceClaims = %+v, want one entry", sts.Spec.Template.Spec.ResourceClaims)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching resourceClaims")
+		}
+	})
+}
+
 func TestBuildStatefulSet_PodLabels(t *testing.T) {
 	t.Run("base labels always present", func(t *testing.T) {
 		spec := testSpec()

@@ -747,6 +747,18 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					NodeSelector:                  effectiveNodeSelector(spec, classInfo),
 					Tolerations:                   effectiveTolerations(spec, classInfo),
 					Affinity:                      effectiveAffinity(spec, classInfo),
+					TopologySpreadConstraints:     effectiveTopologySpreadConstraints(spec, classInfo),
+					PriorityClassName:             effectivePriorityClassName(spec, classInfo),
+					RuntimeClassName:              effectiveRuntimeClassName(spec, classInfo),
+					DNSPolicy:                     effectiveDNSPolicy(spec, classInfo),
+					DNSConfig:                     effectiveDNSConfig(spec, classInfo),
+					SchedulerName:                 effectiveSchedulerName(spec, classInfo),
+					PreemptionPolicy:              effectivePreemptionPolicy(spec, classInfo),
+					ReadinessGates:                effectiveReadinessGates(spec, classInfo),
+					ResourceClaims:                effectivePodResourceClaims(spec, classInfo),
+					HostAliases:                   effectiveHostAliases(spec, classInfo),
+					OS:                            effectivePodOS(spec, classInfo),
+					Overhead:                      effectivePodOverhead(spec, classInfo),
 					InitContainers:                effectiveInitContainers(spec, classInfo),
 					TerminationGracePeriodSeconds: &gracePeriod,
 					SecurityContext:               podSecurityContext,
@@ -1005,6 +1017,207 @@ func effectiveAffinity(spec *computev1alpha1.FireboltEngineSpec, classInfo *Fire
 	}
 	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.Affinity != nil {
 		return classInfo.Template.Spec.Affinity.DeepCopy()
+	}
+	return nil
+}
+
+// effectiveTopologySpreadConstraints concatenates the class template's
+// topologySpreadConstraints with the engine template's, class first.
+// Constraints are independently evaluated by the scheduler, so
+// concatenation matches the engine controller's other slice-typed
+// fields (tolerations, init containers, sidecars).
+func effectiveTopologySpreadConstraints(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.TopologySpreadConstraint {
+	var classTSC []corev1.TopologySpreadConstraint
+	if classInfo != nil && classInfo.Template != nil {
+		classTSC = classInfo.Template.Spec.TopologySpreadConstraints
+	}
+	engineTSC := engineTemplate(spec).Spec.TopologySpreadConstraints
+	if len(classTSC) == 0 && len(engineTSC) == 0 {
+		return nil
+	}
+	out := make([]corev1.TopologySpreadConstraint, 0, len(classTSC)+len(engineTSC))
+	for i := range classTSC {
+		out = append(out, *classTSC[i].DeepCopy())
+	}
+	for i := range engineTSC {
+		out = append(out, *engineTSC[i].DeepCopy())
+	}
+	return out
+}
+
+// effectivePriorityClassName picks the engine template's value when set,
+// else the class template's, else "". Whole-string ownership.
+func effectivePriorityClassName(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) string {
+	if s := engineTemplate(spec).Spec.PriorityClassName; s != "" {
+		return s
+	}
+	if classInfo != nil && classInfo.Template != nil {
+		return classInfo.Template.Spec.PriorityClassName
+	}
+	return ""
+}
+
+// effectiveRuntimeClassName picks the engine template's value when set,
+// else the class template's, else nil.
+func effectiveRuntimeClassName(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *string {
+	if s := engineTemplate(spec).Spec.RuntimeClassName; s != nil {
+		v := *s
+		return &v
+	}
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.RuntimeClassName != nil {
+		v := *classInfo.Template.Spec.RuntimeClassName
+		return &v
+	}
+	return nil
+}
+
+// effectiveDNSPolicy picks the engine template's value when set, else
+// the class template's, else "" (which causes the apiserver to default
+// to ClusterFirst).
+func effectiveDNSPolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.DNSPolicy {
+	if p := engineTemplate(spec).Spec.DNSPolicy; p != "" {
+		return p
+	}
+	if classInfo != nil && classInfo.Template != nil {
+		return classInfo.Template.Spec.DNSPolicy
+	}
+	return ""
+}
+
+// effectiveDNSConfig picks the engine template's value when set, else
+// the class template's, else nil. Whole-struct ownership: the
+// nameservers / searches / options trio is generally authored as a
+// unit and a partial merge would surprise.
+func effectiveDNSConfig(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.PodDNSConfig {
+	if c := engineTemplate(spec).Spec.DNSConfig; c != nil {
+		return c.DeepCopy()
+	}
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.DNSConfig != nil {
+		return classInfo.Template.Spec.DNSConfig.DeepCopy()
+	}
+	return nil
+}
+
+// effectiveSchedulerName picks the engine template's value when set,
+// else the class template's, else "" (default scheduler).
+func effectiveSchedulerName(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) string {
+	if s := engineTemplate(spec).Spec.SchedulerName; s != "" {
+		return s
+	}
+	if classInfo != nil && classInfo.Template != nil {
+		return classInfo.Template.Spec.SchedulerName
+	}
+	return ""
+}
+
+// effectivePreemptionPolicy picks the engine template's value when set,
+// else the class template's, else nil.
+func effectivePreemptionPolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.PreemptionPolicy {
+	if p := engineTemplate(spec).Spec.PreemptionPolicy; p != nil {
+		v := *p
+		return &v
+	}
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.PreemptionPolicy != nil {
+		v := *classInfo.Template.Spec.PreemptionPolicy
+		return &v
+	}
+	return nil
+}
+
+// effectiveReadinessGates concatenates class then engine, mirroring
+// tolerations. Readiness gates are independently evaluated and adding
+// one cannot subtract a sibling's contribution, so concatenation is
+// the natural merge.
+func effectiveReadinessGates(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.PodReadinessGate {
+	var classGates []corev1.PodReadinessGate
+	if classInfo != nil && classInfo.Template != nil {
+		classGates = classInfo.Template.Spec.ReadinessGates
+	}
+	engineGates := engineTemplate(spec).Spec.ReadinessGates
+	if len(classGates) == 0 && len(engineGates) == 0 {
+		return nil
+	}
+	out := make([]corev1.PodReadinessGate, 0, len(classGates)+len(engineGates))
+	out = append(out, classGates...)
+	out = append(out, engineGates...)
+	return out
+}
+
+// effectivePodResourceClaims concatenates pod-level ResourceClaims
+// from the class template and the engine template, class first. This
+// pre-merges the pod claim list the engine container's
+// volumeDevices / resources.Claims may reference by name.
+func effectivePodResourceClaims(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.PodResourceClaim {
+	var classClaims []corev1.PodResourceClaim
+	if classInfo != nil && classInfo.Template != nil {
+		classClaims = classInfo.Template.Spec.ResourceClaims
+	}
+	engineClaims := engineTemplate(spec).Spec.ResourceClaims
+	if len(classClaims) == 0 && len(engineClaims) == 0 {
+		return nil
+	}
+	out := make([]corev1.PodResourceClaim, 0, len(classClaims)+len(engineClaims))
+	for i := range classClaims {
+		out = append(out, *classClaims[i].DeepCopy())
+	}
+	for i := range engineClaims {
+		out = append(out, *engineClaims[i].DeepCopy())
+	}
+	return out
+}
+
+// effectiveHostAliases concatenates host aliases from both sides,
+// class first. /etc/hosts entries are independently meaningful.
+func effectiveHostAliases(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.HostAlias {
+	var classAliases []corev1.HostAlias
+	if classInfo != nil && classInfo.Template != nil {
+		classAliases = classInfo.Template.Spec.HostAliases
+	}
+	engineAliases := engineTemplate(spec).Spec.HostAliases
+	if len(classAliases) == 0 && len(engineAliases) == 0 {
+		return nil
+	}
+	out := make([]corev1.HostAlias, 0, len(classAliases)+len(engineAliases))
+	for i := range classAliases {
+		out = append(out, *classAliases[i].DeepCopy())
+	}
+	for i := range engineAliases {
+		out = append(out, *engineAliases[i].DeepCopy())
+	}
+	return out
+}
+
+// effectivePodOS picks the engine template's value when set, else
+// the class template's, else nil. Whole-struct ownership.
+func effectivePodOS(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.PodOS {
+	if o := engineTemplate(spec).Spec.OS; o != nil {
+		return o.DeepCopy()
+	}
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.OS != nil {
+		return classInfo.Template.Spec.OS.DeepCopy()
+	}
+	return nil
+}
+
+// effectivePodOverhead picks the engine template's value when set,
+// else the class template's, else nil. Overhead is a ResourceList
+// keyed by ResourceName; whole-map ownership keeps it consistent with
+// how the engine container's Resources field is merged (engine wins
+// wholesale, no per-key merge).
+func effectivePodOverhead(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.ResourceList {
+	if o := engineTemplate(spec).Spec.Overhead; len(o) > 0 {
+		out := make(corev1.ResourceList, len(o))
+		for k, v := range o {
+			out[k] = v.DeepCopy()
+		}
+		return out
+	}
+	if classInfo != nil && classInfo.Template != nil && len(classInfo.Template.Spec.Overhead) > 0 {
+		out := make(corev1.ResourceList, len(classInfo.Template.Spec.Overhead))
+		for k, v := range classInfo.Template.Spec.Overhead {
+			out[k] = v.DeepCopy()
+		}
+		return out
 	}
 	return nil
 }
@@ -1619,6 +1832,104 @@ func annotationsEqual(a, b map[string]string) bool {
 	return true
 }
 
+// stringPtrsEqual compares two *string by value, treating nil and ""
+// (or two nils, or two empty pointers) as equal. corev1.PodSpec.RuntimeClassName
+// is a *string, and an apiserver round-trip can flip a "" pointer back
+// to nil; reflect.DeepEqual would report drift on that flip.
+func stringPtrsEqual(a, b *string) bool {
+	av, bv := "", ""
+	if a != nil {
+		av = *a
+	}
+	if b != nil {
+		bv = *b
+	}
+	return av == bv
+}
+
+// preemptionPolicyEqual is the *corev1.PreemptionPolicy sibling of
+// stringPtrsEqual. The kubelet defaults a nil PreemptionPolicy to
+// PreemptLowerPriority on read-back via the apiserver in some
+// versions; comparing by value-or-empty keeps stsMatchesSpec from
+// rolling a fresh generation on that no-op default flip.
+func preemptionPolicyEqual(a, b *corev1.PreemptionPolicy) bool {
+	av, bv := corev1.PreemptionPolicy(""), corev1.PreemptionPolicy("")
+	if a != nil {
+		av = *a
+	}
+	if b != nil {
+		bv = *b
+	}
+	return av == bv
+}
+
+// overheadEqual compares two ResourceList overhead maps. nil and
+// empty are treated as identical (matches what the apiserver does on
+// json:omitempty round-trip), and each Quantity is compared with the
+// resource.Quantity Cmp method so semantic equivalents (e.g. "1Gi"
+// vs "1024Mi") do not produce false drift.
+func overheadEqual(a, b corev1.ResourceList) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok {
+			return false
+		}
+		if av.Cmp(bv) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// extraPodSpecFieldsMatch is the drift comparator for the pod-spec
+// fields the operator passes through verbatim from the engine template
+// (with the FireboltEngineClass template's value as a fallback).
+// Extracted out of stsMatchesSpec to keep the latter's cyclomatic
+// complexity reasonable as the set of honored pod-template fields
+// grows.
+func extraPodSpecFieldsMatch(podSpec *corev1.PodSpec, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+	if !reflect.DeepEqual(podSpec.TopologySpreadConstraints, effectiveTopologySpreadConstraints(spec, classInfo)) {
+		return false
+	}
+	if podSpec.PriorityClassName != effectivePriorityClassName(spec, classInfo) {
+		return false
+	}
+	if !stringPtrsEqual(podSpec.RuntimeClassName, effectiveRuntimeClassName(spec, classInfo)) {
+		return false
+	}
+	if podSpec.DNSPolicy != effectiveDNSPolicy(spec, classInfo) {
+		return false
+	}
+	if !reflect.DeepEqual(podSpec.DNSConfig, effectiveDNSConfig(spec, classInfo)) {
+		return false
+	}
+	if podSpec.SchedulerName != effectiveSchedulerName(spec, classInfo) {
+		return false
+	}
+	if !preemptionPolicyEqual(podSpec.PreemptionPolicy, effectivePreemptionPolicy(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(podSpec.ReadinessGates, effectiveReadinessGates(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(podSpec.ResourceClaims, effectivePodResourceClaims(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(podSpec.HostAliases, effectiveHostAliases(spec, classInfo)) {
+		return false
+	}
+	if !reflect.DeepEqual(podSpec.OS, effectivePodOS(spec, classInfo)) {
+		return false
+	}
+	if !overheadEqual(podSpec.Overhead, effectivePodOverhead(spec, classInfo)) {
+		return false
+	}
+	return true
+}
+
 // stsMatchesSpec returns true if the StatefulSet matches all mutable fields
 // in the engine spec. A mismatch triggers a new blue-green generation.
 // classInfo carries the resolved FireboltEngineClass template (nil when the engine
@@ -1657,6 +1968,10 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if !reflect.DeepEqual(podSpec.Affinity, effectiveAffinity(spec, classInfo)) {
+		return false
+	}
+
+	if !extraPodSpecFieldsMatch(&podSpec, spec, classInfo) {
 		return false
 	}
 
