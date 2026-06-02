@@ -1312,11 +1312,17 @@ func effectiveImagePullSecrets(spec *computev1alpha1.FireboltEngineSpec, classIn
 
 // appendUserPodVolumes appends pod-level volumes from both the class
 // template and the engine template to the operator-rendered list, in
-// that order. Volume names already present in operator are skipped:
-// the operator owns DataVolumeName and "nodes-config" and a user
-// redefinition would break those mounts.
+// that order. Volume names matching an operator-owned name are skipped.
+//
+// The reserved set is the union of (a) every name in the operator-built
+// `operator` slice and (b) the static operator-owned name list. The
+// static list catches DataVolumeName on the PVC backend, where the data
+// volume comes from spec.volumeClaimTemplates rather than from
+// spec.template.spec.volumes — without the static list, a user volume
+// named "data" would slip through admission and collide with the PVC-
+// synthesized data volume at pod creation time, leaving pods Pending.
 func appendUserPodVolumes(operator []corev1.Volume, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Volume {
-	reserved := make(map[string]struct{}, len(operator))
+	reserved := operatorOwnedPodVolumeNames()
 	for i := range operator {
 		reserved[operator[i].Name] = struct{}{}
 	}
@@ -1327,6 +1333,21 @@ func appendUserPodVolumes(operator []corev1.Volume, spec *computev1alpha1.Firebo
 	}
 	out = appendUserVolumesFrom(out, engineTemplate(spec).Spec.Volumes, reserved)
 	return out
+}
+
+// operatorOwnedPodVolumeNames returns the static set of pod-volume
+// names the operator owns end-to-end. A user-supplied volume colliding
+// with one of these is silently dropped by appendUserPodVolumes. The
+// set is fixed (not derived from runtime state) so the PVC and
+// emptyDir/hostPath storage backends share the same protection — on
+// the PVC backend the data volume comes from VolumeClaimTemplates and
+// is therefore not present in the rendered pod-level Volumes list,
+// making the runtime-derived reservation insufficient.
+func operatorOwnedPodVolumeNames() map[string]struct{} {
+	return map[string]struct{}{
+		"nodes-config": {},
+		DataVolumeName: {},
+	}
 }
 
 // appendUserVolumesFrom deep-copies entries from src into dst,
