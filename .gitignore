@@ -42,3 +42,7 @@ test/e2e/pod-logs
 formal/*.dot
 
 docs/.venv
+
+# Python bytecode (docs validation scripts)
+__pycache__/
+*.pyc

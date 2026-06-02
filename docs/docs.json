@@ -1,5 +1,17 @@
 {
   "$schema": "https://mintlify.com/docs.json",
+  "redirects": [
+    {
+      "source": "/architecture/engineclass-design",
+      "destination": "/architecture/fireboltengineclass-design",
+      "permanent": false
+    },
+    {
+      "source": "/crd-reference/engineclass-crd-reference",
+      "destination": "/crd-reference/fireboltengineclass-crd-reference",
+      "permanent": false
+    }
+  ],
   "navigation": {
     "groups": [
       {
