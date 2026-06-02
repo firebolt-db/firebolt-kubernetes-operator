@@ -89,7 +89,7 @@ const (
 	//      `concurrent_in_flight_requests * (1 + retry_factor) * this`.
 	//      Doubling this value doubles the steady-state memory floor for
 	//      gateway pods at any given concurrency. The hard-coded value is
-	//      matched in helm/kubernetes-operator/values.yaml's gateway
+	//      matched in helm/firebolt-operator/values.yaml's gateway
 	//      resources defaults; raising it without also raising
 	//      `spec.gateway.resources.limits.memory` and `replicas` invites
 	//      OOMKills under load. Keeping it operator-controlled means the
