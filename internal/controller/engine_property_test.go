@@ -46,6 +46,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"pgregory.net/rapid"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -362,19 +363,40 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 	m.cache = m.api.snapshot()
 }
 
-// ApplySpecChange mutates a pod-template-affecting spec field, triggering
-// spec drift detection. The carrier is the engine-template
-// ServiceAccountName: it is single-valued, lives on
-// spec.template.spec, and participates in stsMatchesSpec via
-// effectiveServiceAccountName — same drift semantics the previous
-// flat-field ServiceAccountName carrier produced before FB-1426 moved
-// the field under spec.template.
+// ApplySpecChange mutates a pod-template-affecting spec field,
+// triggering spec drift detection. The action rotates among multiple
+// carriers — ServiceAccountName, engine container Resources, pod
+// labels — so the rapid harness covers every drift-comparator branch
+// the FB-1426 merge layer added, not only the SA single-value path.
+// Each carrier lives under spec.template post-FB-1426 and is read by
+// the matching effective* helper in stsMatchesSpec, so a regression
+// that breaks one branch (e.g. forgets to compare resources on the
+// engine container) gets caught.
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
-	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
 	if m.spec.Template == nil {
 		m.spec.Template = &corev1.PodTemplateSpec{}
 	}
-	m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", v)
+	carrier := rapid.SampledFrom([]string{"sa", "resources", "podLabel"}).Draw(t, "specCarrier")
+	v := rapid.IntRange(1, 99).Draw(t, "carrierVersion")
+	switch carrier {
+	case "sa":
+		m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", v)
+	case "resources":
+		// Use a fresh requirements block so the comparator inside
+		// resourceRequirementsEqual exercises both Requests and Limits.
+		mem := fmt.Sprintf("%dMi", 64+v) // varies in non-trivial increments
+		setSimContainerResources(m.spec.Template, corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(mem)},
+			Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(mem)},
+		})
+	case "podLabel":
+		if m.spec.Template.Labels == nil {
+			m.spec.Template.Labels = map[string]string{}
+		}
+		m.spec.Template.Labels["spec.test/version"] = fmt.Sprintf("v%d", v)
+	default:
+		t.Fatalf("ApplySpecChange: unknown carrier %q (rapid.SampledFrom should never produce this)", carrier)
+	}
 }
 
 // ApplyClassChange mutates the resolved FireboltEngineClass that this engine
@@ -400,6 +422,55 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 		},
 		Hash: fmt.Sprintf("class-hash-v%d", v),
 	}
+}
+
+// ApplyConflictingClassAndEngine sets the *same* pod-template field
+// on both the class and the engine template, with different values.
+// Forces the merge layer (effective*) to arbitrate. The harness's
+// existing invariants (the rendered STS matches stsMatchesSpec,
+// stsMatchesSpec accepts what buildStatefulSet just produced) already
+// catch a regression where the comparator and the renderer disagree
+// on precedence; this action ensures that state space is actually
+// reached, not just reachable in principle. ServiceAccountName is
+// the carrier because both effective* paths use it and the field is
+// scalar (no value-equality subtlety).
+func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
+	v := rapid.IntRange(1, 99).Draw(t, "conflictVersion")
+	if m.spec.Template == nil {
+		m.spec.Template = &corev1.PodTemplateSpec{}
+	}
+	m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("engine-sa-v%d", v)
+	m.classInfo = &FireboltEngineClassInfo{
+		Name: fmt.Sprintf("class-conflict-v%d", v),
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				ServiceAccountName: fmt.Sprintf("class-sa-v%d", v),
+			},
+		},
+		Hash: fmt.Sprintf("class-conflict-hash-v%d", v),
+	}
+}
+
+// setSimContainerResources writes (or initializes) the engine
+// container's Resources block on the harness's spec.Template. Kept
+// local to engine_property_test.go because the production code reads
+// resources via effectiveEngineResources / EngineContainerInTemplate
+// and never needs to mutate them.
+func setSimContainerResources(tmpl *corev1.PodTemplateSpec, res corev1.ResourceRequirements) {
+	idx := -1
+	for i := range tmpl.Spec.Containers {
+		if tmpl.Spec.Containers[i].Name == computev1alpha1.EngineContainerName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		tmpl.Spec.Containers = append(tmpl.Spec.Containers, corev1.Container{
+			Name: computev1alpha1.EngineContainerName,
+		})
+		idx = len(tmpl.Spec.Containers) - 1
+	}
+	tmpl.Spec.Containers[idx].Resources = res
 }
 
 // ScaleReplicas changes the replica count, also triggering spec drift.
