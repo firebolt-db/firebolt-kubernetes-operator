@@ -42,6 +42,9 @@ ENV_ACTIONS = frozenset(
         "EnvPodsDrained",
         "EnvSetInstanceReady(TRUE)",
         "EnvSetInstanceReady(FALSE)",
+        "EnvSetClassReady(TRUE)",
+        "EnvSetClassReady(FALSE)",
+        "EnvSetGatesOpen",
     ]
 )
 
@@ -183,6 +186,7 @@ def state_key(state: Dict[str, object]) -> Tuple[object, ...]:
         state["podsReady"],
         state["podsDrained"],
         state["instanceReady"],
+        state["classReady"],
     )
 
 
@@ -210,6 +214,7 @@ type tlaState struct {{
 	PodsReady      bool
 	PodsDrained    bool
 	InstanceReady  bool
+	ClassReady     bool
 }}
 
 // tlaTestCase references tlaStatePool by index. Start is the index of the
@@ -260,7 +265,8 @@ def go_state_lit(s: Dict[str, object], max_gen: int) -> str:
         f'{s["svcTargetGen"]}, '
         f'{go_bool(bool(s["podsReady"]))}, '
         f'{go_bool(bool(s["podsDrained"]))}, '
-        f'{go_bool(bool(s["instanceReady"]))}'
+        f'{go_bool(bool(s["instanceReady"]))}, '
+        f'{go_bool(bool(s["classReady"]))}'
         "}"
     )
 

@@ -77,10 +77,11 @@ VARIABLES
     svcTargetGen,   \* generation the cluster Service selector points to (-1 = no service)
     podsReady,      \* TRUE when all pods in currentGen are Running+Ready
     podsDrained,    \* TRUE when draining gen has zero running/suspended queries
-    instanceReady   \* TRUE when the referenced FireboltInstance is Ready (env-controlled)
+    instanceReady,  \* TRUE when the referenced FireboltInstance is Ready (env-controlled)
+    classReady      \* TRUE when the referenced FireboltEngineClass is Ready (env-controlled)
 
 vars == <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-          stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+          stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* ---------------------------------------------------------------------------
 \* Helpers
@@ -111,6 +112,7 @@ Init ==
     /\ podsReady     = FALSE
     /\ podsDrained   = TRUE
     /\ instanceReady = TRUE
+    /\ classReady    = TRUE
 
 \* ---------------------------------------------------------------------------
 \* Environment actions  (non-deterministic; can fire at any time)
@@ -126,7 +128,7 @@ EnvChangeSpec ==
     /\ specVer' = specVer + 1
     /\ specWantsStop' \in BOOLEAN
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* Pods in currentGen become all-ready. For spec.replicas=0 this fires
 \* trivially (0/0 pods ready) in the real code; here we require the env
@@ -135,19 +137,51 @@ EnvPodsReady ==
     /\ ~podsReady
     /\ podsReady' = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
 
 \* Pods in drainingGen finish draining (zero running/suspended queries)
 EnvPodsDrained ==
     /\ ~podsDrained
     /\ podsDrained' = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady>>
 
 \* Instance becomes ready or not-ready
 EnvSetInstanceReady(v) ==
     /\ instanceReady # v
     /\ instanceReady' = v
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, classReady>>
+
+\* FireboltEngineClass becomes ready or not-ready. Symmetric to
+\* EnvSetInstanceReady: models the FB-1145 / FB-1298 class-Ready gate
+\* (resolveFireboltEngineClassInfo refuses to consume a class whose
+\* Ready=False/OperatorOwnedFieldSet condition is set; Reconcile then
+\* surfaces ConditionReady=False/FireboltEngineClassUnready on the engine
+\* without rendering a StatefulSet). The gate fires at the same compute*
+\* entry as instanceReady, so every action that respects instanceReady
+\* also respects classReady. Switching/Draining/Cleaning intentionally
+\* bypass the gate (they do not re-resolve the class), matching the
+\* implementation.
+EnvSetClassReady(v) ==
+    /\ classReady # v
+    /\ classReady' = v
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+
+\* Atomic env action that drives BOTH instanceReady and classReady to
+\* TRUE in a single step. Used purely for liveness: independent WF on
+\* the per-flag (TRUE) actions only guarantees each flag is TRUE
+\* infinitely often, not simultaneously, so TLC can find a behavior
+\* where the two flags alternate and the gated reconcile never opens.
+\* WF on EnvSetGatesOpen forces a moment where both gates are open,
+\* satisfying the SF on the gated reconcile actions. The pre-FB-1426
+\* spec did not need this because the gate was a single flag.
+EnvSetGatesOpen ==
+    /\ \/ instanceReady = FALSE
+       \/ classReady = FALSE
+    /\ instanceReady' = TRUE
+    /\ classReady'    = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained>>
 
@@ -162,11 +196,12 @@ EnvSetInstanceReady(v) ==
 ReconcileInit ==
     /\ phase = "uninitialized"
     /\ instanceReady                          \* gate applies
+    /\ classReady                             \* gate applies
     /\ phase'      = "creating"
     /\ currentGen' = 0
     /\ activeGen'  = -1
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
 
 \* ------ Phase: stable / stopped (terminal) ------
 \* Detect spec drift or missing STS; start a new generation if needed.
@@ -181,12 +216,13 @@ ReconcileTerminal_Drift ==
     \* This is the only path out of a terminal phase.
     /\ phase \in TerminalPhases
     /\ instanceReady
+    /\ classReady
     /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen' = currentGen + 1
     /\ phase'      = "creating"
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
 
 \* GC: delete STSes that belong neither to currentGen nor drainingGen.
 \* Runs opportunistically in either terminal phase; safe to repeat.
@@ -200,7 +236,7 @@ GCOrphans ==
            /\ g # drainingGen   \* drainingGen=-1 never equals any gen in Gens
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* ------ Phase: creating ------
 \* Four mutually-exclusive sub-cases (checked in order in the real code):
@@ -218,12 +254,13 @@ ReconcileCreating_SpecDrift ==
     \* Mirrors the early-return spec-drift check in computeCreating.
     /\ phase = "creating"
     /\ instanceReady
+    /\ classReady
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen'  = currentGen + 1
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
-    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, specWantsStop, svcTargetGen, podsDrained, instanceReady>>
+    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, specWantsStop, svcTargetGen, podsDrained, instanceReady, classReady>>
 
 ReconcileCreating_SpecDrift_AtMax ==
     \* Boundary case: spec drifted but currentGen is already at the model ceiling.
@@ -231,23 +268,25 @@ ReconcileCreating_SpecDrift_AtMax ==
     \* podsReady is reset to FALSE: the old pods are gone with the deleted STS.
     /\ phase = "creating"
     /\ instanceReady
+    /\ classReady
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen = MaxGen
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsDrained, instanceReady>>
+                   svcTargetGen, podsDrained, instanceReady, classReady>>
 
 ReconcileCreating_EnsureSTS ==
     \* Create the StatefulSet for currentGen (also creates ConfigMap + headless Service
     \* in the real code; omitted here as they don't affect the phase state machine).
     /\ phase = "creating"
     /\ instanceReady
+    /\ classReady
     /\ ~StsExists(currentGen)                                   \* STS absent
     /\ ~(StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)) \* no spec drift
     /\ stsSpecVer' = [stsSpecVer EXCEPT ![currentGen] = specVer]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 ReconcileCreating_EnsureService ==
     \* Create the cluster Service when it does not yet exist (first deployment only;
@@ -255,22 +294,24 @@ ReconcileCreating_EnsureService ==
     \* The service initially points to currentGen and is updated in switching.
     /\ phase = "creating"
     /\ instanceReady
+    /\ classReady
     /\ StsMatchesSpec(currentGen)
     /\ svcTargetGen = -1
     /\ svcTargetGen' = currentGen
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady>>
 
 ReconcileCreating_Advance ==
     \* STS exists, service exists, pods ready -> transition to switching.
     /\ phase = "creating"
     /\ instanceReady
+    /\ classReady
     /\ StsMatchesSpec(currentGen)
     /\ svcTargetGen # -1
     /\ podsReady
     /\ phase' = "switching"
     /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* ------ Phase: switching ------
 \* Two sub-steps (matches computeSwitching):
@@ -283,7 +324,7 @@ ReconcileSwitching_UpdateService ==
     /\ svcTargetGen # currentGen
     /\ svcTargetGen' = currentGen
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady>>
 
 ReconcileSwitching_Complete ==
     \* Service already points to currentGen: finalise the switch.
@@ -303,7 +344,7 @@ ReconcileSwitching_Complete ==
           /\ phase'       = "draining"
           /\ drainingGen' = activeGen
           /\ podsDrained' = FALSE         \* reset; new draining target
-    /\ UNCHANGED <<currentGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsReady, instanceReady>>
+    /\ UNCHANGED <<currentGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady>>
 
 \* ------ Phase: draining ------
 \* Wait for drain completion, then go to cleaning.
@@ -315,7 +356,7 @@ ReconcileDraining_Complete ==
     /\ podsDrained
     /\ phase' = "cleaning"
     /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* ------ Phase: cleaning ------
 \* Delete old-generation resources and return to a terminal phase (stable or
@@ -328,7 +369,7 @@ ReconcileCleaning ==
     /\ drainingGen' = -1
     /\ phase'       = TerminalPhase
     /\ UNCHANGED <<currentGen, activeGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
 
 \* ---------------------------------------------------------------------------
 \* Next-state relation
@@ -340,6 +381,9 @@ Next ==
     \/ EnvPodsDrained
     \/ EnvSetInstanceReady(TRUE)
     \/ EnvSetInstanceReady(FALSE)
+    \/ EnvSetClassReady(TRUE)
+    \/ EnvSetClassReady(FALSE)
+    \/ EnvSetGatesOpen
     \/ ReconcileInit
     \/ ReconcileTerminal_Drift
     \/ GCOrphans
@@ -369,6 +413,7 @@ TypeOK ==
     /\ podsReady     \in BOOLEAN
     /\ podsDrained   \in BOOLEAN
     /\ instanceReady \in BOOLEAN
+    /\ classReady    \in BOOLEAN
 
 \* Matches user-confirmed invariant from code review:
 \* "Any persistent CurrentGeneration != ActiveGeneration while the engine is in
@@ -492,7 +537,9 @@ EventuallyTerminal == <>(phase \in TerminalPhases)
 Spec ==
     /\ Init
     /\ [][Next]_vars
-    \* Instance-gated actions: SF because instanceReady can toggle adversarially.
+    \* Instance- AND class-gated actions: SF because both readiness flags
+    \* can toggle adversarially. Same SF-vs-WF reasoning as the instance
+    \* gate above.
     /\ SF_vars(ReconcileInit)
     /\ SF_vars(ReconcileTerminal_Drift)
     /\ SF_vars(ReconcileCreating_SpecDrift)
@@ -508,6 +555,8 @@ Spec ==
     /\ WF_vars(EnvPodsReady)
     /\ WF_vars(EnvPodsDrained)
     /\ WF_vars(EnvSetInstanceReady(TRUE))
+    /\ WF_vars(EnvSetClassReady(TRUE))
+    /\ WF_vars(EnvSetGatesOpen)
 
 \* Theorems (checked by TLC, provable by TLAPS for the infinite-state version)
 THEOREM Spec => []Safety
