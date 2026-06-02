@@ -424,6 +424,22 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 	}
 }
 
+// ApplyClassUnready models the FB-1145 / FB-1298 class-Ready gate by
+// nulling out the resolved classInfo. The production controller's
+// resolveFireboltEngineClassInfo refuses to consume an unready class
+// and short-circuits the reconcile, so the compute layer never sees
+// the classInfo — the inner harness models that by setting m.classInfo
+// to nil. Distinct from drawing v=0 in ApplyClassChange (which models
+// "engineClassRef cleared by the user"): the engine still references
+// a class, the class is just transiently unready. The compute layer
+// cannot distinguish the two, which is exactly what the production
+// gate enforces — useful as an explicit named action so the state
+// space deliberately visits the transition rather than relying on
+// the implicit v=0 draw probability.
+func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
+	m.classInfo = nil
+}
+
 // ApplyConflictingClassAndEngine sets the *same* pod-template field
 // on both the class and the engine template, with different values.
 // Forces the merge layer (effective*) to arbitrate. The harness's

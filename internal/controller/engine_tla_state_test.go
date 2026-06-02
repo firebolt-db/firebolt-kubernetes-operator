@@ -246,14 +246,16 @@ func parseSAToken(s string) int {
 	return n
 }
 
-// tlaShouldGateOut returns true when the outer Reconcile method's instance gate
-// would prevent computeEngineReconcile from running at all. The gate engages
-// when instanceReady is false and phase is in {stable, stopped, creating}; the
-// other phases (switching, draining, cleaning) bypass it deliberately. State
-// cover for the compute layer skips these states because the compute layer
-// runs only when the gate is open.
+// tlaShouldGateOut returns true when one of the outer Reconcile method's
+// gates (instance-Ready or class-Ready, FB-1145/1298) would prevent
+// computeEngineReconcile from running at all. Both gates engage when
+// the corresponding flag is false and phase is in {stable, stopped,
+// creating}; the other phases (switching, draining, cleaning) bypass
+// the gates deliberately because they do not re-resolve the instance
+// or the class. State cover for the compute layer skips these states
+// because the compute layer runs only when both gates are open.
 func tlaShouldGateOut(s tlaState) bool {
-	if s.InstanceReady {
+	if s.InstanceReady && s.ClassReady {
 		return false
 	}
 	switch s.Phase {
@@ -430,7 +432,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			}
 		})
 	}
-	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
+	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
 		len(tlaEngineStateCases)-skippedGate-skippedBoundary, len(tlaEngineStateCases),
 		skippedGate, skippedBoundary)
 }
