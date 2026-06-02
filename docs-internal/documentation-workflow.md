@@ -51,8 +51,8 @@ After aggregation, packdb runs [`merge_multirepo_navigation.py`](https://github.
 
 | Workflow | Repository | Trigger |
 | --- | --- | --- |
-| [`.github/workflows/docs-sync.yml`](../.github/workflows/docs-sync.yml) | operator | Same-repo PR (opened, reopened, synchronize, closed). `sync` requires a `docs/**` or `.github/workflows/docs-sync.yml` change; `ready`/`cleanup` on close are gated on the existence of the packdb aggregate branch |
-| [`.github/workflows/docs-multirepo-aggregate.yml`](https://github.com/firebolt-analytics/packdb/blob/master/.github/workflows/docs-multirepo-aggregate.yml) | packdb | `repository_dispatch` (`operator-docs-changed`) or manual `workflow_dispatch` |
+| [`.github/workflows/docs-sync.yaml`](../.github/workflows/docs-sync.yaml) | operator | Same-repo PR (opened, reopened, synchronize, closed). `sync` requires a `docs/**` or `.github/workflows/docs-sync.yaml` change; `ready`/`cleanup` on close are gated on the existence of the packdb aggregate branch |
+| [`.github/workflows/docs-multirepo-aggregate.yaml`](https://github.com/firebolt-analytics/packdb/blob/master/.github/workflows/docs-multirepo-aggregate.yaml) | packdb | `workflow_dispatch` (inputs `action`, `source`, `source_pr_number`), triggered by the operator/helm sync workflows or run manually |
 
 An in-job relevance check (not a trigger-level `paths` filter) on the operator workflow means changes under `docs/`, or edits to the sync workflow file itself, trigger `sync` aggregation. Edits confined to `docs-internal/` do not. The relevance check is intentionally **not** used to gate the `closed` event so that cleanup/ready still run for a PR whose final diff no longer touches `docs/`; the close action is resolved from the packdb aggregate branch instead.
 
@@ -60,19 +60,20 @@ An in-job relevance check (not a trigger-level `paths` filter) on the operator w
 
 ## Dispatch model
 
-The operator workflow never pushes to packdb. It sends a `repository_dispatch` with a small, allowlisted payload:
+The operator workflow never pushes to packdb. It triggers the packdb aggregation workflow with a `workflow_dispatch` carrying a small, allowlisted set of inputs:
 
-```json
-{
-  "event_type": "operator-docs-changed",
-  "client_payload": {
-    "action": "sync | ready | cleanup",
-    "operator_pr_number": 123
-  }
-}
+```bash
+gh workflow run docs-multirepo-aggregate.yaml \
+  --repo firebolt-analytics/packdb \
+  --ref master \
+  -f action="sync | ready | cleanup" \
+  -f source=operator \
+  -f source_pr_number=123
 ```
 
-Packdb resolves all Git refs itself (operator PR head, `main`, branch names). It does **not** trust client-supplied branch names.
+`workflow_dispatch` is used instead of `repository_dispatch` so the cross-repo dispatcher App only needs **Actions: write** on packdb rather than **Contents: write** (see [Actors and credentials](#actors-and-credentials)). GitHub resolves the workflow file from packdb's default branch (`master`), so the renamed `docs-multirepo-aggregate.yaml` must already be on `master` before the operator side can target it.
+
+Packdb resolves all Git refs itself (operator PR head, `main`, branch names). It does **not** trust client-supplied branch names. The only inputs are `action`, a fixed `source`, and the source PR number.
 
 On `opened` / `reopened` / `synchronize`, the operator workflow uses the PR's current file list to decide whether to `sync`. On `closed` it does **not** rely on the file list — the merged diff is an unreliable proxy for whether a `sync` ever ran. Instead it queries packdb for the aggregate branch `aggregate/operator-docs-pr-{N}` (created only by `sync`). If the branch exists, a merged PR is marked `ready` and an abandoned one is `cleanup`'d; if it does not exist, nothing is dispatched. This guarantees a merged docs PR is never accidentally torn down because its final diff no longer matched `docs/*`, and avoids dispatching no-op `cleanup` events for closed non-docs PRs.
 
@@ -149,11 +150,17 @@ While the operator PR is open, the packdb PR stays a **draft** and its head bran
 
 ### Actors and credentials
 
+Credentials are split across two trust domains. The **operator/helm** repos only hold the dispatcher App key, and the **packdb** repo holds the keys that can write to packdb. No single key can both be triggered from a source repo and push to packdb.
+
 ```mermaid
 flowchart TB
-  subgraph secrets ["Secrets / tokens"]
-    FBA["FBA docs integration app\n(secrets in operator repo)"]
-    FBDB["FB_DB docs integration app\n(secrets in packdb repo)"]
+  subgraph srcsecrets ["Secrets in operator / helm repos"]
+    DISP["FBA dispatcher app\n(GH_APP_FBA_DOCS_INTEGRATION_*)"]
+  end
+
+  subgraph pdbsecrets ["Secrets in packdb repo"]
+    PINT["FBA packdb-internal app\n(GH_APP_FBA_PACKDB_INTERNAL_*)"]
+    FBDB["FB_DB docs integration app\n(GH_APP_FB_DB_DOCS_INTEGRATION_*)"]
     GHT["GITHUB_TOKEN\n(packdb workflow)"]
   end
 
@@ -162,24 +169,24 @@ flowchart TB
     PDB["packdb"]
   end
 
-  OP -->|"repository_dispatch\n(FBA app token)"| PDB
-  PDB -->|"gh pr view / gh pr comment\n(FB_DB app token)"| OP
-  PDB -->|"multirepo clone + push aggregate branch,\nopen/update/close PRs\n(GITHUB_TOKEN today)"| PDB
+  OP -->|"workflow_dispatch\n(dispatcher token: actions:write)"| PDB
+  PDB -->|"clone operator/helm docs,\ngh pr view / gh pr comment\n(FB_DB app token)"| OP
+  PDB -->|"push aggregate branch,\ncreate / ready packdb PR\n(packdb-internal token)"| PDB
+  PDB -->|"poll check-runs, read branch state\n(GITHUB_TOKEN)"| PDB
   ML["Mintlify GitHub App"] -->|"Mintlify Deployment check\n(async on branch push)"| PDB
 ```
 
 | Token | Installed / used on | Permissions needed |
 | --- | --- | --- |
-| FBA docs integration app | `packdb` (secrets stored in **operator** repo; token minted in operator workflow) | **Contents: Read and write** on `packdb`. GitHub maps [`POST /repos/.../dispatches`](https://docs.github.com/en/rest/overview/permissions-required-for-github-apps#repository-permissions-for-contents) to **Contents write** — read-only is not sufficient and returns HTTP 403. |
-| FB_DB docs integration app | `firebolt-kubernetes-operator` (secrets stored in **packdb** repo; token minted in packdb workflow) | Pull requests: read + write on operator repo (verify PR, post comments). **Not** passed to multirepo today. |
-| `GITHUB_TOKEN` | packdb workflow | `contents: write`, `pull-requests: write`, `issues: write`, `checks: read`; repo setting **Allow GitHub Actions to create pull requests** enabled. Used for multirepo push to packdb **and** as the multirepo-action `token` input. Polls Mintlify GitHub App check runs. |
+| FBA dispatcher app (`GH_APP_FBA_DOCS_INTEGRATION_*`) | `packdb` (secrets stored in **operator** and **helm** repos; token minted in those sync workflows) | **Actions: write** (trigger `workflow_dispatch`) and **Contents: read** (query the aggregate branch on close) on `packdb`. Installed on packdb with only these two permissions, so a leaked source-repo key cannot push to packdb. |
+| FBA packdb-internal app (`GH_APP_FBA_PACKDB_INTERNAL_*`) | `packdb` (secrets stored in **packdb** repo only; token minted in the packdb workflow) | **Contents: write** (push the aggregate branch) and **Pull requests: write** (create / ready the packdb PR). Installed solely on packdb. An App token (not `GITHUB_TOKEN`) is required here because `GITHUB_TOKEN`-authored pushes / PR transitions do not start new workflow runs, which would leave the required Master-CI-Gate check unreported. |
+| FB_DB docs integration app (`GH_APP_FB_DB_DOCS_INTEGRATION_*`) | `firebolt-kubernetes-operator` + `firebolt-instance-helm` (secrets stored in **packdb** repo; token minted in packdb workflow) | Contents: read (clone source docs for multirepo) and Pull requests: read + write on the source repos (verify PR, post comments). |
+| `GITHUB_TOKEN` | packdb workflow | `contents: write`, `pull-requests: write`, `issues: write`, `checks: read`. Used for read/poll operations inside packdb (Mintlify check runs, branch state). The aggregate-branch push and the PR ready flip are done with the packdb-internal App token, not `GITHUB_TOKEN`. |
 | Mintlify GitHub App | packdb repo (dashboard install) | Automatic preview deployments on PRs targeting `master`; aggregation workflow reads `Mintlify Deployment` check `details_url` |
 
-#### Multirepo token caveat
+#### Multirepo source-clone token
 
-[`mintlify/multirepo-action`](https://github.com/mintlify/multirepo-action) accepts a **single** token for cloning sub-repositories and pushing the aggregate branch. The workflow currently passes packdb’s `GITHUB_TOKEN`. That token can write to packdb but **cannot read private repositories in another org** (`firebolt-db`).
-
-If aggregation fails at clone time with an auth or 404 error against `firebolt-kubernetes-operator`, pass a token that has **Contents: read** on the operator repo (for example the FB_DB app token) to multirepo-action instead of, or in addition to, `GITHUB_TOKEN`. Until that wiring change is made, the FB_DB app’s Contents permission is required for comments/PR checks only — not for multirepo itself.
+[`mintlify/multirepo-action`](https://github.com/mintlify/multirepo-action) (and the `aggregate_multirepo_docs.py` clone step) need a token that can **read** the source repos in the `firebolt-db` org. The packdb workflow passes the **FB_DB app token** (`DOCS_AGGREGATE_TOKEN_OPERATOR` / `DOCS_AGGREGATE_TOKEN_HELM`) for that, because packdb's `GITHUB_TOKEN` cannot read private repositories in another org. The aggregate-branch push is a separate step authenticated with the packdb-internal App token via the checkout's persisted credentials.
 
 ### Sequence: `sync` (operator PR open / update)
 
@@ -187,20 +194,22 @@ If aggregation fails at clone time with an auth or 404 error against `firebolt-k
 sequenceDiagram
   autonumber
   actor Author
-  participant OP as Operator repo / docs-sync.yml
-  participant FBA as FBA docs app
-  participant PDB as packdb / docs-multirepo-aggregate.yml
+  participant OP as Operator repo / docs-sync.yaml
+  participant FBA as FBA dispatcher app
+  participant PDB as packdb / docs-multirepo-aggregate.yaml
   participant FBDB as FB_DB docs app
+  participant PINT as FBA packdb-internal app
   participant GH as GitHub (packdb)
   participant ML as Mintlify GitHub App
 
   Author->>OP: Push to operator PR branch (docs/**)
   OP->>OP: action = sync
-  OP->>FBA: Mint installation token (packdb)
-  OP->>PDB: repository_dispatch(operator-docs-changed)
-  PDB->>FBDB: Mint token (operator repo)
+  OP->>FBA: Mint installation token (packdb, actions:write)
+  OP->>PDB: workflow_dispatch(action=sync, source=operator)
+  PDB->>FBDB: Mint token (source repos)
+  PDB->>PINT: Mint token (packdb, contents+PR write)
   PDB->>OP: gh pr view — verify OPEN, same-repo, read headRefName
-  PDB->>GH: checkout packdb master
+  PDB->>GH: checkout packdb master (packdb-internal token persisted)
   PDB->>PDB: mintlify/multirepo-action<br/>master + operator PR head → aggregate/operator-docs-pr-N
   PDB->>PDB: merge_multirepo_navigation.py
   PDB->>GH: push aggregate branch (force)
@@ -221,16 +230,18 @@ Operator ref for multirepo: **PR head branch**. Packdb base content: **`master`*
 ```mermaid
 sequenceDiagram
   autonumber
-  participant OP as Operator repo / docs-sync.yml
-  participant FBA as FBA docs app
+  participant OP as Operator repo / docs-sync.yaml
+  participant FBA as FBA dispatcher app
   participant PDB as packdb / ready-aggregate
   participant FBDB as FB_DB docs app
+  participant PINT as FBA packdb-internal app
   participant GH as GitHub (packdb)
 
   OP->>OP: pull_request closed, merged = true → action = ready
-  OP->>FBA: Mint token
-  OP->>PDB: repository_dispatch(action=ready)
-  PDB->>FBDB: Mint token
+  OP->>FBA: Mint token (actions:write)
+  OP->>PDB: workflow_dispatch(action=ready, source=operator)
+  PDB->>FBDB: Mint token (source repos)
+  PDB->>PINT: Mint token (packdb, contents+PR write)
   PDB->>OP: gh pr view — verify merged, same-repo
   PDB->>GH: checkout packdb master
   PDB->>PDB: multirepo — master + operator main → aggregate branch
@@ -250,7 +261,7 @@ sequenceDiagram
   participant PDB as packdb / cleanup-aggregate
   participant GH as GitHub (packdb)
 
-  OP->>PDB: repository_dispatch(action=cleanup)
+  OP->>PDB: workflow_dispatch(action=cleanup, source=operator)
   PDB->>GH: gh pr close (open packdb PR for aggregate branch)
   PDB->>GH: DELETE refs/heads/aggregate/operator-docs-pr-N
 ```
@@ -318,41 +329,40 @@ Keep design notes, SDLC, and slides in **`docs-internal/`** only.
 | --- | --- |
 | No fork aggregation | Operator workflow gate + packdb `headRepository` check |
 | No `pull_request_target` | Operator workflow uses `pull_request` only; secrets not exposed to fork workflows |
-| No trusted client refs | Only `operator_pr_number` in dispatch; packdb reads refs from GitHub API |
+| No trusted client refs | Dispatch inputs are limited to `action`, a fixed `source`, and `source_pr_number`; packdb reads all refs from the GitHub API |
+| Least-privilege cross-repo trigger | Source repos hold only the dispatcher App key (`actions:write` + `contents:read` on packdb). The keys that can write to packdb (`contents:write`, `pull_requests:write`) live solely in the packdb repo |
 | Allowlisted branch names | Regex `^aggregate/operator-docs-pr-[0-9]+$` before push, preview, or delete |
 | No direct push to `master` | Bot pushes aggregate branch only; `master` via human PR merge |
 | Preview exposure | Mintlify preview URLs are public; preview renders full Firebolt site from `master` + operator changes |
 
 ## Troubleshooting
 
-### `gh api .../dispatches` → HTTP 403 `Resource not accessible by integration`
+### `gh workflow run` → HTTP 403 `Resource not accessible by integration`
 
-This is **not** caused by the packdb aggregation workflow missing on a feature branch (that yields HTTP 204 and a silent no-op).
-
-Per [GitHub’s permissions table](https://docs.github.com/en/rest/overview/permissions-required-for-github-apps#repository-permissions-for-contents), `POST /repos/{owner}/{repo}/dispatches` requires **Contents: write** on the target repo. **Contents: Read-only is not enough** (an earlier draft of this doc incorrectly said read-level access was sufficient).
+`POST /repos/{owner}/{repo}/actions/workflows/{id}/dispatches` requires **Actions: write** on the target repo. (This is the reason the workflow moved off `repository_dispatch`, which would instead require **Contents: write**.)
 
 **Checklist:**
 
-1. FBA docs integration app → repository permission **Contents: Read and write**.
+1. FBA dispatcher app → repository permission **Actions: Read and write** (plus **Contents: read** for the close-time branch query).
 2. App **installed** on `firebolt-analytics` with **`packdb`** in the installation (not operator-only).
 3. After changing app permissions, **accept** the updated installation on the org/repo.
 4. Operator repo secrets match this app (`GH_APP_FBA_DOCS_INTEGRATION_CLIENT_ID`, `GH_APP_FBA_DOCS_INTEGRATION_APP_KEY_PEM`).
-5. Token mint step scopes to packdb (`owner: firebolt-analytics`, `repositories: packdb` in `docs-sync.yml` — already correct).
+5. Token mint step scopes to packdb (`owner: firebolt-analytics`, `repositories: packdb` in `docs-sync.yaml` — already correct).
 6. Re-run the failed `docs-sync` job.
 
-### Dispatch succeeds (204) but packdb workflow never runs
+### Dispatch succeeds but packdb workflow never runs
 
-`repository_dispatch` only triggers workflows present on packdb **`master`**. Merge the packdb aggregation workflow PR first, then re-dispatch from the operator PR.
+`workflow_dispatch` resolves the workflow file from packdb's **default branch** (`master`) and is rejected (HTTP 422) if the workflow does not exist there. The renamed `docs-multirepo-aggregate.yaml` must be merged to packdb `master` **before** the operator side targets it. Merge the packdb workflow PR first, then re-dispatch from the operator PR.
 
 ## Manual recovery
 
-On packdb, run **Aggregate Mintlify docs** (`workflow_dispatch`):
+On packdb, run **Aggregate Mintlify docs** (`workflow_dispatch`) with `source=operator`:
 
 | Input | When to use |
 | --- | --- |
-| `action=sync`, `operator_pr_number=N` | Rebuild draft aggregate branch / draft PR while operator PR #N is still open |
-| `action=ready`, `operator_pr_number=N` | Re-run post-merge aggregation and mark packdb PR ready |
-| `action=cleanup`, `operator_pr_number=N` | Tear down after abandoned operator PR |
+| `action=sync`, `source=operator`, `source_pr_number=N` | Rebuild draft aggregate branch / draft PR while operator PR #N is still open |
+| `action=ready`, `source=operator`, `source_pr_number=N` | Re-run post-merge aggregation and mark packdb PR ready |
+| `action=cleanup`, `source=operator`, `source_pr_number=N` | Tear down after abandoned operator PR |
 
 Concurrency group `docs-aggregate-operator-pr-{N}` cancels in-progress runs for the same operator PR.
 
