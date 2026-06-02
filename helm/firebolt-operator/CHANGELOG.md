@@ -1,3 +1,14 @@
+# 1.0.28
+
+appVersion: v4.4.0
+
+## [4.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.3.0...v4.4.0) (2026-06-02)
+
+### Features
+
+* **controller:** distinct autoscaler reason for the first-observation anchor ([40b0aa4](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40b0aa466347e43a3df2ec12e2236894455be30b))
+
+
 # 1.0.27
 
 appVersion: v4.3.0
