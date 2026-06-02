@@ -331,74 +331,48 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	return nil
 }
 
-// extractItems returns the individual objects from a typed list. This avoids
-// reflection and keeps the helper type-safe for the resource kinds used in
-// reconcileDelete.
+// extractItems returns the individual objects from a typed list. The type
+// switch dispatches an interface-typed list to its concrete element type;
+// boxItems then handles the uniform &items[i] boxing without reflection.
 func extractItems(list client.ObjectList) []client.Object {
 	switch l := list.(type) {
 	case *appsv1.StatefulSetList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[appsv1.StatefulSet, *appsv1.StatefulSet](l.Items)
 	case *appsv1.DeploymentList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[appsv1.Deployment, *appsv1.Deployment](l.Items)
 	case *corev1.ServiceList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[corev1.Service, *corev1.Service](l.Items)
 	case *corev1.ConfigMapList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[corev1.ConfigMap, *corev1.ConfigMap](l.Items)
 	case *corev1.SecretList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[corev1.Secret, *corev1.Secret](l.Items)
 	case *corev1.PersistentVolumeClaimList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[corev1.PersistentVolumeClaim, *corev1.PersistentVolumeClaim](l.Items)
 	case *policyv1.PodDisruptionBudgetList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[policyv1.PodDisruptionBudget, *policyv1.PodDisruptionBudget](l.Items)
 	case *corev1.ServiceAccountList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[corev1.ServiceAccount, *corev1.ServiceAccount](l.Items)
 	case *rbacv1.RoleList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[rbacv1.Role, *rbacv1.Role](l.Items)
 	case *rbacv1.RoleBindingList:
-		out := make([]client.Object, len(l.Items))
-		for i := range l.Items {
-			out[i] = &l.Items[i]
-		}
-		return out
+		return boxItems[rbacv1.RoleBinding, *rbacv1.RoleBinding](l.Items)
 	default:
 		return nil
 	}
+}
+
+// boxItems converts []T to []client.Object by taking the address of each
+// element. The PT constraint encodes "pointer-to-T that implements
+// client.Object", which is the shape every typed K8s list satisfies.
+func boxItems[T any, PT interface {
+	*T
+	client.Object
+}](items []T) []client.Object {
+	out := make([]client.Object, len(items))
+	for i := range items {
+		out[i] = PT(&items[i])
+	}
+	return out
 }
 
 // validateInstanceTemplates re-runs the FireboltInstance webhook's
