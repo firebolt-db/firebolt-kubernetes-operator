@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
 
@@ -392,6 +393,7 @@ func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rul
 	var errs field.ErrorList
 
 	metaPath := base.Child("metadata")
+	errs = append(errs, validatePodTemplateMetadata(&template.ObjectMeta, metaPath)...)
 	errs = append(errs, ValidateReservedKeyPrefix(metaPath.Child("labels"), template.Labels)...)
 	errs = append(errs, ValidateReservedKeyPrefix(metaPath.Child("annotations"), template.Annotations)...)
 
@@ -403,13 +405,85 @@ func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rul
 	return errs
 }
 
+// validatePodTemplateMetadata closes the silent-drop path on
+// spec.template.metadata: the embedded corev1.ObjectMeta lets users
+// submit name / namespace / ownerReferences / finalizers / etc., and
+// the operator silently strips them at render time (the StatefulSet
+// controller assigns identity to per-pod ObjectMetas). Reject those
+// fields at admission so users discover the no-op immediately rather
+// than wondering why their finalizer never ran.
+//
+// Only labels and annotations are passed through (and further
+// constrained by ValidateReservedKeyPrefix). Everything else on
+// ObjectMeta has no meaning at the pod-template level for any
+// workload controller.
+func validatePodTemplateMetadata(meta *metav1.ObjectMeta, base *field.Path) field.ErrorList {
+	var errs field.ErrorList
+	if meta.Name != "" {
+		errs = append(errs, field.Forbidden(base.Child("name"),
+			"pod template metadata.name is assigned by the StatefulSet controller; remove it"))
+	}
+	if meta.GenerateName != "" {
+		errs = append(errs, field.Forbidden(base.Child("generateName"),
+			"pod template metadata.generateName has no effect under a StatefulSet; remove it"))
+	}
+	if meta.Namespace != "" {
+		errs = append(errs, field.Forbidden(base.Child("namespace"),
+			"pod template metadata.namespace is inherited from the owning resource; remove it"))
+	}
+	if meta.UID != "" {
+		errs = append(errs, field.Forbidden(base.Child("uid"),
+			"pod template metadata.uid is assigned by the API server; remove it"))
+	}
+	if meta.ResourceVersion != "" {
+		errs = append(errs, field.Forbidden(base.Child("resourceVersion"),
+			"pod template metadata.resourceVersion is assigned by the API server; remove it"))
+	}
+	if meta.Generation != 0 {
+		errs = append(errs, field.Forbidden(base.Child("generation"),
+			"pod template metadata.generation is assigned by the API server; remove it"))
+	}
+	if meta.CreationTimestamp != (metav1.Time{}) {
+		errs = append(errs, field.Forbidden(base.Child("creationTimestamp"),
+			"pod template metadata.creationTimestamp is assigned by the API server; remove it"))
+	}
+	if meta.DeletionTimestamp != nil {
+		errs = append(errs, field.Forbidden(base.Child("deletionTimestamp"),
+			"pod template metadata.deletionTimestamp has no meaning here; remove it"))
+	}
+	if meta.DeletionGracePeriodSeconds != nil {
+		errs = append(errs, field.Forbidden(base.Child("deletionGracePeriodSeconds"),
+			"pod template metadata.deletionGracePeriodSeconds has no meaning here; remove it"))
+	}
+	if len(meta.OwnerReferences) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("ownerReferences"),
+			"pod template metadata.ownerReferences are operator-managed; remove them"))
+	}
+	if len(meta.Finalizers) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("finalizers"),
+			"pod template metadata.finalizers are silently dropped at render time; remove them"))
+	}
+	if len(meta.ManagedFields) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("managedFields"),
+			"pod template metadata.managedFields are assigned by the API server; remove them"))
+	}
+	return errs
+}
+
 // validateUniversalPodFields enforces the pod-level (non-container)
-// ownership rules that apply to every component. Each rejected field
-// is stamped by the operator (terminationGracePeriodSeconds from
-// component defaults or FireboltEngineSpec) or fixed by a workload
-// contract (subdomain/hostname under headless DNS, restartPolicy under
-// Deployment / StatefulSet semantics, activeDeadlineSeconds for
-// long-lived pods).
+// ownership rules that apply to every component. Three categories:
+//
+//   - Operator-stamped: terminationGracePeriodSeconds (component default
+//     or hardcoded engine 60s).
+//   - Workload-contract: subdomain / hostname (headless DNS),
+//     restartPolicy (StatefulSet / Deployment), activeDeadlineSeconds
+//     (long-lived pods).
+//   - Security / footgun: hostNetwork / hostPID / hostIPC /
+//     shareProcessNamespace / hostUsers. Sharing the node network or
+//     PID namespace with the engine pod defeats the isolation a
+//     long-lived data-plane workload depends on; we close those at
+//     admission rather than silently accept and let a user accidentally
+//     expose engine memory to anything else running on the node.
 func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path) field.ErrorList {
 	var errs field.ErrorList
 	if spec.TerminationGracePeriodSeconds != nil {
@@ -431,6 +505,26 @@ func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path) field.Er
 	if spec.ActiveDeadlineSeconds != nil {
 		errs = append(errs, field.Forbidden(base.Child("activeDeadlineSeconds"),
 			"activeDeadlineSeconds is incompatible with long-lived component pods"))
+	}
+	if spec.HostNetwork {
+		errs = append(errs, field.Forbidden(base.Child("hostNetwork"),
+			"hostNetwork sharing is not permitted for component pods"))
+	}
+	if spec.HostPID {
+		errs = append(errs, field.Forbidden(base.Child("hostPID"),
+			"hostPID sharing is not permitted for component pods"))
+	}
+	if spec.HostIPC {
+		errs = append(errs, field.Forbidden(base.Child("hostIPC"),
+			"hostIPC sharing is not permitted for component pods"))
+	}
+	if spec.ShareProcessNamespace != nil {
+		errs = append(errs, field.Forbidden(base.Child("shareProcessNamespace"),
+			"shareProcessNamespace is not permitted for component pods"))
+	}
+	if spec.HostUsers != nil {
+		errs = append(errs, field.Forbidden(base.Child("hostUsers"),
+			"hostUsers is not permitted for component pods"))
 	}
 	return errs
 }
@@ -526,6 +620,28 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 	if c.StartupProbe != nil {
 		errs = append(errs, field.Forbidden(base.Child("startupProbe"),
 			fmt.Sprintf("%s container startupProbe is operator-owned", rules.Component)))
+	}
+	// Interactive / orchestration fields that make no sense on a
+	// long-lived data-plane container. RestartPolicy on a non-init
+	// container is silently dropped by the kubelet; Stdin/StdinOnce/TTY
+	// are kubectl-exec ergonomics with no meaning on a server process.
+	// Closing these here gives users immediate feedback instead of
+	// "set it, nothing happened".
+	if c.RestartPolicy != nil {
+		errs = append(errs, field.Forbidden(base.Child("restartPolicy"),
+			fmt.Sprintf("%s container restartPolicy has no effect on a long-lived workload container", rules.Component)))
+	}
+	if c.Stdin {
+		errs = append(errs, field.Forbidden(base.Child("stdin"),
+			fmt.Sprintf("%s container stdin is for interactive use only; the engine runs non-interactively", rules.Component)))
+	}
+	if c.StdinOnce {
+		errs = append(errs, field.Forbidden(base.Child("stdinOnce"),
+			fmt.Sprintf("%s container stdinOnce is for interactive use only; the engine runs non-interactively", rules.Component)))
+	}
+	if c.TTY {
+		errs = append(errs, field.Forbidden(base.Child("tty"),
+			fmt.Sprintf("%s container tty is for interactive use only; the engine runs non-interactively", rules.Component)))
 	}
 
 	// Allowlist-toggled fields.
