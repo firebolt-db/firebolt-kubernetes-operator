@@ -992,12 +992,19 @@ func effectiveTolerations(spec *computev1alpha1.FireboltEngineSpec, classInfo *F
 // nested struct (node / pod / pod-anti) whose semantics depend on every
 // term agreeing, so partial overrides are dangerous. Whoever sets the
 // field owns the whole tree.
+//
+// The return value is a deep copy of whichever side won so callers can
+// freely mutate it (e.g. buildStatefulSet stamping it onto a fresh STS
+// that is later JSON-serialized) without aliasing live spec state into
+// the rendered StatefulSet. Pre-FB-1426 this helper returned the spec
+// pointer directly, asymmetric with effectiveTolerations /
+// effectiveNodeSelector which already copy.
 func effectiveAffinity(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.Affinity {
 	if a := engineTemplate(spec).Spec.Affinity; a != nil {
-		return a
+		return a.DeepCopy()
 	}
-	if classInfo != nil && classInfo.Template != nil {
-		return classInfo.Template.Spec.Affinity
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.Affinity != nil {
+		return classInfo.Template.Spec.Affinity.DeepCopy()
 	}
 	return nil
 }
