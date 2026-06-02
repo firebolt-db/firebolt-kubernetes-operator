@@ -172,8 +172,10 @@ func (m *outerEngineSim) ApplySpecChange(t *rapid.T) {
 		return
 	}
 	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
-	sa := fmt.Sprintf("sa-v%d", v)
-	eng.Spec.ServiceAccountName = &sa
+	if eng.Spec.Template == nil {
+		eng.Spec.Template = &corev1.PodTemplateSpec{}
+	}
+	eng.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", v)
 	if err := m.env.cli.Update(m.ctx, eng); err != nil {
 		// Conflicts are benign here: another action (e.g. a Reconcile that
 		// wrote status) bumped the resource version. The next Reconcile will

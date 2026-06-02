@@ -76,10 +76,10 @@ echo "Applying engine-full with CI overrides (storage.size=1Gi, memory=2Gi) and 
 BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" CLASS="$ENGINE_CLASS_NAME" yq eval '
   (select(.kind == "FireboltEngine").spec.engineClassRef) = env(CLASS) |
   (select(.kind == "FireboltEngine").spec.storage.persistentVolumeClaim.size) = "500Mi" |
-  (select(.kind == "FireboltEngine").spec.resources.requests.cpu) = "250m" |
-  (select(.kind == "FireboltEngine").spec.resources.limits.cpu) = "250m" |
-  (select(.kind == "FireboltEngine").spec.resources.requests.memory) = "2Gi" |
-  (select(.kind == "FireboltEngine").spec.resources.limits.memory) = "2Gi" |
+  (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.requests.cpu) = "250m" |
+  (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.limits.cpu) = "250m" |
+  (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.requests.memory) = "2Gi" |
+  (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.limits.memory) = "2Gi" |
   (select(.kind == "FireboltEngine").spec.customEngineConfig) = {
     "storage": {
       "type": "minio",

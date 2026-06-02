@@ -520,9 +520,12 @@ func UpdateEngineScheduling(
 	affinity *corev1.Affinity,
 ) error {
 	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
-		engine.Spec.NodeSelector = nodeSelector
-		engine.Spec.Tolerations = tolerations
-		engine.Spec.Affinity = affinity
+		if engine.Spec.Template == nil {
+			engine.Spec.Template = &corev1.PodTemplateSpec{}
+		}
+		engine.Spec.Template.Spec.NodeSelector = nodeSelector
+		engine.Spec.Template.Spec.Tolerations = tolerations
+		engine.Spec.Template.Spec.Affinity = affinity
 	})
 }
 
