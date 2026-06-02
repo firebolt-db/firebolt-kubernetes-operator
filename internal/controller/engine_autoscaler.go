@@ -56,6 +56,12 @@ const (
 	AutoscalerReasonScrapeFailed   = "ScrapeFailed"
 	AutoscalerReasonIdle           = "Idle"
 	AutoscalerReasonWakeRequested  = "WakeRequested"
+	// AutoscalerReasonInitializing covers the first quiet observation on
+	// an engine that has no LastActivityTime yet: there is nothing to
+	// measure idleFor against, so the decision is "anchor the timestamp
+	// and observe again". Distinct from ActivityObserved, which carries
+	// the stronger claim that the most recent scrape saw running queries.
+	AutoscalerReasonInitializing = "Initializing"
 )
 
 // AutoscalerObservation is the runtime input the autoscaler consumes each
@@ -209,7 +215,7 @@ func computeAutoscalerDecision(
 		nowMeta := metav1.NewTime(now)
 		return AutoscalerDecision{
 			DesiredReplicas:     spec.Replicas,
-			Reason:              AutoscalerReasonActivity,
+			Reason:              AutoscalerReasonInitializing,
 			RequeueAfter:        pollInterval,
 			NewLastActivityTime: &nowMeta,
 		}

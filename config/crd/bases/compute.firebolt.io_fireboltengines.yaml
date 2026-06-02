@@ -3438,7 +3438,7 @@ spec:
                 description: |-
                   AutoscalerReason is a short token describing the most recent autoscaler
                   decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
-                  "Disabled", "Stopped".
+                  "Disabled", "Stopped", "Initializing", "WakeRequested".
                 type: string
               conditions:
                 description: Conditions represent the latest available observations

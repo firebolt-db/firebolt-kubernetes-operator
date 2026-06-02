@@ -244,6 +244,11 @@ func TestComputeAutoscalerDecision_FirstQuietObservationAnchorsLastActivity(t *t
 	if d.NewLastActivityTime == nil || !d.NewLastActivityTime.Time.Equal(fixedNow()) {
 		t.Fatal("first quiet observation must anchor LastActivityTime to now")
 	}
+	// Reason must be Initializing rather than ActivityObserved: no
+	// queries were observed, we are just anchoring the idle clock.
+	if d.Reason != AutoscalerReasonInitializing {
+		t.Fatalf("reason: want %q got %q", AutoscalerReasonInitializing, d.Reason)
+	}
 }
 
 func TestComputeAutoscalerDecision_IdleScalesDownToMin(t *testing.T) {
