@@ -100,9 +100,9 @@ the manager uses when you run it directly. The Helm chart default is what the
 | `--webhook-cert-name` | `tls.crt` | Not set | Webhook certificate file name. |
 | `--webhook-cert-key` | `tls.key` | Not set | Webhook key file name. |
 | `--enable-http2` | `false` | Not set | Enable HTTP/2 for the metrics and webhook servers. |
-| `--engine-max-cpu` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` CPU request and limit. Empty disables the bound. |
-| `--engine-max-memory` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` memory request and limit. Empty disables the bound. |
-| `--engine-max-ephemeral-storage` | `""` | Not set | Maximum allowed `FireboltEngine.spec.resources` ephemeral-storage request and limit. Empty disables the bound. |
+| `--engine-max-cpu` | `""` | Not set | Maximum allowed engine-container CPU request and limit (resolved from `FireboltEngine.spec.template.spec.containers[engine].resources` or the referenced FireboltEngineClass's container resources). Empty disables the bound. |
+| `--engine-max-memory` | `""` | Not set | Maximum allowed engine-container memory request and limit (same resolution as `--engine-max-cpu`). Empty disables the bound. |
+| `--engine-max-ephemeral-storage` | `""` | Not set | Maximum allowed engine-container ephemeral-storage request and limit (same resolution as `--engine-max-cpu`). Empty disables the bound. |
 | `--zap-devel` | `false` | Not set | Enable controller-runtime development logging defaults. |
 | `--zap-encoder` | `json` | `json` | Log encoding. Valid values are `json` and `console`. |
 | `--zap-log-level` | `info` | `info` | Minimum log level. Valid values include `debug`, `info`, `error`, and `panic`. |

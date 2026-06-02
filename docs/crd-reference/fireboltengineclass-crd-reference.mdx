@@ -48,6 +48,12 @@ end-to-end. The rejected set is enumerated below. Everything else under
 | `nodeSelector` | Yes | Map-merge. Engine keys win on conflict. |
 | `tolerations` | Yes | Class tolerations + engine tolerations, concatenated. |
 | `affinity` | Yes | Engine `spec.template.spec.affinity` wins if non-nil. Otherwise class. No field-merge. |
+| `topologySpreadConstraints` | Yes | Class entries + engine entries, concatenated. |
+| `priorityClassName`, `runtimeClassName`, `schedulerName` | Yes | Engine wins when set, else class. |
+| `dnsPolicy`, `dnsConfig` | Yes | Engine wins when set, else class. `dnsConfig` is whole-struct. |
+| `preemptionPolicy` | Yes | Engine wins when set, else class. |
+| `readinessGates`, `resourceClaims`, `hostAliases` | Yes | Class entries + engine entries, concatenated. |
+| `os`, `overhead` | Yes | Engine wins when set, else class. Whole-struct / whole-map ownership. |
 | `imagePullSecrets` | Yes | Class secrets + engine secrets, concatenated. |
 | `volumes` | Yes | Firebolt Operator-owned volumes (`nodes-config`, data) come first. Class and engine volumes are appended in that order. Entries whose names collide with Firebolt Operator volumes are silently dropped because the Firebolt Operator owns those mount paths. |
 | `securityContext` | Yes | Engine `spec.template.spec.securityContext` wins if non-nil. Otherwise class. Firebolt Operator defaults (`fsGroup`, `fsGroupChangePolicy`) are always stamped on whichever side won. |
@@ -57,6 +63,7 @@ end-to-end. The rejected set is enumerated below. Everything else under
 | `terminationGracePeriodSeconds` | **No** | Hardcoded by the Firebolt Operator to 60s. The same rejection applies to engine `spec.template.spec.terminationGracePeriodSeconds`. |
 | `subdomain`, `hostname` | **No** | Headless-DNS contract. |
 | `restartPolicy`, `activeDeadlineSeconds` | **No** | StatefulSet semantics. |
+| `hostNetwork`, `hostPID`, `hostIPC`, `shareProcessNamespace`, `hostUsers` | **No** | Sharing the node network or PID namespace with a long-lived data-plane workload is rarely intentional and defeats the isolation the operator relies on. |
 
 ### Engine container (`containers[name=="engine"]`)
 
@@ -69,14 +76,20 @@ the pod template.
 | Field | User-allowed | Notes |
 |---|---|---|
 | `image`, `imagePullPolicy` | Yes | Canonical knob for runtime version upgrades. Engine `spec.template.spec.containers[engine].image` wins when set. |
-| `resources` | Yes | Engine `spec.template.spec.containers[engine].resources` wins wholesale if it carries any requests/limits/claims. Otherwise the class entry fills in. No field-level merge. |
+| `resources` | Yes | Engine `spec.template.spec.containers[engine].resources` wins wholesale if it carries any requests/limits/claims. Otherwise the class entry fills in. No field-level merge. Resource maxima configured at operator install time (`--engine-max-cpu` etc.) are checked against the **merged** value, so a class with oversized requests is rejected even when the engine omits its own resources. |
 | `env` | Yes | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) appear first on the pod. Class entries then engine entries are appended in that order. Entries that name a reserved key are **rejected** at admission. |
 | `envFrom` | Yes | Class entries + engine entries, concatenated. |
 | `volumeMounts` | Yes | Firebolt Operator-owned mounts first. Class mounts and engine mounts are appended in that order. Entries whose names collide with Firebolt Operator-owned volumes (`nodes-config`, data) are silently dropped. |
 | `securityContext` | Yes | Engine `spec.template.spec.containers[engine].securityContext` wins if non-nil. Otherwise class. |
 | `lifecycle` | Yes | Engine `spec.template.spec.containers[engine].lifecycle` wins if non-nil. Otherwise class. |
+| `workingDir` | Yes | Engine wins when set, else class. |
+| `terminationMessagePath`, `terminationMessagePolicy` | Yes | Engine wins when set, else class. |
+| `volumeDevices` | Yes | Class entries + engine entries, concatenated. |
+| `resizePolicy` | Yes | Class entries + engine entries, concatenated. |
 | `name`, `command`, `args`, `ports` | **No** | Hardcoded by the Firebolt Operator. |
 | `readinessProbe`, `livenessProbe`, `startupProbe` | **No** | Owned by the Firebolt Operator (`/health/ready` contract). |
+| `restartPolicy` | **No** | Silently dropped by the kubelet on non-init containers. |
+| `stdin`, `stdinOnce`, `tty` | **No** | Interactive-use ergonomics. The engine runs non-interactively. |
 
 A second container also named `engine` is **rejected** because it would collide
 with the Firebolt Operator-rendered engine container during the merge.

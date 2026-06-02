@@ -43,35 +43,47 @@ PostgreSQL is the backing database for the metadata service. The Firebolt Operat
 The Firebolt Operator enforces a hierarchical dependency from engines to their instance, plus an optional in-namespace dependency on FireboltEngineClass:
 
 ```text
-┌───────────────────┐   1:N   ┌───────────────────┐
-│ FireboltInstance  │◄────────│  FireboltEngine   │
-│                   │  reads  │                   │
-│ Provisions:       │ status  │ spec.instanceRef  │
-│ - PostgreSQL      │         │ points to the     │
-│ - Metadata Svc    │         │ instance by name  │
-│ - Gateway         │         │                   │
-│                   │         │ Blocked until     │
-│ status:           │         │ instance has:     │
-│  metadataEndpoint │         │ - metadataEndpoint│
-│                   │         │ - spec.id         │
-└───────────────────┘         └─────────┬─────────┘
-                                        |
-                                   N:1  │ inherits properties
-                                        │ when spec.engineClassRef set
-                                        │
-                                        ▼
-                             ┌─────────────────────┐
-                             │     FireboltEngineClass     │
-                             │   (namespaced,      │
-                             │    optional)        │
-                             │                     │
-                             │  spec.template:     │
-                             │    PodTemplateSpec  │
-                             │    merged into the  │
-                             │    engine pod spec  │
-                             │                     │
-                             └─────────────────────┘
+┌───────────────────┐   1:N   ┌────────────────────────┐
+│ FireboltInstance  │◄────────│  FireboltEngine        │
+│                   │  reads  │                        │
+│ Provisions:       │ status  │ spec.instanceRef       │
+│ - PostgreSQL      │         │ points to the          │
+│ - Metadata Svc    │         │ instance by name       │
+│ - Gateway         │         │                        │
+│                   │         │ spec.template:         │
+│ status:           │         │   PodTemplateSpec      │
+│  metadataEndpoint │         │   (top of merge)       │
+│                   │         │                        │
+│                   │         │ Blocked until          │
+│                   │         │ instance has:          │
+│                   │         │ - metadataEndpoint     │
+│                   │         │ - spec.id              │
+└───────────────────┘         └────────────┬───────────┘
+                                           |
+                                      N:1  │ inherits properties
+                                           │ when spec.engineClassRef set
+                                           │
+                                           ▼
+                                ┌─────────────────────┐
+                                │  FireboltEngineClass│
+                                │   (namespaced,      │
+                                │    optional)        │
+                                │                     │
+                                │  spec.template:     │
+                                │    PodTemplateSpec  │
+                                │    (under engine    │
+                                │     in the merge)   │
+                                │                     │
+                                └─────────────────────┘
 ```
+
+The rendered engine pod spec is the merge of three layers, top wins:
+operator defaults < `FireboltEngineClass.spec.template` (when
+`spec.engineClassRef` is set) < `FireboltEngine.spec.template`.
+List-typed fields (`tolerations`, `initContainers`, sidecars, `env`,
+`envFrom`, `volumeMounts`, `imagePullSecrets`, `volumes`) concatenate
+class-then-engine so the engine template extends rather than replaces
+the class.
 
 **Rules:**
 

@@ -11,7 +11,7 @@ sidebarTitle: FireboltEngine CRD reference
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace. |
 | `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) **in this engine's namespace**. When set, the class's `spec.template` merges underneath this engine's `spec.template` (engine wins on conflict). The engine container image is sourced from the class. There is no per-engine image override on this CR. See the FireboltEngineClass reference for the merge precedence. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. Set to `0` to stop the engine. The CR is preserved. See [Stop and resume](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/README.md#stop-and-resume). |
-| `spec.template` | No | - | `corev1.PodTemplateSpec` that carries every per-engine pod-template override: `spec.serviceAccountName`, `spec.nodeSelector`, `spec.tolerations`, `spec.affinity`, `spec.securityContext`, `spec.initContainers`, `spec.imagePullSecrets`, `metadata.labels`, `metadata.annotations`. The engine container ships under `spec.containers[name=="engine"]`: set per-engine `resources`, `env`, `envFrom`, `volumeMounts`, `lifecycle`, and container-level `securityContext` there. See [Pod-template merge precedence](#pod-template-merge-precedence) for the field ownership and ordering rules. |
+| `spec.template` | No | - | `corev1.PodTemplateSpec` that carries every per-engine pod-template override. The pod spec lives under `spec.template.spec` (`serviceAccountName`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`, `runtimeClassName`, `dnsPolicy`, `dnsConfig`, `schedulerName`, `preemptionPolicy`, `readinessGates`, `resourceClaims`, `hostAliases`, `os`, `overhead`, `securityContext`, `initContainers`, `imagePullSecrets`, sidecar `containers`, `volumes`). Pod metadata lives under `spec.template.metadata` (`labels`, `annotations` — other fields are rejected). The engine container ships under `spec.template.spec.containers[name=="engine"]`: set per-engine `image`, `imagePullPolicy`, `resources`, `env`, `envFrom`, `volumeMounts`, `lifecycle`, `securityContext`, `workingDir`, `terminationMessagePath`, `terminationMessagePolicy`, `volumeDevices`, and `resizePolicy` there. See [Pod-template merge precedence](#pod-template-merge-precedence) for the field ownership and ordering rules. |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. |
 | `spec.drainCheckEnabled` | No | `true` | Set to `false` to skip the Firebolt Operator-side drain check. The engine's `shutdown_wait_unfinished` still runs on SIGTERM. |
 | `spec.drainCheckInterval` | No | `5s` | How often to poll old pods for drain status. |
@@ -35,19 +35,26 @@ from three layers, where top wins on conflict:
    references the class.
 3. **`spec.template`** on this engine, which always wins for
    scalar and struct fields. List-typed fields (`tolerations`,
-   `imagePullSecrets`, container `env`, `envFrom`, and
-   `volumeMounts`) concatenate class-then-engine so the engine
-   spec extends rather than replaces the class.
+   `topologySpreadConstraints`, `readinessGates`, `resourceClaims`,
+   `hostAliases`, `imagePullSecrets`, `volumes`, `initContainers`,
+   sidecar `containers`, engine container `env`, `envFrom`,
+   `volumeMounts`, `volumeDevices`, `resizePolicy`) concatenate
+   class-then-engine so the engine template extends rather than
+   replaces the class.
 
 The Firebolt Operator runs the same validating webhook against both
-class and engine pod templates. Both reject `terminationGracePeriodSeconds`,
-the StatefulSet-bound pod fields (`subdomain`, `hostname`,
-`restartPolicy`, `activeDeadlineSeconds`), any change to the engine
-container's identity (`name`, `command`, `args`, `ports`, `probes`,
-reserved `FIREBOLT_*` env keys), and any label or annotation under
-the `firebolt.io/` prefix. Sidecar containers (any container not
-named `engine`) and additional init containers pass through
-verbatim.
+class and engine pod templates. Both reject the StatefulSet-bound
+pod fields (`terminationGracePeriodSeconds`, `subdomain`, `hostname`,
+`restartPolicy`, `activeDeadlineSeconds`), the security / footgun
+fields (`hostNetwork`, `hostPID`, `hostIPC`, `shareProcessNamespace`,
+`hostUsers`), pod-template metadata other than `labels` and
+`annotations`, any change to the engine container's identity
+(`name`, `command`, `args`, `ports`, `probes`, reserved
+`FIREBOLT_*` env keys), engine-container interactive-orchestration
+fields (`restartPolicy`, `stdin`, `stdinOnce`, `tty`), and any label
+or annotation under the `firebolt.io/` prefix. Sidecar containers
+(any container not named `engine`) and additional init containers
+pass through verbatim.
 
 Changes to `spec.template` trigger a new blue-green generation.
 
