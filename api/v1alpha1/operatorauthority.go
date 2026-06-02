@@ -274,13 +274,18 @@ type PodTemplateRules struct {
 // field to the Kubernetes API surface keeps the operator's owned-by-
 // default posture without a code change here.
 type PrimaryContainerFields struct {
-	Image           bool // image and imagePullPolicy
-	Resources       bool
-	Env             bool // entries with reserved keys still rejected
-	EnvFrom         bool
-	VolumeMounts    bool // entries with reserved names still rejected
-	SecurityContext bool
-	Lifecycle       bool
+	Image                    bool // image and imagePullPolicy
+	Resources                bool
+	Env                      bool // entries with reserved keys still rejected
+	EnvFrom                  bool
+	VolumeMounts             bool // entries with reserved names still rejected
+	SecurityContext          bool
+	Lifecycle                bool
+	WorkingDir               bool
+	TerminationMessagePath   bool
+	TerminationMessagePolicy bool
+	VolumeDevices            bool
+	ResizePolicy             bool
 }
 
 // FireboltEngineClassPodTemplateRules is the ruleset for FireboltEngineClass.spec.template.
@@ -293,13 +298,18 @@ var FireboltEngineClassPodTemplateRules = PodTemplateRules{
 	Component:            "engine",
 	PrimaryContainerName: EngineContainerName,
 	AllowedPrimaryFields: PrimaryContainerFields{
-		Image:           true,
-		Resources:       true,
-		Env:             true,
-		EnvFrom:         true,
-		VolumeMounts:    true,
-		SecurityContext: true,
-		Lifecycle:       true,
+		Image:                    true,
+		Resources:                true,
+		Env:                      true,
+		EnvFrom:                  true,
+		VolumeMounts:             true,
+		SecurityContext:          true,
+		Lifecycle:                true,
+		WorkingDir:               true,
+		TerminationMessagePath:   true,
+		TerminationMessagePolicy: true,
+		VolumeDevices:            true,
+		ResizePolicy:             true,
 	},
 	ReservedPrimaryEnvKeys:          operatorOwnedEngineEnvKeys,
 	ReservedPrimaryVolumeMountNames: operatorOwnedEngineVolumeNames,
@@ -588,15 +598,27 @@ func validateInitContainersAgainstRules(initContainers []corev1.Container, base 
 
 // validatePrimaryContainerFields walks every user-set container field on
 // the primary container and rejects any that the allowlist does not
-// permit. Fields the operator always controls — Name, Command, Args,
-// Ports, all three Probes — are checked unconditionally because they
-// have no allowlist toggle. Env and VolumeMounts, even when allowed,
-// have their reserved-key / reserved-name filter applied per entry.
+// permit. The check splits into three groups: hardcoded operator-owned
+// fields (Name, Command, Args, Ports, Probes), interactive-orchestration
+// fields rejected for every component (RestartPolicy, Stdin/Once, TTY),
+// and allowlist-toggled fields. Env and VolumeMounts, even when
+// allowed, have their reserved-key / reserved-name filter applied per
+// entry.
 func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
-	allowed := rules.AllowedPrimaryFields
+	errs = append(errs, validatePrimaryHardcodedRejects(c, base, rules)...)
+	errs = append(errs, validatePrimaryInteractiveRejects(c, base, rules)...)
+	errs = append(errs, validatePrimaryAllowlistedScalars(c, base, rules)...)
+	errs = append(errs, validatePrimaryAllowlistedSlices(c, base, rules)...)
+	errs = append(errs, validatePrimaryAllowlistedExtras(c, base, rules)...)
+	return errs
+}
 
-	// Always operator-owned, regardless of component.
+// validatePrimaryHardcodedRejects covers fields the operator owns
+// unconditionally: name (via container-walk), command, args, ports,
+// all three probes. These have no allowlist toggle.
+func validatePrimaryHardcodedRejects(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
 	if len(c.Command) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("command"),
 			fmt.Sprintf("%s container command is operator-owned", rules.Component)))
@@ -621,12 +643,17 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 		errs = append(errs, field.Forbidden(base.Child("startupProbe"),
 			fmt.Sprintf("%s container startupProbe is operator-owned", rules.Component)))
 	}
-	// Interactive / orchestration fields that make no sense on a
-	// long-lived data-plane container. RestartPolicy on a non-init
-	// container is silently dropped by the kubelet; Stdin/StdinOnce/TTY
-	// are kubectl-exec ergonomics with no meaning on a server process.
-	// Closing these here gives users immediate feedback instead of
-	// "set it, nothing happened".
+	return errs
+}
+
+// validatePrimaryInteractiveRejects rejects fields that make no sense
+// on a long-lived data-plane container. RestartPolicy on a non-init
+// container is silently dropped by the kubelet; Stdin/StdinOnce/TTY
+// are kubectl-exec ergonomics with no meaning on a server process.
+// Closing these here gives users immediate feedback instead of
+// "set it, nothing happened".
+func validatePrimaryInteractiveRejects(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
 	if c.RestartPolicy != nil {
 		errs = append(errs, field.Forbidden(base.Child("restartPolicy"),
 			fmt.Sprintf("%s container restartPolicy has no effect on a long-lived workload container", rules.Component)))
@@ -643,8 +670,15 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 		errs = append(errs, field.Forbidden(base.Child("tty"),
 			fmt.Sprintf("%s container tty is for interactive use only; the engine runs non-interactively", rules.Component)))
 	}
+	return errs
+}
 
-	// Allowlist-toggled fields.
+// validatePrimaryAllowlistedScalars covers the scalar / pointer
+// container fields whose allowlist toggle is per-ruleset:
+// image+imagePullPolicy, resources, securityContext, lifecycle.
+func validatePrimaryAllowlistedScalars(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
+	allowed := rules.AllowedPrimaryFields
 	if !allowed.Image && (c.Image != "" || c.ImagePullPolicy != "") {
 		errs = append(errs, field.Forbidden(base.Child("image"),
 			fmt.Sprintf("%s container image is operator-owned", rules.Component)))
@@ -661,7 +695,16 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 		errs = append(errs, field.Forbidden(base.Child("lifecycle"),
 			fmt.Sprintf("%s container lifecycle is operator-owned", rules.Component)))
 	}
+	return errs
+}
 
+// validatePrimaryAllowlistedSlices covers the slice-typed container
+// fields whose allowlist toggle is per-ruleset (Env, EnvFrom,
+// VolumeMounts) and applies the reserved-key / reserved-name per-entry
+// filter when allowed.
+func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
+	allowed := rules.AllowedPrimaryFields
 	if allowed.Env {
 		for ei := range c.Env {
 			if !isReservedKey(c.Env[ei].Name, rules.ReservedPrimaryEnvKeys) {
@@ -674,12 +717,10 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 		errs = append(errs, field.Forbidden(base.Child("env"),
 			fmt.Sprintf("%s container env is operator-owned", rules.Component)))
 	}
-
 	if !allowed.EnvFrom && len(c.EnvFrom) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("envFrom"),
 			fmt.Sprintf("%s container envFrom is operator-owned", rules.Component)))
 	}
-
 	if allowed.VolumeMounts {
 		for mi := range c.VolumeMounts {
 			if !isReservedKey(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
@@ -692,7 +733,36 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 		errs = append(errs, field.Forbidden(base.Child("volumeMounts"),
 			fmt.Sprintf("%s container volumeMounts are operator-owned", rules.Component)))
 	}
+	return errs
+}
 
+// validatePrimaryAllowlistedExtras covers the FB-1426 follow-up
+// allowlist toggles: WorkingDir, TerminationMessagePath/Policy,
+// VolumeDevices, ResizePolicy. Each is rejected when the ruleset
+// does not opt the component in.
+func validatePrimaryAllowlistedExtras(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
+	allowed := rules.AllowedPrimaryFields
+	if !allowed.WorkingDir && c.WorkingDir != "" {
+		errs = append(errs, field.Forbidden(base.Child("workingDir"),
+			fmt.Sprintf("%s container workingDir is operator-owned", rules.Component)))
+	}
+	if !allowed.TerminationMessagePath && c.TerminationMessagePath != "" {
+		errs = append(errs, field.Forbidden(base.Child("terminationMessagePath"),
+			fmt.Sprintf("%s container terminationMessagePath is operator-owned", rules.Component)))
+	}
+	if !allowed.TerminationMessagePolicy && c.TerminationMessagePolicy != "" {
+		errs = append(errs, field.Forbidden(base.Child("terminationMessagePolicy"),
+			fmt.Sprintf("%s container terminationMessagePolicy is operator-owned", rules.Component)))
+	}
+	if !allowed.VolumeDevices && len(c.VolumeDevices) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("volumeDevices"),
+			fmt.Sprintf("%s container volumeDevices are operator-owned", rules.Component)))
+	}
+	if !allowed.ResizePolicy && len(c.ResizePolicy) > 0 {
+		errs = append(errs, field.Forbidden(base.Child("resizePolicy"),
+			fmt.Sprintf("%s container resizePolicy is operator-owned", rules.Component)))
+	}
 	return errs
 }
 

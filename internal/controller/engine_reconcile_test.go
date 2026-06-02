@@ -133,114 +133,29 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 	}
 }
 
+// makeSTS returns the seed StatefulSet used by reconciler tests that
+// need a "stable, in-sync with testSpec" fixture. It delegates to the
+// real buildStatefulSet so every field stsMatchesSpec inspects is
+// stamped consistently; previously this helper hand-rolled the STS,
+// which silently fell out of sync whenever stsMatchesSpec grew a new
+// comparison (e.g. the FB-1426 engine-container Env / VolumeMounts /
+// extra-pod-spec checks).
 func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
-	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
-	pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
-	return &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      genResourceName(engineName, gen, ""),
-			Namespace: testNamespace,
-			Labels: map[string]string{
-				LabelEngine:     engineName,
-				LabelGeneration: strconv.Itoa(gen),
-			},
-		},
-		Spec: appsv1.StatefulSetSpec{
-			Replicas: &replicas,
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
-				ObjectMeta: metav1.ObjectMeta{Name: DataVolumeName},
-				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes: pvc.AccessModes,
-					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceStorage: pvc.Size},
-					},
-					StorageClassName: pvc.StorageClassName,
-				},
-			}},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						LabelEngine:     engineName,
-						LabelGeneration: strconv.Itoa(gen),
-					},
-				},
-				Spec: corev1.PodSpec{
-					ServiceAccountName:            enginePodServiceAccountName(spec),
-					NodeSelector:                  effectiveNodeSelector(spec, nil),
-					Tolerations:                   effectiveTolerations(spec, nil),
-					Affinity:                      effectiveAffinity(spec, nil),
-					TerminationGracePeriodSeconds: &defaultTGPS,
-					SecurityContext:               getEnginePodSecurityContext(spec),
-					Containers: []corev1.Container{
-						{
-							Name:            computev1alpha1.EngineContainerName,
-							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							Resources:       engineContainerResources(spec),
-							SecurityContext: getEngineContainerSecurityContext(spec),
-						},
-					},
-				},
-			},
-		},
-	}
+	sts := buildStatefulSet(spec, engineName, testNamespace, gen, nil)
+	sts.Spec.Replicas = &replicas
+	return sts
 }
 
-// makeEmptyDirSTS is the emptyDir sibling of makeSTS: it produces an STS
-// fixture whose data volume is a pod-template emptyDir Volume named
-// DataVolumeName instead of a VolumeClaimTemplate. Mirrors makeSTS's other
-// fields exactly so stsMatchesSpec sees only the data-volume shape change.
-// Used by reconciler tests parameterised over storageBackendCases.
+// makeEmptyDirSTS is the emptyDir sibling of makeSTS: produces an STS
+// whose data volume is a pod-template emptyDir Volume rather than a
+// VolumeClaimTemplate. Mirrors makeSTS's delegation to buildStatefulSet.
 func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
 	spec.Storage = computev1alpha1.EngineStorageSpec{}
-	defaultTGPS := int64(DefaultTerminationGracePeriodSeconds)
-	return &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      genResourceName(engineName, gen, ""),
-			Namespace: testNamespace,
-			Labels: map[string]string{
-				LabelEngine:     engineName,
-				LabelGeneration: strconv.Itoa(gen),
-			},
-		},
-		Spec: appsv1.StatefulSetSpec{
-			Replicas: &replicas,
-			// No VolumeClaimTemplates for the emptyDir backend.
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						LabelEngine:     engineName,
-						LabelGeneration: strconv.Itoa(gen),
-					},
-				},
-				Spec: corev1.PodSpec{
-					ServiceAccountName:            enginePodServiceAccountName(spec),
-					NodeSelector:                  effectiveNodeSelector(spec, nil),
-					Tolerations:                   effectiveTolerations(spec, nil),
-					Affinity:                      effectiveAffinity(spec, nil),
-					TerminationGracePeriodSeconds: &defaultTGPS,
-					SecurityContext:               getEnginePodSecurityContext(spec),
-					Containers: []corev1.Container{
-						{
-							Name:            computev1alpha1.EngineContainerName,
-							Image:           resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag),
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							Resources:       engineContainerResources(spec),
-							SecurityContext: getEngineContainerSecurityContext(spec),
-						},
-					},
-					Volumes: []corev1.Volume{
-						{
-							Name:         DataVolumeName,
-							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-						},
-					},
-				},
-			},
-		},
-	}
+	sts := buildStatefulSet(spec, engineName, testNamespace, gen, nil)
+	sts.Spec.Replicas = &replicas
+	return sts
 }
 
 // storageBackendCase parameterizes a reconciler test across the engine
@@ -1771,6 +1686,98 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		}
 		if !stsMatchesSpec(sts, spec, nil) {
 			t.Error("stsMatchesSpec: false drift on matching resourceClaims")
+		}
+	})
+}
+
+// TestBuildStatefulSet_HonorsExtraEngineContainerFields covers the
+// FB-1426 follow-up that exposed new engine-container fields under
+// spec.template.spec.containers[engine]. Each sub-test sets one field
+// and asserts both that the rendered container carries it and that
+// stsMatchesSpec sees the match (no false drift) and detects removal.
+func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
+	t.Run("workingDir", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) { c.WorkingDir = "/tmp/firebolt" })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Containers[0].WorkingDir; got != "/tmp/firebolt" {
+			t.Fatalf("WorkingDir = %q, want /tmp/firebolt", got)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching workingDir")
+		}
+		if stsMatchesSpec(sts, testSpec(), nil) {
+			t.Error("stsMatchesSpec: failed to detect drift when workingDir removed from spec")
+		}
+	})
+
+	t.Run("terminationMessagePath", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) { c.TerminationMessagePath = "/var/log/term" })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Containers[0].TerminationMessagePath; got != "/var/log/term" {
+			t.Fatalf("TerminationMessagePath = %q, want /var/log/term", got)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching terminationMessagePath")
+		}
+	})
+
+	t.Run("terminationMessagePath defaults tolerated", func(t *testing.T) {
+		// Engine spec doesn't set the field. STS read-back has the
+		// apiserver-defaulted /dev/termination-log. stsMatchesSpec must
+		// not flag drift.
+		spec := testSpec()
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts.Spec.Template.Spec.Containers[0].TerminationMessagePath = "/dev/termination-log"
+		sts.Spec.Template.Spec.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on apiserver-defaulted termination message fields")
+		}
+	})
+
+	t.Run("terminationMessagePolicy", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Containers[0].TerminationMessagePolicy; got != corev1.TerminationMessageFallbackToLogsOnError {
+			t.Fatalf("TerminationMessagePolicy = %q, want FallbackToLogsOnError", got)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching terminationMessagePolicy")
+		}
+	})
+
+	t.Run("volumeDevices", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.VolumeDevices = []corev1.VolumeDevice{{Name: "raw-disk", DevicePath: "/dev/xvdf"}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Containers[0].VolumeDevices; len(got) != 1 || got[0].Name != "raw-disk" {
+			t.Fatalf("VolumeDevices = %+v, want one entry", got)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching volumeDevices")
+		}
+	})
+
+	t.Run("resizePolicy", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.ResizePolicy = []corev1.ContainerResizePolicy{{
+				ResourceName:  corev1.ResourceCPU,
+				RestartPolicy: corev1.NotRequired,
+			}}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if got := sts.Spec.Template.Spec.Containers[0].ResizePolicy; len(got) != 1 || got[0].ResourceName != corev1.ResourceCPU {
+			t.Fatalf("ResizePolicy = %+v, want one CPU entry", got)
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec: false drift on matching resizePolicy")
 		}
 	})
 }
