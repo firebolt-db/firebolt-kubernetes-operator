@@ -1,12 +1,12 @@
 ---
-# Default values for kubernetes-operator.
+# Default values for firebolt-operator.
 
 # -- Number of operator replicas.
 replicaCount: 1
 
 image:
   # -- Container image repository.
-  repository: ghcr.io/firebolt-db/kubernetes-operator
+  repository: ghcr.io/firebolt-db/firebolt-operator
   # -- Image pull policy.
   pullPolicy: IfNotPresent
   # -- Overrides the image tag whose default is the chart appVersion.

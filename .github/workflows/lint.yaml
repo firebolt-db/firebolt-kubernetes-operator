@@ -74,7 +74,7 @@ jobs:
       - name: Verify Helm chart READMEs are up to date
         run: |
           make helm-docs
-          if ! git diff --exit-code -- helm/kubernetes-operator/README.md helm/firebolt-operator-crds/README.md; then
+          if ! git diff --exit-code -- helm/firebolt-operator/README.md helm/firebolt-operator-crds/README.md; then
             echo "ERROR: Helm chart README(s) are out of date." 1>&2
             echo "       Run 'make helm-docs' locally and commit the result." 1>&2
             exit 1

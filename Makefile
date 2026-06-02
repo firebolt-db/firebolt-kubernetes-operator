@@ -30,7 +30,7 @@ endif
 GO_BUILD_TAGS := $(GO_BUILD_TAGS_BASE)
 
 # Helm chart configuration
-HELM_CHART_DIR ?= helm/kubernetes-operator
+HELM_CHART_DIR ?= helm/firebolt-operator
 HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
 HELM_REGISTRY ?= oci://ghcr.io/firebolt-db/helm-charts
 
@@ -280,7 +280,7 @@ kind-load-operator: ## Load the operator image into the Kind cluster.
 .PHONY: local-deploy
 local-deploy: docker-build-local kind-load-operator manifests ## Build, load, and deploy operator to Kind (one command).
 	helm upgrade --install firebolt-operator $(HELM_CHART_DIR) \
-		--set fullnameOverride=kubernetes-operator \
+		--set fullnameOverride=firebolt-operator \
 		--set image.repository=$(LOCAL_IMG_REPO) \
 		--set image.tag=$(LOCAL_IMG_TAG) \
 		--set image.pullPolicy=Never \
@@ -288,7 +288,7 @@ local-deploy: docker-build-local kind-load-operator manifests ## Build, load, an
 		--set leaderElection.enabled=false \
 		--set logging.development=true \
 		--set-string podAnnotations.deploy-timestamp="$(shell date +%s)"
-	$(KUBECTL) rollout status deployment/kubernetes-operator -n default --timeout=30s
+	$(KUBECTL) rollout status deployment/firebolt-operator -n default --timeout=30s
 
 .PHONY: local-undeploy
 local-undeploy: ## Remove the operator Helm release.
@@ -339,7 +339,7 @@ helm-package: ## Package the Helm charts into dist/.
 
 .PHONY: helm-push
 helm-push: helm-package ## Package and push the Helm charts to ECR.
-	helm push dist/kubernetes-operator-*.tgz $(HELM_REGISTRY)
+	helm push dist/firebolt-operator-[0-9]*.tgz $(HELM_REGISTRY)
 	helm push dist/firebolt-operator-crds-*.tgz $(HELM_REGISTRY)
 
 ##@ Dependencies

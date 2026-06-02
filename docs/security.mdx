@@ -29,7 +29,7 @@ the image requires.
 
 The Firebolt Operator's own ClusterRole (rendered into
 `config/rbac/role.yaml`, mirrored in
-`helm/kubernetes-operator/templates/clusterrole.yaml`) is the minimal
+`helm/firebolt-operator/templates/clusterrole.yaml`) is the minimal
 set of verbs needed to manage the three CRDs and their generated
 resources. The Firebolt Operator does not request `*` on any namespaced verb
 and does not request `nodes`, `clusterrolebindings`, or any other

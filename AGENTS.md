@@ -22,7 +22,7 @@ docs-internal/         # internal design notes, SDLC, slides (not published)
 examples/              # user-facing example manifests
 formal/                # TLA+ specifications and model-checker configs
 helm/
-  kubernetes-operator/ # operator Helm chart
+  firebolt-operator/   # operator Helm chart
   firebolt-operator-crds/ # CRD-only Helm chart
 internal/
   controller/          # reconcilers, state machines, gateway, drain logic
@@ -141,7 +141,7 @@ FireboltEngineClass holds a reusable pod-template fragment that engines in the s
 
 ### RBAC changes
 
-When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/kubernetes-operator/templates/clusterrole.yaml`](helm/kubernetes-operator/templates/clusterrole.yaml) needs matching edits -- it is hand-maintained separately from kubebuilder output.
+When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/firebolt-operator/templates/clusterrole.yaml`](helm/firebolt-operator/templates/clusterrole.yaml) needs matching edits -- it is hand-maintained separately from kubebuilder output.
 
 ### Admission webhooks and controller-side fallbacks
 

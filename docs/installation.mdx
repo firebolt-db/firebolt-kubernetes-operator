@@ -56,7 +56,7 @@ direct `kubectl apply` of the CRD manifests.
 Install the Firebolt Operator controller:
 
 ```bash
-helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/kubernetes-operator --skip-crds
+helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator --skip-crds
 ```
 
 Omit `--skip-crds` if you chose the bundled `crds/` directory option above.
@@ -67,7 +67,7 @@ The Firebolt Operator watches Firebolt custom resources and reconciles the Kuber
 
 The Firebolt Operator supports these runtime flags. The binary default is what
 the manager uses when you run it directly. The Helm chart default is what the
-`kubernetes-operator` chart passes with its default `values.yaml`.
+`firebolt-operator` chart passes with its default `values.yaml`.
 
 | Flag | Binary default | Helm chart default | Description |
 |------|----------------|--------------------|-------------|

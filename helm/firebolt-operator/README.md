@@ -1,11 +1,11 @@
-# kubernetes-operator
+# firebolt-operator
 
 Helm chart for the Firebolt Kubernetes Operator
 
 ## Installation
 
 ```bash
-helm install firebolt-operator ./helm/kubernetes-operator \
+helm install firebolt-operator ./helm/firebolt-operator \
   --namespace firebolt-system --create-namespace
 ```
 
@@ -47,7 +47,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | fullnameOverride | string | `""` | Override the full resource name. |
 | healthProbeBindAddress | string | `":8081"` | Address the health probe endpoint binds to. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| image.repository | string | `"ghcr.io/firebolt-db/kubernetes-operator"` | Container image repository. |
+| image.repository | string | `"ghcr.io/firebolt-db/firebolt-operator"` | Container image repository. |
 | image.tag | string | `""` | Overrides the image tag whose default is the chart appVersion. |
 | imagePullSecrets | list | `[]` | Secrets for pulling images from private registries. |
 | leaderElection.enabled | bool | `true` | Enable leader election for the controller manager. |
@@ -99,7 +99,7 @@ chart automatically picks up the changes. Since Helm does not upgrade CRDs
 in the `crds/` directory, apply CRD updates manually:
 
 ```bash
-kubectl apply -f helm/kubernetes-operator/crds/
+kubectl apply -f helm/firebolt-operator/crds/
 ```
 
 Or use the `firebolt-operator-crds` chart for managed CRD upgrades via
