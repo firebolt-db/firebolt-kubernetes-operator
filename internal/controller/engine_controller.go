@@ -330,8 +330,15 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// silent no-op would mislead operators who set them. Same field
 	// path and "exceeds operator-configured maximum" message as the
 	// webhook so diagnostics are stable across admission paths.
-	if boundsErrs := r.ResourceBounds.Validate(engine.Spec.Resources, field.NewPath("spec", "resources")); len(boundsErrs) > 0 {
-		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+	// Resources are now nested under spec.template; admission already
+	// rejects out-of-bounds values, but the defense-in-depth check
+	// here keeps the controller's behavior identical on the
+	// webhook-disabled path.
+	if c := computev1alpha1.EngineContainerInTemplate(engine.Spec.Template); c != nil {
+		path := field.NewPath("spec", "template", "spec", "containers").Key(computev1alpha1.EngineContainerName).Child("resources")
+		if boundsErrs := r.ResourceBounds.Validate(c.Resources, path); len(boundsErrs) > 0 {
+			return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+		}
 	}
 
 	result := computeEngineReconcile(

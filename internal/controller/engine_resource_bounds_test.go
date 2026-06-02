@@ -68,7 +68,14 @@ func boundsTestEngine(name, ns, instanceRef string, resources corev1.ResourceReq
 		Spec: computev1alpha1.FireboltEngineSpec{
 			InstanceRef: instanceRef,
 			Replicas:    1,
-			Resources:   resources,
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:      computev1alpha1.EngineContainerName,
+						Resources: resources,
+					}},
+				},
+			},
 		},
 		Status: computev1alpha1.FireboltEngineStatus{
 			Phase: computev1alpha1.PhaseCreating,
@@ -145,8 +152,8 @@ func TestEngineReconcile_ResourceBoundsExceeded(t *testing.T) {
 	if cond.Reason != reasonResourceBoundsExceeded {
 		t.Errorf("Ready.Reason = %q, want %q", cond.Reason, reasonResourceBoundsExceeded)
 	}
-	if !strings.Contains(cond.Message, "spec.resources.limits") {
-		t.Errorf("Ready.Message = %q, want it to name the offending field path", cond.Message)
+	if !strings.Contains(cond.Message, "spec.template.spec.containers") || !strings.Contains(cond.Message, "resources.limits") {
+		t.Errorf("Ready.Message = %q, want it to name the template-container resources.limits path", cond.Message)
 	}
 	if !strings.Contains(cond.Message, "32") {
 		t.Errorf("Ready.Message = %q, want it to name the configured maximum (32)", cond.Message)

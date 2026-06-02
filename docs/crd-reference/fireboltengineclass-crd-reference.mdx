@@ -26,7 +26,7 @@ Multiple classes can exist per namespace. The engine picks one by name. Usage is
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `spec.template` | **Yes** | – | A Kubernetes [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged underneath each engine's own pod template. Engine spec fields win over class fields. Firebolt Operator defaults sit beneath both. |
+| `spec.template` | **Yes** | – | A Kubernetes [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged underneath each engine's own `spec.template`. Engine template fields win over class fields. Firebolt Operator defaults sit beneath both. The validating webhook applies the same allowlist to the class template and to every engine's `spec.template`, so a field accepted here is also accepted on an engine, and vice versa. |
 
 The validating webhook rejects user input on paths the Firebolt Operator owns
 end-to-end. The rejected set is enumerated below. Everything else under
@@ -36,25 +36,25 @@ end-to-end. The rejected set is enumerated below. Everything else under
 
 | Path | User-allowed | Notes |
 |---|---|---|
-| `spec.template.metadata.labels` | Yes | Keys under `firebolt.io/` are **rejected**. Engine spec `spec.podLabels` wins on conflict. |
-| `spec.template.metadata.annotations` | Yes | Keys under `firebolt.io/` are **rejected**. Engine spec `spec.podAnnotations` wins on conflict. Typical use: `kube2iam` IAM role binding. |
+| `spec.template.metadata.labels` | Yes | Keys under `firebolt.io/` are **rejected**. Engine `spec.template.metadata.labels` wins on conflict. |
+| `spec.template.metadata.annotations` | Yes | Keys under `firebolt.io/` are **rejected**. Engine `spec.template.metadata.annotations` wins on conflict. Typical use: `kube2iam` IAM role binding. |
 | `spec.template.metadata.{name,namespace,ownerReferences,...}` | No | Pod identity is assigned by the StatefulSet controller. |
 
 ### Pod-level fields under `spec.template.spec`
 
 | Path | User-allowed | Notes |
 |---|---|---|
-| `serviceAccountName` | Yes | IRSA / Pod Identity binding. Engine `spec.serviceAccountName` wins. |
+| `serviceAccountName` | Yes | IRSA / Pod Identity binding. Engine `spec.template.spec.serviceAccountName` wins. |
 | `nodeSelector` | Yes | Map-merge. Engine keys win on conflict. |
 | `tolerations` | Yes | Class tolerations + engine tolerations, concatenated. |
-| `affinity` | Yes | Engine `spec.affinity` wins if non-nil. Otherwise class. No field-merge. |
-| `imagePullSecrets` | Yes | Passed through. |
-| `volumes` | Yes | Firebolt Operator-owned volumes (`nodes-config`, data) come first. Class volumes appended. Class entries whose names collide with Firebolt Operator volumes are silently dropped because the Firebolt Operator owns those mount paths. |
-| `securityContext` | Yes | Engine `spec.podSecurityContext` wins if non-nil. Otherwise class. Firebolt Operator defaults (`fsGroup`, `fsGroupChangePolicy`) are always stamped on whichever side won. |
-| `initContainers[*]` | Yes | Class slice + engine `spec.initContainers`, concatenated (mirrors `tolerations`). An init container named `engine` is **rejected** (collides with the engine container name). |
+| `affinity` | Yes | Engine `spec.template.spec.affinity` wins if non-nil. Otherwise class. No field-merge. |
+| `imagePullSecrets` | Yes | Class secrets + engine secrets, concatenated. |
+| `volumes` | Yes | Firebolt Operator-owned volumes (`nodes-config`, data) come first. Class and engine volumes are appended in that order. Entries whose names collide with Firebolt Operator volumes are silently dropped because the Firebolt Operator owns those mount paths. |
+| `securityContext` | Yes | Engine `spec.template.spec.securityContext` wins if non-nil. Otherwise class. Firebolt Operator defaults (`fsGroup`, `fsGroupChangePolicy`) are always stamped on whichever side won. |
+| `initContainers[*]` | Yes | Class slice + engine `spec.template.spec.initContainers`, concatenated (mirrors `tolerations`). An init container named `engine` is **rejected** (collides with the engine container name). |
 | `containers[name=="engine"]` | Limited | Engine container. See below. |
 | `containers[name!="engine"]` | Yes | Sidecars. Fully user-owned: image, command, ports, env, mounts. |
-| `terminationGracePeriodSeconds` | **No** | Stamped from FireboltEngine `spec.terminationGracePeriodSeconds`. |
+| `terminationGracePeriodSeconds` | **No** | Hardcoded by the Firebolt Operator to 60s. The same rejection applies to engine `spec.template.spec.terminationGracePeriodSeconds`. |
 | `subdomain`, `hostname` | **No** | Headless-DNS contract. |
 | `restartPolicy`, `activeDeadlineSeconds` | **No** | StatefulSet semantics. |
 
@@ -68,13 +68,13 @@ the pod template.
 
 | Field | User-allowed | Notes |
 |---|---|---|
-| `image`, `imagePullPolicy` | Yes | Canonical knob for runtime version upgrades. |
-| `resources` | Yes | Engine `spec.resources` wins wholesale if it carries any requests/limits/claims. Otherwise the class entry fills in. No field-level merge. |
-| `env` | Yes | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) appear first on the pod. Class entries appended. Class entries that name a reserved key are **rejected** at admission. |
-| `envFrom` | Yes | Passed through from class. |
-| `volumeMounts` | Yes | Firebolt Operator-owned mounts first. Class mounts appended. Class entries whose names collide with Firebolt Operator-owned volumes (`nodes-config`, data) are silently dropped. |
-| `securityContext` | Yes | Engine `spec.securityContext` wins if non-nil. Otherwise class. |
-| `lifecycle` | Yes | Passed through from class. |
+| `image`, `imagePullPolicy` | Yes | Canonical knob for runtime version upgrades. Engine `spec.template.spec.containers[engine].image` wins when set. |
+| `resources` | Yes | Engine `spec.template.spec.containers[engine].resources` wins wholesale if it carries any requests/limits/claims. Otherwise the class entry fills in. No field-level merge. |
+| `env` | Yes | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) appear first on the pod. Class entries then engine entries are appended in that order. Entries that name a reserved key are **rejected** at admission. |
+| `envFrom` | Yes | Class entries + engine entries, concatenated. |
+| `volumeMounts` | Yes | Firebolt Operator-owned mounts first. Class mounts and engine mounts are appended in that order. Entries whose names collide with Firebolt Operator-owned volumes (`nodes-config`, data) are silently dropped. |
+| `securityContext` | Yes | Engine `spec.template.spec.containers[engine].securityContext` wins if non-nil. Otherwise class. |
+| `lifecycle` | Yes | Engine `spec.template.spec.containers[engine].lifecycle` wins if non-nil. Otherwise class. |
 | `name`, `command`, `args`, `ports` | **No** | Hardcoded by the Firebolt Operator. |
 | `readinessProbe`, `livenessProbe`, `startupProbe` | **No** | Owned by the Firebolt Operator (`/health/ready` contract). |
 

@@ -77,105 +77,84 @@ func TestParsePrometheusGaugeRejectsLabeledSeries(t *testing.T) {
 	}
 }
 
-func TestGetTerminationGracePeriod(t *testing.T) {
-	tests := []struct {
-		name string
-		spec *computev1alpha1.FireboltEngineSpec
-		want int64
-	}{
-		{
-			name: "default when unset",
-			spec: &computev1alpha1.FireboltEngineSpec{},
-			want: DefaultTerminationGracePeriodSeconds,
-		},
-		{
-			name: "override when set",
-			spec: &computev1alpha1.FireboltEngineSpec{
-				TerminationGracePeriodSeconds: int64Pointer(120),
-			},
-			want: 120,
-		},
+// TestGetTerminationGracePeriod_AlwaysDefault pins the post-FB-1426
+// invariant: TGPS is operator-owned. Neither the engine spec nor any
+// pod template can change it — getTerminationGracePeriod always returns
+// the operator default, and the admission webhook rejects user-supplied
+// TGPS on both engine.spec.template and FireboltEngineClass.spec.template.
+func TestGetTerminationGracePeriod_AlwaysDefault(t *testing.T) {
+	if got := getTerminationGracePeriod(&computev1alpha1.FireboltEngineSpec{}); got != DefaultTerminationGracePeriodSeconds {
+		t.Errorf("getTerminationGracePeriod(empty) = %d, want %d", got, DefaultTerminationGracePeriodSeconds)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := getTerminationGracePeriod(tt.spec); got != tt.want {
-				t.Errorf("getTerminationGracePeriod() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildStatefulSetInstallsTGPS(t *testing.T) {
-	spec := testSpec()
-	custom := int64(45)
-	spec.TerminationGracePeriodSeconds = &custom
-
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-
-	podSpec := sts.Spec.Template.Spec
-	if podSpec.TerminationGracePeriodSeconds == nil || *podSpec.TerminationGracePeriodSeconds != 45 {
-		t.Fatalf("expected TGPS=45, got %v", podSpec.TerminationGracePeriodSeconds)
-	}
-
-	if len(podSpec.Containers) != 1 {
-		t.Fatalf("expected 1 container, got %d", len(podSpec.Containers))
-	}
-	c := podSpec.Containers[0]
-	if c.Lifecycle != nil && c.Lifecycle.PreStop != nil {
-		t.Fatal("engine container must not have a preStop hook")
+	if got := getTerminationGracePeriod(testSpec()); got != DefaultTerminationGracePeriodSeconds {
+		t.Errorf("getTerminationGracePeriod(testSpec) = %d, want %d", got, DefaultTerminationGracePeriodSeconds)
 	}
 }
 
 func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 	spec := testSpec()
-	spec.TerminationGracePeriodSeconds = nil
 	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 	got := sts.Spec.Template.Spec.TerminationGracePeriodSeconds
 	if got == nil || *got != int64(DefaultTerminationGracePeriodSeconds) {
 		t.Fatalf("expected default TGPS=%d, got %v", DefaultTerminationGracePeriodSeconds, got)
 	}
+	if len(sts.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(sts.Spec.Template.Spec.Containers))
+	}
+	if c := sts.Spec.Template.Spec.Containers[0]; c.Lifecycle != nil && c.Lifecycle.PreStop != nil {
+		t.Fatal("engine container must not have a preStop hook")
+	}
 }
 
-func TestShutdownWaitUnfinished(t *testing.T) {
-	// engine.termination_grace_period in the rendered config.yaml is the
-	// engine's post-SIGTERM drain budget; FireboltCoreServer maps it onto
-	// the legacy `shutdown_wait_unfinished` Poco setting. Format is a
-	// duration string ("Ns") because the structured schema rejects bare
-	// integers for durations.
+// TestEngineShutdownWaitSeconds_ClampsAndMargin exercises the
+// gracePeriod → shutdown-wait conversion directly. Post-FB-1426 the
+// production TGPS is always the operator default, so this test pins
+// down only the helper's arithmetic (margin subtraction + 1s floor)
+// rather than threading TGPS through a spec field that no longer
+// exists.
+func TestEngineShutdownWaitSeconds_ClampsAndMargin(t *testing.T) {
 	tests := []struct {
 		name string
 		tgps int64
-		want string
+		want int64
 	}{
-		{"default 60s", 60, "55s"},
-		{"custom 120s", 120, "115s"},
-		{"5s floors to 1s", 5, "1s"},
-		{"boundary 6s floors to 1s", 6, "1s"},
-		{"7s leaves 2s", 7, "2s"},
-		{"very small 1s clamps to 1", 1, "1s"},
+		{"default 60s", 60, 55},
+		{"custom 120s", 120, 115},
+		{"5s floors to 1s", 5, 1},
+		{"boundary 6s floors to 1s", 6, 1},
+		{"7s leaves 2s", 7, 2},
+		{"very small 1s clamps to 1", 1, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spec := testSpec()
-			spec.TerminationGracePeriodSeconds = &tt.tgps
-			cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
-			var wrapper struct {
-				Engine struct {
-					TerminationGracePeriod string `json:"termination_grace_period"`
-				} `json:"engine"`
-			}
-			if err := yaml.Unmarshal([]byte(cm.Data[ConfigFileName]), &wrapper); err != nil {
-				t.Fatalf("failed to parse config.yaml: %v", err)
-			}
-			if wrapper.Engine.TerminationGracePeriod != tt.want {
-				t.Errorf("engine.termination_grace_period = %q, want %q",
-					wrapper.Engine.TerminationGracePeriod, tt.want)
+			if got := engineShutdownWaitSeconds(tt.tgps); got != tt.want {
+				t.Errorf("engineShutdownWaitSeconds(%d) = %d, want %d", tt.tgps, got, tt.want)
 			}
 		})
 	}
 }
 
-func int64Pointer(v int64) *int64 { return &v }
+// TestShutdownWaitUnfinished_ConfigMap pins the wiring from the
+// operator-default TGPS into the rendered config.yaml's
+// engine.termination_grace_period field. The production path is the
+// only configurable scenario now that user TGPS overrides are
+// rejected at admission on both engine.spec.template and
+// FireboltEngineClass.spec.template.
+func TestShutdownWaitUnfinished_ConfigMap(t *testing.T) {
+	cm := buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo())
+	var wrapper struct {
+		Engine struct {
+			TerminationGracePeriod string `json:"termination_grace_period"`
+		} `json:"engine"`
+	}
+	if err := yaml.Unmarshal([]byte(cm.Data[ConfigFileName]), &wrapper); err != nil {
+		t.Fatalf("failed to parse config.yaml: %v", err)
+	}
+	if want := "55s"; wrapper.Engine.TerminationGracePeriod != want {
+		t.Errorf("engine.termination_grace_period = %q, want %q",
+			wrapper.Engine.TerminationGracePeriod, want)
+	}
+}
 
 // Compile-time guard: make sure we never silently drop the container name
 // the drain check targets. If this constant ever renames we want the test

@@ -382,7 +382,11 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 		*out = new(string)
 		**out = **in
 	}
-	in.Resources.DeepCopyInto(&out.Resources)
+	if in.Template != nil {
+		in, out := &in.Template, &out.Template
+		*out = new(v1.PodTemplateSpec)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.DrainCheckEnabled != nil {
 		in, out := &in.DrainCheckEnabled, &out.DrainCheckEnabled
 		*out = new(bool)
@@ -393,76 +397,16 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 		*out = new(metav1.Duration)
 		**out = **in
 	}
-	if in.NodeSelector != nil {
-		in, out := &in.NodeSelector, &out.NodeSelector
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
-	if in.Tolerations != nil {
-		in, out := &in.Tolerations, &out.Tolerations
-		*out = make([]v1.Toleration, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-	if in.Affinity != nil {
-		in, out := &in.Affinity, &out.Affinity
-		*out = new(v1.Affinity)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.PodLabels != nil {
-		in, out := &in.PodLabels, &out.PodLabels
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
-	if in.PodAnnotations != nil {
-		in, out := &in.PodAnnotations, &out.PodAnnotations
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
-		}
-	}
-	if in.ServiceAccountName != nil {
-		in, out := &in.ServiceAccountName, &out.ServiceAccountName
-		*out = new(string)
-		**out = **in
-	}
 	if in.MetadataEndpointOverride != nil {
 		in, out := &in.MetadataEndpointOverride, &out.MetadataEndpointOverride
 		*out = new(string)
 		**out = **in
 	}
 	in.Storage.DeepCopyInto(&out.Storage)
-	if in.TerminationGracePeriodSeconds != nil {
-		in, out := &in.TerminationGracePeriodSeconds, &out.TerminationGracePeriodSeconds
-		*out = new(int64)
-		**out = **in
-	}
 	if in.CustomEngineConfig != nil {
 		in, out := &in.CustomEngineConfig, &out.CustomEngineConfig
 		*out = new(apiextensionsv1.JSON)
 		(*in).DeepCopyInto(*out)
-	}
-	if in.PodSecurityContext != nil {
-		in, out := &in.PodSecurityContext, &out.PodSecurityContext
-		*out = new(v1.PodSecurityContext)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.SecurityContext != nil {
-		in, out := &in.SecurityContext, &out.SecurityContext
-		*out = new(v1.SecurityContext)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.InitContainers != nil {
-		in, out := &in.InitContainers, &out.InitContainers
-		*out = make([]v1.Container, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
 	}
 	if in.Autoscaling != nil {
 		in, out := &in.Autoscaling, &out.Autoscaling

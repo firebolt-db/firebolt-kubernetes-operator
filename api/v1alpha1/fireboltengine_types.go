@@ -319,17 +319,35 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
-	// The engine container image is sourced from the referenced FireboltEngineClass
-	// template (spec.template.containers[name=="engine"].image) when set, or
-	// from the operator's embedded default otherwise. There is no per-engine
-	// image override on this CR: image is a class-level concern so that
-	// platform teams can audit image rollouts through FireboltEngineClass changes
-	// rather than across N FireboltEngine CRs. Override the operator default
-	// at install time via Helm values.
-
-	// Resources defines the Kubernetes resource requests and limits for engine pods.
+	// Template is the pod template the operator merges with its
+	// own-rendered engine container, data volume, projected ConfigMap,
+	// probes, and pod-level securityContext to produce the engine
+	// StatefulSet's pod spec. Most users set only
+	// template.spec.containers[name=="engine"].image and
+	// .resources, plus scheduling fields (nodeSelector / tolerations /
+	// affinity / topologySpreadConstraints / priorityClassName /
+	// podSecurityContext) and any sidecars / init containers / extra
+	// volumes they need.
+	//
+	// When spec.engineClassRef is also set, the operator first merges
+	// the class's spec.template underneath the operator defaults, then
+	// this template on top — engine wins on conflict (whole-struct
+	// ownership for pointer fields; list-type fields like tolerations
+	// / initContainers / sidecars / volumes concatenate class-first
+	// then engine). The same field-by-field precedence the
+	// FireboltEngineClass merge layer has always used now applies to
+	// the engine's own template as the topmost layer.
+	//
+	// The validating webhook rejects user input on paths the operator
+	// owns end-to-end — see FireboltEngineClassPodTemplateRules in
+	// operatorauthority.go for the authoritative allowlist. Notably,
+	// terminationGracePeriodSeconds is rejected: TGPS is operator-stamped
+	// from an internal default (60s), matching the same rejection on the
+	// class template.
+	//
+	// Changes to this field trigger a new blue-green generation.
 	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
 	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
 	// check on old-generation pods during graceful rollouts. When false, the
@@ -344,46 +362,6 @@ type FireboltEngineSpec struct {
 	// Only used when drainCheckEnabled is true.
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
-
-	// NodeSelector constrains which nodes the engine pods can be scheduled on.
-	// +optional
-	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
-
-	// Tolerations allow engine pods to be scheduled on tainted nodes.
-	// +optional
-	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
-
-	// Affinity defines scheduling affinity rules for engine pods. Supports the
-	// full Kubernetes corev1.Affinity shape: nodeAffinity, podAffinity, and
-	// podAntiAffinity. Changes to this field trigger a new blue-green generation
-	// (see stsMatchesSpec).
-	// +optional
-	Affinity *corev1.Affinity `json:"affinity,omitempty"`
-
-	// PodLabels are additional labels to apply to engine pods. The operator
-	// reserves "firebolt.io/engine" and "firebolt.io/generation" for its own
-	// use; user-provided values for these keys are silently ignored. All other
-	// labels are passed through verbatim.
-	//
-	// Changes to this field trigger a new blue-green generation.
-	// +optional
-	PodLabels map[string]string `json:"podLabels,omitempty"`
-
-	// PodAnnotations are additional annotations to apply to engine pods.
-	// Operator-managed pod annotations always win over user-provided values
-	// with the same key, so user input cannot accidentally drop or shadow
-	// them. All other annotations are passed through verbatim.
-	//
-	// Changes to this field trigger a new blue-green generation.
-	// +optional
-	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
-
-	// ServiceAccountName is the name of the ServiceAccount to run engine pods as.
-	// If unset, StatefulSet pods use the namespace default ServiceAccount.
-	// Changing this value triggers a new blue-green generation (see stsMatchesSpec).
-	// +kubebuilder:validation:MinLength=1
-	// +optional
-	ServiceAccountName *string `json:"serviceAccountName,omitempty"`
 
 	// Rollout strategy for transitions: "graceful" waits for drain, "recreate" deletes immediately.
 	// +kubebuilder:default=graceful
@@ -406,25 +384,13 @@ type FireboltEngineSpec struct {
 	// generation, because the StatefulSet's VolumeClaimTemplates are
 	// immutable and a backend swap necessarily reshapes the pod-template
 	// data Volume.
+	//
+	// Not a Kubernetes pod-template concern: the operator owns the data
+	// volume name and the StatefulSet's VolumeClaimTemplates, so this stays
+	// on the spec wrapper rather than under spec.template.spec.volumes.
 	// +kubebuilder:default={}
 	// +optional
 	Storage EngineStorageSpec `json:"storage,omitempty"`
-
-	// TerminationGracePeriodSeconds is the grace period given to engine pods
-	// between SIGTERM and SIGKILL during termination. On SIGTERM the engine
-	// waits up to (TerminationGracePeriodSeconds - 5s) for in-flight queries
-	// to finish before exiting; Envoy's active health checks eject the pod
-	// from the gateway load-balancer within ~1s of SIGTERM so no new queries
-	// are routed to a draining pod.
-	//
-	// Defaults to 60 seconds. Raise it for workloads with analytical
-	// queries that routinely exceed a minute; lower it for latency-bounded
-	// workloads where quicker rollouts are preferable to query survival at
-	// the tail.
-	// +kubebuilder:default=60
-	// +kubebuilder:validation:Minimum=1
-	// +optional
-	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 
 	// CustomEngineConfig is a free-form object deep-merged into the rendered
 	// engine config.yaml at the root. The rendered document follows the
@@ -454,36 +420,6 @@ type FireboltEngineSpec struct {
 	// +kubebuilder:validation:Type=object
 	// +optional
 	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
-
-	// PodSecurityContext sets pod-level security attributes stamped on the
-	// engine pod template. The operator unconditionally applies an fsGroup
-	// (3473) so the kernel chowns the per-pod data PVC for the engine
-	// process; setting fsGroup here overrides that default. All other fields
-	// are passed through verbatim.
-	//
-	// Changes to this field trigger a new blue-green generation.
-	// +optional
-	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
-
-	// SecurityContext sets container-level security attributes for the
-	// engine container. The value is passed through verbatim; the operator
-	// applies no defaults at the container scope.
-	//
-	// Changes to this field trigger a new blue-green generation.
-	// +optional
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
-
-	// InitContainers are additional init containers stamped on the engine pod
-	// template before the engine container starts. Use this for node-local data
-	// prep (for example chown on a hostPath volume at the data mount path).
-	// Init containers must mount pod volumes explicitly (typically the "data"
-	// volume at /firebolt-core/volume). The operator does not inject volume
-	// mounts or mutate container definitions.
-	//
-	// Changes to this field trigger a new blue-green generation.
-	// +optional
-	// +listType=atomic
-	InitContainers []corev1.Container `json:"initContainers,omitempty"`
 
 	// Autoscaling configures automatic replica management for this engine.
 	// When omitted or with Enabled=false, replicas is governed entirely by

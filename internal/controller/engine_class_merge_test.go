@@ -54,8 +54,7 @@ func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.F
 func TestEffectiveServiceAccountName(t *testing.T) {
 	classWithSA := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
 	specWithSA := testSpec()
-	sa := "engine-sa"
-	specWithSA.ServiceAccountName = &sa
+	setSpecTemplatePod(specWithSA, func(p *corev1.PodSpec) { p.ServiceAccountName = "engine-sa" })
 
 	tests := []struct {
 		name      string
@@ -82,7 +81,9 @@ func TestEffectiveNodeSelector_MergesKeys(t *testing.T) {
 		NodeSelector: map[string]string{"pool": "engine", "zone": "a"},
 	}))
 	spec := testSpec()
-	spec.NodeSelector = map[string]string{"zone": "b", "gpu": "true"} // engine overrides "zone"
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+		p.NodeSelector = map[string]string{"zone": "b", "gpu": "true"} // engine overrides "zone"
+	})
 
 	got := effectiveNodeSelector(spec, classInfo)
 	want := map[string]string{
@@ -105,7 +106,9 @@ func TestEffectiveTolerations_ConcatenatesClassThenEngine(t *testing.T) {
 		Tolerations: []corev1.Toleration{{Key: "from-class", Operator: corev1.TolerationOpExists}},
 	}))
 	spec := testSpec()
-	spec.Tolerations = []corev1.Toleration{{Key: "from-engine", Operator: corev1.TolerationOpExists}}
+	setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+		p.Tolerations = []corev1.Toleration{{Key: "from-engine", Operator: corev1.TolerationOpExists}}
+	})
 
 	got := effectiveTolerations(spec, classInfo)
 	if len(got) != 2 {
@@ -132,10 +135,12 @@ func TestEffectivePodAnnotations_EngineWinsOnConflict(t *testing.T) {
 		&corev1.PodSpec{},
 	))
 	spec := testSpec()
-	spec.PodAnnotations = map[string]string{
-		"shared":               "engine",
-		"prometheus.io/scrape": "true",
-	}
+	setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
+		m.Annotations = map[string]string{
+			"shared":               "engine",
+			"prometheus.io/scrape": "true",
+		}
+	})
 
 	got := effectivePodAnnotations(spec, classInfo)
 	if got["shared"] != "engine" {
@@ -257,7 +262,9 @@ func TestEffectiveEngineResources_SpecWinsElseClass(t *testing.T) {
 
 	t.Run("class fills in when spec empty", func(t *testing.T) {
 		spec := testSpec()
-		spec.Resources = corev1.ResourceRequirements{}
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{}
+		})
 		got := effectiveEngineResources(spec, classInfo)
 		if got.Requests.Cpu().String() != "4" {
 			t.Errorf("CPU = %s, want 4 (from class)", got.Requests.Cpu().String())
@@ -278,7 +285,9 @@ func TestEffectiveEngineResources_SpecWinsElseClass(t *testing.T) {
 
 	t.Run("zero when neither side sets it", func(t *testing.T) {
 		spec := testSpec()
-		spec.Resources = corev1.ResourceRequirements{}
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.Resources = corev1.ResourceRequirements{}
+		})
 		got := effectiveEngineResources(spec, nil)
 		if len(got.Requests) != 0 || len(got.Limits) != 0 {
 			t.Errorf("ResourceRequirements = %+v, want zero", got)
@@ -400,12 +409,13 @@ func TestBuildStatefulSet_AppendsClassImagePullSecrets(t *testing.T) {
 	}
 }
 
-// TestAppendClassPodVolumes_OperatorReservedNamesWin covers the
-// defense against a class redefining the operator-owned volume names
-// (DataVolumeName, "nodes-config"): the operator entry must remain.
-// Otherwise a FireboltEngineClass author could silently break engine startup
-// or data persistence by collision.
-func TestAppendClassPodVolumes_OperatorReservedNamesWin(t *testing.T) {
+// TestAppendUserPodVolumes_OperatorReservedNamesWin covers the
+// defense against a class or engine template redefining the operator-owned
+// volume names (DataVolumeName, "nodes-config"): the operator entry must
+// remain. Otherwise a FireboltEngineClass author (or an engine template
+// author) could silently break engine startup or data persistence by
+// collision.
+func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 	operator := []corev1.Volume{
 		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
 		{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
@@ -419,7 +429,7 @@ func TestAppendClassPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 		},
 	}))
 
-	got := appendClassPodVolumes(operator, classInfo)
+	got := appendUserPodVolumes(operator, testSpec(), classInfo)
 	if len(got) != 3 {
 		t.Fatalf("got %d volumes, want 3 (2 operator + 1 non-colliding class)", len(got))
 	}
@@ -502,7 +512,9 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 	t.Run("spec wins wholesale", func(t *testing.T) {
 		spec := testSpec()
 		runAsUser := int64(2222)
-		spec.SecurityContext = &corev1.SecurityContext{RunAsUser: &runAsUser}
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.SecurityContext = &corev1.SecurityContext{RunAsUser: &runAsUser}
+		})
 		got := effectiveEngineContainerSecurityContext(spec, nil)
 		if got == nil || got.RunAsUser == nil || *got.RunAsUser != 2222 {
 			t.Errorf("RunAsUser = %v, want 2222", got)
@@ -565,9 +577,11 @@ func TestEffectivePodSecurityContext_Precedence(t *testing.T) {
 
 	t.Run("spec wins wholesale when set", func(t *testing.T) {
 		spec := testSpec()
-		spec.PodSecurityContext = &corev1.PodSecurityContext{
-			FSGroup: &specFsGroup,
-		}
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.SecurityContext = &corev1.PodSecurityContext{
+				FSGroup: &specFsGroup,
+			}
+		})
 		got := effectivePodSecurityContext(spec, classInfo)
 		if got.FSGroup == nil || *got.FSGroup != specFsGroup {
 			t.Errorf("FSGroup = %v, want %d (engine spec wins)", got.FSGroup, specFsGroup)

@@ -207,8 +207,22 @@ func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ runt
 func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *FireboltEngine) field.ErrorList {
 	var errs field.ErrorList
 	errs = append(errs, v.validateEngineClassRef(ctx, eng)...)
+	errs = append(errs, v.validateTemplate(eng)...)
 	errs = append(errs, v.validateResources(eng)...)
 	return errs
+}
+
+// validateTemplate runs the per-component pod-template allowlist on the
+// engine's own spec.template. Reuses FireboltEngineClassPodTemplateRules
+// because the engine template and the class template are both validated
+// against the same operator-owned-fields contract: they merge into the
+// same pod and therefore must obey the same set of operator-owned paths.
+func (v *FireboltEngineCustomValidator) validateTemplate(eng *FireboltEngine) field.ErrorList {
+	return ValidatePodTemplate(
+		eng.Spec.Template,
+		field.NewPath("spec", "template"),
+		FireboltEngineClassPodTemplateRules,
+	)
 }
 
 // validateEngineClassRef returns field.NotFound when spec.engineClassRef
@@ -235,11 +249,45 @@ func (v *FireboltEngineCustomValidator) validateEngineClassRef(ctx context.Conte
 	return nil
 }
 
-// validateResources rejects spec.resources entries whose value exceeds
-// the operator-configured maximum. Delegates to ResourceBounds.Validate
-// so the webhook and the FireboltEngineReconciler's controller-side
-// defense-in-depth check (admission-bypass path) report identical
-// field-path errors.
+// validateResources rejects engine-container resources entries whose
+// value exceeds the operator-configured maximum. Resources now live on
+// spec.template.spec.containers[name=="engine"].resources after FB-1426
+// moved the per-engine pod-template surface under a single embedded
+// PodTemplateSpec. Delegates to ResourceBounds.Validate so the webhook
+// and the FireboltEngineReconciler's controller-side defense-in-depth
+// check (admission-bypass path) report identical field-path errors.
+//
+// When the engine declares no template, or its template declares no
+// "engine" container, there is nothing to bound and the function
+// short-circuits with an empty error list — the operator will fall
+// back to either the class's resources or empty (no requests/limits)
+// at render time, neither of which can exceed an admin-configured
+// ceiling.
 func (v *FireboltEngineCustomValidator) validateResources(eng *FireboltEngine) field.ErrorList {
-	return v.ResourceBounds.Validate(eng.Spec.Resources, field.NewPath("spec", "resources"))
+	c := EngineContainerInTemplate(eng.Spec.Template)
+	if c == nil {
+		return nil
+	}
+	return v.ResourceBounds.Validate(
+		c.Resources,
+		field.NewPath("spec", "template", "spec", "containers").Key(EngineContainerName).Child("resources"),
+	)
+}
+
+// EngineContainerInTemplate returns the container named
+// EngineContainerName from a pod template, or nil when the template
+// is nil or carries no such container. The lookup is exported so
+// callers outside this package (the controller's resource-bounds
+// defense-in-depth check, e.g.) can use the same definition.
+func EngineContainerInTemplate(template *corev1.PodTemplateSpec) *corev1.Container {
+	if template == nil {
+		return nil
+	}
+	for i := range template.Spec.Containers {
+		c := &template.Spec.Containers[i]
+		if c.Name == EngineContainerName {
+			return c
+		}
+	}
+	return nil
 }

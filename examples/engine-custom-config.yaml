@@ -29,13 +29,17 @@ metadata:
 spec:
   instanceRef: firebolt
   replicas: 1
-  resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "1"
-      memory: 4Gi
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi
   customEngineConfig:
     logging:
       level: debug

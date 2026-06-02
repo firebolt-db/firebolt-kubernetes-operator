@@ -32,10 +32,17 @@ spec:
       minio:
         # Same-namespace short name; floci must run in this engine's namespace.
         endpoint: http://floci:4566
-  resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "1"
-      memory: 4Gi
+  # Per-engine pod overrides live under spec.template (FB-1426). The
+  # operator owns container name "engine"; place per-pod tuning
+  # (resources, env, volume mounts, affinity, ...) here.
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi

@@ -143,12 +143,20 @@ func TestFireboltEngineValidator_DeleteIsNoOp(t *testing.T) {
 }
 
 // engineWithResources returns a minimal valid FireboltEngine with the
-// supplied resources block. nil ref keeps the FireboltEngineClass lookup
+// supplied resources block embedded in the engine container under the
+// engine PodTemplateSpec. nil ref keeps the FireboltEngineClass lookup
 // out of the way so the resource-bound assertions are not entangled with
 // reader fixtures.
 func engineWithResources(req, lim corev1.ResourceList) *FireboltEngine {
 	eng := fireboltEngineWithRef(nil)
-	eng.Spec.Resources = corev1.ResourceRequirements{Requests: req, Limits: lim}
+	eng.Spec.Template = &corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:      EngineContainerName,
+				Resources: corev1.ResourceRequirements{Requests: req, Limits: lim},
+			}},
+		},
+	}
 	return eng
 }
 
@@ -190,8 +198,8 @@ func TestFireboltEngineValidator_ResourcesExceedCPULimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateCreate: cpu limit above bound should be rejected, got nil")
 	}
-	if !strings.Contains(err.Error(), "spec.resources.limits") || !strings.Contains(err.Error(), "cpu") {
-		t.Errorf("ValidateCreate: error %q does not surface limits.cpu path", err.Error())
+	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.limits") || !strings.Contains(err.Error(), "cpu") {
+		t.Errorf("ValidateCreate: error %q does not surface template-container limits.cpu path", err.Error())
 	}
 	if !strings.Contains(err.Error(), "32") {
 		t.Errorf("ValidateCreate: error %q does not surface the configured maximum", err.Error())
@@ -213,8 +221,8 @@ func TestFireboltEngineValidator_ResourcesExceedMemoryRequest(t *testing.T) {
 	if err == nil {
 		t.Fatal("ValidateCreate: memory request above bound should be rejected, got nil")
 	}
-	if !strings.Contains(err.Error(), "spec.resources.requests") || !strings.Contains(err.Error(), "memory") {
-		t.Errorf("ValidateCreate: error %q does not surface requests.memory path", err.Error())
+	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.requests") || !strings.Contains(err.Error(), "memory") {
+		t.Errorf("ValidateCreate: error %q does not surface template-container requests.memory path", err.Error())
 	}
 }
 
@@ -277,8 +285,8 @@ func TestFireboltEngineValidator_AggregatesClassAndResourceErrors(t *testing.T) 
 	if err == nil {
 		t.Fatal("ValidateCreate: expected aggregated error, got nil")
 	}
-	if !strings.Contains(err.Error(), "engineClassRef") || !strings.Contains(err.Error(), "spec.resources.limits") {
-		t.Errorf("ValidateCreate: error %q should report both engineClassRef and resources violations", err.Error())
+	if !strings.Contains(err.Error(), "engineClassRef") || !strings.Contains(err.Error(), "spec.template.spec.containers") {
+		t.Errorf("ValidateCreate: error %q should report both engineClassRef and template-resources violations", err.Error())
 	}
 }
 

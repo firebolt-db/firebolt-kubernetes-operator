@@ -363,14 +363,18 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 }
 
 // ApplySpecChange mutates a pod-template-affecting spec field, triggering
-// spec drift detection. ServiceAccountName is used as the carrier because
-// it is single-valued, lives on FireboltEngineSpec, and participates in
-// stsMatchesSpec — same drift semantics the previous image-tag carrier
-// produced before image moved out of FireboltEngineSpec into FireboltEngineClass.
+// spec drift detection. The carrier is the engine-template
+// ServiceAccountName: it is single-valued, lives on
+// spec.template.spec, and participates in stsMatchesSpec via
+// effectiveServiceAccountName — same drift semantics the previous
+// flat-field ServiceAccountName carrier produced before FB-1426 moved
+// the field under spec.template.
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
 	v := rapid.IntRange(1, 99).Draw(t, "saVersion")
-	sa := fmt.Sprintf("sa-v%d", v)
-	m.spec.ServiceAccountName = &sa
+	if m.spec.Template == nil {
+		m.spec.Template = &corev1.PodTemplateSpec{}
+	}
+	m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", v)
 }
 
 // ApplyClassChange mutates the resolved FireboltEngineClass that this engine
