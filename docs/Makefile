@@ -21,13 +21,14 @@ PYTHON ?= python3
 default: check
 
 .PHONY: check
-check: test check-navigation
+check: test check-navigation check-lost-redirects
 	@echo "☑ Operator docs checks passed"
 
 .PHONY: test
 test:
 	@echo "Running docs script tests..."
 	$(PYTHON) scripts/test_check_operator_navigation.py
+	$(PYTHON) scripts/test_check_lost_redirects.py
 	@echo "☑ Docs script tests passed"
 
 .PHONY: check-navigation
@@ -38,3 +39,14 @@ check-navigation:
 	@echo "Checking for MDX files missing from navigation..."
 	$(PYTHON) scripts/check_lost_pages.py
 	@echo "☑ All MDX files are listed in navigation"
+
+.PHONY: check-lost-redirects
+check-lost-redirects:
+	@echo "Checking removed pages have redirects (propagated into packdb)..."
+	$(PYTHON) scripts/check_lost_redirects.py
+	@echo "☑ No removed pages without a redirect"
+
+.PHONY: check-lost-redirects-regenerate
+check-lost-redirects-regenerate:
+	$(PYTHON) scripts/check_lost_redirects.py regenerate
+	@echo "☑ Regenerated known_pages.json"
