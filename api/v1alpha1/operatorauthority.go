@@ -660,15 +660,15 @@ func validatePrimaryInteractiveRejects(c *corev1.Container, base *field.Path, ru
 	}
 	if c.Stdin {
 		errs = append(errs, field.Forbidden(base.Child("stdin"),
-			fmt.Sprintf("%s container stdin is for interactive use only; the engine runs non-interactively", rules.Component)))
+			fmt.Sprintf("%s container stdin is for interactive use only; the %s runs non-interactively", rules.Component, rules.Component)))
 	}
 	if c.StdinOnce {
 		errs = append(errs, field.Forbidden(base.Child("stdinOnce"),
-			fmt.Sprintf("%s container stdinOnce is for interactive use only; the engine runs non-interactively", rules.Component)))
+			fmt.Sprintf("%s container stdinOnce is for interactive use only; the %s runs non-interactively", rules.Component, rules.Component)))
 	}
 	if c.TTY {
 		errs = append(errs, field.Forbidden(base.Child("tty"),
-			fmt.Sprintf("%s container tty is for interactive use only; the engine runs non-interactively", rules.Component)))
+			fmt.Sprintf("%s container tty is for interactive use only; the %s runs non-interactively", rules.Component, rules.Component)))
 	}
 	return errs
 }
