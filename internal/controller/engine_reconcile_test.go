@@ -1690,6 +1690,26 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 	})
 }
 
+// TestStsMatchesSpec_TolerantOfPodSpecAPIServerDefaults pins the
+// false-drift fix for DNSPolicy and SchedulerName: with neither set
+// on spec.template, buildStatefulSet renders "" but the apiserver
+// fills them with "ClusterFirst" / "default-scheduler" on read-back.
+// Without the tolerant comparators, stsMatchesSpec would return false
+// on its own output and the reconciler would roll a fresh blue-green
+// generation on every loop forever (observed in CI as engine-g0 →
+// engine-g41 STSes piling up before the test timeout).
+func TestStsMatchesSpec_TolerantOfPodSpecAPIServerDefaults(t *testing.T) {
+	spec := testSpec()
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	// Simulate what the apiserver stamps on every pod spec at create
+	// time when the fields are left empty.
+	sts.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
+	sts.Spec.Template.Spec.SchedulerName = corev1.DefaultSchedulerName
+	if !stsMatchesSpec(sts, spec, nil) {
+		t.Fatal("stsMatchesSpec: false drift on apiserver-defaulted DNSPolicy / SchedulerName — would loop the reconciler rolling fresh generations forever")
+	}
+}
+
 // TestBuildStatefulSet_HonorsExtraEngineContainerFields covers the
 // FB-1426 follow-up that exposed new engine-container fields under
 // spec.template.spec.containers[engine]. Each sub-test sets one field

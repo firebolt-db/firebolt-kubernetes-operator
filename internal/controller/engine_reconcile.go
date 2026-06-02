@@ -1944,6 +1944,32 @@ func annotationsEqual(a, b map[string]string) bool {
 	return true
 }
 
+// dnsPolicyEqual treats apiserver-defaulted DNSPolicy values
+// (ClusterFirst when hostNetwork is off, ClusterFirstWithHostNet
+// when on) as equivalent to "" so an engine that does not set the
+// field compares equal to the same StatefulSet read back from the
+// apiserver. Without this tolerance, stsMatchesSpec returns false on
+// its own buildStatefulSet output once the apiserver fills in the
+// default, and the reconciler rolls a fresh blue-green generation on
+// every loop forever.
+func dnsPolicyEqual(actual, expected corev1.DNSPolicy) bool {
+	if expected == "" {
+		return actual == "" || actual == corev1.DNSClusterFirst || actual == corev1.DNSClusterFirstWithHostNet
+	}
+	return actual == expected
+}
+
+// schedulerNameEqual treats the apiserver-defaulted "default-scheduler"
+// as equivalent to "" so an engine that does not pick a scheduler
+// compares equal to the same StatefulSet read back. Same false-drift
+// rationale as dnsPolicyEqual.
+func schedulerNameEqual(actual, expected string) bool {
+	if expected == "" {
+		return actual == "" || actual == corev1.DefaultSchedulerName
+	}
+	return actual == expected
+}
+
 // stringPtrsEqual compares two *string by value, treating nil and ""
 // (or two nils, or two empty pointers) as equal. corev1.PodSpec.RuntimeClassName
 // is a *string, and an apiserver round-trip can flip a "" pointer back
@@ -2078,13 +2104,13 @@ func extraPodSpecFieldsMatch(podSpec *corev1.PodSpec, spec *computev1alpha1.Fire
 	if !stringPtrsEqual(podSpec.RuntimeClassName, effectiveRuntimeClassName(spec, classInfo)) {
 		return false
 	}
-	if podSpec.DNSPolicy != effectiveDNSPolicy(spec, classInfo) {
+	if !dnsPolicyEqual(podSpec.DNSPolicy, effectiveDNSPolicy(spec, classInfo)) {
 		return false
 	}
 	if !reflect.DeepEqual(podSpec.DNSConfig, effectiveDNSConfig(spec, classInfo)) {
 		return false
 	}
-	if podSpec.SchedulerName != effectiveSchedulerName(spec, classInfo) {
+	if !schedulerNameEqual(podSpec.SchedulerName, effectiveSchedulerName(spec, classInfo)) {
 		return false
 	}
 	if !preemptionPolicyEqual(podSpec.PreemptionPolicy, effectivePreemptionPolicy(spec, classInfo)) {
