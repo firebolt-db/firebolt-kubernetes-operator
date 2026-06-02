@@ -290,6 +290,99 @@ func TestFireboltEngineValidator_AggregatesClassAndResourceErrors(t *testing.T) 
 	}
 }
 
+// fakeReaderWithClassContainer builds a fake client preloaded with a
+// FireboltEngineClass whose spec.template carries the engine container
+// with the supplied resources block. Used by the class-bounds tests:
+// the engine omits its own template, so the bounds gate must fall
+// through to the class container.
+func fakeReaderWithClassContainer(t *testing.T, name string, resources corev1.ResourceRequirements) client.Reader {
+	t.Helper()
+	sch := runtime.NewScheme()
+	if err := scheme.AddToScheme(sch); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := AddToScheme(sch); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	class := &FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: FireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:      EngineContainerName,
+						Resources: resources,
+					}},
+				},
+			},
+		},
+	}
+	return fake.NewClientBuilder().WithScheme(sch).WithObjects(class).Build()
+}
+
+// TestFireboltEngineValidator_ClassResourcesExceedBound covers the
+// FB-1426 class-blindness fix: an engine that omits its own
+// spec.template resources but references a class whose engine
+// container carries oversized resources must be rejected too. The
+// rendered StatefulSet would otherwise carry the class's resources
+// without ever being checked against the operator's caps.
+func TestFireboltEngineValidator_ClassResourcesExceedBound(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClassContainer(t, "compute-big", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		}),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := fireboltEngineWithRef(ptr.To("compute-big"))
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: class cpu limit above bound should be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.limits") {
+		t.Errorf("ValidateCreate: error %q does not surface the merged template-container path", err.Error())
+	}
+	if !strings.Contains(err.Error(), "compute-big") {
+		t.Errorf("ValidateCreate: error %q should name the source FireboltEngineClass so the user knows where to edit", err.Error())
+	}
+}
+
+// TestFireboltEngineValidator_EngineWinsOverClassForBounds covers the
+// merge precedence: when both the engine and the class supply engine-
+// container resources, the engine wins and only its values are bounded.
+// Class values that would otherwise fail the gate are ignored because
+// they will not appear in the rendered StatefulSet.
+func TestFireboltEngineValidator_EngineWinsOverClassForBounds(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithClassContainer(t, "compute-big", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		}),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := engineWithResources(
+		nil,
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
+	)
+	eng.Spec.EngineClassRef = ptr.To("compute-big")
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: engine wins, engine cpu within bound, should pass; got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_ClassResourcesUnboundedWhenEngineEmpty
+// confirms the no-op path: a class without resources and an engine
+// without resources together pass the bounds gate, regardless of how
+// tight the configured bounds are.
+func TestFireboltEngineValidator_ClassResourcesUnboundedWhenEngineEmpty(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader:         fakeReaderWithClassContainer(t, "compute-small", corev1.ResourceRequirements{}),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("1")},
+	}
+	eng := fireboltEngineWithRef(ptr.To("compute-small"))
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: empty resources on both sides should pass any bound, got %v", err)
+	}
+}
+
 func TestFireboltEngineValidator_ResourceBoundsIsEmpty(t *testing.T) {
 	empty := EngineResourceBounds{}
 	if !empty.IsEmpty() {
