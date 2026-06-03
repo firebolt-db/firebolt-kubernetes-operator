@@ -1,3 +1,25 @@
+# 1.0.29
+
+appVersion: v4.5.0
+
+## [4.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.4.0...v4.5.0) (2026-06-03)
+
+### Features
+
+* **engine:** embed PodTemplateSpec on FireboltEngineSpec (FB-1426) ([436efc9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/436efc9ad32c77e769cce006b43efebfef48355d))
+* **engine:** honor more engine-container fields from spec.template (FB-1426) ([94fe5d8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/94fe5d8311d200c3a2b17bc13f193192158d12d7))
+* **engine:** honor more pod-spec fields from spec.template (FB-1426) ([8d65ed6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8d65ed63a29066610f917ee75b2d808b16171405))
+* **webhook:** close pod-template silent-drop and security gaps (FB-1426) ([f228c96](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f228c967c74681d2440969a9f009191ede431034))
+
+### Bug Fixes
+
+* **engine:** always reserve DataVolumeName from user pod volumes (FB-1426) ([5c755af](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5c755af60c852f9f649ec1bafd62e85dca963f56))
+* **engine:** bound class-supplied container resources too (FB-1426) ([27ac8b5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/27ac8b54efd40097baedad57a224150e0a024d46))
+* **engine:** DeepCopy effective affinity to stop aliasing into STS (FB-1426) ([bb751e6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/bb751e6cf0a951f8f12189ea0a3e73fcaf5efd1e))
+* **engine:** tolerate apiserver-defaulted DNSPolicy/SchedulerName (FB-1426) ([e9a24d0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e9a24d0d39932cfc69a226d5d48b550152bfb34f))
+* **webhook:** use rules.Component in both halves of interactive-rejection messages ([0e5b0f2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0e5b0f23e88f7eb237883be94e9a36010634873e))
+
+
 # 1.0.28
 
 appVersion: v4.4.0
