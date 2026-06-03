@@ -23,9 +23,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -36,9 +34,7 @@ import (
 const (
 	// SuffixGatewayWakeRole is appended to the instance name to form the
 	// per-instance RoleBinding name that binds the chart-managed
-	// gateway-wake ClusterRole to the gateway ServiceAccount. The name
-	// is also the legacy Role name; the migration path in
-	// ensureGatewayWakeRoleBinding tears that Role down.
+	// gateway-wake ClusterRole to the gateway ServiceAccount.
 	SuffixGatewayWakeRole = "-gateway-wake"
 )
 
@@ -72,12 +68,8 @@ func userGatewayServiceAccountName(instance *computev1alpha1.FireboltInstance) s
 	return ""
 }
 
-// gatewayWakeRoleName returns the per-instance RoleBinding name (and
-// the legacy Role name, used by the migration path). The basename is
-// intentionally the same so a single resource label query
-// (LabelInstance=<instance>) covers both old and new shapes during the
-// rolling upgrade window.
-func gatewayWakeRoleName(instanceName string) string {
+// gatewayWakeRoleBindingName returns the per-instance RoleBinding name.
+func gatewayWakeRoleBindingName(instanceName string) string {
 	return instanceName + SuffixGatewayWakeRole
 }
 
@@ -85,14 +77,8 @@ func gatewayWakeRoleName(instanceName string) string {
 // per-instance RoleBinding used by the gateway pods. The RoleBinding
 // targets a chart-managed ClusterRole (named via
 // `--gateway-wake-cluster-role`) that grants `get/list/patch` on
-// FireboltEngines.
-//
-// The Role+RoleBinding pair the previous operator versions created has
-// been replaced by ClusterRole+RoleBinding so the operator no longer
-// needs `roles: create/update/patch` cluster-wide. The retained
-// `roles: get;list;watch;delete` verbs let the reconciler clean up the
-// legacy per-instance Role during upgrade — see
-// ensureGatewayWakeRoleBinding for the migration handling.
+// FireboltEngines, so the operator no longer needs `roles:
+// create/update/patch` anywhere in its RBAC.
 func (r *FireboltInstanceReconciler) ensureGatewayRBAC(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	if r.GatewayWakeClusterRole == "" {
 		return errGatewayWakeClusterRoleUnset
@@ -131,44 +117,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayServiceAccount(ctx context.Con
 // ensureGatewayWakeRoleBinding creates or updates a RoleBinding in the
 // instance namespace that binds the chart-managed gateway-wake
 // ClusterRole to the gateway ServiceAccount.
-//
-// Migration: earlier operator versions created a per-instance Role and a
-// RoleBinding whose roleRef pointed at that Role. RoleBinding.roleRef
-// is immutable in Kubernetes, so a server-side apply with a different
-// roleRef returns a validation error. When the existing RoleBinding's
-// roleRef doesn't match the desired ClusterRole reference, delete the
-// stale binding (and the now-orphaned legacy Role) and re-create via
-// the standard apply path. Subsequent reconciles see a matching
-// roleRef and the migration step is a no-op.
 func (r *FireboltInstanceReconciler) ensureGatewayWakeRoleBinding(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
-	name := gatewayWakeRoleName(instance.Name)
+	name := gatewayWakeRoleBindingName(instance.Name)
 	saName := gatewayServiceAccountName(instance.Name)
-	key := types.NamespacedName{Name: name, Namespace: instance.Namespace}
-
-	desiredRoleRef := rbacv1.RoleRef{
-		APIGroup: rbacv1.GroupName,
-		Kind:     "ClusterRole",
-		Name:     r.GatewayWakeClusterRole,
-	}
-
-	existing := &rbacv1.RoleBinding{}
-	if err := r.Get(ctx, key, existing); err == nil {
-		if existing.RoleRef != desiredRoleRef {
-			log.Info("Deleting legacy gateway wake RoleBinding to switch roleRef",
-				"name", name, "oldRoleRef", existing.RoleRef, "newRoleRef", desiredRoleRef)
-			if err := r.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("deleting legacy RoleBinding: %w", err)
-			}
-		}
-	} else if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("reading existing RoleBinding: %w", err)
-	}
-
-	if err := r.deleteLegacyGatewayWakeRole(ctx, instance.Namespace, name); err != nil {
-		return err
-	}
-
 	desired := &rbacv1.RoleBinding{
 		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -181,26 +133,15 @@ func (r *FireboltInstanceReconciler) ensureGatewayWakeRoleBinding(ctx context.Co
 			Name:      saName,
 			Namespace: instance.Namespace,
 		}},
-		RoleRef: desiredRoleRef,
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     r.GatewayWakeClusterRole,
+		},
 	}
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
 	log.V(1).Info("Applying gateway wake RoleBinding", "name", name)
 	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
-}
-
-// deleteLegacyGatewayWakeRole tears down the per-instance Role created
-// by earlier operator versions. The Role's permissions are now carried by
-// the chart-managed ClusterRole, so the per-instance copy is dead
-// weight after the RoleBinding switches roleRef. Idempotent: missing
-// Role is a no-op.
-func (r *FireboltInstanceReconciler) deleteLegacyGatewayWakeRole(ctx context.Context, namespace, name string) error {
-	legacy := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-	}
-	if err := r.Delete(ctx, legacy); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("deleting legacy gateway wake Role: %w", err)
-	}
-	return nil
 }
