@@ -78,6 +78,7 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CRDs, CRD JSON schemas, and description-slimmed chart CRDs.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	python3 $(CURDIR)/scripts/patch-crd-template-metadata.py config/crd/bases/*.yaml
+	python3 $(CURDIR)/scripts/sync-helm-rbac.py
 	mkdir -p $(HELM_CRD_CHART_DIR)/json-schema
 	cd config/crd/bases && python3 $(CURDIR)/scripts/openapi2jsonschema.py *.yaml
 	mv config/crd/bases/*.json $(HELM_CRD_CHART_DIR)/json-schema/
