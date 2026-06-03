@@ -105,7 +105,6 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
@@ -326,7 +325,6 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&policyv1.PodDisruptionBudgetList{}, "PodDisruptionBudget")
 	deleteList(&corev1.ServiceAccountList{}, "ServiceAccount")
 	deleteList(&rbacv1.RoleBindingList{}, "RoleBinding")
-	deleteList(&rbacv1.RoleList{}, "Role")
 
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
@@ -364,8 +362,6 @@ func extractItems(list client.ObjectList) []client.Object {
 		return boxItems[policyv1.PodDisruptionBudget, *policyv1.PodDisruptionBudget](l.Items)
 	case *corev1.ServiceAccountList:
 		return boxItems[corev1.ServiceAccount, *corev1.ServiceAccount](l.Items)
-	case *rbacv1.RoleList:
-		return boxItems[rbacv1.Role, *rbacv1.Role](l.Items)
 	case *rbacv1.RoleBindingList:
 		return boxItems[rbacv1.RoleBinding, *rbacv1.RoleBinding](l.Items)
 	default:
