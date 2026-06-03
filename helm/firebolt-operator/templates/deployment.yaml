@@ -81,6 +81,7 @@ spec:
             {{- with .Values.engineResourceBounds.maxEphemeralStorage }}
             - --engine-max-ephemeral-storage={{ . }}
             {{- end }}
+            - --gateway-wake-cluster-role={{ include "firebolt-operator.gatewayWakeClusterRoleName" . }}
             {{- if (.Values.logging.development | default false) }}
             - --zap-devel=true
             {{- else }}

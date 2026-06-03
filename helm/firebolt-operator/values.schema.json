@@ -77,6 +77,13 @@
         "create": { "type": "boolean" }
       }
     },
+    "gatewayWakeClusterRole": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" }
+      }
+    },
     "leaderElection": {
       "type": "object",
       "properties": {
