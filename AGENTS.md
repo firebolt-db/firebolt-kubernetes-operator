@@ -141,7 +141,7 @@ FireboltEngineClass holds a reusable pod-template fragment that engines in the s
 
 ### RBAC changes
 
-When canonical RBAC changes (typically regeneration of [`config/rbac/role.yaml`](config/rbac/role.yaml) from `// +kubebuilder:rbac:` markers via `make manifests`), review whether [`helm/firebolt-operator/templates/clusterrole.yaml`](helm/firebolt-operator/templates/clusterrole.yaml) needs matching edits -- it is hand-maintained separately from kubebuilder output.
+`config/rbac/role.yaml` is the canonical RBAC manifest, regenerated from `// +kubebuilder:rbac:` markers via `make manifests` (controller-gen step). The matching Helm chart template [`helm/firebolt-operator/templates/clusterrole.yaml`](helm/firebolt-operator/templates/clusterrole.yaml) is GENERATED from that canonical file by [`scripts/sync-helm-rbac.py`](scripts/sync-helm-rbac.py), which `make manifests` runs immediately after controller-gen. So a `// +kubebuilder:rbac:` marker edit + `make manifests` updates BOTH files in lockstep. Do not hand-edit the chart template — the next `make manifests` run will overwrite the edit. Historical drift between the two files used to require a hand-merge step (`pods/proxy` missing after b284983, `endpointslices` dead since e538444); the sync script removes that drift entirely.
 
 ### Admission webhooks and controller-side fallbacks
 

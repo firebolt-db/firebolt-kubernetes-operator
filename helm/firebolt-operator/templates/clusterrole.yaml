@@ -1,10 +1,10 @@
 {{- /*
-HAND-MAINTAINED. This ClusterRole must stay in sync with
-config/rbac/role.yaml, which is generated from +kubebuilder:rbac:
-markers on the controllers. When those markers change, update this
-file too. Historical drift has bitten us twice (pods/proxy missing
-after b284983, endpointslices dead since e538444); keep the rule
-set minimal and matching the generated role exactly.
+GENERATED FILE. DO NOT EDIT.
+Regenerated from config/rbac/role.yaml (the canonical controller-gen
+output) by scripts/sync-helm-rbac.py. `make manifests` runs both steps
+in order, so changes to `// +kubebuilder:rbac:` markers in the
+reconcilers propagate to the chart automatically. A hand-edit here will
+be overwritten on the next `make manifests`.
 */ -}}
 {{- if .Values.rbac.create -}}
 apiVersion: rbac.authorization.k8s.io/v1
@@ -36,21 +36,21 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - persistentvolumeclaims
-    verbs:
-      - delete
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
       - events
     verbs:
       - create
       - get
       - list
       - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - delete
+      - get
+      - list
       - watch
   - apiGroups:
       - ""
@@ -71,19 +71,6 @@ rules:
     resources:
       - deployments
       - statefulsets
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - compute.firebolt.io
-    resources:
-      - fireboltengines
-      - fireboltinstances
     verbs:
       - create
       - delete
@@ -120,6 +107,19 @@ rules:
       - get
       - patch
       - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines
+      - fireboltinstances
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   - apiGroups:
       - policy
     resources:
