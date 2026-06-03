@@ -73,6 +73,7 @@ func main() {
 	var enableWebhooks bool
 	var watchNamespace string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
+	var gatewayWakeClusterRole string
 	var tlsOpts []func(*tls.Config)
 	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -105,6 +106,12 @@ func main() {
 	flag.StringVar(&engineMaxEphemeralStorageStr, "engine-max-ephemeral-storage", "",
 		"Maximum value (Kubernetes resource.Quantity, e.g. \"10Ti\") for FireboltEngine.spec.resources requests/limits ephemeral-storage. "+
 			"Empty disables the bound.")
+	flag.StringVar(&gatewayWakeClusterRole, "gateway-wake-cluster-role", "",
+		"Name of the chart-managed ClusterRole that grants get/list/patch on fireboltengines. "+
+			"The operator binds this ClusterRole to each FireboltInstance's gateway ServiceAccount via "+
+			"a per-instance RoleBinding (so the gateway can stamp the wake annotation). "+
+			"Empty fails any FireboltInstance reconcile that requires operator-managed gateway RBAC; "+
+			"users supplying their own gateway ServiceAccount via spec.gateway.template.spec.serviceAccountName are unaffected.")
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -242,9 +249,10 @@ func main() {
 	}
 
 	if err := (&controller.FireboltInstanceReconciler{
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		MetricsRecorder: instanceMetrics,
+		Client:                 mgr.GetClient(),
+		Scheme:                 mgr.GetScheme(),
+		MetricsRecorder:        instanceMetrics,
+		GatewayWakeClusterRole: gatewayWakeClusterRole,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)

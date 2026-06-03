@@ -71,3 +71,15 @@ Create the name of the service account to use.
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Name of the chart-managed gateway-wake ClusterRole. The operator binds
+this ClusterRole to each FireboltInstance's gateway ServiceAccount via
+a per-instance RoleBinding, passing the same name in
+`--gateway-wake-cluster-role`. Override
+`gatewayWakeClusterRole.name` to point at an externally managed
+ClusterRole (e.g. when `gatewayWakeClusterRole.create: false`).
+*/}}
+{{- define "firebolt-operator.gatewayWakeClusterRoleName" -}}
+{{- default (printf "%s-gateway-wake" (include "firebolt-operator.fullname" .)) .Values.gatewayWakeClusterRole.name }}
+{{- end }}

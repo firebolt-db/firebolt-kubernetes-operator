@@ -79,6 +79,17 @@ type FireboltInstanceReconciler struct {
 	// in the same namespace; in production this is left empty so the
 	// reconciler processes every FireboltInstance it watches.
 	NameFilter string
+
+	// GatewayWakeClusterRole is the name of the chart-managed ClusterRole
+	// that grants get/list/patch on fireboltengines to the gateway
+	// ServiceAccount. The reconciler binds this ClusterRole via a per-
+	// instance RoleBinding in the instance's namespace; the operator never
+	// creates the ClusterRole itself, so the cluster-wide `roles` verbs
+	// no longer appear in the operator's RBAC. Empty means the user takes
+	// ownership of gateway RBAC entirely — instances that reach the
+	// operator-managed branch (no user-supplied gateway SA) fail with a
+	// surfaced GatewayReady=False condition until the flag is set.
+	GatewayWakeClusterRole string
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch;create;update;patch;delete
@@ -93,7 +104,8 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.

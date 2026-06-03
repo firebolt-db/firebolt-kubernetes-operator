@@ -1,0 +1,33 @@
+{{- /*
+Chart-managed ClusterRole that the operator binds to each FireboltInstance's
+gateway ServiceAccount via a per-instance RoleBinding. Previously the
+operator minted a per-instance Role with these same rules, which required
+`roles: create/update/patch` cluster-wide on the operator's RBAC. Shipping
+a single static ClusterRole removes that grant from the operator entirely.
+
+The ClusterRole's name is passed to the operator via
+`--gateway-wake-cluster-role`; per-install isolation comes from the
+release-derived `<fullname>-gateway-wake` suffix so multiple operator
+installs in the same cluster don't collide.
+*/ -}}
+{{- if and .Values.rbac.create .Values.gatewayWakeClusterRole.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.gatewayWakeClusterRoleName" . }}
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines
+    verbs:
+      - get
+      - list
+      - patch
+{{- end }}

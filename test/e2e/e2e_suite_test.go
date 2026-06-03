@@ -36,6 +36,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -55,6 +56,14 @@ const (
 	resourceCleanupTimeout   = 120 * time.Second
 	instanceReadyTimeout     = 300 * time.Second
 	pollInterval             = 1 * time.Second
+
+	// e2eGatewayWakeClusterRole is the name of the chart-managed
+	// ClusterRole that grants get/list/patch on fireboltengines to the
+	// gateway ServiceAccount. The suite creates it once in
+	// SynchronizedBeforeSuite (and deletes it in SynchronizedAfterSuite)
+	// and StartInstanceOperator passes it to every per-instance
+	// FireboltInstanceReconciler via GatewayWakeClusterRole.
+	e2eGatewayWakeClusterRole = "firebolt-gateway-wake-e2e"
 )
 
 // Image references for the E2E suite, sourced from the variant-specific
@@ -234,6 +243,15 @@ var _ = SynchronizedBeforeSuite(func() {
 	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
+	By("Ensuring the gateway-wake ClusterRole exists for in-process operators")
+	// The chart ships this ClusterRole at install time; the suite runs the
+	// operator in-process and doesn't go through Helm, so create the
+	// equivalent here. Each FireboltInstanceReconciler started by
+	// StartInstanceOperator references this same name via
+	// GatewayWakeClusterRole; the per-instance RoleBindings created by
+	// ensureGatewayWakeRoleBinding point their roleRef at it.
+	ensureGatewayWakeClusterRole(ctx, k8sClient)
+
 	By("Deploying floci (S3 emulator) and pre-creating the engine bucket")
 	// The engine refuses to start without managed_storage pointing at object
 	// storage when dedicated-pensieve mode is on. Stand up floci once for the
@@ -308,8 +326,43 @@ var _ = SynchronizedAfterSuite(func() {
 		if err != nil && !errors.IsNotFound(err) {
 			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
 		}
+
+		By("Deleting the gateway-wake ClusterRole")
+		err = k8sClient.RbacV1().ClusterRoles().Delete(cleanupCtx, e2eGatewayWakeClusterRole, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete gateway-wake ClusterRole: %v\n", err)
+		}
 	}
 })
+
+// ensureGatewayWakeClusterRole creates (or refreshes) the cluster-wide
+// gateway-wake ClusterRole that earlier operator versions used to mint as
+// a per-instance Role. The chart ships an equivalent ClusterRole at
+// install time; the E2E suite runs the operator in-process and bypasses
+// Helm, so the equivalent setup happens here.
+func ensureGatewayWakeClusterRole(ctx context.Context, cs *kubernetes.Clientset) {
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: e2eGatewayWakeClusterRole},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{"compute.firebolt.io"},
+			Resources: []string{"fireboltengines"},
+			Verbs:     []string{"get", "list", "patch"},
+		}},
+	}
+	createCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	_, err := cs.RbacV1().ClusterRoles().Create(createCtx, cr, metav1.CreateOptions{})
+	if errors.IsAlreadyExists(err) {
+		// Earlier run left it behind; refresh the rules in case they
+		// changed and the previous run was on an older operator. Update
+		// is fine because ClusterRole rules are mutable.
+		existing, getErr := cs.RbacV1().ClusterRoles().Get(createCtx, e2eGatewayWakeClusterRole, metav1.GetOptions{})
+		Expect(getErr).NotTo(HaveOccurred(), "fetching pre-existing gateway-wake ClusterRole")
+		existing.Rules = cr.Rules
+		_, err = cs.RbacV1().ClusterRoles().Update(createCtx, existing, metav1.UpdateOptions{})
+	}
+	Expect(err).NotTo(HaveOccurred(), "creating gateway-wake ClusterRole")
+}
 
 // ensureNoOperatorDeployed fails the suite if any firebolt operator Deployment
 // is already running in the cluster. The E2E suite runs its own in-process
