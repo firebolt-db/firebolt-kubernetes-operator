@@ -1,3 +1,14 @@
+# 1.0.30
+
+appVersion: v4.5.1
+
+## [4.5.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.5.0...v4.5.1) (2026-06-04)
+
+### Bug Fixes
+
+* **helm:** slim CRD descriptions to fit Helm's 1 MiB release Secret (FB-1475) ([b4518ba](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b4518bad401690df8cd868ea37864f421fe00b15))
+
+
 # 1.0.29
 
 appVersion: v4.5.0
