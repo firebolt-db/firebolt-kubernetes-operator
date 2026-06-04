@@ -336,6 +336,17 @@ helm-test: ## Run Helm quickstart validation scripts against current cluster/ope
 	./scripts/ci/verify-quickstart-basic.sh "$(HELM_TEST_BASIC_NS)"
 	./scripts/ci/verify-quickstart-full.sh "$(HELM_TEST_FULL_NS)"
 
+.PHONY: helm-test-crds
+HELM_TEST_CRDS_NS ?= helm-verify-crds
+helm-test-crds: ## Verify the CRD chart installs within Helm's 1 MiB release-Secret cap (kind).
+	@ctx="$$( $(KUBECTL) config current-context 2>/dev/null || true )"; \
+	if [ "$$ctx" != "$(HELM_TEST_CONTEXT)" ]; then \
+		echo "Refusing to run helm-test-crds on kube context '$$ctx' (expected '$(HELM_TEST_CONTEXT)')." >&2; \
+		echo "Switch context or override HELM_TEST_CONTEXT / KIND_CLUSTER explicitly." >&2; \
+		exit 1; \
+	fi
+	./scripts/ci/verify-crd-chart-install.sh "$(HELM_TEST_CRDS_NS)"
+
 .PHONY: helm-package
 helm-package: ## Package the Helm charts into dist/.
 	mkdir -p dist
