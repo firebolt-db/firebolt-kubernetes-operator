@@ -39,8 +39,8 @@ jobs:
         run: |
           python3 -m pip install --user pyyaml
           make manifests
-          if ! git diff --exit-code -- config/crd/bases helm/firebolt-operator-crds/json-schema; then
-            echo "ERROR: CRD manifests or JSON schemas are out of date." 1>&2
+          if ! git diff --exit-code -- config/crd/bases helm/firebolt-operator-crds/json-schema helm/firebolt-operator-crds/templates helm/firebolt-operator/crds; then
+            echo "ERROR: CRD manifests, JSON schemas, or chart CRDs are out of date." 1>&2
             echo "       Run 'make manifests' locally and commit the result." 1>&2
             exit 1
           fi
