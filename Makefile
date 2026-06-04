@@ -75,12 +75,17 @@ help: ## Display this help.
 ##@ Development
 
 .PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CustomResourceDefinition objects, and CRD JSON schemas.
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CRDs, CRD JSON schemas, and description-slimmed chart CRDs.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	python3 $(CURDIR)/scripts/patch-crd-template-metadata.py config/crd/bases/*.yaml
 	mkdir -p $(HELM_CRD_CHART_DIR)/json-schema
 	cd config/crd/bases && python3 $(CURDIR)/scripts/openapi2jsonschema.py *.yaml
 	mv config/crd/bases/*.json $(HELM_CRD_CHART_DIR)/json-schema/
+	# Ship description-slimmed CRDs in both Helm charts so each release Secret
+	# stays under Kubernetes' 1 MiB cap. MUST run after patch-crd-template-metadata.py
+	# (which keys off descriptions); config/crd/bases stays full-fat and canonical.
+	python3 $(CURDIR)/scripts/strip-crd-descriptions.py --out-dir $(HELM_CRD_CHART_DIR)/templates config/crd/bases/*.yaml
+	python3 $(CURDIR)/scripts/strip-crd-descriptions.py --out-dir $(HELM_CHART_DIR)/crds config/crd/bases/*.yaml
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

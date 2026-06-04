@@ -12,9 +12,10 @@
 
 # JSON schemas are generated into this chart dir by `make manifests` and are
 # kept in the repo for IDE / kubeconform validation, but they are NOT needed
-# at install time. Packaging them bloats the Helm release Secret, which is
-# capped at ~1 MB; combined with the CRD templates it pushes the release over
-# that limit and `helm install` fails. Keep them on disk, ship them out.
+# at install time. They keep full descriptions (~2.2 MB) and would blow the
+# Helm release Secret's ~1 MB cap on their own -- so they ship out even though
+# the CRD templates are now description-slimmed (scripts/strip-crd-descriptions.py).
+# Keep them on disk, ship them out. See KNOWN_ISSUES.md (release-Secret size).
 json-schema/
 
 # helm-docs source template; the rendered README.md is shipped instead.
