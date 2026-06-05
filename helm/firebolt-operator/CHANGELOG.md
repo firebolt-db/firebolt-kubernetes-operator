@@ -1,3 +1,14 @@
+# 1.0.32
+
+appVersion: v4.6.0
+
+## [4.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.5.2...v4.6.0) (2026-06-05)
+
+### Features
+
+* do not add ticket references in docs or code (FB-1454) ([6d039db](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6d039db6df1de678b8d7a247cdf653801c53e389))
+
+
 # 1.0.31
 
 appVersion: v4.5.2
