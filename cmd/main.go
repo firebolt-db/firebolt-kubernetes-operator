@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -71,7 +72,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var enableWebhooks bool
-	var watchNamespace string
+	var watchNamespacesArg string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
 	var gatewayWakeClusterRole string
 	var tlsOpts []func(*tls.Config)
@@ -95,8 +96,10 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&enableWebhooks, "enable-webhooks", true,
 		"Enable the admission webhook server. Disable when TLS certs are not available (e.g. local Kind clusters).")
-	flag.StringVar(&watchNamespace, "namespace", "",
-		"Namespace to watch for FireboltEngine resources (optional, watches all namespaces if empty)")
+	flag.StringVar(&watchNamespacesArg, "namespaces", "",
+		"Comma-separated list of namespaces to watch for Firebolt CRs. Empty watches all namespaces "+
+			"(cluster-wide install, requires the chart's ClusterRole). A non-empty list confines the "+
+			"manager cache to those namespaces and requires per-namespace Role+RoleBinding pairs in each.")
 	flag.StringVar(&engineMaxCPUStr, "engine-max-cpu", "",
 		"Maximum value (Kubernetes resource.Quantity, e.g. \"32\") for FireboltEngine.spec.resources requests/limits CPU. "+
 			"Empty disables the bound.")
@@ -216,12 +219,14 @@ func main() {
 		mgrOpts.WebhookServer = webhookServer
 	}
 
-	if watchNamespace != "" {
-		mgrOpts.Cache = cache.Options{
-			DefaultNamespaces: map[string]cache.Config{
-				watchNamespace: {},
-			},
+	watchNamespaces := parseNamespaces(watchNamespacesArg)
+	if len(watchNamespaces) > 0 {
+		defaults := make(map[string]cache.Config, len(watchNamespaces))
+		for _, ns := range watchNamespaces {
+			defaults[ns] = cache.Config{}
 		}
+		mgrOpts.Cache = cache.Options{DefaultNamespaces: defaults}
+		setupLog.Info("manager cache scoped to enumerated namespaces", "namespaces", watchNamespaces)
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOpts)
@@ -240,7 +245,6 @@ func main() {
 	if err := (&controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Namespace:       watchNamespace,
 		MetricsRecorder: engineMetrics,
 		ResourceBounds:  engineBounds,
 	}).SetupWithManager(mgr); err != nil {
@@ -354,4 +358,23 @@ func parseEngineResourceBounds(cpu, memory, ephemeral string) (computev1alpha1.E
 		bounds.MaxEphemeralStorage = q
 	}
 	return bounds, nil
+}
+
+// parseNamespaces splits a comma-separated namespace list into a clean
+// slice. Whitespace around entries is tolerated; empty entries are
+// dropped, so values like " a , b ," produce []string{"a", "b"}. An
+// empty input returns a nil slice, which the caller treats as
+// "cluster-wide" (no DefaultNamespaces, watch every namespace).
+func parseNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

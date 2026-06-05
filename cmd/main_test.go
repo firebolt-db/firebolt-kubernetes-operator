@@ -76,3 +76,31 @@ func TestParseEngineResourceBounds_MalformedFails(t *testing.T) {
 		})
 	}
 }
+
+func TestParseNamespaces(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "alpha", []string{"alpha"}},
+		{"two", "alpha,beta", []string{"alpha", "beta"}},
+		{"three with whitespace", " alpha , beta , gamma ", []string{"alpha", "beta", "gamma"}},
+		{"empty entries dropped", "alpha,,beta,", []string{"alpha", "beta"}},
+		{"only commas yields nil-equivalent", ",,,", []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseNamespaces(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseNamespaces(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("parseNamespaces(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
