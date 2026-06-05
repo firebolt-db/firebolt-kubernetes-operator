@@ -69,8 +69,8 @@ spec:
             {{- else }}
             - --enable-webhooks=false
             {{- end }}
-            {{- with .Values.watchNamespace }}
-            - --namespace={{ . }}
+            {{- with .Values.watchNamespaces }}
+            - --namespaces={{ join "," . }}
             {{- end }}
             {{- with .Values.engineResourceBounds.maxCPU }}
             - --engine-max-cpu={{ . }}
