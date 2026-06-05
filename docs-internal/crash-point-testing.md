@@ -1,9 +1,3 @@
----
-title: Crash-point testing
-description: E2E crash injection points used to verify Firebolt Operator recovery at engine phase boundaries.
-sidebarTitle: Crash-point testing
----
-
 ## Crash-point testing
 
 The E2E test suite verifies crash recovery at every phase boundary using a build-tag-based injection mechanism.

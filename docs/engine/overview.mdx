@@ -1,0 +1,30 @@
+---
+title: Engine overview
+description: A FireboltEngine is the compute resource that runs query engine nodes.
+sidebarTitle: Overview
+---
+
+## Overview
+
+The Firebolt Operator's engine reconciler owns `FireboltEngine` lifecycle: blue-green generations, phase transitions, status conditions, and the Kubernetes objects behind each engine node.
+
+Use the pages in this section when you need implementation detail beyond the top-level [Architecture](../architecture) page.
+
+- [Engine reconciliation](./engine-reconciliation) covers the reconcile loop, phase machine, generation model, and crash recovery.
+- [Engine rollouts](./engine-rollouts) covers drain checks and rolling update parameters during cutovers.
+- [Autoscaling and wake-up](./autoscaling-and-wake-up) covers operator-driven scaling and the gateway wake-up annotation protocol.
+
+For the `FireboltEngine` API surface, see the [FireboltEngine CRD reference](../crd-reference/engine-crd-reference).
+
+## Inspecting status
+
+```bash
+kubectl get fireng -n firebolt
+```
+
+```
+NAME        REPLICAS   PHASE    READY   GENERATION   AGE
+my-engine   5          stable   True    2            24h
+```
+
+Worked examples live in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.

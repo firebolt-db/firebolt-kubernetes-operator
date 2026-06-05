@@ -14,44 +14,27 @@ This page explains how to install the Firebolt Operator in a Kubernetes cluster.
 
 ## Install the CRDs
 
-The Firebolt Operator needs its CustomResourceDefinitions before any `FireboltInstance`,
-`FireboltEngine`, or `FireboltEngineClass` resources can be created. There are two
-supported installation patterns; the separate CRD chart is the recommended one.
+The Firebolt Operator comes with three CustomResourceDefinitions:
+- `FireboltInstance`
+- `FireboltEngine`
+- `FireboltEngineClass`
 
-The Firebolt CRDs embed the full Kubernetes `PodTemplateSpec` schema and are
-several hundred kilobytes each, well above the 256 KB ceiling on the
-`kubectl.kubernetes.io/last-applied-configuration` annotation that client-side
-`kubectl apply` uses. Helm bypasses this annotation entirely and installs the
-CRDs cleanly with either option below. If you ever install the CRDs directly
-with `kubectl`, use server-side apply:
-
-```bash
-kubectl apply --server-side --force-conflicts -f config/crd/bases/
-```
-
-The same guidance applies to the custom resources (`FireboltInstance`,
-`FireboltEngine`, `FireboltEngineClass`): always apply them with
-`--server-side`. The Quickstart shows the flag in every `kubectl apply` example.
+We provide two ways to install the CRDs. Either via a separate CRD chart or via the
+Firebolt Operator chart `crds/` directory. If you would like to learn more about the
+pros and cons of each option, please refer to the [Helm chart best practices for CRDs](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/).
 
 ### Option 1 (recommended): Separate CRD chart
 
-Install the CRD chart before installing the Firebolt Operator controller:
+Install the CRD chart before installing the Firebolt Operator chart. This is the recommended option as it
+allows you full control over the CRDs lifecycle.
 
 ```bash
 helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
 ```
 
-This chart installs the API types used by the Firebolt Operator:
-
-- `FireboltInstance`
-- `FireboltEngine`
-- `FireboltEngineClass`
-
-This is the recommended pattern, and it matches the [Helm chart best practices for CRDs](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/): keep CRDs in a chart of their own, install them before the chart that uses them, and let Helm manage their lifecycle through ordinary `helm upgrade` flows. The separate CRD chart renders CRDs from `templates/`, so a future `helm upgrade firebolt-crds ...` can update the CRD definitions. When you later install the Firebolt Operator chart in this flow, pass `--skip-crds` so Helm does not also run the Firebolt Operator chart's bundled CRD install step.
-
 ### Option 2: Firebolt Operator chart `crds/` directory
 
-The Firebolt Operator chart also bundles CRDs in its `crds/` directory. Helm gives this
+The Firebolt Operator chart bundles CRDs in its `crds/` directory. Helm gives this
 directory special handling: on `helm install`, CRDs in `crds/` are installed
 before the chart templates are rendered. If a CRD already exists, Helm skips it
 with a warning. You can opt out of this bundled CRD installation with
@@ -59,22 +42,17 @@ with a warning. You can opt out of this bundled CRD installation with
 
 Helm does not upgrade or delete CRDs from a chart's `crds/` directory (this is
 the trade-off the [Helm CRD best practices](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/) caution against for ongoing use).
-This option is useful for first-install bootstrapping, but CRD schema changes
-must be applied separately later, either with the `firebolt-operator-crds`
-chart or a direct `kubectl apply` of the CRD manifests. Prefer Option 1 for any
-deployment that will need to upgrade the operator over time.
+Prefer Option 1 for any deployment that will need to upgrade the operator over time.
 
 ## Install the Firebolt Operator
 
 Install the Firebolt Operator controller:
 
 ```bash
-helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator --skip-crds
+helm upgrade --skip-crds --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator
 ```
 
 Omit `--skip-crds` if you chose the bundled `crds/` directory option above.
-
-The Firebolt Operator watches Firebolt custom resources and reconciles the Kubernetes objects needed to run instances, gateways, metadata services, and engines.
 
 ## Firebolt Operator flags
 
@@ -109,4 +87,4 @@ the manager uses when you run it directly. The Helm chart default is what the
 
 ## Next step
 
-After installation, follow the [quickstart](./quickstart) to create a `FireboltInstance`, an `FireboltEngineClass`, and a `FireboltEngine`.
+After installation, follow the [quickstart](./quickstart) to create your first `FireboltEngine`.

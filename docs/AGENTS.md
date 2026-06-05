@@ -7,7 +7,7 @@ especially MDX files.
 - In documentation and readme files, always use "the Firebolt Operator" over "the operator" or "the Kubernetes operator" or "the Firebolt Kubernetes Operator".
 
 ## CRD reference accuracy
-- The CRD reference pages under `docs/crd-reference/` (`instance-crd-reference.mdx`, `engine-crd-reference.mdx`, `fireboltengineclass-crd-reference.mdx`) describe the CRD spec, status, phases, conditions, short names, and `kubectl` printer columns. They are hand-maintained and not generated.
+- The CRD reference pages under `docs/crd-reference/` (`instance-crd-reference.mdx`, `engine-crd-reference.mdx`, `fireboltengineclass-crd-reference.mdx`) are spec/owned-field/phase/status property references only. Narrative design content lives under `docs/engine/`, `docs/engineclass/`, and `docs/instance/`. They are hand-maintained and not generated.
 - When the CRD API types change, you must update the matching reference page in the same change. Triggers include any edit to `api/v1alpha1/*_types.go` (new, renamed, or removed spec or status fields, defaults, validation, immutability), changes to `// +kubebuilder:printcolumn` markers or short names, and new phases, conditions, or reconciler-managed resources.
 - Keep the documented short names and example `kubectl get` output in sync with the live CRDs: `fire` for FireboltInstance, `fireng` for FireboltEngine, and `firengc` for FireboltEngineClass.
 
@@ -23,6 +23,8 @@ especially MDX files.
 - Use descriptive link text.
 - Write accessibly.
 - Write for a global audience.
+- Do not put commit IDs into documentation.
+- Do not put ticket or issue references into documentation.
 
 ## Language and grammar
 

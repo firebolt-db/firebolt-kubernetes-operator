@@ -221,7 +221,7 @@ make lint               # golangci-lint
 - [docs/crd-reference/instance-crd-reference.mdx](docs/crd-reference/instance-crd-reference.mdx) -- FireboltInstance spec, phases, and monitoring
 - [docs/crd-reference/engine-crd-reference.mdx](docs/crd-reference/engine-crd-reference.mdx) -- FireboltEngine spec, phases, conditions, and managed resources
 - [docs/crd-reference/fireboltengineclass-crd-reference.mdx](docs/crd-reference/fireboltengineclass-crd-reference.mdx) -- FireboltEngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
-- [docs/gateway-sizing.mdx](docs/gateway-sizing.mdx) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
+- [docs/instance/gateway/gateway-sizing.mdx](docs/instance/gateway/gateway-sizing.mdx) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
 - [docs/troubleshooting.mdx](docs/troubleshooting.mdx) -- common issues with instances and engines
 - [docs/monitoring.mdx](docs/monitoring.mdx) -- observability and metrics
 - [docs/security.mdx](docs/security.mdx) -- operator vs. platform responsibilities for pod hardening, network isolation, and secrets

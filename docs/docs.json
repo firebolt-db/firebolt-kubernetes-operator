@@ -1,17 +1,6 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "redirects": [
-    {
-      "source": "/architecture/engineclass-design",
-      "destination": "/architecture/fireboltengineclass-design",
-      "permanent": false
-    },
-    {
-      "source": "/crd-reference/engineclass-crd-reference",
-      "destination": "/crd-reference/fireboltengineclass-crd-reference",
-      "permanent": false
-    }
-  ],
+  "redirects": [],
   "navigation": {
     "groups": [
       {
@@ -27,17 +16,39 @@
           },
           "architecture",
           {
-            "group": "Architecture details",
+            "group": "Instance",
             "pages": [
-              "architecture/engine-reconciliation",
-              "architecture/instance-reconciliation",
-              "architecture/fireboltengineclass-design",
-              "architecture/engine-rollouts",
-              "architecture/autoscaling-and-wake-up",
-              "architecture/gateway-query-routing",
-              "architecture/crash-point-testing"
+              "instance/overview",
+              "instance/instance-reconciliation",
+              {
+                "group": "Gateway",
+                "pages": [
+                  "instance/gateway/overview",
+                  "instance/gateway/gateway-query-routing",
+                  "instance/gateway/gateway-sizing"
+                ]
+              }
             ]
           },
+          {
+            "group": "Engine",
+            "pages": [
+              "engine/overview",
+              "engine/engine-reconciliation",
+              "engine/engine-rollouts",
+              "engine/autoscaling-and-wake-up"
+            ]
+          },
+          {
+            "group": "EngineClass",
+            "pages": [
+              "engineclass/overview",
+              "engineclass/fireboltengineclass-design"
+            ]
+          },
+          "monitoring",
+          "security",
+          "troubleshooting",
           {
             "group": "CRD reference",
             "pages": [
@@ -45,11 +56,7 @@
               "crd-reference/engine-crd-reference",
               "crd-reference/fireboltengineclass-crd-reference"
             ]
-          },
-          "gateway-sizing",
-          "monitoring",
-          "security",
-          "troubleshooting"
+          }
         ]
       }
     ]

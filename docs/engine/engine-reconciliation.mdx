@@ -176,6 +176,72 @@ The Firebolt Operator is crash-safe at every phase boundary. If the process term
 
 No persistent state outside of the Kubernetes API server is required.
 
+## Pod template merge
+
+Per-engine pod-template overrides live under `spec.template`. When
+`spec.engineClassRef` is set, the Firebolt Operator composes the rendered
+StatefulSet pod template from three layers (top wins on conflict for scalar
+and struct fields):
+
+1. **Firebolt Operator defaults** (`terminationGracePeriodSeconds=60`, hardened `runAsUser` / `fsGroup`, `firebolt.io/engine` and `firebolt.io/generation` labels, operator-owned volumes).
+2. **`FireboltEngineClass.spec.template`** (shared by every engine that references the class).
+3. **`FireboltEngine.spec.template`** on this engine.
+
+List-typed fields (`tolerations`, `initContainers`, sidecars, `env`, `envFrom`,
+`volumeMounts`, `imagePullSecrets`, `volumes`) concatenate class-then-engine.
+The validating webhook applies the same allowlist to class and engine templates.
+Rejected paths are enumerated in the
+[FireboltEngine CRD reference](../crd-reference/engine-crd-reference#firebolt-operator-owned-fields-on-engine-templates)
+and [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference).
+For merge rules the reconciler uses, see
+[FireboltEngineClass design](../engineclass/fireboltengineclass-design#pod-template-merge-layer).
+
+Changes to `spec.template` or the resolved class content trigger a new blue-green generation.
+
+## Firebolt Operator-managed resources
+
+**Do not modify these resources manually.** For an engine named `my-engine`:
+
+| Resource | Name pattern | Purpose |
+|----------|--------------|---------|
+| **Engine Service** | `my-engine-service` | Headless Service exposing the current generation's pod IPs. |
+| **StatefulSet** | `my-engine-g{N}` | Pods for generation N |
+| **Headless Service** | `my-engine-g{N}-hl` | Pod DNS for generation N |
+| **Config ConfigMap** | `my-engine-g{N}-config` | Engine config for generation N |
+
+## Admission resource bounds
+
+The validating webhook can be configured with per-dimension maxima for the
+engine container's `resources.requests` and `resources.limits`. When
+configured, any `FireboltEngine` create or update whose engine container
+`cpu`, `memory`, or `ephemeral-storage` value exceeds the matching maximum is
+rejected at admission with a
+`spec.template.spec.containers[engine].resources.{requests,limits}.{name}`
+field error.
+
+Bounds are opt-in (defaults are empty). Configure via Helm when the webhook is enabled:
+
+```yaml
+webhook:
+  enabled: true
+engineResourceBounds:
+  maxCPU: "32"
+  maxMemory: "256Gi"
+  maxEphemeralStorage: "10Ti"
+```
+
+Or via Firebolt Operator flags:
+
+```
+--engine-max-cpu=32
+--engine-max-memory=256Gi
+--engine-max-ephemeral-storage=10Ti
+```
+
+Bounds apply independently per dimension. Resource names without a configured
+maximum pass through unchecked. Both requests and limits are checked against
+the same per-dimension maximum.
+
 ## Resource ownership
 
 All per-engine resources have:

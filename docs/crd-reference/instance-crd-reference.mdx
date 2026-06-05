@@ -12,7 +12,7 @@ under `spec.gateway.template` and `spec.metadata.template` respectively.
 They use the same shape as `FireboltEngineClass.spec.template`. The validating webhook
 restricts what users may set on those templates. See
 [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates)
-below.
+and [Instance reconciliation](../instance/instance-reconciliation#component-pod-templates).
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
@@ -24,10 +24,10 @@ below.
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
 | `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported). |
-| `spec.metadata.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered metadata container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates) for what users may and may not set. Image: `spec.metadata.template.spec.containers[name=="metadata"].image`. |
+| `spec.metadata.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered metadata container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.metadata.template.spec.containers[name=="metadata"].image`. |
 | `spec.metadata.engineRegistration` | No | `false` | Register Engine objects in the metadata service for SQL-level RBAC. |
 | `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
-| `spec.gateway.replicas` | No | `2` | Number of gateway pods. See [sizing guidance](#gateway-sizing). Replicas + memory must absorb both steady-state traffic and the retry amplification produced by the X-Firebolt-Drained shutdown path. |
+| `spec.gateway.replicas` | No | `2` | Number of gateway pods. See [Gateway sizing](../instance/gateway/gateway-sizing). |
 | `spec.gateway.metricsPort` | No | `9090` | Container port exposing Envoy's Prometheus metrics endpoint. The Firebolt Operator stamps a corresponding `metrics` port on the container. |
 | `spec.gateway.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered Envoy container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.gateway.template.spec.containers[name=="envoy"].image`. |
 | `spec.auth` | No | disabled | Authentication configuration. Not enforced yet. Reserved for future engine-level auth. |
@@ -42,10 +42,7 @@ below.
 [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/)
 embeds. The validating webhook (`vfireboltinstance.compute.firebolt.io`)
 walks every template at admission time and rejects user input on
-fields the Firebolt Operator manages end-to-end. This keeps the
-StatefulSet/Deployment + Service + drain-hook contracts intact while
-giving users the full pod surface for everything they legitimately
-need.
+fields the Firebolt Operator manages end-to-end.
 
 The same set of pod-level fields is rejected on **both** components:
 
@@ -95,68 +92,15 @@ as `GatewayPodTemplateRules` and `MetadataPodTemplateRules`.
 | `Degraded` | Was previously Ready, but one or more components became unhealthy |
 | `Failed` | Terminal error requiring manual intervention (e.g., multiple accounts found in metadata) |
 
-## Gateway custom service account
+## Status properties
 
-By default the Firebolt Operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `compute.firebolt.io/fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on FireboltEngines when a request arrives for a stopped engine (the wake-on-zero protocol).
+| Field | Description |
+|-------|-------------|
+| `status.phase` | Instance lifecycle phase. See [Instance phases](#instance-phases). |
+| `status.metadataReady` | Whether the metadata service Deployment has a ready replica. |
+| `status.gatewayReady` | Whether the gateway Deployment has a ready replica. |
+| `status.metadataEndpoint` | In-cluster metadata gRPC endpoint (cleared when metadata is not ready). |
+| `status.gatewayEndpoint` | In-cluster gateway HTTP endpoint (cleared when gateway is not ready). |
+| `status.conditions` | `Ready`, `MetadataReady`, `GatewayReady`. |
 
-When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA / Role / RoleBinding entirely**. The user is then responsible for:
-
-1. Creating the ServiceAccount in the instance's namespace under the name they specified.
-2. Granting it the verbs the gateway needs:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gateway-wake
-  namespace: firebolt
-rules:
-  - apiGroups: ["compute.firebolt.io"]
-    resources: ["fireboltengines"]
-    verbs: ["get", "list", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gateway-wake
-  namespace: firebolt
-subjects:
-  - kind: ServiceAccount
-    name: my-gateway-sa
-    namespace: firebolt
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gateway-wake
-```
-
-The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC.
-
-Missing or under-permissioned user SAs do **not** fail at admission. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts but logs `Forbidden` 403s when it tries to patch a stopped engine's wake annotation. Verify with:
-
-```bash
-kubectl auth can-i patch fireboltengines.compute.firebolt.io \
-  --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
-```
-
-## Check status
-
-```bash
-kubectl get fire -n firebolt
-```
-
-```
-NAME         PHASE   GATEWAY   METADATA   AGE
-production   Ready   true      true       24h
-```
-
-Inspect details:
-
-```bash
-kubectl get fire production -n firebolt -o yaml
-```
-
-Key status fields: `phase`, `metadataReady`, `gatewayReady`, `metadataEndpoint`, `gatewayEndpoint`, `conditions` (`Ready`, `MetadataReady`, `GatewayReady`).
-
-## Examples
-For full examples, see the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.
+Short name: `fire`.

@@ -1,0 +1,30 @@
+---
+title: FireboltEngineClass overview
+description: Optional namespaced pod-template classes shared by FireboltEngine resources in a namespace.
+sidebarTitle: Overview
+---
+
+## Overview
+
+`FireboltEngineClass` is an optional namespaced resource that holds a reusable pod-template fragment. Engines in the same namespace reference it through `spec.engineClassRef` so scheduling, identity, sidecars, and engine image settings stay consistent without duplicating YAML on every engine.
+
+The pattern echoes `StorageClass` / `IngressClass` / `GatewayClass` in the "shared template referenced by name" sense, but `FireboltEngineClass` is **namespaced** rather than cluster-scoped. Its template carries namespace-resolved identifiers: ServiceAccount names, Secret / ConfigMap / PVC volume references, and per-tenant IAM annotations. Kubernetes resolves those names in the engine's namespace at pod admission time, so the class and its consumer engines stay co-located.
+
+Multiple classes can exist per namespace. The engine picks one by name. Usage is optional.
+
+- [FireboltEngineClass design](./fireboltengineclass-design) documents merge precedence with `FireboltEngine.spec.template`, deletion, and rollout behavior when a class changes.
+
+For the allowlist of user-settable vs. operator-owned template fields, see the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference).
+
+## Inspecting status
+
+```bash
+kubectl get firengc -n firebolt
+```
+
+```
+NAME                BOUND   READY   AGE
+compute-optimized   3       True    24h
+```
+
+Examples: [`firebolt-engine-class.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/firebolt-engine-class.yaml), [`instance-with-engines.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/instance-with-engines.yaml).
