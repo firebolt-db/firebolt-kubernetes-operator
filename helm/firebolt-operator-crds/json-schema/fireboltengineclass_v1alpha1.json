@@ -13,8 +13,212 @@
       "type": "object"
     },
     "spec": {
-      "description": "FireboltEngineClassSpec defines the desired state of a FireboltEngineClass.\n\nTemplate is a Kubernetes PodTemplateSpec merged underneath an engine's\nown pod template when the engine references this class via\nspec.engineClassRef. Precedence on every field is:\n\n 1. operator defaults (lowest)\n 2. FireboltEngineClass template\n 3. FireboltEngine spec (highest)\n\nThe operator owns a subset of the pod template (the engine container's\nimage, command, args, ports, probes, reserved env keys; pod-level\nterminationGracePeriodSeconds, subdomain, hostname; metadata names; the\nfirebolt.io/* label/annotation prefix). These paths are rejected by the\nFireboltEngineClass validating webhook at admission time so users see the\nfailure immediately instead of via silent stripping. The authoritative\nrejection set is built from operatorauthority.go.\n\nNon-engine containers (sidecars) and additional init containers are\nfully user-owned: the webhook does not constrain their image, command,\nports, or environment.",
+      "description": "FireboltEngineClassSpec defines the desired state of a FireboltEngineClass.\n\nTemplate is a Kubernetes PodTemplateSpec merged underneath an engine's\nown pod template when the engine references this class via\nspec.engineClassRef. Precedence on every field is:\n\n 1. operator defaults (lowest)\n 2. FireboltEngineClass template\n 3. FireboltEngine spec (highest)\n\nThe operator owns a subset of the pod template (the engine container's\nimage, command, args, ports, probes, reserved env keys; pod-level\nterminationGracePeriodSeconds, subdomain, hostname; metadata names; the\nfirebolt.io/* label/annotation prefix). These paths are rejected by the\nFireboltEngineClass validating webhook at admission time so users see the\nfailure immediately instead of via silent stripping. The authoritative\nrejection set is built from operatorauthority.go.\n\nNon-engine containers (sidecars) and additional init containers are\nfully user-owned: the webhook does not constrain their image, command,\nports, or environment.\n\nBeyond Template, the class carries defaults for a subset of\nnon-pod-template FireboltEngine settings (Storage, CustomEngineConfig,\nRollout, DrainCheckEnabled, DrainCheckInterval, Autoscaling). Each\nresolves engine-if-set \u2192 class-if-set \u2192 operator default: a referencing\nengine that sets the corresponding spec field owns it, the class value\napplies when the engine leaves it unset, and the operator default sits\nbeneath both. This lets a platform team standardize storage, engine\nconfig, and rollout/autoscaling policy across a fleet without repeating\nit on every FireboltEngine.",
       "properties": {
+        "autoscaling": {
+          "description": "Autoscaling is the default autoscaling policy for referencing engines\nthat leave spec.autoscaling unset. Resolution is whole-struct: an\nengine that sets spec.autoscaling owns the entire policy and this\nvalue is not field-merged into it; when the engine omits it, the\nclass policy applies; when neither sets it, autoscaling is disabled.",
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Enabled turns the autoscaler on for this engine. Defaults to false.",
+              "type": "boolean"
+            },
+            "idleTimeout": {
+              "default": "30m",
+              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before the autoscaler scales down to MinReplicas.\nDefaults to 30 minutes.",
+              "type": "string"
+            },
+            "maxReplicas": {
+              "description": "MaxReplicas is the replica count the autoscaler scales up to when the\nengine is active (during a Schedule window or following a wake-up).\nRequired when Enabled is true.",
+              "format": "int32",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "minReplicas": {
+              "default": 0,
+              "description": "MinReplicas is the floor the autoscaler scales down to once IdleTimeout\nelapses with no observed query activity. 0 enables scale-to-zero.\nDefaults to 0.",
+              "format": "int32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pollInterval": {
+              "default": "1m",
+              "description": "PollInterval is how often the autoscaler scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
+              "type": "string"
+            },
+            "schedule": {
+              "description": "Schedule is an optional list of UTC time windows during which the\nautoscaler holds the engine at MaxReplicas regardless of observed\nactivity. Useful for \"always-on during business hours\" policies.",
+              "items": {
+                "description": "ScheduleWindow is a recurring UTC time window during which the autoscaler\nkeeps the engine pinned at MaxReplicas. End may be less than Start to\nexpress a window that crosses midnight (e.g. 22:00-02:00).",
+                "properties": {
+                  "days": {
+                    "description": "Days lists the UTC weekdays the window applies to. Empty means every\nday. The window is anchored to the day on which Start falls; if End\ncrosses midnight the trailing portion still belongs to the listed day.",
+                    "items": {
+                      "description": "ScheduleDay is a UTC weekday code used in ScheduleWindow.Days.",
+                      "enum": [
+                        "Mon",
+                        "Tue",
+                        "Wed",
+                        "Thu",
+                        "Fri",
+                        "Sat",
+                        "Sun"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "end": {
+                    "description": "End is the window closing time in UTC, formatted \"HH:MM\". An End equal\nto Start is treated as an empty window.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  },
+                  "start": {
+                    "description": "Start is the window opening time in UTC, formatted \"HH:MM\".",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "end",
+                  "start"
+                ],
+                "type": "object",
+                "additionalProperties": false
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "enabled",
+            "maxReplicas"
+          ],
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "maxReplicas must be >= minReplicas",
+              "rule": "self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas : 0)"
+            }
+          ],
+          "additionalProperties": false
+        },
+        "customEngineConfig": {
+          "description": "CustomEngineConfig is deep-merged beneath each referencing engine's\nown spec.customEngineConfig into the rendered config.yaml: operator\ndefaults first, then this class config, then the engine config on top\n(engine keys win on conflict). Operator-owned paths (see\nOperatorOwnedEngineConfigPaths) are stripped from this value before\nthe merge, exactly as they are from the engine's own config, so the\nclass cannot override identity, routing, or topology.",
+          "type": "object",
+          "x-kubernetes-preserve-unknown-fields": true
+        },
+        "drainCheckEnabled": {
+          "description": "DrainCheckEnabled is the default drain-check setting for referencing\nengines that leave spec.drainCheckEnabled unset. The operator default\n(true) applies when neither side sets it; nil here means the class\ndoes not override.",
+          "type": "boolean"
+        },
+        "drainCheckInterval": {
+          "description": "DrainCheckInterval is the default drain-poll interval for referencing\nengines that leave spec.drainCheckInterval unset. The operator default\napplies when neither side sets it; nil here means the class does not\noverride.",
+          "type": "string"
+        },
+        "rollout": {
+          "description": "Rollout is the default rollout strategy for referencing engines that\nleave spec.rollout unset. The operator default (graceful) applies when\nneither the engine nor the class sets it; an empty value here means\nthe class does not override. The graceful/recreate enum is inherited\nfrom RolloutStrategy.",
+          "enum": [
+            "graceful",
+            "recreate"
+          ],
+          "type": "string"
+        },
+        "storage": {
+          "default": {},
+          "description": "Storage is the default per-pod data-volume configuration for engines\nthat reference this class and do not declare a storage backend of\ntheir own. An engine that sets any backend on spec.storage\n(persistentVolumeClaim, emptyDir, or hostPath) owns its storage\nwholesale and ignores this value; otherwise the class value applies,\nfalling through to the operator default (an emptyDir) when neither\nside selects a backend. See EngineStorageSpec for the backend choice\nand its mutual-exclusion rule, which this field inherits.",
+          "properties": {
+            "emptyDir": {
+              "description": "EmptyDir backs the engine's data mount with a pod-scoped emptyDir\nVolume. The mount holds regenerable cache only; authoritative\ndata lives in the metadata service and the managed-table S3\nbucket (see EngineStorageSpec for the full picture), so volume\ncontents being lost on pod restart is normal engine behavior\nrather than a durability regression.",
+              "properties": {
+                "medium": {
+                  "description": "Medium is the storage medium backing the emptyDir. Leave empty\nfor the default node disk; set to \"Memory\" for a tmpfs-backed\nvolume sized against the pod's memory limit.",
+                  "enum": [
+                    "",
+                    "Memory"
+                  ],
+                  "type": "string"
+                },
+                "sizeLimit": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "SizeLimit caps the volume's growth. Optional; nil means\nunbounded (subject to node disk pressure or pod memory limits\nfor Memory medium).",
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "x-kubernetes-int-or-string": true
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            },
+            "hostPath": {
+              "description": "HostPath backs the engine's data mount with a directory on the\nnode filesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode the engine pod could be scheduled onto, with permissions\nreadable by the engine UID. Use to expose instance-store NVMe on\nthe node.",
+              "properties": {
+                "path": {
+                  "description": "Path is the absolute filesystem path on the host node.",
+                  "pattern": "^/.*",
+                  "type": "string"
+                },
+                "type": {
+                  "description": "Type enforces a check on Path before mounting (Directory,\nDirectoryOrCreate, \u2026). See\nhttps://kubernetes.io/docs/concepts/storage/volumes/#hostpath\nfor the full enum. Leave nil to skip the check (kubelet default).",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object",
+              "additionalProperties": false
+            },
+            "persistentVolumeClaim": {
+              "description": "PersistentVolumeClaim opts the engine into a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller\nfrom a VolumeClaimTemplate. Set the field (even to an empty\nstruct) to enable the PVC backend; the kubebuilder defaults\n(1Gi, ReadWriteOnce, cluster-default StorageClass) on\nEnginePersistentVolumeClaimSpec fill in any omitted inner field.\nWhen this field is nil the engine falls back to the default\nemptyDir backend (see the EngineStorageSpec doc above).",
+              "properties": {
+                "accessModes": {
+                  "default": [
+                    "ReadWriteOnce"
+                  ],
+                  "description": "AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the\nper-pod ownership model used by the StatefulSet VolumeClaimTemplate.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "size": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "default": "1Gi",
+                  "description": "Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.",
+                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
+                  "x-kubernetes-int-or-string": true
+                },
+                "storageClassName": {
+                  "description": "StorageClassName selects the StorageClass for the PVC. Leave nil to use\nthe cluster default. An empty string disables dynamic provisioning.",
+                  "type": "string"
+                }
+              },
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "type": "object",
+          "x-kubernetes-validations": [
+            {
+              "message": "storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive",
+              "rule": "(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1"
+            }
+          ],
+          "additionalProperties": false
+        },
         "template": {
           "description": "Template is the pod template merged into engines that reference this\nclass. See the type-level doc for the precedence rules and the list\nof operator-owned paths the validating webhook rejects.\n\nThe CRD schema for template.metadata is patched post-controller-gen\n(scripts/patch-crd-template-metadata.py, invoked by `make manifests`)\nto set x-kubernetes-preserve-unknown-fields on the embedded\nObjectMeta. Without that injection, structural-schema pruning would\nstrip template.metadata.labels and template.metadata.annotations at\nadmission time and any GitOps controller re-applying them would\ndrift forever. A +kubebuilder:pruning:PreserveUnknownFields marker\non this Go field is not sufficient: controller-gen lands it on the\ntemplate schema, but the marker does not propagate into a child\nthat has its own typed sub-schema (metadata: {type: object}).",
           "properties": {

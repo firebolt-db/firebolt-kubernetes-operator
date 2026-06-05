@@ -1,14 +1,14 @@
 ---
 title: FireboltEngineClass overview
-description: Optional namespaced pod-template classes shared by FireboltEngine resources in a namespace.
+description: Optional namespaced classes of shared FireboltEngine settings, including pod template, storage, engine config, and rollout and autoscaling defaults.
 sidebarTitle: Overview
 ---
 
 ## Overview
 
-The `FireboltEngineClass` can be used to share pod-template properties
-among multiple engines. Engines within the same namespace can reference a `FireboltEngineClass` through `spec.engineClassRef`. This eliminates
-the need to repeat identical per-engine properties like serviceAccountName, nodeSelector, tolerations, pod annotations.
+`FireboltEngineClass` is an optional namespaced resource that holds reusable FireboltEngine settings: a pod-template fragment plus defaults for `storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and `autoscaling`. Engines in the same namespace reference it through `spec.engineClassRef` so scheduling, identity, sidecars, engine image, storage, engine config, and rollout and autoscaling policy stay consistent without duplicating YAML on every engine.
+
+Each inherited field resolves the engine value first, then the class value, then the Firebolt Operator's default. An engine that sets a field owns it. The class fills it in otherwise.
 
 The pattern echoes known Kubernetes patterns like `StorageClass` or `GatewayClass` in the "shared template referenced by name"
 sense, but `FireboltEngineClass` is **namespaced** rather than cluster-scoped.

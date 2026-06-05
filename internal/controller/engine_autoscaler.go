@@ -136,18 +136,19 @@ type AutoscalerDecision struct {
 //     its first scale-down).
 func computeAutoscalerDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
+	autoscaling *computev1alpha1.AutoscalingSpec,
 	status *computev1alpha1.FireboltEngineStatus,
 	obs AutoscalerObservation,
 	now time.Time,
 ) AutoscalerDecision {
-	if spec.Autoscaling == nil || !spec.Autoscaling.Enabled {
+	if autoscaling == nil || !autoscaling.Enabled {
 		return AutoscalerDecision{
 			DesiredReplicas: spec.Replicas,
 			Reason:          AutoscalerReasonDisabled,
 		}
 	}
 
-	as := spec.Autoscaling
+	as := autoscaling
 	pollInterval := DefaultAutoscalerPollInterval
 	if as.PollInterval != nil && as.PollInterval.Duration > 0 {
 		pollInterval = as.PollInterval.Duration
@@ -403,8 +404,13 @@ type autoscalerStepResult struct {
 func (r *FireboltEngineReconciler) runAutoscaler(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
 ) (autoscalerStepResult, error) {
-	if engine.Spec.Autoscaling == nil || !engine.Spec.Autoscaling.Enabled {
+	// Autoscaling resolves engine-if-set → class-if-set → nil (disabled),
+	// so an engine inherits its class's autoscaling policy when it declares
+	// none of its own.
+	autoscaling := effectiveAutoscaling(&engine.Spec, classInfo)
+	if autoscaling == nil || !autoscaling.Enabled {
 		// Autoscaler is off. Clear stale autoscaler-driven fields from a
 		// previous active cycle so audit tooling never sees values that
 		// no longer correspond to a running autoscaler. AutoscaledAt is
@@ -442,7 +448,7 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 		obs.ScrapeFailed = failed
 	}
 
-	decision := computeAutoscalerDecision(&engine.Spec, &engine.Status, obs, time.Now())
+	decision := computeAutoscalerDecision(&engine.Spec, autoscaling, &engine.Status, obs, time.Now())
 
 	result := autoscalerStepResult{
 		Decision:     decision,

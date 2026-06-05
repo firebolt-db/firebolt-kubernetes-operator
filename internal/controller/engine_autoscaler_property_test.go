@@ -52,7 +52,7 @@ var referenceTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 func TestComputeAutoscalerDecision_Properties(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		in := drawAutoscalerInput(t)
-		dec := computeAutoscalerDecision(in.spec, in.status, in.obs, referenceTime)
+		dec := computeAutoscalerDecision(in.spec, in.spec.Autoscaling, in.status, in.obs, referenceTime)
 
 		assertAutoscalerWellFormed(t, in, dec)
 		assertAutoscalerPrecedence(t, in, dec)

@@ -108,8 +108,7 @@
           "x-kubernetes-preserve-unknown-fields": true
         },
         "drainCheckEnabled": {
-          "default": true,
-          "description": "DrainCheckEnabled controls whether the operator performs a SQL-based drain\ncheck on old-generation pods during graceful rollouts. When false, the\noperator skips directly to cleaning after switching traffic, without\nverifying that in-flight queries have completed. Requires a running\nnode that can execute the drain-check query when enabled.",
+          "description": "DrainCheckEnabled controls whether the operator performs a SQL-based drain\ncheck on old-generation pods during graceful rollouts. When false, the\noperator skips directly to cleaning after switching traffic, without\nverifying that in-flight queries have completed. Requires a running\nnode that can execute the drain-check query when enabled.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (true). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to true at admission.",
           "type": "boolean"
         },
         "drainCheckInterval": {
@@ -143,8 +142,7 @@
           "type": "integer"
         },
         "rollout": {
-          "default": "graceful",
-          "description": "Rollout strategy for transitions: \"graceful\" waits for drain, \"recreate\" deletes immediately.",
+          "description": "Rollout strategy for transitions: \"graceful\" waits for drain, \"recreate\"\ndeletes immediately. Resolution is engine-if-set \u2192\nFireboltEngineClass-if-set \u2192 operator default (graceful). The default is\napplied by the controller, not the CRD, so an unset value here falls\nthrough to the referenced class instead of being materialized to\ngraceful at admission.",
           "enum": [
             "graceful",
             "recreate"

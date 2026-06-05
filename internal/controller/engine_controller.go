@@ -206,7 +206,34 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"activeGen", engine.Status.ActiveGeneration,
 	)
 
-	current, err := r.getEngineState(ctx, engine)
+	// Resolve the referenced FireboltEngineClass before reading engine state:
+	// getEngineState's drain decision and the autoscaler both consume
+	// class-inherited settings (rollout, drainCheckEnabled, autoscaling), and
+	// computeEngineReconcile merges the class template / storage / config.
+	// Resolution is bubbled up to controller-runtime on every failure.
+	// NotFound (errFireboltEngineClassNotFound) is normally caught at
+	// admission by the FireboltEngine validating webhook, but the helm chart
+	// ships webhooks disabled by default, so a missing class can reach this
+	// point in dev/test deployments; the engine stays stuck at the
+	// Initializing condition and the reconciler-loop log carries the
+	// missing-class name (the resolver wraps the upstream error with the name
+	// + namespace). We intentionally do NOT mint a dedicated
+	// FireboltEngineClassReady condition for the missing-class case: the state
+	// space is binary (exists / doesn't), not a lifecycle worth narrating like
+	// InstanceReady.
+	//
+	// errFireboltEngineClassUnready is treated differently: the class exists
+	// but the FireboltEngineClassReconciler stamped Ready=False/
+	// OperatorOwnedFieldSet. handleFireboltEngineClassError surfaces
+	// ConditionReady=False/FireboltEngineClassUnready on the engine and
+	// refuses to render a StatefulSet off it. The FireboltEngine watch on
+	// FireboltEngineClass re-enqueues when the class status changes.
+	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
+	if classErr != nil {
+		return r.handleFireboltEngineClassError(ctx, engine, classErr)
+	}
+
+	current, err := r.getEngineState(ctx, engine, classInfo)
 	if err != nil {
 		// Surface a drain-probe failure as a user-facing condition
 		// BEFORE returning the error. Without this the reconciler
@@ -294,34 +321,6 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		})
 	}
 
-	// FireboltEngineClass resolution is bubbled up to controller-runtime on
-	// every failure. NotFound (errFireboltEngineClassNotFound) is normally
-	// caught at admission by the FireboltEngine validating webhook,
-	// but the helm chart ships webhooks disabled by default, so a
-	// missing class can reach this point in dev/test deployments. The
-	// engine stays stuck at the Initializing condition and the
-	// reconciler-loop log carries the missing-class name (the
-	// resolver wraps the upstream error with the name + namespace).
-	// We intentionally do NOT mint a dedicated FireboltEngineClassReady
-	// condition for the missing-class case: the state space is binary
-	// (exists / doesn't), not a lifecycle worth narrating like
-	// InstanceReady.
-	//
-	// errFireboltEngineClassUnready is treated differently: the class exists
-	// but the FireboltEngineClassReconciler stamped Ready=False/
-	// OperatorOwnedFieldSet. Refuse to render a StatefulSet off it and
-	// surface ConditionReady=False/FireboltEngineClassUnready on the engine so
-	// kubectl describe shows the pointer to the offending class. No
-	// backoff error: the engine is correctly reconciled given the
-	// unready class, and the next reconcile fires when the class
-	// reconciler updates the class status (the FireboltEngine watch on
-	// FireboltEngineClass already covers this through enqueueClassFromEngine's
-	// symmetric counterpart).
-	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
-	if classErr != nil {
-		return r.handleFireboltEngineClassError(ctx, engine, classErr)
-	}
-
 	// Defense-in-depth for the FireboltEngine validating webhook's
 	// pod-template allowlist (validateTemplate). Webhook ON: admission
 	// already rejected operator-owned-field input on spec.template, so
@@ -394,7 +393,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// through the FireboltEngine watch and the next reconcile picks it up
 	// via the existing blue-green path). Errors here do not poison the main
 	// reconcile result, since the cluster state we just wrote is consistent.
-	asResult, asErr := r.runAutoscaler(ctx, engine)
+	asResult, asErr := r.runAutoscaler(ctx, engine, classInfo)
 	if asErr != nil {
 		log.Error(asErr, "Autoscaler step failed; will retry on next reconcile")
 	}

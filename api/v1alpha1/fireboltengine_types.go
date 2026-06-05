@@ -354,7 +354,11 @@ type FireboltEngineSpec struct {
 	// operator skips directly to cleaning after switching traffic, without
 	// verifying that in-flight queries have completed. Requires a running
 	// node that can execute the drain-check query when enabled.
-	// +kubebuilder:default=true
+	//
+	// Resolution is engine-if-set → FireboltEngineClass-if-set → operator
+	// default (true). The default is applied by the controller, not the CRD,
+	// so an unset value here falls through to the referenced class instead of
+	// being materialized to true at admission.
 	// +optional
 	DrainCheckEnabled *bool `json:"drainCheckEnabled,omitempty"`
 
@@ -363,8 +367,12 @@ type FireboltEngineSpec struct {
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
 
-	// Rollout strategy for transitions: "graceful" waits for drain, "recreate" deletes immediately.
-	// +kubebuilder:default=graceful
+	// Rollout strategy for transitions: "graceful" waits for drain, "recreate"
+	// deletes immediately. Resolution is engine-if-set →
+	// FireboltEngineClass-if-set → operator default (graceful). The default is
+	// applied by the controller, not the CRD, so an unset value here falls
+	// through to the referenced class instead of being materialized to
+	// graceful at admission.
 	// +optional
 	Rollout RolloutStrategy `json:"rollout,omitempty"`
 

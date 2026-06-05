@@ -26,6 +26,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -73,9 +74,26 @@ type FireboltEngineClassInfo struct {
 	// Template is the FireboltEngineClass.spec.template ready to merge.
 	Template *corev1.PodTemplateSpec
 
+	// Storage, CustomEngineConfig, Rollout, DrainCheckEnabled,
+	// DrainCheckInterval, and Autoscaling carry the class's defaults for the
+	// matching non-pod-template engine settings. They are consumed by the
+	// effective* helpers, each of which resolves engine-if-set →
+	// class-if-set → operator default. Copied verbatim from the class spec.
+	Storage            computev1alpha1.EngineStorageSpec
+	CustomEngineConfig *apiextensionsv1.JSON
+	Rollout            computev1alpha1.RolloutStrategy
+	DrainCheckEnabled  *bool
+	DrainCheckInterval *metav1.Duration
+	Autoscaling        *computev1alpha1.AutoscalingSpec
+
 	// Hash is a stable content hash of Template. Used as the value of
 	// AnnotationEngineClassHash on the rendered StatefulSet so drift is
-	// detected by stsMatchesSpec when the class spec changes.
+	// detected by stsMatchesSpec when the class template changes. Storage
+	// and CustomEngineConfig drift is detected through their own
+	// effective-aware comparators (storageMatchesSpec, customEngineConfigHash)
+	// rather than this hash; Rollout / DrainCheckEnabled / DrainCheckInterval /
+	// Autoscaling do not reshape the StatefulSet and are read live, so they
+	// are not hashed.
 	Hash string
 }
 
@@ -93,9 +111,15 @@ func newFireboltEngineClassInfo(ec *computev1alpha1.FireboltEngineClass) *Firebo
 	}
 	tmpl := ec.Spec.Template.DeepCopy()
 	return &FireboltEngineClassInfo{
-		Name:     ec.Name,
-		Template: tmpl,
-		Hash:     hash,
+		Name:               ec.Name,
+		Template:           tmpl,
+		Storage:            *ec.Spec.Storage.DeepCopy(),
+		CustomEngineConfig: ec.Spec.CustomEngineConfig.DeepCopy(),
+		Rollout:            ec.Spec.Rollout,
+		DrainCheckEnabled:  ec.Spec.DrainCheckEnabled,
+		DrainCheckInterval: ec.Spec.DrainCheckInterval,
+		Autoscaling:        ec.Spec.Autoscaling.DeepCopy(),
+		Hash:               hash,
 	}
 }
 
@@ -124,7 +148,7 @@ func computeEngineReconcile(
 	case computev1alpha1.PhaseSwitching:
 		computeSwitching(spec, &result, current, engineName, engineNamespace)
 	case computev1alpha1.PhaseDraining:
-		computeDraining(spec, &result, current)
+		computeDraining(spec, &result, current, classInfo)
 	case computev1alpha1.PhaseCleaning:
 		computeCleaning(spec, &result, current)
 	default:
@@ -219,7 +243,7 @@ func computeStable(
 	// its resurrection immediately restores intra-cluster pod DNS. No new
 	// generation, no full rollout, no traffic switch.
 	if current.CurrentConfigMap == nil {
-		r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
+		r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
 		r.Requeue = true
 	}
 	if current.CurrentHeadlessSvc == nil {
@@ -364,6 +388,7 @@ func computeDraining(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
 	current EngineState,
+	classInfo *FireboltEngineClassInfo,
 ) {
 	status := &r.Status
 
@@ -374,7 +399,7 @@ func computeDraining(
 	}
 
 	if !current.DrainingPodsDrained {
-		r.RequeueAfter = getDrainCheckInterval(spec)
+		r.RequeueAfter = getDrainCheckInterval(spec, classInfo)
 		return
 	}
 
@@ -426,12 +451,12 @@ func buildGenResources(
 	instanceInfo InstanceInfo,
 	classInfo *FireboltEngineClassInfo,
 ) {
-	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo)
+	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
 	r.EnsureHeadlessSvc = buildHeadlessService(engineName, engineNamespace, gen)
 	r.EnsureStatefulSet = buildStatefulSet(spec, engineName, engineNamespace, gen, classInfo)
 }
 
-func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo) *corev1.ConfigMap {
+func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) *corev1.ConfigMap {
 	name := genResourceName(engineName, gen, SuffixConfig)
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
 	stsName := genResourceName(engineName, gen, "")
@@ -457,13 +482,15 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	shutdownWait := engineShutdownWaitSeconds(gracePeriod)
 	// Canonical document seeded with operator-managed defaults, shaped to
 	// the structured YAML schema consumed by FireboltCoreServer (packdb
-	// `DB::Config::ApplicationConfig`). User input from spec.customEngineConfig
-	// is deep-merged into this at the root, so users may add/override keys
-	// in any top-level section (auth, engine, instance, logging). Operator-
-	// authoritative paths are stripped from user input before the merge (see
-	// stripProtectedEngineConfigPaths) so they cannot be overridden —
-	// silently, to keep the same spec portable across operator versions even
-	// if the protected set evolves.
+	// `DB::Config::ApplicationConfig`). The user contribution
+	// (effectiveCustomEngineConfig: the referenced class's customEngineConfig
+	// deep-merged underneath the engine's own) is merged into this at the
+	// root, so users may add/override keys in any top-level section (auth,
+	// engine, instance, logging) and an engine key wins over the same key on
+	// the class. Operator-authoritative paths are stripped from each user
+	// layer before the merge (see stripProtectedEngineConfigPaths) so they
+	// cannot be overridden — silently, to keep the same spec portable across
+	// operator versions even if the protected set evolves.
 	//
 	// instance.id is a Ulid that the engine propagates to all four legacy
 	// identity fields (account_id, account_name, organization_id,
@@ -488,17 +515,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		},
 	}
 
-	if spec.CustomEngineConfig != nil && len(spec.CustomEngineConfig.Raw) > 0 {
-		var custom map[string]interface{}
-		// Schemaless+Type=object on the CRD constrains valid input to a
-		// JSON object; any unmarshal failure here means the apiserver
-		// admitted something it should have rejected, so silently
-		// skipping the merge is the conservative choice.
-		if err := json.Unmarshal(spec.CustomEngineConfig.Raw, &custom); err == nil {
-			stripProtectedEngineConfigPaths(custom)
-			deepMergeJSON(coreConfig, custom)
-		}
-	}
+	deepMergeJSON(coreConfig, effectiveCustomEngineConfig(spec, classInfo))
 
 	configYAML, err := yaml.Marshal(coreConfig)
 	if err != nil {
@@ -584,7 +601,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	if spec.MetadataEndpointOverride != nil {
 		annotations[AnnotationMetadataOverride] = *spec.MetadataEndpointOverride
 	}
-	if h := customEngineConfigHash(spec); h != "" {
+	if h := customEngineConfigHash(spec, classInfo); h != "" {
 		annotations[AnnotationCustomEngineConfigHash] = h
 	}
 	if classInfo != nil {
@@ -607,18 +624,21 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	// PVC (the default; the StatefulSet controller synthesizes the pod
 	// Volume from the VolumeClaimTemplate) or a node-local emptyDir /
 	// hostPath that we add to pod.spec.volumes explicitly.
+	// storage resolves engine-if-set → class-if-set → default emptyDir, so
+	// an engine that omits a backend inherits the class's.
+	storage := effectiveStorage(spec, classInfo)
 	var (
 		volumeClaimTemplates []corev1.PersistentVolumeClaim
 		extraDataVolume      *corev1.Volume
 	)
-	switch resolveStorageBackend(spec.Storage) {
+	switch resolveStorageBackend(storage) {
 	case BackendEmptyDir:
-		// spec.Storage.EmptyDir may be nil when resolveStorageBackend
+		// storage.EmptyDir may be nil when resolveStorageBackend
 		// fell through to the default (no backend set); render a
 		// bare emptyDir in that case.
 		var ed computev1alpha1.EngineEmptyDirSpec
-		if spec.Storage.EmptyDir != nil {
-			ed = *spec.Storage.EmptyDir
+		if storage.EmptyDir != nil {
+			ed = *storage.EmptyDir
 		}
 		extraDataVolume = &corev1.Volume{
 			Name: DataVolumeName,
@@ -630,7 +650,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			},
 		}
 	case BackendHostPath:
-		hp := spec.Storage.HostPath
+		hp := storage.HostPath
 		extraDataVolume = &corev1.Volume{
 			Name: DataVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -641,7 +661,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			},
 		}
 	case BackendPersistentVolumeClaim:
-		pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
+		pvc := resolvePersistentVolumeClaimDefaults(storage.PersistentVolumeClaim)
 		volumeClaimTemplates = []corev1.PersistentVolumeClaim{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   DataVolumeName,
@@ -848,9 +868,14 @@ func buildClusterService(engineName, namespace string, gen int) *corev1.Service 
 	}
 }
 
-func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec) time.Duration {
+// getDrainCheckInterval resolves the drain-poll interval: engine-if-set →
+// FireboltEngineClass-if-set → operator default (DefaultDrainCheckInterval).
+func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) time.Duration {
 	if spec.DrainCheckInterval != nil {
 		return spec.DrainCheckInterval.Duration
+	}
+	if classInfo != nil && classInfo.DrainCheckInterval != nil {
+		return classInfo.DrainCheckInterval.Duration
 	}
 	return DefaultDrainCheckInterval
 }
@@ -1062,6 +1087,106 @@ func effectiveDNSConfig(spec *computev1alpha1.FireboltEngineSpec, classInfo *Fir
 	}
 	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.DNSConfig != nil {
 		return classInfo.Template.Spec.DNSConfig.DeepCopy()
+	}
+	return nil
+}
+
+// storageBackendSet reports whether an EngineStorageSpec selects a
+// concrete data-volume backend. Used as the "is set" predicate for
+// effectiveStorage: an engine that names any backend owns its storage
+// wholesale, while a bare/empty spec falls through to the class.
+func storageBackendSet(s computev1alpha1.EngineStorageSpec) bool {
+	return s.PersistentVolumeClaim != nil || s.EmptyDir != nil || s.HostPath != nil
+}
+
+// effectiveStorage resolves the engine's data-volume configuration: the
+// engine's own spec.storage when it names a backend, else the class's,
+// else the engine's (empty) value — which resolveStorageBackend turns
+// into the default emptyDir. Backend selection is whole-struct so the
+// EngineStorageSpec mutual-exclusion invariant is never violated by a
+// cross-layer mix (e.g. engine emptyDir + class PVC). Consumed by both
+// buildStatefulSet and storageMatchesSpec so the rendered value and the
+// drift comparator stay aligned.
+func effectiveStorage(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) computev1alpha1.EngineStorageSpec {
+	if storageBackendSet(spec.Storage) {
+		return spec.Storage
+	}
+	if classInfo != nil && storageBackendSet(classInfo.Storage) {
+		return classInfo.Storage
+	}
+	return spec.Storage
+}
+
+// effectiveCustomEngineConfig returns the merged user contribution to the
+// rendered config.yaml: the class's customEngineConfig deep-merged
+// underneath the engine's, with operator-owned paths stripped from each
+// layer first (so neither side can override identity / routing /
+// topology). The result excludes the operator-rendered base; callers
+// merge it on top of that base. Returns an empty map when neither side
+// sets config. Consumed by both buildConfigMap and customEngineConfigHash.
+func effectiveCustomEngineConfig(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) map[string]interface{} {
+	merged := map[string]interface{}{}
+	if classInfo != nil {
+		mergeStrippedConfig(merged, classInfo.CustomEngineConfig)
+	}
+	mergeStrippedConfig(merged, spec.CustomEngineConfig)
+	return merged
+}
+
+// mergeStrippedConfig unmarshals a customEngineConfig payload, strips the
+// operator-owned paths, and deep-merges it into dst. A nil/empty payload
+// or an unmarshal failure is a no-op: Schemaless+Type=object on the CRD
+// constrains valid input to a JSON object, so a failure means the
+// apiserver admitted something it should have rejected and skipping the
+// merge is the conservative choice.
+func mergeStrippedConfig(dst map[string]interface{}, raw *apiextensionsv1.JSON) {
+	if raw == nil || len(raw.Raw) == 0 {
+		return
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(raw.Raw, &parsed); err != nil {
+		return
+	}
+	stripProtectedEngineConfigPaths(parsed)
+	deepMergeJSON(dst, parsed)
+}
+
+// effectiveRollout resolves the rollout strategy: engine-if-set →
+// class-if-set → operator default (graceful). The CRD no longer defaults
+// the engine field, so an unset engine value is the empty string and
+// falls through here.
+func effectiveRollout(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) computev1alpha1.RolloutStrategy {
+	if spec.Rollout != "" {
+		return spec.Rollout
+	}
+	if classInfo != nil && classInfo.Rollout != "" {
+		return classInfo.Rollout
+	}
+	return computev1alpha1.RolloutGraceful
+}
+
+// effectiveDrainCheckEnabled resolves the drain-check toggle:
+// engine-if-set → class-if-set → operator default (true).
+func effectiveDrainCheckEnabled(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+	if spec.DrainCheckEnabled != nil {
+		return *spec.DrainCheckEnabled
+	}
+	if classInfo != nil && classInfo.DrainCheckEnabled != nil {
+		return *classInfo.DrainCheckEnabled
+	}
+	return true
+}
+
+// effectiveAutoscaling resolves the autoscaling policy whole-struct:
+// engine-if-set → class-if-set → nil (autoscaling disabled). An engine
+// that sets spec.autoscaling owns the entire policy; the class value is
+// not field-merged.
+func effectiveAutoscaling(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *computev1alpha1.AutoscalingSpec {
+	if spec.Autoscaling != nil {
+		return spec.Autoscaling
+	}
+	if classInfo != nil && classInfo.Autoscaling != nil {
+		return classInfo.Autoscaling
 	}
 	return nil
 }
@@ -1753,7 +1878,11 @@ func deepMergeJSON(dst, src map[string]interface{}) {
 // When a top-level section (e.g. `instance`, `engine`) is not a JSON object
 // the whole key is dropped: deepMergeJSON would otherwise replace the
 // operator-built section wholesale with the user's scalar, losing every
-// authoritative key.
+// authoritative key. A section whose only keys were operator-owned is also
+// dropped once those keys are removed, so a config that names nothing but
+// protected paths reduces to the empty map — it contributes nothing to the
+// merge and leaves no trace in the customEngineConfig hash (no spurious
+// generation).
 //
 // The owned-path set lives in
 // computev1alpha1.OperatorOwnedEngineConfigPaths so that every templating
@@ -1767,33 +1896,39 @@ func stripProtectedEngineConfigPaths(m map[string]interface{}) {
 			}
 			continue
 		}
-		if sub, ok := m[owned.Section].(map[string]interface{}); ok {
-			for _, k := range owned.Keys {
-				delete(sub, k)
-			}
+		sub, ok := m[owned.Section].(map[string]interface{})
+		if !ok {
+			delete(m, owned.Section)
 			continue
 		}
-		delete(m, owned.Section)
+		for _, k := range owned.Keys {
+			delete(sub, k)
+		}
+		if len(sub) == 0 {
+			delete(m, owned.Section)
+		}
 	}
 }
 
-// customEngineConfigHash returns a stable hash of spec.customEngineConfig
-// suitable for stamping onto the engine StatefulSet so stsMatchesSpec can
-// detect drift. Returns "" when no custom config is set.
-func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec) string {
-	if spec.CustomEngineConfig == nil || len(spec.CustomEngineConfig.Raw) == 0 {
+// customEngineConfigHash returns a stable hash of the effective user
+// contribution to the engine config.yaml — the referenced class's
+// customEngineConfig deep-merged underneath the engine's, with operator-
+// owned paths already stripped (see effectiveCustomEngineConfig). Stamped
+// onto the engine StatefulSet so stsMatchesSpec detects drift from either
+// layer. Returns "" when neither side contributes anything post-strip,
+// keeping the annotation absent and the rendered pod byte-identical to an
+// engine with no custom config.
+func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) string {
+	merged := effectiveCustomEngineConfig(spec, classInfo)
+	if len(merged) == 0 {
 		return ""
 	}
-	// Re-marshal through map[string]interface{} so semantically equal
-	// payloads (whitespace, key order) hash to the same value and don't
-	// trigger spurious generations.
-	var custom map[string]interface{}
-	if err := json.Unmarshal(spec.CustomEngineConfig.Raw, &custom); err != nil {
-		return contentHash(string(spec.CustomEngineConfig.Raw))
-	}
-	canonical, err := json.Marshal(custom)
+	// Marshal through the canonical map form so semantically equal payloads
+	// (whitespace, key order) hash to the same value and don't trigger
+	// spurious generations.
+	canonical, err := json.Marshal(merged)
 	if err != nil {
-		return contentHash(string(spec.CustomEngineConfig.Raw))
+		return contentHash(fmt.Sprintf("%v", merged))
 	}
 	return contentHash(string(canonical))
 }
@@ -2250,7 +2385,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if sts.Annotations[AnnotationCustomEngineConfigHash] != customEngineConfigHash(spec) {
+	if sts.Annotations[AnnotationCustomEngineConfigHash] != customEngineConfigHash(spec, classInfo) {
 		return false
 	}
 
@@ -2262,7 +2397,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !storageMatchesSpec(sts, spec) {
+	if !storageMatchesSpec(sts, spec, classInfo) {
 		return false
 	}
 
@@ -2291,12 +2426,16 @@ func sidecarsMatch(actual []corev1.Container, expected []corev1.Container) bool 
 }
 
 // storageMatchesSpec reports whether the STS's VolumeClaimTemplates match the
-// engine's resolved storage spec. VolumeClaimTemplates are immutable on a STS,
-// so any drift (resizing, switching access modes or storage class) must
-// trigger a new blue-green generation.
-func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec) bool {
+// engine's resolved storage spec. The spec is resolved through effectiveStorage
+// (engine-if-set → class-if-set → default emptyDir), the same helper
+// buildStatefulSet renders from, so a class storage change is detected as drift
+// and the rendered value and comparator never diverge. VolumeClaimTemplates are
+// immutable on a STS, so any drift (resizing, switching access modes or storage
+// class) must trigger a new blue-green generation.
+func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
 	dataVol := findDataPodVolume(sts)
-	switch resolveStorageBackend(spec.Storage) {
+	storage := effectiveStorage(spec, classInfo)
+	switch resolveStorageBackend(storage) {
 	case BackendEmptyDir:
 		if len(sts.Spec.VolumeClaimTemplates) != 0 {
 			return false
@@ -2304,12 +2443,12 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 		if dataVol == nil || dataVol.EmptyDir == nil {
 			return false
 		}
-		// spec.Storage.EmptyDir may be nil when resolveStorageBackend
+		// storage.EmptyDir may be nil when resolveStorageBackend
 		// fell through to the default (no backend set); compare
 		// against a bare EngineEmptyDirSpec{} in that case.
 		var ed computev1alpha1.EngineEmptyDirSpec
-		if spec.Storage.EmptyDir != nil {
-			ed = *spec.Storage.EmptyDir
+		if storage.EmptyDir != nil {
+			ed = *storage.EmptyDir
 		}
 		if dataVol.EmptyDir.Medium != ed.Medium {
 			return false
@@ -2322,7 +2461,7 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 		if dataVol == nil || dataVol.HostPath == nil {
 			return false
 		}
-		hp := spec.Storage.HostPath
+		hp := storage.HostPath
 		if dataVol.HostPath.Path != hp.Path {
 			return false
 		}
@@ -2334,7 +2473,7 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 		if len(sts.Spec.VolumeClaimTemplates) == 0 {
 			return false
 		}
-		pvc := resolvePersistentVolumeClaimDefaults(spec.Storage.PersistentVolumeClaim)
+		pvc := resolvePersistentVolumeClaimDefaults(storage.PersistentVolumeClaim)
 		vct := sts.Spec.VolumeClaimTemplates[0]
 		if vct.Name != DataVolumeName {
 			return false

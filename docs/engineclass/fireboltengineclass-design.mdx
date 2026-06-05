@@ -1,6 +1,6 @@
 ---
 title: FireboltEngineClass design
-description: FireboltEngineClass namespacing, pod-template inheritance, and merge behavior.
+description: FireboltEngineClass namespacing, pod-template and engine-settings inheritance, and merge behavior.
 sidebarTitle: FireboltEngineClass design
 ---
 
@@ -62,6 +62,28 @@ and [engine-crd-reference](../crd-reference/engine-crd-reference). The
 merge layer therefore assumes both resolved templates only carry
 fields it knows how to handle.
 
+## Inherited engine settings
+
+Beyond the pod template, a `FireboltEngineClass` carries defaults for a subset
+of `FireboltEngine` settings. Each resolves the engine value first, then the
+class value, then the operator default, the same precedence the pod template
+follows. The `effective*` helpers in `engine_reconcile.go` centralize the
+resolution so the renderer and the drift comparator agree.
+
+| Field | Rule |
+|---|---|
+| `storage` | Whole-struct. The engine owns its storage when it names any backend (`persistentVolumeClaim`, `emptyDir`, or `hostPath`). Otherwise the class backend applies, falling through to the default `emptyDir`. Whole-struct selection keeps the three backends mutually exclusive. |
+| `customEngineConfig` | Deep-merged: operator base, then class, then engine, so an engine key wins over the same key on the class. The Firebolt Operator strips its owned config paths from both layers, so neither can override identity, routing, or topology. |
+| `rollout` | engine > class > `graceful`. |
+| `drainCheckEnabled` | engine > class > `true`. |
+| `drainCheckInterval` | engine > class > operator default. |
+| `autoscaling` | Whole-struct. An engine that sets `spec.autoscaling` owns the entire policy. The class policy applies only when the engine omits it. |
+
+`rollout`, `drainCheckEnabled`, and `drainCheckInterval` carry no CRD default on
+`FireboltEngine`. The Firebolt Operator applies the default in the resolver
+instead, so an unset engine value falls through to the class rather than being
+filled in at admission.
+
 ## Deletion
 
 The validating webhook **refuses** `DELETE` while any `FireboltEngine` in
@@ -75,11 +97,15 @@ outage from opening a window in which a bound class could be removed.
 
 ## Class edit rollouts
 
-Editing the class spec triggers a blue-green rollout on every referencing
+Editing the class spec can trigger a blue-green rollout on every referencing
 engine in the same namespace. The engine controller watches
 `FireboltEngineClass` and enqueues every consumer whose
 `spec.engineClassRef` matches. `stsMatchesSpec` compares the resolved class
-content hash against the `firebolt.io/engine-class-hash` annotation on the
-StatefulSet. Any mismatch bumps `currentGeneration`, whether the class spec
-was edited in place, the engine flipped to a different class, or the reference
-was cleared.
+template hash against the `firebolt.io/engine-class-hash` annotation on the
+StatefulSet, and detects `storage` and `customEngineConfig` changes (from
+either the engine or the class) through their own resolved-value comparators.
+Any mismatch bumps `currentGeneration`, whether the class template was edited in
+place, the engine flipped to a different class, or the reference was cleared.
+Class changes to `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and
+`autoscaling` do not reshape the pod, so they take effect on the next reconcile
+without forcing a new generation.
