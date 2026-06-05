@@ -41,8 +41,8 @@ test/e2e/pod-logs
 # Formal-verification artifacts (regenerated via `make formal-dump`)
 formal/*.dot
 
-docs/.venv
-
 # Python bytecode (docs validation scripts)
 __pycache__/
 *.pyc
+docs/scripts/__pycache__
+docs/.venv

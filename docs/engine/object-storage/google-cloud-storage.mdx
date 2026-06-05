@@ -1,0 +1,193 @@
+---
+title: Google Cloud Storage
+description: Configure Google Cloud Storage as the backing object storage for Firebolt Operator engines.
+sidebarTitle: Google Cloud Storage
+---
+
+Every `FireboltEngine` requires object storage for managed tablet data. The Firebolt Operator does not support local filesystem storage mode, so an engine does not start until you point it at object storage. On a production cluster running on Google Cloud, that backing store is a Google Cloud Storage (GCS) bucket.
+
+With GCS as the backing store for table data, durability does not depend on the per-pod data volumes mounted to each engine node. Even a complete loss of those volumes does not cause data loss, because the authoritative copy of managed table data lives in the bucket.
+
+You configure GCS on the engine through `spec.customEngineConfig.storage`. The engine reads Google Cloud credentials from the pod's Google identity, which you provide with [Workload Identity Federation for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity).
+
+## Prerequisites
+
+Before you begin, ensure that you have the following installed and configured:
+
+* A [Kubernetes](https://kubernetes.io/) cluster (v1.28+) running on Google Kubernetes Engine (GKE) with Workload Identity Federation enabled.
+* The Firebolt Operator installed in the cluster. See [Installation](../../installation).
+* A `FireboltInstance` in the `Ready` phase. See the [Quickstart](../../quickstart).
+* `kubectl` command-line tool configured to access your cluster.
+* `helm` (v3+) installed on your local machine.
+* `gcloud` command-line tool configured for your project.
+* A Google Cloud project with permissions to create GCS buckets and IAM service accounts.
+
+## Use Google Cloud Storage
+
+The following examples use a GCS bucket named `firebolt-engine-demo-data` in the project `my-project`, but you can choose any name you like.
+
+### Create a GCS bucket
+
+```bash
+export GCP_PROJECT=my-project
+export GCP_LOCATION=us-east4
+export BUCKET_NAME=firebolt-engine-demo-data
+
+gcloud storage buckets create "gs://${BUCKET_NAME}" \
+  --project="${GCP_PROJECT}" \
+  --location="${GCP_LOCATION}" \
+  --uniform-bucket-level-access \
+  --public-access-prevention
+```
+
+### Create a service account and grant bucket access
+
+Create a Google service account for the engine and grant it permission to manage objects in the bucket. Use [Workload Identity Federation for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) to bind this service account to the Kubernetes ServiceAccount that the engine pods run as. The next step shows how to attach that ServiceAccount to the engine.
+
+```bash
+export GSA_NAME=firebolt-engine
+export GSA_EMAIL="${GSA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
+export K8S_NAMESPACE=firebolt
+export K8S_SA=my-engine
+
+gcloud iam service-accounts create "${GSA_NAME}" \
+  --project="${GCP_PROJECT}"
+
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+  --member="serviceAccount:${GSA_EMAIL}" \
+  --role="roles/storage.objectAdmin"
+
+# Allow the Kubernetes ServiceAccount to impersonate the Google service account.
+gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
+  --project="${GCP_PROJECT}" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="serviceAccount:${GCP_PROJECT}.svc.id.goog[${K8S_NAMESPACE}/${K8S_SA}]"
+```
+
+### Configure the engine to use GCS
+
+Point the engine at the bucket through `spec.customEngineConfig.storage` and run its pods under the ServiceAccount that carries the Google identity.
+
+The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Google Cloud Storage, set `type` to `gcs`. The default scheme for `gcs` is `gs://`.
+
+The following manifest creates the ServiceAccount, an `FireboltEngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the service account email and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-engine
+  namespace: firebolt
+  annotations:
+    # Bind the Google service account from the previous step (Workload Identity).
+    iam.gke.io/gcp-service-account: firebolt-engine@my-project.iam.gserviceaccount.com
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngineClass
+metadata:
+  name: default
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:dev
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  engineClassRef: default
+  serviceAccountName: my-engine
+  replicas: 2
+  customEngineConfig:
+    storage:
+      type: gcs
+      api_scheme: "gs://"
+      bucket_name: firebolt-engine-demo-data
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+```
+
+Apply the manifest:
+
+```bash
+kubectl apply -f engine-gcs.yaml
+```
+
+The engine resolves Google Cloud credentials from the pod's Google identity, which Workload Identity Federation provides. GKE injects the credentials automatically into pods that run under a ServiceAccount annotated with `iam.gke.io/gcp-service-account`.
+
+For the full set of engine fields, including `customEngineConfig` and `serviceAccountName`, see the [FireboltEngine CRD reference](../../crd-reference/engine-crd-reference).
+
+### Confirm that object storage is working
+
+To confirm that managed storage works, create a table and check that new prefixes appear in your bucket. Engine pods follow the name pattern `<engine>-g<generation>-<index>`, so the first pod of generation `0` for `my-engine` is `my-engine-g0-0`.
+
+```bash
+kubectl port-forward pod/my-engine-g0-0 3473:3473 -n firebolt
+
+curl -s "http://localhost:3473" --data-binary "create table test (val int);"
+curl -s "http://localhost:3473" --data-binary "insert into test values (1);"
+
+gcloud storage ls "gs://firebolt-engine-demo-data"
+```
+
+If the queries hang, check the engine pod logs for Google Cloud access-denied errors:
+
+```bash
+kubectl logs my-engine-g0-0 -n firebolt
+```
+
+## Restrict external access with an intermediary service account
+
+The bucket you configure under `storage` holds an engine's managed tablet data. The engine reaches it with the engine pod's own Google identity. Queries that read from or write to *external* locations, such as external tables that point at a different bucket, follow a separate credential path.
+
+By default, external access uses the engine pod's own identity. That identity is tied to the engine deployment, so it is not a convenient identity for the owner of an external bucket to reference when they grant access.
+
+An intermediary service account gives external access a stable identity instead. When you configure one, the engine impersonates the intermediary service account for external access, rather than using its own pod identity. Because the service account is stable and known ahead of time, you can share it with third parties and reference it in bucket IAM policies, including on Google Cloud projects outside your own organization.
+
+### How the credential chain works
+
+The engine selects the external credential path based on what you configure:
+
+- **Intermediary service account set.** The engine impersonates the intermediary service account for external access. The service account is the stable identity you grant access to external data.
+- **Intermediary service account not set.** The engine uses its own pod identity for external access.
+
+Access to the managed `storage` bucket always uses the engine pod's own identity. The intermediary service account applies only to external locations.
+
+### Configure the intermediary service account
+
+Create the intermediary Google service account and grant the engine's identity permission to impersonate it. The engine's identity needs `roles/iam.serviceAccountTokenCreator` on the intermediary service account, and the intermediary service account needs only the permissions required to reach the external data.
+
+Set the intermediary service account ID under `storage.gcp.intermediary_service_account_id`:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  engineClassRef: default
+  serviceAccountName: my-engine
+  replicas: 2
+  customEngineConfig:
+    storage:
+      type: gcs
+      api_scheme: "gs://"
+      bucket_name: firebolt-engine-demo-data
+      gcp:
+        intermediary_service_account_id: projects/my-project/serviceAccounts/firebolt-intermediary@my-project.iam.gserviceaccount.com
+```
+
+The `storage.gcp` block is valid only when `type` is `gcs`.

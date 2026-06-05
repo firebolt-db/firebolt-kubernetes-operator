@@ -15,8 +15,8 @@ You configure S3 on the engine through `spec.customEngineConfig.storage`. The en
 Before you begin, ensure that you have the following installed and configured:
 
 * A [Kubernetes](https://kubernetes.io/) cluster (v1.28+) running on AWS EKS.
-* The Firebolt Operator installed in the cluster. See [Installation](../installation).
-* A `FireboltInstance` in the `Ready` phase. See the [Quickstart](../quickstart).
+* The Firebolt Operator installed in the cluster. See [Installation](../../installation).
+* A `FireboltInstance` in the `Ready` phase. See the [Quickstart](../../quickstart).
 * `kubectl` command-line tool configured to access your cluster.
 * `helm` (v3+) installed on your local machine.
 * An AWS account with permissions to create S3 buckets, IAM roles, and IAM policies.
@@ -194,7 +194,7 @@ spec:
               value: us-east-1
 ```
 
-For the full set of engine fields, including `customEngineConfig` and `serviceAccountName`, see the [FireboltEngine CRD reference](../crd-reference/engine-crd-reference).
+For the full set of engine fields, including `customEngineConfig` and `serviceAccountName`, see the [FireboltEngine CRD reference](../../crd-reference/engine-crd-reference).
 
 ### Confirm that object storage is working
 
@@ -217,3 +217,48 @@ If the queries hang, check the engine pod logs for AWS IAM access-denied errors:
 ```bash
 kubectl logs my-engine-g0-0 -n firebolt
 ```
+
+## Restrict external access with an intermediary role
+
+The bucket you configure under `storage` holds an engine's managed tablet data. The engine reaches it with the engine pod's own AWS identity. Queries that read from or write to *external* locations, such as external tables or `COPY` statements that point at a different bucket, follow a separate credential path.
+
+By default, external access uses the engine pod's own AWS identity. That identity is tied to the engine deployment, so it is not a convenient identity for the owner of an external bucket to reference when they grant access.
+
+An intermediary role gives external access a stable identity instead. When you configure one, the engine assumes the intermediary role first and then assumes the external role from there, rather than using its own pod identity. Because the intermediary role ARN is stable and known ahead of time, you can share it with third parties and reference it in S3 bucket policies or IAM role trust policies, including on AWS accounts outside your own organization. You can also scope the intermediary role so that it only has access to resources outside your own AWS account or AWS organization.
+
+### How the credential chain works
+
+The engine selects the external credential path based on what you configure:
+
+- **Intermediary role set.** The engine assumes the intermediary role, then assumes the external role from there. The intermediary role is the stable identity you reference in external bucket policies and trust policies.
+- **Intermediary role not set.** The engine uses its own pod identity from the AWS SDK credential chain for external access.
+
+Access to the managed `storage` bucket always uses the engine pod's own identity. The intermediary role applies only to external locations.
+
+### Configure the intermediary role
+
+Create the intermediary IAM role and grant the engine's identity permission to assume it. The intermediary role's trust policy must allow the engine ServiceAccount identity to assume it, and the role needs only `sts:AssumeRole` on the external roles it is allowed to reach.
+
+Set the intermediary role ARN under `storage.aws.intermediary_access_role`:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  engineClassRef: default
+  serviceAccountName: my-engine
+  replicas: 2
+  customEngineConfig:
+    storage:
+      type: s3
+      api_scheme: "s3://"
+      bucket_name: firebolt-engine-demo-data
+      aws:
+        intermediary_access_role: arn:aws:iam::<account-id>:role/firebolt-intermediary
+```
+
+The `storage.aws` block is valid only when `type` is `s3`.
