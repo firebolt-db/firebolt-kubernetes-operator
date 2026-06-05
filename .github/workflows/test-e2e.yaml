@@ -16,8 +16,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    name: Detect docs-only change
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.detect.outputs.docs_only }}
+    steps:
+      - name: Determine whether the PR changed only docs
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # List the PR's changed files via the compare API (no checkout
+          # needed). "docs" = markdown anywhere, plus docs/ and docs-internal/.
+          # Fail-safe: any uncertainty leaves docs_only=false so the full
+          # suite still runs.
+          files="$(gh api --paginate \
+            "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
+            --jq '.files[].filename' 2>/dev/null || true)"
+          echo "Changed files:"
+          printf '%s\n' "${files:-<none>}"
+          non_docs="$(printf '%s\n' "${files}" \
+            | grep -vE '\.mdx?$|^docs/|^docs-internal/' || true)"
+          if [ -n "${files}" ] && [ -z "${non_docs}" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test-e2e:
     name: E2E Tests
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
     runs-on: ubuntu-16core-64gb-600ssd-amd64
     permissions:
       id-token: write
