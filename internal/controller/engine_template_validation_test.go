@@ -65,8 +65,8 @@ func templateTestEngine(name, ns, instanceRef string, env []corev1.EnvVar) *comp
 	}
 }
 
-// TestEngineReconcile_TemplateRejectedReservedEnvKey is the FB-1492
-// regression guard. An engine that sets one of the operator-injected
+// TestEngineReconcile_TemplateRejectedReservedEnvKey is the regression
+// guard. An engine that sets one of the operator-injected
 // env keys on spec.template.spec.containers[engine].env must surface
 // ConditionReady=False/TemplateRejected naming the offending key, and
 // render no StatefulSet — even with webhooks off (the chart default).

@@ -18,7 +18,7 @@ test coverage gaps, surfaced by the audit on branch
 | W8 | e2e for deletion guard and resource bounds | 3 | Lock W1/W4 behavior end-to-end |
 | W9 | Chart values.yaml warnings | 4 | Make webhook-off limitations visible at install |
 | W10 | Docs + minor cleanup | 4 | AGENTS.md split note, misleading e2e comment, Makefile dedup |
-| W11 | FireboltEngine own-template defense-in-depth | 2 | Reserved engine env key on `spec.template` wins under kubelet last-wins; webhook-only (FB-1492 follow-up, gap W2/W3 missed) |
+| W11 | FireboltEngine own-template defense-in-depth | 2 | Reserved engine env key on `spec.template` wins under kubelet last-wins; webhook-only (follow-up, gap W2/W3 missed) |
 
 Each workstream maps to one self-contained commit per the project's commit
 conventions (`AGENTS.md` → "Planning work").
@@ -244,7 +244,7 @@ W9, W10               ── parallel from day 1.
 
 ---
 
-## Follow-up — FB-1492 (gap the FB-1298 audit missed)
+## Follow-up — engine template re-validation (gap the earlier audit missed)
 
 ### W11. FireboltEngine own-template defense-in-depth
 
