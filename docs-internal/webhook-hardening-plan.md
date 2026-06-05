@@ -18,6 +18,7 @@ test coverage gaps, surfaced by the audit on branch
 | W8 | e2e for deletion guard and resource bounds | 3 | Lock W1/W4 behavior end-to-end |
 | W9 | Chart values.yaml warnings | 4 | Make webhook-off limitations visible at install |
 | W10 | Docs + minor cleanup | 4 | AGENTS.md split note, misleading e2e comment, Makefile dedup |
+| W11 | FireboltEngine own-template defense-in-depth | 2 | Reserved engine env key on `spec.template` wins under kubelet last-wins; webhook-only (FB-1492 follow-up, gap W2/W3 missed) |
 
 Each workstream maps to one self-contained commit per the project's commit
 conventions (`AGENTS.md` → "Planning work").
@@ -240,3 +241,41 @@ W6, W7                ── small; can land any time.
 W8                    ── after W1 / W4 merge.
 W9, W10               ── parallel from day 1.
 ```
+
+---
+
+## Follow-up — FB-1492 (gap the FB-1298 audit missed)
+
+### W11. FireboltEngine own-template defense-in-depth
+
+**Problem.** W2 added a controller-side template check for the
+**FireboltInstance** components and W3 added the **FireboltEngineClass**
+consumption gate, but the **FireboltEngine's own** `spec.template` was left
+webhook-only. With webhooks off (chart default) a user with just
+`fireboltengines` create/update RBAC can set a reserved engine-container env
+key on `spec.template.spec.containers[engine].env` — `POD_INDEX`,
+`FIREBOLT_CORE_MODE`, or `FB_AWS_EC2_METADATA_CLIENT_ENABLED`.
+`buildEngineContainerEnv` appends user env *after* the operator-injected
+vars, and the kubelet resolves duplicate env names last-wins, so the user
+value silently overrides the operator's: a forged `POD_INDEX` hands the
+engine a wrong node identity, `FIREBOLT_CORE_MODE` flips the runtime code
+path. Lower-privilege than the W3 class path (which is already blocked by
+`OperatorOwnedFieldSet` and needs `fireboltengineclasses` RBAC too) and
+unmitigated.
+
+**Approach.** Mirror W2/W4 exactly. `validateEngineTemplate` runs
+`ValidateOperatorOwnedPodTemplate(engine.Spec.Template, …)` (the same
+`FireboltEngineClassPodTemplateRules` the webhook applies) at the top of
+`FireboltEngineReconciler.Reconcile`, after class resolution and before the
+resource-bound gate (matching the webhook's
+`validateTemplate → validateResources` order). On error, set
+`Ready=False/TemplateRejected` (reusing the FireboltInstance reason) with the
+field path, refuse to render the STS, requeue without bubbling an error.
+
+**Files.** `internal/controller/engine_controller.go`,
+`internal/controller/engine_reconcile.go` (stale `effectiveEngineEnv`
+comment that advertised webhook-only reliance).
+
+**Tests.**
+- envtest: each reserved engine env key on `spec.template` → `Ready=False/TemplateRejected` with field path, no STS rendered.
+- envtest: non-reserved env var → gate passes (false-positive guard).

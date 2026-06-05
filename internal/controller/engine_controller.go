@@ -323,6 +323,24 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Defense-in-depth for the FireboltEngine validating webhook's
+	// pod-template allowlist (validateTemplate). Webhook ON: admission
+	// already rejected operator-owned-field input on spec.template, so
+	// this branch is dead code. Webhook OFF (chart default): this is the
+	// only enforcement — without it a reserved engine env key set on
+	// spec.template.spec.containers[engine].env (POD_INDEX,
+	// FIREBOLT_CORE_MODE, FB_AWS_EC2_METADATA_CLIENT_ENABLED) flows
+	// through buildEngineContainerEnv after the operator-injected vars,
+	// and the kubelet's last-wins env semantics let the user value
+	// silently override the operator's — handing the engine a forged
+	// node identity or runtime mode. Runs before the resource-bound
+	// gate to mirror the webhook's validateTemplate→validateResources
+	// order. Refuse to render until the template is fixed; mirrors the
+	// FireboltInstance controller's validateInstanceTemplates gate.
+	if tplErrs := validateEngineTemplate(engine); len(tplErrs) > 0 {
+		return r.handleTemplateRejected(ctx, engine, tplErrs)
+	}
+
+	// Defense-in-depth for the FireboltEngine validating webhook's
 	// resource-bound check. Webhook ON: admission already rejected
 	// anything above the configured --engine-max-* maximum, so this
 	// branch is dead code. Webhook OFF (chart default): this is the
@@ -783,6 +801,36 @@ func (r *FireboltEngineReconciler) validateMergedEngineResources(engine *compute
 	return nil
 }
 
+// validateEngineTemplate is the controller-side counterpart of the
+// FireboltEngine webhook's validateTemplate gate (api/v1alpha1/
+// fireboltengine_webhook.go). It re-runs the operator-owned-fields
+// allowlist on the engine's own spec.template every reconcile, using
+// the same FireboltEngineClassPodTemplateRules the webhook applies —
+// engine and class templates merge into one pod, so they share the
+// contract.
+//
+// This is defense-in-depth, not bypass: when the validating webhook is
+// in the request path the list is empty by construction (admission
+// already rejected the apply). When the webhook is off — the Helm chart
+// default — this is the only place a reserved engine-container env key
+// (POD_INDEX, FIREBOLT_CORE_MODE, FB_AWS_EC2_METADATA_CLIENT_ENABLED),
+// a reserved volume-mount name, or any other operator-owned template
+// field is caught before buildEngineContainerEnv would append it after
+// the operator-injected vars.
+//
+// Only the engine's own template is checked here; the referenced
+// FireboltEngineClass template is guarded separately by
+// resolveFireboltEngineClassInfo, which refuses to render off a class
+// the FireboltEngineClassReconciler stamped Ready=False/
+// OperatorOwnedFieldSet. A nil template returns nil — engines with no
+// template pass through.
+func validateEngineTemplate(engine *computev1alpha1.FireboltEngine) field.ErrorList {
+	return computev1alpha1.ValidateOperatorOwnedPodTemplate(
+		engine.Spec.Template,
+		field.NewPath("spec", "template"),
+	)
+}
+
 // handleResourceBoundsViolation surfaces a ResourceBounds.Validate
 // failure on the engine's ConditionReady and short-circuits the
 // reconcile. The aggregated field-path error becomes the condition
@@ -799,6 +847,32 @@ func (r *FireboltEngineReconciler) handleResourceBoundsViolation(ctx context.Con
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: engine.Generation,
 		Reason:             reasonResourceBoundsExceeded,
+		Message:            errs.ToAggregate().Error(),
+	})
+	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+// handleTemplateRejected surfaces a validateEngineTemplate failure on
+// the engine's ConditionReady and short-circuits the reconcile so no
+// StatefulSet is rendered off a template that sets an operator-owned
+// field. The aggregated field-path error becomes the condition message
+// so kubectl describe names the offending path (e.g.
+// spec.template.spec.containers[engine].env[0].name). Same shape as
+// handleResourceBoundsViolation: no error to controller-runtime (the
+// engine is correctly reconciled given the rejected template; the user
+// must fix spec.template for progress), just a requeue so a transient
+// mistake recovers without an explicit nudge. Reuses the
+// FireboltInstance controller's reasonTemplateRejected so the diagnostic
+// reads identically across CRDs.
+func (r *FireboltEngineReconciler) handleTemplateRejected(ctx context.Context, engine *computev1alpha1.FireboltEngine, errs field.ErrorList) (ctrl.Result, error) {
+	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: engine.Generation,
+		Reason:             reasonTemplateRejected,
 		Message:            errs.ToAggregate().Error(),
 	})
 	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
