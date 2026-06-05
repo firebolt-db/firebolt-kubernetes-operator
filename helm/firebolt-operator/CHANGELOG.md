@@ -1,3 +1,14 @@
+# 1.0.31
+
+appVersion: v4.5.2
+
+## [4.5.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.5.1...v4.5.2) (2026-06-05)
+
+### Bug Fixes
+
+* **controller:** re-validate engine spec.template at reconcile time (FB-1492) ([d5ac33c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d5ac33cb6abdcbed7dd317e585ef1a6910b9b05e))
+
+
 # 1.0.30
 
 appVersion: v4.5.1
