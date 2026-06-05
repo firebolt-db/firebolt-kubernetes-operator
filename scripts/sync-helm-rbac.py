@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Regenerate the operator Helm chart's ClusterRole template from the canonical
-kubebuilder output.
+"""Regenerate the operator Helm chart's manager RBAC template from the
+canonical kubebuilder output.
 
 The canonical source is `config/rbac/role.yaml`, produced by `controller-gen`
-from the `// +kubebuilder:rbac:` markers on the reconcilers. The Helm chart at
-`helm/firebolt-operator/templates/clusterrole.yaml` needs the SAME rule set
-but with Helm-templated metadata (release-derived name, labels, annotations,
-`.Values.rbac.create` toggle).
+from the `// +kubebuilder:rbac:` markers on the reconcilers. The Helm chart
+needs the SAME rule set in two shapes:
 
-Historical drift between these two files has caused real outages — the
-file used to be hand-maintained, and changes to the kubebuilder markers
-were applied to `config/rbac/role.yaml` without a matching edit to the
-chart. Re-generating from the canonical source removes that drift entirely.
+  - cluster-wide install (`watchNamespaces=[]`): one `ClusterRole` +
+    one `ClusterRoleBinding`.
+  - namespaced install (`watchNamespaces=[ns1, ns2, …]`): one `Role`
+    plus one `RoleBinding` in each listed namespace. Same rules, just
+    a namespaced envelope.
 
-The script is idempotent: re-running with no marker changes produces no
-diff. It is invoked from `make manifests` so RBAC edits in the controllers
-propagate to the chart in the same workflow that regenerates
-`config/rbac/role.yaml` itself.
+Both shapes live in a single generated template
+`helm/firebolt-operator/templates/manager-rbac.yaml`. The chart toggle
+(`.Values.watchNamespaces`) picks the shape at install time. The script
+is invoked from `make manifests` so any RBAC marker edit propagates to
+the chart in the same workflow that regenerates `config/rbac/role.yaml`.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO_ROOT / "config" / "rbac" / "role.yaml"
-DST = REPO_ROOT / "helm" / "firebolt-operator" / "templates" / "clusterrole.yaml"
+DST = REPO_ROOT / "helm" / "firebolt-operator" / "templates" / "manager-rbac.yaml"
 
 
 HEADER = """\
@@ -40,8 +40,13 @@ output) by scripts/sync-helm-rbac.py. `make manifests` runs both steps
 in order, so changes to `// +kubebuilder:rbac:` markers in the
 reconcilers propagate to the chart automatically. A hand-edit here will
 be overwritten on the next `make manifests`.
+
+Empty `watchNamespaces` renders a cluster-wide ClusterRole +
+ClusterRoleBinding. A non-empty list renders a Role + RoleBinding in
+each listed namespace with the same rule set.
 */ -}}
 {{- if .Values.rbac.create -}}
+{{- if empty .Values.watchNamespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -53,6 +58,73 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 rules:
+"""
+
+
+CLUSTER_BINDING = """\
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+"""
+
+
+NS_LOOP_HEADER = """\
+{{- else }}
+{{- range $ns := .Values.watchNamespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+"""
+
+
+NS_BINDING = """\
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
 """
 
 
@@ -68,19 +140,8 @@ def _quote_apigroup(group: str) -> str:
 
 
 def render_rules(rules: list[dict]) -> str:
-    """Emit the chart's `rules:` body with a fixed shape:
-
-        - apiGroups:
-            - "<group>"
-          resources:
-            - <res>
-          verbs:
-            - <verb>
-
-    PyYAML's safe_dump doesn't produce this exact style — it indents lists
-    flat with their parent key and uses single quotes for empty strings —
-    so the helper hand-formats each rule to match the chart's house style
-    and keep diffs against the prior hand-maintained file minimal."""
+    """Emit the rules body with the chart's house style (double-quoted
+    core API group, two-space rule indent, six-space list-item indent)."""
     out: list[str] = []
     for rule in rules:
         out.append("  - apiGroups:")
@@ -111,10 +172,26 @@ def main() -> int:
         print(f"error: {SRC} is not a ClusterRole document", file=sys.stderr)
         return 1
     rules = canonical.get("rules") or []
+    rules_body = render_rules(rules)
 
-    rendered = HEADER + render_rules(rules) + FOOTER
+    rendered = (
+        HEADER
+        + rules_body
+        + CLUSTER_BINDING
+        + NS_LOOP_HEADER
+        + rules_body
+        + NS_BINDING
+        + FOOTER
+    )
     DST.parent.mkdir(parents=True, exist_ok=True)
     DST.write_text(rendered)
+
+    # Drop the old two files now superseded by manager-rbac.yaml. Idempotent.
+    for legacy in ("clusterrole.yaml", "clusterrolebinding.yaml"):
+        legacy_path = DST.parent / legacy
+        if legacy_path.exists():
+            legacy_path.unlink()
+
     return 0
 
 

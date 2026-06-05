@@ -148,8 +148,16 @@ webhook:
 # -- Address the health probe endpoint binds to.
 healthProbeBindAddress: ":8081"
 
-# -- Namespace to watch for FireboltEngine resources. Empty watches all namespaces.
-watchNamespace: ""
+# -- Namespaces the operator watches and the chart's manager RBAC is
+# scoped to. Empty (the default) renders a cluster-wide install: one
+# `ClusterRole` + `ClusterRoleBinding` for the manager, and the operator
+# starts with `--namespaces=""` (controller-runtime watches every
+# namespace). A non-empty list renders a `Role` + `RoleBinding` pair
+# per listed namespace with the same rule set, and the operator starts
+# with `--namespaces=<comma-list>` so its cache spans only those
+# namespaces. Switching modes is a `helm upgrade` plus an operator
+# restart.
+watchNamespaces: []
 
 # Upper bounds on FireboltEngine.spec.resources values. Each entry is a
 # Kubernetes resource.Quantity that caps both Requests and Limits for the
@@ -229,7 +237,7 @@ podMonitor:
     enabled: false
     interval: 15s
   # -- When true, PodMonitors discover pods across all namespaces.
-  # Use when the operator watches multiple namespaces (watchNamespace is empty).
+  # Use when the operator watches multiple namespaces (watchNamespaces is empty).
   # When false, PodMonitors only discover pods in the release namespace.
   allNamespaces: false
 

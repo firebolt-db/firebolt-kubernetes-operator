@@ -191,8 +191,12 @@
     "healthProbeBindAddress": {
       "type": "string"
     },
-    "watchNamespace": {
-      "type": "string"
+    "watchNamespaces": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "logging": {
       "type": "object",

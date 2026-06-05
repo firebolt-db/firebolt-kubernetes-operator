@@ -1,0 +1,333 @@
+{{- /*
+GENERATED FILE. DO NOT EDIT.
+Regenerated from config/rbac/role.yaml (the canonical controller-gen
+output) by scripts/sync-helm-rbac.py. `make manifests` runs both steps
+in order, so changes to `// +kubebuilder:rbac:` markers in the
+reconcilers propagate to the chart automatically. A hand-edit here will
+be overwritten on the next `make manifests`.
+
+Empty `watchNamespaces` renders a cluster-wide ClusterRole +
+ClusterRoleBinding. A non-empty list renders a Role + RoleBinding in
+each listed namespace with the same rule set.
+*/ -}}
+{{- if .Values.rbac.create -}}
+{{- if empty .Values.watchNamespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+      - serviceaccounts
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/proxy
+    verbs:
+      - get
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses/finalizers
+      - fireboltengines/finalizers
+      - fireboltinstances/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses/status
+      - fireboltengines/status
+      - fireboltinstances/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines
+      - fireboltinstances
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "firebolt-operator.fullname" . }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- range $ns := .Values.watchNamespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - secrets
+      - serviceaccounts
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/proxy
+    verbs:
+      - get
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses/finalizers
+      - fireboltengines/finalizers
+      - fireboltinstances/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengineclasses/status
+      - fireboltengines/status
+      - fireboltinstances/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
+      - fireboltengines
+      - fireboltinstances
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "firebolt-operator.fullname" $ }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}
