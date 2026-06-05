@@ -19,7 +19,7 @@ The gateway ConfigMap (`{instance}-gateway-config`) is a pure function of the `F
 
 ### Gateway custom service account
 
-By default the Firebolt Operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on `FireboltEngine` resources when a request arrives for a stopped engine (the wake-on-zero protocol). See [Autoscaling and wake-up](../engine/autoscaling-and-wake-up#gateway-wake-up-protocol).
+By default the Firebolt Operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on `FireboltEngine` resources when a request arrives for a stopped engine (the wake-on-zero protocol). See [Autoscaling and wake-up](../../engine/autoscaling-and-wake-up#gateway-wake-up-protocol).
 
 When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA / Role / RoleBinding entirely**. You are then responsible for:
 
