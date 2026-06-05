@@ -231,3 +231,5 @@ When breaking work into a plan, divide it into self-contained commits. Each comm
 ### Code quality
 
 - Ignoring errors is forbidden except with a documented rationale in a comment.
+- No ticket references (`FB-<ticket>`, `FIR-<ticket>`, or any tracker ID) in code or docs: not in comments, identifiers, strings, doc prose, or `docs-internal/` notes. Tickets go in the commit message only (see Commit conventions).
+- Comments and docs state how the code behaves now, not what just changed. Do not narrate edits ("previously", "changed to", "fixed the bug where", "new:"); record durable footguns in `KNOWN_ISSUES.md` (see Document resolved issues), not inline.
