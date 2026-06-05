@@ -206,7 +206,7 @@ func TestStorageMatchesSpec_BackendSwitchBumpsGeneration(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := storageMatchesSpec(tc.sts, tc.spec)
+			got := storageMatchesSpec(tc.sts, tc.spec, nil)
 			if got != tc.want {
 				t.Errorf("storageMatchesSpec() = %v, want %v", got, tc.want)
 			}

@@ -318,7 +318,7 @@ func TestComputeEngineReconcile_S2_SpecChange(t *testing.T) {
 			current := EngineState{
 				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3),
 				CurrentHeadlessSvc:      &corev1.Service{},
-				CurrentConfigMap:        buildConfigMap(seedSpec, testEngineName, testNamespace, 0, testInstanceInfo()),
+				CurrentConfigMap:        buildConfigMap(seedSpec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 				CurrentPodsReady:        true,
 				CurrentPodTotal:         3,
 				CurrentPodReady:         3,
@@ -356,7 +356,7 @@ func TestComputeEngineReconcile_S3_CreatingToSwitching(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 1, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -597,7 +597,7 @@ func TestComputeEngineReconcile_S5_STSMissing(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              nil,
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
 	}
@@ -624,7 +624,7 @@ func TestComputeEngineReconcile_S5_MetadataOverrideDrift(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -648,7 +648,7 @@ func TestComputeEngineReconcile_S5_ClusterSvcSelectorDrift(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -680,7 +680,7 @@ func TestComputeEngineReconcile_S7_NoOp(t *testing.T) {
 			current := EngineState{
 				CurrentSTS:              sc.seedSTS(testEngineName, 0, 3),
 				CurrentHeadlessSvc:      &corev1.Service{},
-				CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+				CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 				CurrentPodsReady:        true,
 				CurrentPodTotal:         3,
 				CurrentPodReady:         3,
@@ -720,7 +720,7 @@ func TestComputeEngineReconcile_Idempotency(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -864,7 +864,7 @@ func TestComputeEngineReconcile_StableNilClusterService(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -895,7 +895,7 @@ func TestComputeEngineReconcile_S5_HeadlessSvcMissing(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      nil,
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		CurrentPodTotal:         3,
 		CurrentPodReady:         3,
@@ -968,7 +968,7 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 	// Re-materialized content must equal the canonical generator output so
 	// that ensureConfigMap's content-based update path treats a subsequent
 	// reconcile (CM now present) as a no-op rather than a drift-driven write.
-	want := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	want := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil)
 	if result.EnsureConfigMap.Data[ConfigFileName] != want.Data[ConfigFileName] {
 		t.Error("rebuilt ConfigMap content diverged from buildConfigMap output")
 	}
@@ -2155,7 +2155,7 @@ func TestComputeEngineReconcile_Stop_StableToCreating(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 0, 3),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		ClusterService:          makeClusterSvc(testEngineName, 0),
 		ClusterServiceTargetGen: 0,
@@ -2186,7 +2186,7 @@ func TestComputeEngineReconcile_Stop_ComputeStableChoosesStoppedWhenReplicasZero
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 1, 0),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		ClusterService:          makeClusterSvc(testEngineName, 1),
 		ClusterServiceTargetGen: 1,
@@ -2275,7 +2275,7 @@ func TestComputeEngineReconcile_Stop_StoppedToCreating(t *testing.T) {
 	current := EngineState{
 		CurrentSTS:              makeSTS(testEngineName, 1, 0),
 		CurrentHeadlessSvc:      &corev1.Service{},
-		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo()),
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil),
 		CurrentPodsReady:        true,
 		ClusterService:          makeClusterSvc(testEngineName, 1),
 		ClusterServiceTargetGen: 1,
@@ -2301,7 +2301,7 @@ func renderConfig(t *testing.T, custom string) map[string]interface{} {
 	if custom != "" {
 		spec.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(custom)}
 	}
-	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil)
 	var root map[string]interface{}
 	if err := yaml.Unmarshal([]byte(cm.Data[ConfigFileName]), &root); err != nil {
 		t.Fatalf("rendered config.yaml is not valid YAML: %v", err)
@@ -2509,7 +2509,7 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 	// against an apiserver bug by skipping the merge silently.
 	spec := testSpec()
 	spec.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(`not valid json`)}
-	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo())
+	cm := buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil)
 	var root map[string]interface{}
 	if err := yaml.Unmarshal([]byte(cm.Data[ConfigFileName]), &root); err != nil {
 		t.Fatalf("rendered config.yaml is not valid YAML: %v", err)

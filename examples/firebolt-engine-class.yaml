@@ -1,11 +1,12 @@
 # A FireboltEngineClass with every supported field set. Most are optional.
 #
-# A FireboltEngineClass holds a reusable pod-template fragment that multiple
-# FireboltEngines in the same namespace can reference via
-# spec.engineClassRef. It eliminates the need to repeat identical
-# per-engine pod-level settings — most notably the cloud-provider IAM
-# binding (kube2iam pod annotation / IRSA service account / Pod
-# Identity) which is identical for every engine of one instance.
+# A FireboltEngineClass holds settings shared by multiple FireboltEngines in
+# the same namespace, referenced via spec.engineClassRef. It carries a
+# reusable pod-template fragment — most notably the cloud-provider IAM
+# binding (kube2iam pod annotation / IRSA service account / Pod Identity)
+# identical for every engine of one instance — plus defaults for a subset
+# of non-template engine settings: storage, customEngineConfig, rollout,
+# drainCheckEnabled, drainCheckInterval, and autoscaling.
 #
 # FireboltEngineClass is namespaced (not cluster-scoped). The template
 # carries namespace-resolved identifiers — ServiceAccount names, Secret /
@@ -15,18 +16,22 @@
 # silent-divergence trap a cluster-scoped class would have (same SA
 # name in two namespaces, possibly different IAM roles).
 #
-# Field precedence on the rendered engine pod, top wins:
+# Every field resolves engine-if-set → class-if-set → operator default: an
+# engine that sets the field owns it, the class fills it in otherwise, and
+# the operator default sits beneath both. For the pod template the merge is
+# per-field:
 #   operator defaults < FireboltEngineClass.spec.template < FireboltEngine.spec.template
+# storage and autoscaling are whole-struct (an engine that sets the field
+# owns it); customEngineConfig is deep-merged with engine keys winning.
 #
 # The same allowlist applies to both FireboltEngineClass.spec.template
-# and FireboltEngine.spec.template (FB-1426): the validating webhook
-# refuses anything that touches the engine container's hardcoded
-# identity (name, command, ports, probes, reserved env keys),
-# pod-level fields tied to the StatefulSet contract
-# (terminationGracePeriodSeconds, subdomain, hostname, restartPolicy,
-# activeDeadlineSeconds), or label/annotation keys under the
-# firebolt.io/ prefix. Sidecar containers and additional init
-# containers are fully user-owned.
+# and FireboltEngine.spec.template: the validating webhook refuses
+# anything that touches the engine container's hardcoded identity (name,
+# command, ports, probes, reserved env keys), pod-level fields tied to the
+# StatefulSet contract (terminationGracePeriodSeconds, subdomain,
+# hostname, restartPolicy, activeDeadlineSeconds), or label/annotation
+# keys under the firebolt.io/ prefix. Sidecar containers and additional
+# init containers are fully user-owned.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngineClass
 metadata:
@@ -88,12 +93,43 @@ spec:
         - name: cache-warmer
           image: busybox:1.36
           command: ["sh", "-c", "echo warming cache"]
+  # --- Non-template defaults (siblings of template) ---
+  # Each is inherited by referencing engines that leave the matching
+  # spec field unset.
+  #
+  # Default per-pod data volume. An engine that declares its own
+  # spec.storage backend (persistentVolumeClaim / emptyDir / hostPath)
+  # overrides this wholesale.
+  storage:
+    persistentVolumeClaim:
+      size: 100Gi
+      accessModes: [ReadWriteOnce]
+      # storageClassName: gp3
+  # Engine config.yaml fragment, deep-merged beneath each engine's own
+  # spec.customEngineConfig (engine keys win on conflict). Operator-owned
+  # paths (schema_version, instance.*, engine.id/nodes/...) are stripped.
+  customEngineConfig:
+    logging:
+      level: info
+  # Default rollout strategy. graceful drains in-flight queries off the
+  # old generation before removing its pods; recreate skips the drain.
+  rollout: graceful
+  # Drain-check defaults, used during graceful rollouts.
+  drainCheckEnabled: true
+  drainCheckInterval: 5s
+  # Default autoscaling policy. Whole-struct: an engine that sets
+  # spec.autoscaling owns the entire policy (no field-merge with this).
+  autoscaling:
+    enabled: true
+    maxReplicas: 5
+    minReplicas: 0
+    idleTimeout: 30m
 ---
-# A FireboltEngine that inherits IAM, scheduling, and image from
-# the class via spec.engineClassRef. Per-engine resources live on
-# spec.template (FB-1426) and ride above the class template in the
-# merge order, so the values below override anything the class
-# defines for the engine container's resources block.
+# A FireboltEngine that inherits IAM, scheduling, image, storage, engine
+# config, rollout, and autoscaling from the class via spec.engineClassRef.
+# Per-engine resources live on spec.template and ride above the class
+# template in the merge order, so the values below override anything the
+# class defines for the engine container's resources block.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:

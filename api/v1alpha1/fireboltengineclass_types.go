@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -42,6 +43,16 @@ import (
 // Non-engine containers (sidecars) and additional init containers are
 // fully user-owned: the webhook does not constrain their image, command,
 // ports, or environment.
+//
+// Beyond Template, the class carries defaults for a subset of
+// non-pod-template FireboltEngine settings (Storage, CustomEngineConfig,
+// Rollout, DrainCheckEnabled, DrainCheckInterval, Autoscaling). Each
+// resolves engine-if-set → class-if-set → operator default: a referencing
+// engine that sets the corresponding spec field owns it, the class value
+// applies when the engine leaves it unset, and the operator default sits
+// beneath both. This lets a platform team standardize storage, engine
+// config, and rollout/autoscaling policy across a fleet without repeating
+// it on every FireboltEngine.
 type FireboltEngineClassSpec struct {
 	// Template is the pod template merged into engines that reference this
 	// class. See the type-level doc for the precedence rules and the list
@@ -58,6 +69,61 @@ type FireboltEngineClassSpec struct {
 	// template schema, but the marker does not propagate into a child
 	// that has its own typed sub-schema (metadata: {type: object}).
 	Template corev1.PodTemplateSpec `json:"template"`
+
+	// Storage is the default per-pod data-volume configuration for engines
+	// that reference this class and do not declare a storage backend of
+	// their own. An engine that sets any backend on spec.storage
+	// (persistentVolumeClaim, emptyDir, or hostPath) owns its storage
+	// wholesale and ignores this value; otherwise the class value applies,
+	// falling through to the operator default (an emptyDir) when neither
+	// side selects a backend. See EngineStorageSpec for the backend choice
+	// and its mutual-exclusion rule, which this field inherits.
+	// +kubebuilder:default={}
+	// +optional
+	Storage EngineStorageSpec `json:"storage,omitempty"`
+
+	// CustomEngineConfig is deep-merged beneath each referencing engine's
+	// own spec.customEngineConfig into the rendered config.yaml: operator
+	// defaults first, then this class config, then the engine config on top
+	// (engine keys win on conflict). Operator-owned paths (see
+	// OperatorOwnedEngineConfigPaths) are stripped from this value before
+	// the merge, exactly as they are from the engine's own config, so the
+	// class cannot override identity, routing, or topology.
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	// +optional
+	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
+
+	// Rollout is the default rollout strategy for referencing engines that
+	// leave spec.rollout unset. The operator default (graceful) applies when
+	// neither the engine nor the class sets it; an empty value here means
+	// the class does not override. The graceful/recreate enum is inherited
+	// from RolloutStrategy.
+	// +optional
+	Rollout RolloutStrategy `json:"rollout,omitempty"`
+
+	// DrainCheckEnabled is the default drain-check setting for referencing
+	// engines that leave spec.drainCheckEnabled unset. The operator default
+	// (true) applies when neither side sets it; nil here means the class
+	// does not override.
+	// +optional
+	DrainCheckEnabled *bool `json:"drainCheckEnabled,omitempty"`
+
+	// DrainCheckInterval is the default drain-poll interval for referencing
+	// engines that leave spec.drainCheckInterval unset. The operator default
+	// applies when neither side sets it; nil here means the class does not
+	// override.
+	// +optional
+	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
+
+	// Autoscaling is the default autoscaling policy for referencing engines
+	// that leave spec.autoscaling unset. Resolution is whole-struct: an
+	// engine that sets spec.autoscaling owns the entire policy and this
+	// value is not field-merged into it; when the engine omits it, the
+	// class policy applies; when neither sets it, autoscaling is disabled.
+	// +optional
+	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
 }
 
 // FireboltEngineClassStatus is the observed state of a FireboltEngineClass.

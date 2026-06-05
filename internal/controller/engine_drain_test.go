@@ -141,7 +141,7 @@ func TestEngineShutdownWaitSeconds_ClampsAndMargin(t *testing.T) {
 // rejected at admission on both engine.spec.template and
 // FireboltEngineClass.spec.template.
 func TestShutdownWaitUnfinished_ConfigMap(t *testing.T) {
-	cm := buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo())
+	cm := buildConfigMap(testSpec(), testEngineName, testNamespace, 0, testInstanceInfo(), nil)
 	var wrapper struct {
 		Engine struct {
 			TerminationGracePeriod string `json:"termination_grace_period"`

@@ -144,7 +144,7 @@ func assembleEngineState(
 
 // getEngineState reads all cluster resources related to this engine: StatefulSets,
 // Services, ConfigMaps, pod readiness and drain status.
-func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine) (EngineState, error) {
+func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo) (EngineState, error) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
 	engineName := engine.Name
@@ -191,8 +191,12 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 			return EngineState{}, err
 		}
 
-		drainCheckDisabled := engine.Spec.DrainCheckEnabled != nil && !*engine.Spec.DrainCheckEnabled
-		skipDrain := engine.Spec.Rollout == computev1alpha1.RolloutRecreate || drainCheckDisabled
+		// Rollout strategy and the drain-check toggle both resolve
+		// engine-if-set → class-if-set → operator default, so an engine
+		// that inherits recreate / drainCheckEnabled=false from its class
+		// skips the drain probe exactly as if it set them directly.
+		skipDrain := effectiveRollout(&engine.Spec, classInfo) == computev1alpha1.RolloutRecreate ||
+			!effectiveDrainCheckEnabled(&engine.Spec, classInfo)
 
 		// DrainingSTS == nil is handled by assembleEngineState (sets DrainingPodsDrained=true).
 		if raw.DrainingSTS != nil && !skipDrain {

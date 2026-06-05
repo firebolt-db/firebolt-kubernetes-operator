@@ -52,7 +52,7 @@ func enabledAutoscalingSpec() *computev1alpha1.AutoscalingSpec {
 func TestComputeAutoscalerDecision_DisabledIsNoOp(t *testing.T) {
 	t.Parallel()
 	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3}
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
 	if d.ScaleAction {
 		t.Fatalf("expected no scale action, got DesiredReplicas=%d", d.DesiredReplicas)
 	}
@@ -89,7 +89,7 @@ func TestComputeAutoscalerDecision_ScheduleWinsOverIdleAndStopped(t *testing.T) 
 				Replicas:    tc.replicas,
 				Autoscaling: as,
 			}
-			d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, now)
+			d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, now)
 			if d.Reason != AutoscalerReasonScheduleActive {
 				t.Fatalf("reason: want %q got %q", AutoscalerReasonScheduleActive, d.Reason)
 			}
@@ -112,14 +112,14 @@ func TestComputeAutoscalerDecision_StoppedHonorsScheduleDays(t *testing.T) {
 		{Start: "08:00", End: "18:00", Days: []computev1alpha1.ScheduleDay{"Mon", "Tue", "Wed", "Thu", "Fri"}},
 	}
 	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 0, Autoscaling: as}
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
 	if d.Reason != AutoscalerReasonScheduleActive || d.DesiredReplicas != 3 {
 		t.Fatalf("Wednesday weekday window did not match: %+v", d)
 	}
 
 	// Restrict to weekend only — Wednesday should fall through to Stopped.
 	as.Schedule[0].Days = []computev1alpha1.ScheduleDay{"Sat", "Sun"}
-	d = computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
+	d = computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
 	if d.Reason != AutoscalerReasonStopped || d.DesiredReplicas != 0 {
 		t.Fatalf("weekend-only window must not match Wednesday: %+v", d)
 	}
@@ -135,7 +135,7 @@ func TestComputeAutoscalerDecision_ActivityRefreshesLastActivity(t *testing.T) {
 	priorActivity := metav1.NewTime(fixedNow().Add(-2 * time.Hour))
 	status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &priorActivity}
 
-	d := computeAutoscalerDecision(spec, status, AutoscalerObservation{ActiveQueries: 1}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status, AutoscalerObservation{ActiveQueries: 1}, fixedNow())
 
 	if d.ScaleAction {
 		t.Fatal("activity must not trigger a scale action")
@@ -162,7 +162,7 @@ func TestComputeAutoscalerDecision_ScrapeFailedNeverScalesDown(t *testing.T) {
 	stale := metav1.NewTime(fixedNow().Add(-24 * time.Hour))
 	status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &stale}
 
-	d := computeAutoscalerDecision(spec, status, AutoscalerObservation{ScrapeFailed: true}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status, AutoscalerObservation{ScrapeFailed: true}, fixedNow())
 
 	if d.ScaleAction {
 		t.Fatal("scrape failure must not trigger scale-down")
@@ -196,7 +196,7 @@ func TestComputeAutoscalerDecision_ExtendedScrapeFailureThenQuietHoldsScaleDown(
 	status := &computev1alpha1.FireboltEngineStatus{}
 
 	// T0: activity observed, lastActivity stamped at T0.
-	d := computeAutoscalerDecision(spec, status,
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status,
 		AutoscalerObservation{ActiveQueries: 1}, t0)
 	if d.NewLastActivityTime == nil {
 		t.Fatal("expected activity at T0 to stamp lastActivity")
@@ -207,7 +207,7 @@ func TestComputeAutoscalerDecision_ExtendedScrapeFailureThenQuietHoldsScaleDown(
 	// keep refreshing lastActivity so the quiet sample at T0+46m
 	// computes idleFor from a recent timestamp, not from T0.
 	for offset := time.Minute; offset <= 45*time.Minute; offset += time.Minute {
-		d := computeAutoscalerDecision(spec, status,
+		d := computeAutoscalerDecision(spec, spec.Autoscaling, status,
 			AutoscalerObservation{ScrapeFailed: true}, t0.Add(offset))
 		if d.ScaleAction {
 			t.Fatalf("scale-down at +%v during scrape-failure window", offset)
@@ -220,7 +220,7 @@ func TestComputeAutoscalerDecision_ExtendedScrapeFailureThenQuietHoldsScaleDown(
 
 	// T0+46m: scrapes recover, returns 0 queries. Must not scale down
 	// because lastActivity was kept fresh through the failure window.
-	d = computeAutoscalerDecision(spec, status,
+	d = computeAutoscalerDecision(spec, spec.Autoscaling, status,
 		AutoscalerObservation{}, t0.Add(46*time.Minute))
 	if d.ScaleAction {
 		t.Fatal("first quiet observation after long scrape-failure window must not scale down")
@@ -236,7 +236,7 @@ func TestComputeAutoscalerDecision_FirstQuietObservationAnchorsLastActivity(t *t
 	}
 	// LastActivityTime nil → first quiet observation should not scale,
 	// but should anchor the timestamp so the idle clock starts ticking.
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
 
 	if d.ScaleAction {
 		t.Fatal("first quiet observation must not scale down")
@@ -262,7 +262,7 @@ func TestComputeAutoscalerDecision_IdleScalesDownToMin(t *testing.T) {
 	last := metav1.NewTime(fixedNow().Add(-1 * time.Hour))
 	status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &last}
 
-	d := computeAutoscalerDecision(spec, status, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status, AutoscalerObservation{}, fixedNow())
 
 	if !d.ScaleAction || d.DesiredReplicas != 0 {
 		t.Fatalf("expected scale-down to 0, got DesiredReplicas=%d ScaleAction=%v", d.DesiredReplicas, d.ScaleAction)
@@ -287,7 +287,7 @@ func TestComputeAutoscalerDecision_IdleScalesToCustomMin(t *testing.T) {
 	last := metav1.NewTime(fixedNow().Add(-1 * time.Hour))
 	status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &last}
 
-	d := computeAutoscalerDecision(spec, status, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status, AutoscalerObservation{}, fixedNow())
 
 	if !d.ScaleAction || d.DesiredReplicas != 1 {
 		t.Fatalf("expected scale-down to 1, got DesiredReplicas=%d ScaleAction=%v", d.DesiredReplicas, d.ScaleAction)
@@ -306,7 +306,7 @@ func TestComputeAutoscalerDecision_IdleAtMinDoesNothing(t *testing.T) {
 	last := metav1.NewTime(fixedNow().Add(-2 * time.Hour))
 	status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &last}
 
-	d := computeAutoscalerDecision(spec, status, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, status, AutoscalerObservation{}, fixedNow())
 
 	if d.ScaleAction {
 		t.Fatal("already at min: must not scale")
@@ -321,7 +321,7 @@ func TestComputeAutoscalerDecision_FreshWakeRequestScalesToMax(t *testing.T) {
 		Autoscaling: enabledAutoscalingSpec(),
 	}
 	wake := fixedNow().Add(-30 * time.Second)
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{},
 		AutoscalerObservation{WakeRequestedAt: &wake}, fixedNow())
 
 	if !d.ScaleAction || d.DesiredReplicas != 3 {
@@ -340,7 +340,7 @@ func TestComputeAutoscalerDecision_StaleWakeRequestIgnored(t *testing.T) {
 		Autoscaling: enabledAutoscalingSpec(),
 	}
 	stale := fixedNow().Add(-2 * DefaultAutoscalerWakeTTL)
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{},
 		AutoscalerObservation{WakeRequestedAt: &stale}, fixedNow())
 
 	if d.ScaleAction {
@@ -356,7 +356,7 @@ func TestComputeAutoscalerDecision_WakeIgnoredWhenAutoscalingDisabled(t *testing
 
 	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 0}
 	wake := fixedNow().Add(-1 * time.Second)
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{},
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{},
 		AutoscalerObservation{WakeRequestedAt: &wake}, fixedNow())
 
 	if d.ScaleAction {
@@ -397,7 +397,7 @@ func TestComputeAutoscalerDecision_StoppedNoSchedule(t *testing.T) {
 		Replicas:    0,
 		Autoscaling: enabledAutoscalingSpec(),
 	}
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{}, fixedNow())
 	if d.ScaleAction || d.DesiredReplicas != 0 {
 		t.Fatalf("stopped engine without schedule must remain at 0: %+v", d)
 	}
@@ -417,7 +417,7 @@ func TestComputeAutoscalerDecision_PollIntervalDefault(t *testing.T) {
 			// PollInterval intentionally unset
 		},
 	}
-	d := computeAutoscalerDecision(spec, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{ActiveQueries: 1}, fixedNow())
+	d := computeAutoscalerDecision(spec, spec.Autoscaling, &computev1alpha1.FireboltEngineStatus{}, AutoscalerObservation{ActiveQueries: 1}, fixedNow())
 	if d.RequeueAfter != DefaultAutoscalerPollInterval {
 		t.Fatalf("requeue: want %v got %v", DefaultAutoscalerPollInterval, d.RequeueAfter)
 	}
@@ -592,7 +592,7 @@ func TestRunAutoscaler_DisabledClearsStaleStatus(t *testing.T) {
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
-	if _, err := r.runAutoscaler(context.Background(), engine); err != nil {
+	if _, err := r.runAutoscaler(context.Background(), engine, nil); err != nil {
 		t.Fatalf("runAutoscaler: %v", err)
 	}
 
@@ -637,7 +637,7 @@ func TestRunAutoscaler_DisabledIsIdempotent(t *testing.T) {
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
-	if _, err := r.runAutoscaler(context.Background(), engine); err != nil {
+	if _, err := r.runAutoscaler(context.Background(), engine, nil); err != nil {
 		t.Fatalf("runAutoscaler: %v", err)
 	}
 
