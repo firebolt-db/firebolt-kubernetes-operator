@@ -54,6 +54,43 @@ helm upgrade --skip-crds --install firebolt-operator oci://ghcr.io/firebolt-db/h
 
 Omit `--skip-crds` if you chose the bundled `crds/` directory option above.
 
+## Multi-tenant install: scope the Firebolt Operator to specific namespaces
+
+By default the Firebolt Operator watches every namespace and the chart
+renders a `ClusterRole` plus `ClusterRoleBinding` so it can read and
+write the resources it manages anywhere in the cluster. If you only
+want the Firebolt Operator to act in a fixed set of namespaces, list
+them under `watchNamespaces`:
+
+```bash
+helm upgrade --skip-crds --install firebolt-operator \
+  oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator \
+  --set 'watchNamespaces={tenant-a,tenant-b}'
+```
+
+The chart then renders a `Role` plus `RoleBinding` in each listed
+namespace (carrying the same rule set the `ClusterRole` would have)
+and starts the manager with `--namespaces=tenant-a,tenant-b` so its
+cache only spans those namespaces. The Firebolt Operator's blast
+radius is bounded to that list; CRs created in other namespaces are
+silently ignored.
+
+To onboard a new tenant namespace, add it to `watchNamespaces` and
+re-run `helm upgrade`. The new `Role` and `RoleBinding` land in the
+new namespace and the manager restart picks up the extended flag.
+
+If you also need the apiserver pod-proxy permission (because you set
+`FireboltInstance.spec.metricScrapeMode=ApiserverProxy` on any
+instance), enable the matching opt-in:
+
+```bash
+--set apiserverProxyMetrics.enabled=true
+```
+
+This renders a dedicated `ClusterRole` (or per-namespace `Role` when
+`watchNamespaces` is set) that grants only `pods/proxy: get`. The
+default `metricScrapeMode=PodIP` does not need this permission.
+
 ## Firebolt Operator flags
 
 The Firebolt Operator supports these runtime flags. The binary default is what
@@ -63,7 +100,7 @@ the manager uses when you run it directly. The Helm chart default is what the
 | Flag | Binary default | Helm chart default | Description |
 |------|----------------|--------------------|-------------|
 | `--version` | `false` | Not set | Print the version and exit. |
-| `--namespace` | `""` | Not set | Namespace to watch. Watches all namespaces when empty. |
+| `--namespaces` | `""` | Derived from `watchNamespaces` (omitted when empty) | Comma-separated list of namespaces to watch. Empty watches every namespace (cluster-wide install, requires the chart's `ClusterRole`). A non-empty list confines the manager cache to those namespaces and pairs with per-namespace `Role` and `RoleBinding` from the chart. |
 | `--metrics-bind-address` | `0` | `:8443` | Address for the metrics endpoint. Use `0` to disable metrics. |
 | `--metrics-secure` | `true` | `true` | Serve metrics over HTTPS with Kubernetes authentication and authorization. |
 | `--metrics-cert-path` | `""` | Not set | Directory that contains the metrics server certificate. |
