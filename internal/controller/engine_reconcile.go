@@ -1369,10 +1369,16 @@ func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInf
 
 // effectiveEngineEnv concatenates env vars declared on the engine
 // container of both the class template and the engine spec's
-// template — class first, engine after. The validating webhook
-// rejects reserved keys (POD_INDEX, FB_AWS_EC2_METADATA_CLIENT_ENABLED,
-// FIREBOLT_CORE_MODE) on both surfaces, so the result is safe to
-// append to the operator-injected env list without further filtering.
+// template — class first, engine after. Reserved keys (POD_INDEX,
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE) on either
+// surface are rejected before this runs: the validating webhook gates
+// them at admission, and the always-on controller backstops re-run the
+// same rules every reconcile (the engine template via
+// validateEngineTemplate, the class template via the class's
+// Ready=False/OperatorOwnedFieldSet condition read in
+// resolveFireboltEngineClassInfo). A rejected engine never reaches the
+// renderer, so the result is safe to append to the operator-injected
+// env list without further filtering.
 func effectiveEngineEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.EnvVar {
 	var out []corev1.EnvVar
 	if c := classEngineContainer(classInfo); c != nil {
