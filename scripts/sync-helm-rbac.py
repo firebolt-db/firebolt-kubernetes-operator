@@ -87,6 +87,7 @@ subjects:
 NS_LOOP_HEADER = """\
 {{- else }}
 {{- range $ns := .Values.watchNamespaces }}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
