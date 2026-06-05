@@ -133,8 +133,15 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
+//
+// `pods/proxy: get` is intentionally NOT in the canonical RBAC. The
+// default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches engine
+// metrics through pod IPs and needs no apiserver subresource. Users who
+// opt into `metricScrapeMode=ApiserverProxy` enable the chart value
+// `apiserverProxyMetrics.enabled` to render a dedicated ClusterRole (or
+// per-NS Role when `watchNamespaces` is set) that grants only that one
+// verb. See `helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`.
 
 // Reconcile reads the current engine state from the cluster, computes the
 // reconcile actions needed, and applies them. Deletion is handled separately

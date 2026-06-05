@@ -77,6 +77,12 @@
         "create": { "type": "boolean" }
       }
     },
+    "apiserverProxyMetrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
     "gatewayWakeClusterRole": {
       "type": "object",
       "properties": {

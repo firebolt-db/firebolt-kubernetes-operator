@@ -51,6 +51,20 @@ rbac:
   # -- Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources.
   create: true
 
+# -- Opt-in grant for the apiserver pod-proxy subresource used when a
+# `FireboltInstance.spec.metricScrapeMode=ApiserverProxy`. The default
+# metric-scrape mode is `PodIP` — direct HTTP to engine pod IPs — and
+# needs no `pods/proxy` permission, so the chart's manager RBAC does
+# not include it. Flip `apiserverProxyMetrics.enabled` to true to
+# render a dedicated ClusterRole (or per-namespace Role when
+# `watchNamespaces` is set) that grants only `pods/proxy: get`. If you
+# set `metricScrapeMode=ApiserverProxy` on any FireboltInstance without
+# flipping this value, the operator's metric scrape will surface a 403
+# from the apiserver.
+# @default -- {}
+apiserverProxyMetrics:
+  enabled: false
+
 # -- Chart-managed ClusterRole the operator binds to each FireboltInstance's
 # gateway ServiceAccount (via a per-instance RoleBinding), granting
 # `get/list/patch` on `compute.firebolt.io/fireboltengines` so the gateway can
