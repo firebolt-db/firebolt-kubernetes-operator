@@ -51,13 +51,10 @@ rbac:
   # -- Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources.
   create: true
 
-# Chart-managed ClusterRole bound to each FireboltInstance's gateway
-# ServiceAccount via a per-instance RoleBinding (which the operator
-# creates). Grants `get/list/patch` on `compute.firebolt.io/fireboltengines`
-# so the gateway can stamp the wake-on-zero annotation on a stopped
-# engine. Replaces the per-instance Role the operator used to mint
-# at runtime, removing `roles: create/update/patch` from the
-# operator's cluster-wide RBAC.
+# -- Chart-managed ClusterRole the operator binds to each FireboltInstance's
+# gateway ServiceAccount (via a per-instance RoleBinding), granting
+# `get/list/patch` on `compute.firebolt.io/fireboltengines` so the gateway can
+# wake a stopped engine.
 # @default -- {}
 gatewayWakeClusterRole:
   # -- Render the ClusterRole. Set to false when supplying a pre-existing
