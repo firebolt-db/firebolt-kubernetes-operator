@@ -161,7 +161,6 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 	reconciler := &controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		Namespace:       testNamespace,
 		Clientset:       clientset,
 		InstanceFilter:  instanceName,
 		DisableGC:       true,

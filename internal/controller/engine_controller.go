@@ -80,8 +80,7 @@ const eventReasonExternalFinalizer = "ExternalFinalizerOnOwnedResource"
 // blue-green generational deployments of Firebolt engine StatefulSets.
 type FireboltEngineReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Namespace string
+	Scheme *runtime.Scheme
 	// Clientset is used for the drain-check pod-proxy scrape
 	// (Pods/proxy subresource). Populated in SetupWithManager if nil.
 	Clientset *kubernetes.Clientset
@@ -1178,9 +1177,6 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
 	className := obj.GetName()
 	classNamespace := obj.GetNamespace()
-	if r.Namespace != "" && classNamespace != r.Namespace {
-		return nil
-	}
 	engineList := &computev1alpha1.FireboltEngineList{}
 	if err := r.List(ctx, engineList, client.InNamespace(classNamespace)); err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list engines for FireboltEngineClass watch", "fireboltengineclass", className, "namespace", classNamespace)

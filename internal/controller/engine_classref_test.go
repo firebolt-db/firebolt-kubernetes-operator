@@ -185,38 +185,6 @@ func TestFireboltEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	}
 }
 
-// TestFireboltEngineClassToEngines_HonorsNamespaceFilter pins down the
-// interaction with the reconciler's optional namespace filter
-// (--watch-namespace). A class event for a namespace outside the
-// filter must produce zero requests, otherwise the reconciler would
-// try to reconcile engines it does not have RBAC for.
-func TestFireboltEngineClassToEngines_HonorsNamespaceFilter(t *testing.T) {
-	sch := classRefTestScheme(t)
-	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
-		engineRefingClassFixture("a", "ns-a", "compute-optimized"),
-	).Build()
-	r := engineRefTestReconciler(cli, sch)
-	r.Namespace = "ns-a"
-
-	// Class event from a different namespace than the filter — must
-	// produce no requests even though a matching engine in ns-a exists.
-	classOutside := &computev1alpha1.FireboltEngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "ns-b"},
-	}
-	if got := r.engineClassToEngines(context.Background(), classOutside); len(got) != 0 {
-		t.Errorf("expected zero requests for a class outside the watch namespace, got %v", got)
-	}
-
-	// Class event inside the filter still works.
-	classInside := &computev1alpha1.FireboltEngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: "compute-optimized", Namespace: "ns-a"},
-	}
-	got := r.engineClassToEngines(context.Background(), classInside)
-	if len(got) != 1 || got[0].Name != "a" || got[0].Namespace != "ns-a" {
-		t.Errorf("expected one request for engine a/ns-a, got %v", got)
-	}
-}
-
 // classWithReadyCondition returns a class fixture (always in
 // namespace "ns-a", matching the rest of this file's fixtures) with a
 // specific FireboltEngineClassConditionReady status / reason / message
