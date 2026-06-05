@@ -1,0 +1,90 @@
+{{- /*
+Opt-in RBAC grant for the apiserver pod-proxy subresource used by
+`FireboltInstance.spec.metricScrapeMode=ApiserverProxy`. The default
+metric-scrape mode is `PodIP`, which talks directly to engine pod IPs
+and needs no `pods/proxy: get`; this template only renders when a user
+explicitly enables it. The envelope mirrors the manager-rbac.yaml
+choice: cluster-wide when `watchNamespaces` is empty, per-namespace
+otherwise. Same operator ServiceAccount as the manager binding.
+*/ -}}
+{{- if and .Values.rbac.create .Values.apiserverProxyMetrics.enabled -}}
+{{- if empty .Values.watchNamespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-apiserver-proxy
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods/proxy
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-apiserver-proxy
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "firebolt-operator.fullname" . }}-apiserver-proxy
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+{{- range $ns := .Values.watchNamespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-apiserver-proxy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods/proxy
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" $ }}-apiserver-proxy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "firebolt-operator.labels" $ | nindent 4 }}
+  {{- with $.Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "firebolt-operator.fullname" $ }}-apiserver-proxy
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
+{{- end }}

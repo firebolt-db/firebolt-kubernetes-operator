@@ -66,12 +66,6 @@ rules:
       - list
       - watch
   - apiGroups:
-      - ""
-    resources:
-      - pods/proxy
-    verbs:
-      - get
-  - apiGroups:
       - apps
     resources:
       - deployments
@@ -224,12 +218,6 @@ rules:
       - get
       - list
       - watch
-  - apiGroups:
-      - ""
-    resources:
-      - pods/proxy
-    verbs:
-      - get
   - apiGroups:
       - apps
     resources:

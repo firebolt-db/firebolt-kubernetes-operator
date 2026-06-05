@@ -37,6 +37,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | additionalArgs | list | `[]` | Additional CLI arguments passed to the operator binary. |
 | additionalEnv | list | `[]` | Additional environment variables for the operator container. |
 | affinity | object | `{}` | Affinity rules for the operator pod. |
+| apiserverProxyMetrics | object | {} | Opt-in grant for the apiserver pod-proxy subresource used when a `FireboltInstance.spec.metricScrapeMode=ApiserverProxy`. The default metric-scrape mode is `PodIP` — direct HTTP to engine pod IPs — and needs no `pods/proxy` permission, so the chart's manager RBAC does not include it. Flip `apiserverProxyMetrics.enabled` to true to render a dedicated ClusterRole (or per-namespace Role when `watchNamespaces` is set) that grants only `pods/proxy: get`. If you set `metricScrapeMode=ApiserverProxy` on any FireboltInstance without flipping this value, the operator's metric scrape will surface a 403 from the apiserver. |
 | engineResourceBounds.maxCPU | string | `""` | Maximum allowed FireboltEngine.spec.resources CPU (requests and limits). Example: "32". |
 | engineResourceBounds.maxEphemeralStorage | string | `""` | Maximum allowed FireboltEngine.spec.resources ephemeral-storage (requests and limits). Example: "10Ti". |
 | engineResourceBounds.maxMemory | string | `""` | Maximum allowed FireboltEngine.spec.resources memory (requests and limits). Example: "256Gi". |
