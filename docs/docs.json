@@ -8,12 +8,6 @@
         "pages": [
           "installation",
           "quickstart",
-          {
-            "group": "Object storage",
-            "pages": [
-              "object-storage/amazon-s3"
-            ]
-          },
           "architecture",
           {
             "group": "Instance",
@@ -36,7 +30,15 @@
               "engine/overview",
               "engine/engine-reconciliation",
               "engine/engine-rollouts",
-              "engine/autoscaling-and-wake-up"
+              "engine/autoscaling-and-wake-up",
+              {
+                "group": "Object storage",
+                "pages": [
+                  "engine/object-storage/amazon-s3",
+                  "engine/object-storage/google-cloud-storage",
+                  "engine/object-storage/azure-blob-storage"
+                ]
+              }
             ]
           },
           {

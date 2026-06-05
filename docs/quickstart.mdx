@@ -114,7 +114,7 @@ See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-
 
 Every FireboltEngine requires object storage for managed tablet data. Local filesystem storage mode is not supported by the Firebolt Operator and the engine will refuse to start without object storage.
 
-On a real cluster, point the engine at an existing bucket (S3, GCS, or Azure Blob) and grant access through your platform's workload identity. For Amazon S3, see [Amazon S3](./object-storage/amazon-s3). For a local cluster (Kind, minikube), deploy a small S3-compatible emulator ([floci](https://github.com/floci-io/floci)) and create a bucket:
+On a real cluster, point the engine at an existing bucket (S3, GCS, or Azure Blob) and grant access through your platform's workload identity. For Amazon S3, see [Amazon S3](./engine/object-storage/amazon-s3). For a local cluster (Kind, minikube), deploy a small S3-compatible emulator ([floci](https://github.com/floci-io/floci)) and create a bucket:
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/firebolt-db/firebolt-kubernetes-operator/main/examples/object-storage-local.yaml
