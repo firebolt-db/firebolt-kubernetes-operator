@@ -143,7 +143,15 @@ FireboltEngineClass holds a reusable pod-template fragment plus defaults for a s
 
 ### RBAC changes
 
-`config/rbac/role.yaml` is the canonical RBAC manifest, regenerated from `// +kubebuilder:rbac:` markers via `make manifests` (controller-gen step). The matching Helm chart template [`helm/firebolt-operator/templates/clusterrole.yaml`](helm/firebolt-operator/templates/clusterrole.yaml) is GENERATED from that canonical file by [`scripts/sync-helm-rbac.py`](scripts/sync-helm-rbac.py), which `make manifests` runs immediately after controller-gen. So a `// +kubebuilder:rbac:` marker edit + `make manifests` updates BOTH files in lockstep. Do not hand-edit the chart template — the next `make manifests` run will overwrite the edit. Historical drift between the two files used to require a hand-merge step (`pods/proxy` missing after b284983, `endpointslices` dead since e538444); the sync script removes that drift entirely.
+`config/rbac/role.yaml` is the canonical RBAC manifest, regenerated from `// +kubebuilder:rbac:` markers via `make manifests` (controller-gen step). The Helm chart template [`helm/firebolt-operator/templates/manager-rbac.yaml`](helm/firebolt-operator/templates/manager-rbac.yaml) is GENERATED from that canonical file by [`scripts/sync-helm-rbac.py`](scripts/sync-helm-rbac.py), which `make manifests` runs immediately after controller-gen. So a `// +kubebuilder:rbac:` marker edit + `make manifests` updates both files in lockstep. Do not hand-edit the chart template — the next `make manifests` run will overwrite the edit. Historical drift between the two files used to require a hand-merge step (`pods/proxy` missing after b284983, `endpointslices` dead since e538444); the sync script removes that drift entirely.
+
+The chart picks the RBAC envelope at install time from `.Values.watchNamespaces`:
+- Empty list (default) → one `ClusterRole` + one `ClusterRoleBinding` (cluster-wide install).
+- Non-empty list → a `Role` + `RoleBinding` pair in each listed namespace, no `ClusterRole`. Same rules block; the operator's `cache.Options.DefaultNamespaces` is scoped to the same list via `--namespaces=<comma-list>`.
+
+[`internal/controller/rbac_chart_toggle_test.go`](internal/controller/rbac_chart_toggle_test.go) pins the four-cell `watchNamespaces × apiserverProxyMetrics.enabled` matrix against `helm template`. If a chart edit silently drops the per-NS branch or renders both envelopes at once, that test fails.
+
+`pods/proxy: get` is intentionally NOT in the canonical RBAC because the default `FireboltInstance.spec.metricScrapeMode=PodIP` doesn't use it. The chart template [`helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`](helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml) renders the grant on the opt-in `apiserverProxyMetrics.enabled=true` value and mirrors the same `watchNamespaces` shape. If you add a `// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get` marker back, the verb leaks into the always-on manager RBAC — keep it out of the canonical source.
 
 ### Admission webhooks and controller-side fallbacks
 

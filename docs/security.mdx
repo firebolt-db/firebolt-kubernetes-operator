@@ -27,13 +27,32 @@ floors any user-supplied PodSecurityContext to RunAsNonRoot with the
 pinned UID/GID. A user template cannot drop privileges below what
 the image requires.
 
-The Firebolt Operator's own ClusterRole (rendered into
-`config/rbac/role.yaml`, mirrored in
-`helm/firebolt-operator/templates/clusterrole.yaml`) is the minimal
-set of verbs needed to manage the three CRDs and their generated
-resources. The Firebolt Operator does not request `*` on any namespaced verb
-and does not request `nodes`, `clusterrolebindings`, or any other
+The Firebolt Operator's own manager RBAC (rendered by the chart from
+the canonical `config/rbac/role.yaml`) is the minimal set of verbs
+needed to manage the three CRDs and their generated resources. The
+Firebolt Operator does not request `*` on any namespaced verb and
+does not request `nodes`, `clusterrolebindings`, or any other
 cluster-scope mutation.
+
+The chart renders the manager rules in one of two shapes, picked at
+install time by `watchNamespaces`:
+
+- Empty list (default): one cluster-scoped `ClusterRole` and one
+  `ClusterRoleBinding`. The manager cache spans every namespace.
+- Non-empty list, e.g. `{tenant-a, tenant-b}`: a `Role` plus
+  `RoleBinding` pair in each listed namespace, no `ClusterRole`. The
+  manager cache spans only those namespaces. Use this posture when
+  multi-tenant compliance constraints bound the operator's blast
+  radius.
+
+The default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches
+engine metrics through pod IPs and does not need `pods/proxy: get`,
+so the chart's manager RBAC does not include that verb. Setting
+`metricScrapeMode=ApiserverProxy` on any FireboltInstance requires
+`apiserverProxyMetrics.enabled=true` on the operator chart, which
+renders a dedicated `ClusterRole` (or per-namespace `Role` when
+`watchNamespaces` is set) granting only that one verb. Without the
+toggle, the metric scrape surfaces as a 403 from the apiserver.
 
 Resource maxima on the engine container's `resources` block (set
 under `FireboltEngine.spec.template.spec.containers[name=="engine"]`
