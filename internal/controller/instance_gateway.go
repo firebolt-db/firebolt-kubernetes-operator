@@ -468,7 +468,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
       #     worst case per engine) is bounded; operators that expect
       #     higher per-engine concurrency raise gateway.replicas rather
       #     than this value, so the memory budget per pod stays
-      #     predictable (see docs/gateway-sizing.mdx).
+      #     predictable (see docs/instance/gateway/gateway-sizing.mdx).
       #
       #   - max_pending_requests: 1024. Queue depth before Envoy starts
       #     returning a synthetic "upstream connection pool overflow"

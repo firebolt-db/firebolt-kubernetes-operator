@@ -1,0 +1,62 @@
+---
+title: Gateway overview
+description: Per-instance Envoy gateway for query routing and zero-downtime engine cutovers.
+sidebarTitle: Overview
+---
+
+## Overview
+
+The Firebolt Operator Gateway is based on [Envoy Proxy](https://www.envoyproxy.io/) and responsible for query routing.
+It uses a Lua filter to pick the target engine from the `X-Firebolt-Engine` request header and a dynamic forward
+proxy (DFP) to resolve the per-engine headless Service at request time.
+
+- [Gateway query routing](./gateway-query-routing) describes Envoy routing, retries, graceful shutdown, and why the Firebolt Operator does not gate on EndpointSlice updates.
+- [Gateway sizing](./gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.
+
+### Configuration
+
+The gateway ConfigMap (`{instance}-gateway-config`) is a pure function of the `FireboltInstance`. The Firebolt Operator does not regenerate it on engine create, delete, scale, or blue-green events, so those events never trigger a gateway rollout.
+
+### Gateway custom service account
+
+By default the Firebolt Operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on `FireboltEngine` resources when a request arrives for a stopped engine (the wake-on-zero protocol). See [Autoscaling and wake-up](../engine/autoscaling-and-wake-up#gateway-wake-up-protocol).
+
+When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA / Role / RoleBinding entirely**. You are then responsible for:
+
+1. Creating the ServiceAccount in the instance's namespace under the name you specified.
+2. Granting it the verbs the gateway needs:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-wake
+  namespace: firebolt
+rules:
+  - apiGroups: ["compute.firebolt.io"]
+    resources: ["fireboltengines"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-wake
+  namespace: firebolt
+subjects:
+  - kind: ServiceAccount
+    name: my-gateway-sa
+    namespace: firebolt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gateway-wake
+```
+
+The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC.
+
+Missing or under-permissioned user service accounts do **not** fail at admission. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts but logs `Forbidden` 403s when it tries to patch a stopped engine's wake annotation. Verify with:
+
+```bash
+kubectl auth can-i patch fireboltengines.compute.firebolt.io \
+  --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
+```

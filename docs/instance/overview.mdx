@@ -1,0 +1,34 @@
+---
+title: Instance overview
+description: Shared infrastructure the Firebolt Operator provisions per FireboltInstance.
+sidebarTitle: Overview
+---
+
+## Overview
+
+`FireboltInstance` is the parent resource for shared namespace infrastructure: PostgreSQL for metadata storage, the metadata service, and the Envoy gateway. Engines in the namespace stay blocked until the instance is ready and publishes the endpoints they need.
+
+- [Instance reconciliation](./instance-reconciliation) walks through the reconciler steps, lifecycle phases, and component pod-template merge rules.
+
+Client query traffic enters through the per-instance Envoy gateway. See the [Gateway overview](./gateway/overview), plus [Gateway query routing](./gateway/gateway-query-routing) and [Gateway sizing](./gateway/gateway-sizing) for routing and capacity detail.
+
+For the `FireboltInstance` API surface, see the [FireboltInstance CRD reference](../crd-reference/instance-crd-reference).
+
+## Inspecting status
+
+```bash
+kubectl get fire -n firebolt
+```
+
+```
+NAME         PHASE   GATEWAY   METADATA   AGE
+production   Ready   true      true       24h
+```
+
+For full detail:
+
+```bash
+kubectl get fire production -n firebolt -o yaml
+```
+
+Worked examples live in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.

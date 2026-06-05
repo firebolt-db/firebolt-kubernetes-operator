@@ -6,8 +6,8 @@ sidebarTitle: FireboltEngineClass design
 
 ## Pod template merge layer
 
-Per-engine pod-template overrides live on `FireboltEngine.spec.template`
-(FB-1426), parallel to the existing `FireboltEngineClass.spec.template`.
+Per-engine pod-template overrides live on `FireboltEngine.spec.template`,
+parallel to the existing `FireboltEngineClass.spec.template`.
 When an engine sets `spec.engineClassRef`, the reconciler resolves the
 referenced `FireboltEngineClass` and composes the rendered pod
 template from three layers, top wins on conflict for scalar and
@@ -61,3 +61,25 @@ Operator owns end-to-end. See
 and [engine-crd-reference](../crd-reference/engine-crd-reference). The
 merge layer therefore assumes both resolved templates only carry
 fields it knows how to handle.
+
+## Deletion
+
+The validating webhook **refuses** `DELETE` while any `FireboltEngine` in
+the class's namespace references the class via `spec.engineClassRef`.
+Only same-namespace engines count. The check lists engines live from the API
+server at admission time rather than reading `status.boundEngines`, so a
+class bound between reconciler runs is still protected. Clear
+`spec.engineClassRef` on every referencing engine first, then delete the
+class. `failurePolicy: Fail` on the webhook configuration prevents a webhook
+outage from opening a window in which a bound class could be removed.
+
+## Class edit rollouts
+
+Editing the class spec triggers a blue-green rollout on every referencing
+engine in the same namespace. The engine controller watches
+`FireboltEngineClass` and enqueues every consumer whose
+`spec.engineClassRef` matches. `stsMatchesSpec` compares the resolved class
+content hash against the `firebolt.io/engine-class-hash` annotation on the
+StatefulSet. Any mismatch bumps `currentGeneration`, whether the class spec
+was edited in place, the engine flipped to a different class, or the reference
+was cleared.

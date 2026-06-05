@@ -110,10 +110,10 @@ This means:
 
 The rest of the design is split by audience and task:
 
-- [Engine reconciliation](./architecture/engine-reconciliation) describes the FireboltEngine reconcile loop, phase machine, generation model, status behavior, error handling, crash recovery, and resource ownership.
-- [Instance reconciliation](./architecture/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
-- [FireboltEngineClass design](./architecture/fireboltengineclass-design) describes FireboltEngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
-- [Engine rollouts](./architecture/engine-rollouts) describes drain checks and rolling update parameters.
-- [Autoscaling and wake-up](./architecture/autoscaling-and-wake-up) describes Firebolt Operator-driven autoscaling and the gateway wake-up annotation protocol.
-- [Gateway query routing](./architecture/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.
-- [Crash-point testing](./architecture/crash-point-testing) describes the E2E crash injection mechanism used to verify recovery at phase boundaries.
+- [Engine reconciliation](./engine/engine-reconciliation) describes the FireboltEngine reconcile loop, phase machine, generation model, status behavior, error handling, crash recovery, and resource ownership.
+- [Instance reconciliation](./instance/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
+- [FireboltEngineClass design](./engineclass/fireboltengineclass-design) describes FireboltEngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
+- [Engine rollouts](./engine/engine-rollouts) describes drain checks and rolling update parameters.
+- [Autoscaling and wake-up](./engine/autoscaling-and-wake-up) describes Firebolt Operator-driven autoscaling and the gateway wake-up annotation protocol.
+- [Gateway query routing](./instance/gateway/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.
+- [Gateway sizing](./instance/gateway/gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.
