@@ -1,0 +1,8 @@
+* @firebolt-db/team_infrastructure
+
+api/                    @firebolt-db/team_infrastructure
+internal/controller/    @firebolt-db/team_infrastructure
+helm/                   @firebolt-db/team_infrastructure
+.github/                @firebolt-db/team_infrastructure
+config/rbac/            @firebolt-db/team_infrastructure
+formal/                 @firebolt-db/team_infrastructure
