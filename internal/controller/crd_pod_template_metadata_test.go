@@ -64,9 +64,10 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 	wantLabels := map[string]string{"app": "packdb"}
 	wantAnnotations := map[string]string{"karpenter.sh/do-not-disrupt": "true"}
 
-	// PodSpec.Containers is marked required in the CRD schema, so a
-	// container has to be present for the apiserver to admit the CR even
-	// though the test only cares about the metadata round-trip.
+	// A container is included to mirror real usage. It is not required by
+	// the schema — scripts/patch-crd-template-required.py drops the embedded
+	// PodSpec `required: [containers]`, and crd_template_required_test.go
+	// covers the container-less case explicitly.
 	stubContainers := []corev1.Container{{
 		Name:  "engine",
 		Image: "example/engine:latest",
