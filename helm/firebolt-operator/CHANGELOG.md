@@ -1,3 +1,15 @@
+# 1.0.34
+
+appVersion: v4.8.0
+
+## [4.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.7.0...v4.8.0) (2026-06-08)
+
+### Features
+
+* **controller:** multi-namespace cache via --namespaces flag (FB-1494) ([5512308](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5512308121b0bff3fcce27cc86cf8795748166df))
+* **rbac:** chart toggle between ClusterRole and per-namespace Roles (FB-1494) ([b5e4add](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b5e4add9acf863e8efca034a8339273d45728f28))
+
+
 # 1.0.33
 
 appVersion: v4.7.0
