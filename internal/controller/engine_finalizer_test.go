@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -100,7 +100,7 @@ func TestFormatExternalFinalizerMessage(t *testing.T) {
 type reconcileDeleteTestEnv struct {
 	r        *FireboltEngineReconciler
 	engine   *computev1alpha1.FireboltEngine
-	recorder *record.FakeRecorder
+	recorder *events.FakeRecorder
 }
 
 func newReconcileDeleteTestEnv(t *testing.T, children ...runtime.Object) *reconcileDeleteTestEnv {
@@ -146,7 +146,7 @@ func newReconcileDeleteTestEnv(t *testing.T, children ...runtime.Object) *reconc
 		builder = builder.WithRuntimeObjects(o)
 	}
 
-	rec := record.NewFakeRecorder(8)
+	rec := events.NewFakeRecorder(8)
 	r := &FireboltEngineReconciler{
 		Client:          builder.Build(),
 		Scheme:          scheme,
@@ -210,7 +210,7 @@ func labeledStatefulSet(name string, finalizers ...string) *appsv1.StatefulSet {
 // drainEvents returns every event posted to the FakeRecorder so a
 // test can match against them without racing the goroutine that emits
 // the asynchronous send.
-func drainEvents(rec *record.FakeRecorder) []string {
+func drainEvents(rec *events.FakeRecorder) []string {
 	var out []string
 	for {
 		select {
@@ -254,11 +254,11 @@ func TestReconcileDelete_ExternalFinalizer_EmitsEventAndCondition(t *testing.T) 
 	}
 
 	// One Warning Event expected, naming all the offending finalizers.
-	events := drainEvents(env.recorder)
-	if len(events) != 1 {
-		t.Fatalf("expected exactly one Event, got %d: %v", len(events), events)
+	evs := drainEvents(env.recorder)
+	if len(evs) != 1 {
+		t.Fatalf("expected exactly one Event, got %d: %v", len(evs), evs)
 	}
-	ev := events[0]
+	ev := evs[0]
 	if !strings.Contains(ev, "Warning") || !strings.Contains(ev, eventReasonExternalFinalizer) {
 		t.Errorf("Event %q does not look like the Warning/%s emission", ev, eventReasonExternalFinalizer)
 	}
