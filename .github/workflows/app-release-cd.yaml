@@ -47,6 +47,9 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           show-progress: "false"
+          # Full history so we can inspect the pushed commit range when no
+          # release is produced (see "No release produced" step below).
+          fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
@@ -60,19 +63,45 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
-      - name: Fail in case of no release
+      - name: No release produced
         if: steps.semantic_release.outputs.new_release_git_tag == ''
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
         run: |
-          echo "ERROR: no release was created" 1>&2
-          exit 8
+          # semantic-release made no release. That is expected when this push
+          # carried only non-releasable commits (docs/chore/...) -> stay green
+          # and quiet. But if this push DID contain a releasable commit
+          # (feat/fix/breaking) and still produced no release, a release is
+          # genuinely missing for code now on main (e.g. two merges landed close
+          # together) -> fail loudly so it can be recovered.
+          if git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
+            RANGE="$BEFORE..$AFTER"      # exactly the commits in this push
+          else
+            RANGE="$AFTER"               # new branch / dispatch: inspect the tip
+          fi
+
+          SUBJECTS=$(git log "$RANGE" --no-merges --format='%s')
+          BODIES=$(git log "$RANGE" --no-merges --format='%b')
+
+          if printf '%s\n' "$SUBJECTS" | grep -Eq '^(feat|fix)(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:' \
+             || printf '%s\n' "$BODIES" | grep -Eq 'BREAKING[ -]CHANGE'; then
+            echo "::error title=Releasable push produced no release::This push contained releasable commit(s) but semantic-release produced no release — a release is missing for code already on main (likely two merges landed close together). Re-run this workflow (or push a release) to recover it." 1>&2
+            printf '%s\n' "$SUBJECTS" | sed 's/^/  - /' 1>&2
+            exit 8
+          else
+            echo "No releasable commits in this push (docs/chore) — nothing to release."
+          fi
 
       - name: Publish GitHub release
+        if: steps.semantic_release.outputs.new_release_git_tag != ''
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ steps.semantic_release.outputs.new_release_git_tag }}
           body: "${{ steps.semantic_release.outputs.new_release_notes }}"
 
       - name: Install helm-docs
+        if: steps.semantic_release.outputs.new_release_git_tag != ''
         env:
           HELM_DOCS_VERSION: "1.14.2"
         run: |
@@ -81,6 +110,7 @@ jobs:
           helm-docs --version
 
       - name: Update Helm chart version and changelog
+        if: steps.semantic_release.outputs.new_release_git_tag != ''
         id: update_helm_chart
         env:
           TAG: ${{ steps.semantic_release.outputs.new_release_git_tag }}
@@ -132,6 +162,7 @@ jobs:
 
   build:
     needs: semantic_release
+    if: needs.semantic_release.outputs.new_release_git_tag != ''
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -186,6 +217,7 @@ jobs:
     needs:
       - semantic_release
       - build
+    if: needs.semantic_release.outputs.new_release_git_tag != ''
     runs-on: ubuntu-latest
     permissions:
       id-token: write
