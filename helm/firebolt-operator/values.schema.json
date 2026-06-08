@@ -74,13 +74,8 @@
     "rbac": {
       "type": "object",
       "properties": {
-        "create": { "type": "boolean" }
-      }
-    },
-    "apiserverProxyMetrics": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" }
+        "create": { "type": "boolean" },
+        "apiserverProxyGrant": { "type": "boolean" }
       }
     },
     "gatewayWakeClusterRole": {

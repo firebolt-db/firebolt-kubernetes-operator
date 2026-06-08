@@ -149,9 +149,9 @@ The chart picks the RBAC envelope at install time from `.Values.watchNamespaces`
 - Empty list (default) → one `ClusterRole` + one `ClusterRoleBinding` (cluster-wide install).
 - Non-empty list → a `Role` + `RoleBinding` pair in each listed namespace, no `ClusterRole`. Same rules block; the operator's `cache.Options.DefaultNamespaces` is scoped to the same list via `--namespaces=<comma-list>`.
 
-[`internal/controller/rbac_chart_toggle_test.go`](internal/controller/rbac_chart_toggle_test.go) pins the four-cell `watchNamespaces × apiserverProxyMetrics.enabled` matrix against `helm template`. If a chart edit silently drops the per-NS branch or renders both envelopes at once, that test fails.
+[`internal/controller/rbac_chart_toggle_test.go`](internal/controller/rbac_chart_toggle_test.go) pins the four-cell `watchNamespaces × rbac.apiserverProxyGrant` matrix against `helm template`. If a chart edit silently drops the per-NS branch or renders both envelopes at once, that test fails.
 
-`pods/proxy: get` is intentionally NOT in the canonical RBAC because the default `FireboltInstance.spec.metricScrapeMode=PodIP` doesn't use it. The chart template [`helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`](helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml) renders the grant on the opt-in `apiserverProxyMetrics.enabled=true` value and mirrors the same `watchNamespaces` shape. If you add a `// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get` marker back, the verb leaks into the always-on manager RBAC — keep it out of the canonical source.
+`pods/proxy: get` is intentionally NOT in the canonical RBAC because the default `FireboltInstance.spec.metricScrapeMode=PodIP` doesn't use it. The chart template [`helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`](helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml) renders the grant on the opt-in `rbac.apiserverProxyGrant=true` value and mirrors the same `watchNamespaces` shape. If you add a `// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get` marker back, the verb leaks into the always-on manager RBAC — keep it out of the canonical source.
 
 ### Admission webhooks and controller-side fallbacks
 

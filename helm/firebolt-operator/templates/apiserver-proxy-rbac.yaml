@@ -7,7 +7,7 @@ explicitly enables it. The envelope mirrors the manager-rbac.yaml
 choice: cluster-wide when `watchNamespaces` is empty, per-namespace
 otherwise. Same operator ServiceAccount as the manager binding.
 */ -}}
-{{- if and .Values.rbac.create .Values.apiserverProxyMetrics.enabled -}}
+{{- if and .Values.rbac.create .Values.rbac.apiserverProxyGrant -}}
 {{- if empty .Values.watchNamespaces }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
