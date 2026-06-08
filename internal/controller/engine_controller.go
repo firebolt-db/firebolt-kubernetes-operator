@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -100,10 +100,10 @@ type FireboltEngineReconciler struct {
 
 	// EventRecorder emits Kubernetes Events on the engine CR. Populated
 	// in SetupWithManager when nil; unit tests that exercise event-emitting
-	// paths should inject a record.FakeRecorder. Nil is tolerated: the
+	// paths should inject an events.FakeRecorder. Nil is tolerated: the
 	// emit-event helpers no-op so tests that do not care about events can
 	// leave the field unset.
-	EventRecorder record.EventRecorder
+	EventRecorder events.EventRecorder
 
 	// DisableGC disables the orphaned-generation garbage collector. When
 	// true, the reconciler will not sweep resources from abandoned
@@ -134,8 +134,12 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 //
-// `pods/proxy: get` is intentionally NOT in the canonical RBAC. The
+// The events.k8s.io grant backs the new events.EventRecorder
+// (mgr.GetEventRecorder), whose sink writes events.k8s.io/v1 Events; the
+// core "" events grant is retained for leader election and the legacy
+// broadcaster. `pods/proxy: get` is intentionally NOT in the canonical RBAC. The
 // default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches engine
 // metrics through pod IPs and needs no apiserver subresource. Users who
 // opt into `metricScrapeMode=ApiserverProxy` set the chart value
@@ -554,7 +558,10 @@ func (r *FireboltEngineReconciler) surfaceExternalFinalizers(
 	log.Info("External finalizers detected on owned resources", "detail", msg)
 
 	if r.EventRecorder != nil {
-		r.EventRecorder.Event(engine, corev1.EventTypeWarning, eventReasonExternalFinalizer, msg)
+		// events.EventRecorder has no plain Event(); use Eventf with a "%s"
+		// verb so any '%' in the finalizer list is not treated as a format
+		// directive. "Deleting" is the action (we are reconciling deletion).
+		r.EventRecorder.Eventf(engine, nil, corev1.EventTypeWarning, eventReasonExternalFinalizer, "Deleting", "%s", msg)
 	}
 
 	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
@@ -1159,7 +1166,7 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 		r.Clientset = clientset
 	}
 	if r.EventRecorder == nil {
-		r.EventRecorder = mgr.GetEventRecorderFor(name)
+		r.EventRecorder = mgr.GetEventRecorder(name)
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
