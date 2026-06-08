@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -201,7 +200,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Conte
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 // buildPostgresStatefulSet returns the desired StatefulSet for the
@@ -386,7 +385,7 @@ func (r *FireboltInstanceReconciler) ensurePostgresService(ctx context.Context, 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 func envFromSecret(envName, secretName, secretKey string) corev1.EnvVar {

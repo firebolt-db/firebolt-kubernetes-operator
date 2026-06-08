@@ -141,7 +141,7 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 }
 
 // The three ensure* functions below write through Server-Side Apply
-// (client.Apply) with FieldManager OperatorFieldManager and
+// (applySSA) with FieldManager OperatorFieldManager and
 // ForceOwnership — same idiom as the instance-side resources in
 // instance_gateway.go / instance_metadata.go / instance_postgres.go,
 // with the design rationale documented in the file-level note above
@@ -170,7 +170,7 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
 	log.V(1).Info("Applying ConfigMap", "name", want.Name)
-	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, want)
 }
 
 func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *corev1.Service) error {
@@ -182,7 +182,7 @@ func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *co
 	}
 	log.V(1).Info("Applying Service", "name", want.Name,
 		"selectorGeneration", want.Spec.Selector[LabelGeneration])
-	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, want)
 }
 
 func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *appsv1.StatefulSet) error {
@@ -195,7 +195,7 @@ func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context
 	log.V(1).Info("Applying StatefulSet", "name", want.Name,
 		"replicas", *want.Spec.Replicas,
 		"image", want.Spec.Template.Spec.Containers[0].Image)
-	return r.Patch(ctx, want, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, want)
 }
 
 func (r *FireboltEngineReconciler) deleteIfExists(ctx context.Context, obj client.Object) error {
