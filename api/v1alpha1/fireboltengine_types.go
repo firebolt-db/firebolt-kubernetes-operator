@@ -511,7 +511,3 @@ type FireboltEngineList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []FireboltEngine `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&FireboltEngine{}, &FireboltEngineList{})
-}
