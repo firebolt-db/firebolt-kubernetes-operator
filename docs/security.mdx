@@ -10,22 +10,104 @@ responsibility.
 
 ## What the Firebolt Operator enforces
 
-Pod-level hardening is stamped onto every workload the Firebolt Operator
-creates and is non-overridable by user input (see
-`api/v1alpha1/operatorauthority.go` for the field-level allowlist):
+The Firebolt Operator stamps a hardened security posture on the workloads
+it renders. How much you can change that posture depends on the CRD
+surface. Engine pods expose a wide pod-template merge layer through
+`FireboltEngineClass` and `FireboltEngine`. Gateway and metadata primary
+containers keep operator-owned hardening and only let you set image and
+resources on the primary container.
 
-| Pod | UID/GID | RunAsNonRoot | Capabilities | Seccomp | Read-only root FS |
-|---|---|---|---|---|---|
-| Engine | 3473 / 3473 (default, configurable per spec) | true | drop ALL | `RuntimeDefault` | yes (data volume mounted at `/firebolt-core/volume`) |
-| Metadata (Pensieve) | 1111 / 1111 (pinned to image's `dedicated-pensieve` user) | true | drop ALL | `RuntimeDefault` | yes (tmp via `emptyDir`) |
-| PostgreSQL (internal) | 70 / 70 (Alpine image's `postgres` user) | true | drop ALL | `RuntimeDefault` | yes (PGDATA via PVC) |
-| Gateway (Envoy) | 101 / 101 | true | drop ALL | `RuntimeDefault` | yes |
+Per-field allowlists for each template surface live in
+`api/v1alpha1/operatorauthority.go` (`PodTemplateRules` per component)
+and in the CRD reference pages linked in each subsection below.
 
-The validating webhooks on FireboltInstance and FireboltEngineClass reject
-user input that would weaken these defaults. The metadata pod also
-floors any user-supplied PodSecurityContext to RunAsNonRoot with the
-pinned UID/GID. A user template cannot drop privileges below what
-the image requires.
+### Engine
+
+When neither a referenced `FireboltEngineClass` nor the engine's own
+`spec.template` sets a container `securityContext`, the Firebolt Operator
+applies these defaults on the `engine` container:
+
+| Field | Default |
+|---|---|
+| UID / GID | 3473 / 3473 |
+| `runAsNonRoot` | `true` |
+| Capabilities | drop `ALL` |
+| `allowPrivilegeEscalation` | `false` |
+| Read-only root filesystem | `false` (persistent state lives on the data volume at `/firebolt-core/volume`) |
+| Seccomp | not set |
+
+You can replace that entire container `securityContext` wholesale through
+`FireboltEngineClass.spec.template` or
+`FireboltEngine.spec.template.spec.containers[name=="engine"].securityContext`.
+The engine template wins over the class. There is no merge or floor. A
+template value replaces the operator default completely, including the
+ability to weaken hardening.
+
+Pod-level `spec.template.spec.securityContext` is also user-settable. The
+Firebolt Operator only stamps `fsGroup` (3473) and
+`fsGroupChangePolicy: OnRootMismatch` when you leave those fields unset.
+Sidecar containers and init containers pass through from your template
+without operator hardening.
+
+Validating webhooks on `FireboltEngine` and `FireboltEngineClass` (and
+the engine reconciler when webhooks are off) reject operator-owned paths
+on engine templates: command, args, ports, probes, reserved env keys, and
+`firebolt.io/*` labels. They do not reject a weakened `securityContext`.
+See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference)
+and [FireboltEngine CRD reference](./crd-reference/engine-crd-reference).
+
+### Gateway (Envoy)
+
+The Envoy primary container is operator-rendered end to end. The
+validating webhook rejects user input on its `securityContext`. You may
+only set `image` and `resources` on
+`spec.gateway.template.spec.containers[name=="envoy"]`. The Firebolt
+Operator stamps:
+
+| Field | Value |
+|---|---|
+| UID | 101 |
+| `runAsNonRoot` | `true` |
+| Capabilities | drop `ALL` |
+| `allowPrivilegeEscalation` | `false` |
+| Read-only root filesystem | `true` (scratch via `emptyDir` at `/tmp`) |
+| Seccomp | not set on the container |
+
+Pod-level fields on `spec.gateway.template` (node selector, tolerations,
+`securityContext`, sidecars, init containers) pass through when allowed
+by the template rules. See the
+[FireboltInstance CRD reference](./crd-reference/instance-crd-reference).
+
+### Metadata (Pensieve)
+
+The metadata primary container follows the same pattern as the gateway.
+Operator-stamped hardening applies to `containers[name=="metadata"]`.
+You may set only `image` and `resources` there:
+
+| Field | Value |
+|---|---|
+| UID | 1111 (pinned to the image's `dedicated-pensieve` user) |
+| `runAsNonRoot` | `true` |
+| Capabilities | drop `ALL` |
+| `allowPrivilegeEscalation` | `false` |
+| Read-only root filesystem | `true` (scratch via `emptyDir` at `/tmp`) |
+| Seccomp | not set on the container |
+
+At the pod level, the Firebolt Operator floors any user-supplied
+`PodSecurityContext` to `runAsNonRoot: true` with UID/GID 1111 and sets
+`seccompProfile: RuntimeDefault` when you do not supply one. A template
+cannot run the metadata pod under a different user without failing image
+ownership checks.
+
+### PostgreSQL (internal)
+
+Internal PostgreSQL has no user template surface. The Firebolt Operator
+stamps hardening on every reconcile:
+
+| Level | Posture |
+|---|---|
+| Pod | UID/GID 70, `runAsNonRoot: true`, `seccompProfile: RuntimeDefault` |
+| Container | UID 70, `runAsNonRoot: true`, drop `ALL` capabilities, `allowPrivilegeEscalation: false`, read-only root filesystem (`PGDATA` on the PVC, runtime sockets on `emptyDir`) |
 
 The Firebolt Operator's own manager RBAC (rendered by the chart from
 the canonical `config/rbac/role.yaml`) is the minimal set of verbs
