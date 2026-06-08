@@ -1,0 +1,36 @@
+---
+title: Engine Scaling
+description: Scale up, scale down, and stop a Firebolt Engine.
+sidebarTitle: Engine Scaling
+---
+
+## Engine Scaling
+Firebolt Engine supports scaling up and down by patching the `spec.replicas` field. The Firebolt Operator
+handles the transition automatically, applying one of the rollout strategies defined in [Engine Rollouts](./engine-rollouts).
+
+## Scale or update
+
+Patch `spec.replicas` to scale the engine:
+
+```bash
+kubectl patch fireng my-engine -n firebolt \
+  --type merge -p '{"spec":{"replicas":2}}'
+```
+
+The Firebolt Operator handles the zero-downtime transition automatically.
+
+## Stop and resume
+
+Set `spec.replicas` to `0` to stop the engine without deleting the custom resource:
+
+```bash
+kubectl patch fireng my-engine -n firebolt \
+  --type merge -p '{"spec":{"replicas":0}}'
+```
+
+Resume by setting a non-zero replica count:
+
+```bash
+kubectl patch fireng my-engine -n firebolt \
+  --type merge -p '{"spec":{"replicas":2}}'
+```

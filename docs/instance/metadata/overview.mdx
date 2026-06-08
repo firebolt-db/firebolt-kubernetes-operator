@@ -1,0 +1,19 @@
+---
+title: Metadata overview
+description: Stores and services engine metadata.
+sidebarTitle: Overview
+---
+
+# Metadata service
+
+The metadata service stores and serves engine metadata. It uses PostgreSQL as the backing database. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
+
+## Rolling update parameters
+
+### Metadata deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `0` | Never run two metadata pods concurrently. The metadata service assumes single-writer against Postgres |
+| `maxUnavailable` | `1` | Old pod is terminated before the new one starts. Brief metadata-unavailable window during rollouts |
+| Replicas | `1` (enforced by webhook) | Multi-replica metadata is not currently supported |
