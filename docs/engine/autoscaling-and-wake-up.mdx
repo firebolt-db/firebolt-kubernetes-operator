@@ -6,7 +6,7 @@ sidebarTitle: Autoscaling and wake-up
 
 ## Autoscaler
 
-Autoscaling is opt-in via `spec.autoscaling.enabled=true`. When enabled, the Firebolt Operator owns `spec.replicas` (HPA-style) and toggles it between `minReplicas` (default 0, enabling scale-to-zero) and `maxReplicas` based on observed query activity and an optional UTC `schedule`.
+Autoscaling is opt-in via `spec.autoscaling.enabled=true`. When enabled, the Firebolt Operator owns `spec.replicas` and drives it between two fixed levels. It scales the engine up to `maxReplicas` when a UTC `schedule` window is open or a wake-up is requested, and scales it down to `minReplicas` (default 0, which enables scale-to-zero) after the engine sits idle for `idleTimeout`. This is an activity-gated on/off toggle, not proportional HPA-style scaling. The engine runs at either `minReplicas` or `maxReplicas`, never a value in between, and query volume never changes the count. Observed query activity only keeps the engine warm by resetting the idle clock. It never adds replicas.
 
 The autoscaler reuses the **same Prometheus signal** the drain check consumes: `firebolt_running_queries + firebolt_suspended_queries`, summed across all running pods of the active generation. Sharing the signal keeps "the engine is busy" in exactly one place. A pod that the drain check would refuse to evict is the same pod the autoscaler counts as activity.
 
