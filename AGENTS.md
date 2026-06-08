@@ -104,6 +104,7 @@ You MUST capture non-obvious problems you solve. When you encounter and fix a qu
 - Add a short entry to [KNOWN_ISSUES.md](KNOWN_ISSUES.md) at the repo root, or to the scoped `KNOWN_ISSUES.md` in the module where the issue lives.
 - State the symptom, the cause, and the resolution in two or three sentences.
 - This prevents the next agent from rediscovering the same problem.
+- **Prune entries once the trap is gone.** `KNOWN_ISSUES.md` is a log of *live* footguns, not a changelog. When you eliminate an issue at the root — remove the workaround, drop the dependency, finish migrating off the deprecated API — delete its entry, or trim it to whatever residual footgun still survives, rather than leaving a "Resolved" note. *How* a fix was made lives in the commit history and code comments; this file should only carry what can still bite the next agent.
 
 If the issue is project-wide, put it in the root `KNOWN_ISSUES.md`. If it is scoped to one module, put it in that module's `KNOWN_ISSUES.md`.
 
