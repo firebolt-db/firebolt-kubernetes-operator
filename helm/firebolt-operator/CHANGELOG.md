@@ -1,3 +1,14 @@
+# 1.0.33
+
+appVersion: v4.7.0
+
+## [4.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.6.0...v4.7.0) (2026-06-08)
+
+### Features
+
+* allow extending storage, configuration, autoscaling and drain config from FireboltEngineClass (FB-1500) ([dd0bbef](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/dd0bbef0e4e552078963234d8e366b049527102a))
+
+
 # 1.0.32
 
 appVersion: v4.6.0
