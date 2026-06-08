@@ -1,3 +1,18 @@
+# 1.0.35
+
+appVersion: v4.9.0
+
+## [4.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.8.0...v4.9.0) (2026-06-08)
+
+### Features
+
+* add a prompt for agent-driven setup (FB-1009) ([69cfbdc](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/69cfbdc3f25e2101ad7d7e3ea4e3aa1c09fb3b68))
+
+### Bug Fixes
+
+* **crd:** don't require containers in embedded pod-template specs (FB-1525) ([015012b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/015012bf8b8eb63136b8f0fe626f13173b319341)), closes [#115](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/115)
+
+
 # 1.0.34
 
 appVersion: v4.8.0
