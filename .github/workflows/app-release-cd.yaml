@@ -66,6 +66,7 @@ jobs:
       - name: No release produced
         if: steps.semantic_release.outputs.new_release_git_tag == ''
         env:
+          EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
@@ -75,14 +76,25 @@ jobs:
           # (feat/fix/breaking) and still produced no release, a release is
           # genuinely missing for code now on main (e.g. two merges landed close
           # together) -> fail loudly so it can be recovered.
-          if git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
-            RANGE="$BEFORE..$AFTER"      # exactly the commits in this push
-          else
-            RANGE="$AFTER"               # new branch / dispatch: inspect the tip
+
+          # Only a push has a set of "pushed commits" to judge. A manual
+          # workflow_dispatch with nothing to release is intentional, not a
+          # missing release -> nothing to verify.
+          if [ "$EVENT" != "push" ]; then
+            echo "Event '$EVENT' is not a push — no pushed commits to verify."
+            exit 0
           fi
 
-          SUBJECTS=$(git log "$RANGE" --no-merges --format='%s')
-          BODIES=$(git log "$RANGE" --no-merges --format='%b')
+          if git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
+            # Exactly the commits introduced by this push.
+            SUBJECTS=$(git log "$BEFORE..$AFTER" --no-merges --format='%s')
+            BODIES=$(git log "$BEFORE..$AFTER" --no-merges --format='%b')
+          else
+            # before is unresolvable (e.g. branch creation, all-zeros). Inspect
+            # ONLY the pushed tip commit — never walk full history.
+            SUBJECTS=$(git show -s --format='%s' "$AFTER")
+            BODIES=$(git show -s --format='%b' "$AFTER")
+          fi
 
           if printf '%s\n' "$SUBJECTS" | grep -Eq '^(feat|fix)(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:' \
              || printf '%s\n' "$BODIES" | grep -Eq 'BREAKING[ -]CHANGE'; then
