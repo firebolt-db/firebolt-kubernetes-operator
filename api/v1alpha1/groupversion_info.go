@@ -20,8 +20,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 var (
@@ -29,8 +30,22 @@ var (
 	GroupVersion = schema.GroupVersion{Group: "compute.firebolt.io", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionResource scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
 )
+
+// addKnownTypes registers every type in the compute.firebolt.io/v1alpha1 group
+// with the scheme. Registration is centralized here (rather than per-type init
+// functions) so the api package depends only on k8s.io/apimachinery, not on
+// controller-runtime's pkg/scheme helper.
+func addKnownTypes(s *runtime.Scheme) error {
+	s.AddKnownTypes(GroupVersion,
+		&FireboltInstance{}, &FireboltInstanceList{},
+		&FireboltEngine{}, &FireboltEngineList{},
+		&FireboltEngineClass{}, &FireboltEngineClassList{},
+	)
+	metav1.AddToGroupVersion(s, GroupVersion)
+	return nil
+}
