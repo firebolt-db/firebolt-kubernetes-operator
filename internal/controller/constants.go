@@ -29,7 +29,7 @@ import (
 
 const (
 	// OperatorFieldManager is the Server-Side Apply field-manager name
-	// stamped on every operator-emitted Patch (client.Apply). All
+	// stamped on every operator-emitted apply (applySSA). All
 	// `ensure*` functions across the engine, instance, gateway, metadata,
 	// postgres, and RBAC paths converge on this single identifier so
 	// `kubectl get <resource> -o yaml` shows one consistent owner under

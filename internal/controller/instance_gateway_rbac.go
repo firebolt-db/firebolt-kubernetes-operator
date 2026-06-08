@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -111,7 +110,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayServiceAccount(ctx context.Con
 		return err
 	}
 	log.V(1).Info("Applying gateway ServiceAccount", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 // ensureGatewayWakeRoleBinding creates or updates a RoleBinding in the
@@ -143,5 +142,5 @@ func (r *FireboltInstanceReconciler) ensureGatewayWakeRoleBinding(ctx context.Co
 		return err
 	}
 	log.V(1).Info("Applying gateway wake RoleBinding", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }

@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -602,7 +601,7 @@ admin:
 
 // Design note for the ensure* functions in this file (and their
 // siblings in instance_metadata.go and instance_postgres.go): each one
-// writes through Server-Side Apply (client.Apply) with FieldManager
+// writes through Server-Side Apply (applySSA) with FieldManager
 // OperatorFieldManager and ForceOwnership. The operator declares
 // exactly the fields it owns (everything in the `desired` literal)
 // and the apiserver tracks that ownership under
@@ -649,7 +648,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	}
 
 	log.V(1).Info("Applying gateway ConfigMap", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
@@ -698,7 +697,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.V(1).Info("Applying gateway Deployment", "name", name, "replicas", replicas, "image", podTemplate.Spec.Containers[0].Image)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -727,7 +726,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayService(ctx context.Context, i
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.V(1).Info("Applying gateway Service", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -754,7 +753,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayPDB(ctx context.Context, insta
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.V(1).Info("Applying gateway PDB", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 func boolPtr(v bool) *bool { return &v }

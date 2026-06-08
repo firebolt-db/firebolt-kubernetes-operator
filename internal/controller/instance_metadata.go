@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -155,7 +154,7 @@ func metadataConfigMapName(instanceName string) string {
 }
 
 // Each metadata ensure* function below writes its resource via
-// Server-Side Apply (client.Apply) with FieldManager
+// Server-Side Apply (applySSA) with FieldManager
 // OperatorFieldManager and ForceOwnership. SSA lets the operator
 // declare exactly the fields it owns (everything in the `desired`
 // literal) while preserving foreign-managed fields a user may have
@@ -194,7 +193,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 	}
 
 	log.V(1).Info("Applying metadata ConfigMap", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 // ensureMetadataDeployment creates or updates the metadata Deployment for a
@@ -222,7 +221,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		"name", desired.Name,
 		"replicas", *desired.Spec.Replicas,
 		"image", desired.Spec.Template.Spec.Containers[0].Image)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
@@ -494,7 +493,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, 
 
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.V(1).Info("Applying metadata Service", "name", name)
-	return r.Patch(ctx, desired, client.Apply, client.FieldOwner(OperatorFieldManager), client.ForceOwnership)
+	return applySSA(ctx, r.Client, desired)
 }
 
 // contentHash returns a truncated SHA-256 hash of the given string, used
