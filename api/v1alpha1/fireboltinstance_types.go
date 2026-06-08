@@ -269,7 +269,7 @@ type AuthSpec struct {
 
 // MetricScrapeMode selects how the operator reaches engine pods to scrape
 // the Prometheus /metrics endpoint that backs the drain probe and the
-// autoscaler activity poll.
+// autoStop activity poll.
 // +kubebuilder:validation:Enum=PodIP;ApiserverProxy
 type MetricScrapeMode string
 
@@ -321,7 +321,7 @@ type FireboltInstanceSpec struct {
 	Auth *AuthSpec `json:"auth,omitempty"`
 
 	// MetricScrapeMode selects the transport the operator uses to scrape
-	// engine pod /metrics for the drain probe and autoscaler activity
+	// engine pod /metrics for the drain probe and autoStop activity
 	// poll. Read fresh on every scrape so it can be flipped without a
 	// controller restart. Defaults to PodIP; flip to ApiserverProxy
 	// only when in-cluster pod IPs aren't reachable from the controller

@@ -77,16 +77,16 @@ const (
 	AnnotationConfigHash = "firebolt.io/config-hash"
 
 	// AnnotationWakeRequested is the contract between the gateway and the
-	// engine autoscaler: the gateway patches this annotation with an
+	// engine autoStop: the gateway patches this annotation with an
 	// RFC 3339 timestamp when it observes a request for an engine that is
-	// currently scaled to zero. The engine autoscaler treats a fresh value
-	// (within DefaultAutoscalerWakeTTL of now) as a request to immediately
-	// scale up to spec.autoscaling.maxReplicas, bypassing the idle-timeout
+	// currently scaled to zero. The engine autoStop treats a fresh value
+	// (within DefaultAutoStopWakeTTL of now) as a request to immediately
+	// scale up to spec.autoStop.activeReplicas, bypassing the idle-timeout
 	// check. Stale values are ignored, so the gateway must keep stamping
 	// the annotation while it has buffered queries waiting for the engine.
 	//
-	// The annotation is honored only when spec.autoscaling.enabled=true:
-	// without an autoscaling policy the operator has no MaxReplicas to
+	// The annotation is honored only when spec.autoStop.enabled=true:
+	// without an autoStop policy the operator has no ActiveReplicas to
 	// scale to, and respecting the wake from a non-policy actor would
 	// silently override the user's spec.replicas==0 intent.
 	AnnotationWakeRequested = "firebolt.io/wake-requested"

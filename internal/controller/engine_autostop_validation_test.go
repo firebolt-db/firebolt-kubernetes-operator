@@ -25,10 +25,10 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-var _ = Describe("FireboltEngine autoscaling admission validation", func() {
+var _ = Describe("FireboltEngine autoStop admission validation", func() {
 	const ns = "default"
 
-	mkEngine := func(name string, as *computev1alpha1.AutoscalingSpec) *computev1alpha1.FireboltEngine {
+	mkEngine := func(name string, as *computev1alpha1.AutoStopSpec) *computev1alpha1.FireboltEngine {
 		return &computev1alpha1.FireboltEngine{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 			Spec: computev1alpha1.FireboltEngineSpec{
@@ -51,7 +51,7 @@ var _ = Describe("FireboltEngine autoscaling admission validation", func() {
 						}},
 					},
 				},
-				Autoscaling: as,
+				AutoStop: as,
 			},
 		}
 	}
@@ -67,36 +67,36 @@ var _ = Describe("FireboltEngine autoscaling admission validation", func() {
 		return err
 	}
 
-	It("rejects minReplicas > maxReplicas", func() {
-		err := tryCreate(mkEngine("autoscale-bad", &computev1alpha1.AutoscalingSpec{
-			Enabled:     true,
-			MaxReplicas: 2,
-			MinReplicas: utilptr.To(int32(5)),
+	It("rejects idleReplicas > activeReplicas", func() {
+		err := tryCreate(mkEngine("autostop-bad", &computev1alpha1.AutoStopSpec{
+			Enabled:        true,
+			ActiveReplicas: 2,
+			IdleReplicas:   utilptr.To(int32(5)),
 		}))
 		Expect(err).To(HaveOccurred())
-		Expect(strings.ToLower(err.Error())).To(ContainSubstring("maxreplicas must be >= minreplicas"))
+		Expect(strings.ToLower(err.Error())).To(ContainSubstring("activereplicas must be >= idlereplicas"))
 	})
 
-	It("accepts minReplicas == maxReplicas", func() {
-		Expect(tryCreate(mkEngine("autoscale-eq", &computev1alpha1.AutoscalingSpec{
-			Enabled:     true,
-			MaxReplicas: 3,
-			MinReplicas: utilptr.To(int32(3)),
+	It("accepts idleReplicas == activeReplicas", func() {
+		Expect(tryCreate(mkEngine("autostop-eq", &computev1alpha1.AutoStopSpec{
+			Enabled:        true,
+			ActiveReplicas: 3,
+			IdleReplicas:   utilptr.To(int32(3)),
 		}))).To(Succeed())
 	})
 
-	It("accepts minReplicas < maxReplicas", func() {
-		Expect(tryCreate(mkEngine("autoscale-ok", &computev1alpha1.AutoscalingSpec{
-			Enabled:     true,
-			MaxReplicas: 5,
-			MinReplicas: utilptr.To(int32(2)),
+	It("accepts idleReplicas < activeReplicas", func() {
+		Expect(tryCreate(mkEngine("autostop-ok", &computev1alpha1.AutoStopSpec{
+			Enabled:        true,
+			ActiveReplicas: 5,
+			IdleReplicas:   utilptr.To(int32(2)),
 		}))).To(Succeed())
 	})
 
-	It("accepts minReplicas omitted (defaults to 0)", func() {
-		Expect(tryCreate(mkEngine("autoscale-default", &computev1alpha1.AutoscalingSpec{
-			Enabled:     true,
-			MaxReplicas: 3,
+	It("accepts idleReplicas omitted (defaults to 0)", func() {
+		Expect(tryCreate(mkEngine("autostop-default", &computev1alpha1.AutoStopSpec{
+			Enabled:        true,
+			ActiveReplicas: 3,
 		}))).To(Succeed())
 	})
 })

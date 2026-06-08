@@ -118,62 +118,64 @@ type EngineHostPathSpec struct {
 	Type *corev1.HostPathType `json:"type,omitempty"`
 }
 
-// AutoscalingSpec configures replica autoscaling for a FireboltEngine.
+// AutoStopSpec configures automatic stop and wake-up for a FireboltEngine.
 //
-// When Enabled is true the autoscaler owns spec.replicas: the controller will
-// mutate spec.replicas between zero (or MinReplicas) and MaxReplicas based on
-// the engine's observed query activity and the optional always-on Schedule.
-// User edits to spec.replicas while autoscaling is enabled are converged on
-// the next reconcile, so the user-facing "active" replica count is
-// MaxReplicas.
+// When Enabled is true the operator owns spec.replicas and drives it between
+// two fixed levels: ActiveReplicas while the engine is active and IdleReplicas
+// (0 by default, which fully stops the engine) once it has been idle for
+// IdleTimeout. This is an activity-gated toggle, not proportional autoscaling:
+// the engine runs at exactly IdleReplicas or ActiveReplicas, never a value in
+// between, and query volume never changes the count. User edits to
+// spec.replicas while auto-stop is enabled are converged on the next reconcile.
 //
-// Activity is observed via the same Prometheus gauges
+// The engine scales up to ActiveReplicas when a Schedule window is open or a
+// wake-up is requested, and scales down to IdleReplicas after IdleTimeout with
+// no query activity. Idleness is observed via the same Prometheus gauges
 // (firebolt_running_queries + firebolt_suspended_queries) that drive the
-// blue-green drain check, so a wake-up triggered by query traffic transitions
-// out of MinReplicas without an additional probe protocol.
-// +kubebuilder:validation:XValidation:rule="self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas : 0)",message="maxReplicas must be >= minReplicas"
-type AutoscalingSpec struct {
-	// Enabled turns the autoscaler on for this engine. Defaults to false.
+// blue-green drain check, so no additional probe protocol is needed.
+// +kubebuilder:validation:XValidation:rule="self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas : 0)",message="activeReplicas must be >= idleReplicas"
+type AutoStopSpec struct {
+	// Enabled turns auto-stop on for this engine. Defaults to false.
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 
-	// MaxReplicas is the replica count the autoscaler scales up to when the
-	// engine is active (during a Schedule window or following a wake-up).
-	// Required when Enabled is true.
+	// ActiveReplicas is the replica count the engine runs at while active
+	// (during a Schedule window or following a wake-up). Required when Enabled
+	// is true.
 	// +kubebuilder:validation:Minimum=1
-	MaxReplicas int32 `json:"maxReplicas"`
+	ActiveReplicas int32 `json:"activeReplicas"`
 
-	// MinReplicas is the floor the autoscaler scales down to once IdleTimeout
-	// elapses with no observed query activity. 0 enables scale-to-zero.
+	// IdleReplicas is the replica count the engine scales down to once
+	// IdleTimeout elapses with no query activity. 0 fully stops the engine.
 	// Defaults to 0.
 	// +kubebuilder:default=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional
-	MinReplicas *int32 `json:"minReplicas,omitempty"`
+	IdleReplicas *int32 `json:"idleReplicas,omitempty"`
 
 	// IdleTimeout is how long the engine must observe zero in-flight and
-	// suspended queries before the autoscaler scales down to MinReplicas.
-	// Defaults to 30 minutes.
+	// suspended queries before it scales down to IdleReplicas. Defaults to
+	// 30 minutes.
 	// +kubebuilder:default="30m"
 	// +optional
 	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
 
-	// PollInterval is how often the autoscaler scrapes engine metrics to
+	// PollInterval is how often the operator scrapes engine metrics to
 	// re-evaluate idleness. Defaults to 1 minute.
 	// +kubebuilder:default="1m"
 	// +optional
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
 
-	// Schedule is an optional list of UTC time windows during which the
-	// autoscaler holds the engine at MaxReplicas regardless of observed
-	// activity. Useful for "always-on during business hours" policies.
+	// Schedule is an optional list of UTC time windows during which the engine
+	// is held at ActiveReplicas regardless of observed activity. Useful for
+	// "always-on during business hours" policies.
 	// +optional
 	Schedule []ScheduleWindow `json:"schedule,omitempty"`
 }
 
-// ScheduleWindow is a recurring UTC time window during which the autoscaler
-// keeps the engine pinned at MaxReplicas. End may be less than Start to
-// express a window that crosses midnight (e.g. 22:00-02:00).
+// ScheduleWindow is a recurring UTC time window during which the engine is
+// pinned at ActiveReplicas. End may be less than Start to express a window
+// that crosses midnight (e.g. 22:00-02:00).
 type ScheduleWindow struct {
 	// Start is the window opening time in UTC, formatted "HH:MM".
 	// +kubebuilder:validation:Pattern=`^([01]\d|2[0-3]):[0-5]\d$`
@@ -429,12 +431,14 @@ type FireboltEngineSpec struct {
 	// +optional
 	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
 
-	// Autoscaling configures automatic replica management for this engine.
-	// When omitted or with Enabled=false, replicas is governed entirely by
-	// the user. When enabled, the autoscaler owns spec.replicas (HPA-style)
-	// and mutates it based on query activity and Schedule windows.
+	// AutoStop configures automatic stop and wake-up for this engine. When
+	// omitted or with Enabled=false, spec.replicas is governed entirely by the
+	// user. When enabled, the operator owns spec.replicas and drives it between
+	// IdleReplicas and ActiveReplicas based on idleness, wake-up requests, and
+	// Schedule windows. It is an activity-gated toggle, not proportional
+	// autoscaling.
 	// +optional
-	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
+	AutoStop *AutoStopSpec `json:"autoStop,omitempty"`
 }
 
 // FireboltEngineStatus defines the observed state of a Firebolt engine.
@@ -461,24 +465,24 @@ type FireboltEngineStatus struct {
 	// +optional
 	LastReconciled *metav1.Time `json:"lastReconciled,omitempty"`
 
-	// LastActivityTime is the timestamp of the most recent autoscaler
-	// observation that recorded in-flight or suspended queries. The
-	// autoscaler scales down once now() - LastActivityTime exceeds
-	// spec.autoscaling.idleTimeout. Cleared when autoscaling is disabled.
+	// LastActivityTime is the timestamp of the most recent auto-stop
+	// observation that recorded in-flight or suspended queries. The engine
+	// scales down once now() - LastActivityTime exceeds
+	// spec.autoStop.idleTimeout. Cleared when auto-stop is disabled.
 	// +optional
 	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
 
-	// AutoscaledAt is the timestamp of the most recent autoscaler-driven
-	// mutation of spec.replicas. Distinguishes autoscaler scale events from
+	// LastScaledAt is the timestamp of the most recent auto-stop-driven
+	// mutation of spec.replicas. Distinguishes auto-stop scale events from
 	// user edits in audit trails.
 	// +optional
-	AutoscaledAt *metav1.Time `json:"autoscaledAt,omitempty"`
+	LastScaledAt *metav1.Time `json:"lastScaledAt,omitempty"`
 
-	// AutoscalerReason is a short token describing the most recent autoscaler
+	// AutoStopReason is a short token describing the most recent auto-stop
 	// decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
 	// "Disabled", "Stopped", "Initializing", "WakeRequested".
 	// +optional
-	AutoscalerReason string `json:"autoscalerReason,omitempty"`
+	AutoStopReason string `json:"autoStopReason,omitempty"`
 
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional

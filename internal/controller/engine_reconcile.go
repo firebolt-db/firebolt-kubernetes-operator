@@ -75,7 +75,7 @@ type FireboltEngineClassInfo struct {
 	Template *corev1.PodTemplateSpec
 
 	// Storage, CustomEngineConfig, Rollout, DrainCheckEnabled,
-	// DrainCheckInterval, and Autoscaling carry the class's defaults for the
+	// DrainCheckInterval, and AutoStop carry the class's defaults for the
 	// matching non-pod-template engine settings. They are consumed by the
 	// effective* helpers, each of which resolves engine-if-set →
 	// class-if-set → operator default. Copied verbatim from the class spec.
@@ -84,7 +84,7 @@ type FireboltEngineClassInfo struct {
 	Rollout            computev1alpha1.RolloutStrategy
 	DrainCheckEnabled  *bool
 	DrainCheckInterval *metav1.Duration
-	Autoscaling        *computev1alpha1.AutoscalingSpec
+	AutoStop           *computev1alpha1.AutoStopSpec
 
 	// Hash is a stable content hash of Template. Used as the value of
 	// AnnotationEngineClassHash on the rendered StatefulSet so drift is
@@ -92,7 +92,7 @@ type FireboltEngineClassInfo struct {
 	// and CustomEngineConfig drift is detected through their own
 	// effective-aware comparators (storageMatchesSpec, customEngineConfigHash)
 	// rather than this hash; Rollout / DrainCheckEnabled / DrainCheckInterval /
-	// Autoscaling do not reshape the StatefulSet and are read live, so they
+	// AutoStop do not reshape the StatefulSet and are read live, so they
 	// are not hashed.
 	Hash string
 }
@@ -118,7 +118,7 @@ func newFireboltEngineClassInfo(ec *computev1alpha1.FireboltEngineClass) *Firebo
 		Rollout:            ec.Spec.Rollout,
 		DrainCheckEnabled:  ec.Spec.DrainCheckEnabled,
 		DrainCheckInterval: ec.Spec.DrainCheckInterval,
-		Autoscaling:        ec.Spec.Autoscaling.DeepCopy(),
+		AutoStop:           ec.Spec.AutoStop.DeepCopy(),
 		Hash:               hash,
 	}
 }
@@ -1177,16 +1177,16 @@ func effectiveDrainCheckEnabled(spec *computev1alpha1.FireboltEngineSpec, classI
 	return true
 }
 
-// effectiveAutoscaling resolves the autoscaling policy whole-struct:
-// engine-if-set → class-if-set → nil (autoscaling disabled). An engine
-// that sets spec.autoscaling owns the entire policy; the class value is
+// effectiveAutoStop resolves the autoStop policy whole-struct:
+// engine-if-set → class-if-set → nil (autoStop disabled). An engine
+// that sets spec.autoStop owns the entire policy; the class value is
 // not field-merged.
-func effectiveAutoscaling(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *computev1alpha1.AutoscalingSpec {
-	if spec.Autoscaling != nil {
-		return spec.Autoscaling
+func effectiveAutoStop(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *computev1alpha1.AutoStopSpec {
+	if spec.AutoStop != nil {
+		return spec.AutoStop
 	}
-	if classInfo != nil && classInfo.Autoscaling != nil {
-		return classInfo.Autoscaling
+	if classInfo != nil && classInfo.AutoStop != nil {
+		return classInfo.AutoStop
 	}
 	return nil
 }

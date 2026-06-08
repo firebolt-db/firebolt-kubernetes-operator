@@ -6,7 +6,7 @@
 # binding (kube2iam pod annotation / IRSA service account / Pod Identity)
 # identical for every engine of one instance — plus defaults for a subset
 # of non-template engine settings: storage, customEngineConfig, rollout,
-# drainCheckEnabled, drainCheckInterval, and autoscaling.
+# drainCheckEnabled, drainCheckInterval, and autoStop.
 #
 # FireboltEngineClass is namespaced (not cluster-scoped). The template
 # carries namespace-resolved identifiers — ServiceAccount names, Secret /
@@ -21,7 +21,7 @@
 # the operator default sits beneath both. For the pod template the merge is
 # per-field:
 #   operator defaults < FireboltEngineClass.spec.template < FireboltEngine.spec.template
-# storage and autoscaling are whole-struct (an engine that sets the field
+# storage and autoStop are whole-struct (an engine that sets the field
 # owns it); customEngineConfig is deep-merged with engine keys winning.
 #
 # The same allowlist applies to both FireboltEngineClass.spec.template
@@ -117,16 +117,16 @@ spec:
   # Drain-check defaults, used during graceful rollouts.
   drainCheckEnabled: true
   drainCheckInterval: 5s
-  # Default autoscaling policy. Whole-struct: an engine that sets
-  # spec.autoscaling owns the entire policy (no field-merge with this).
-  autoscaling:
+  # Default autoStop policy. Whole-struct: an engine that sets
+  # spec.autoStop owns the entire policy (no field-merge with this).
+  autoStop:
     enabled: true
-    maxReplicas: 5
-    minReplicas: 0
+    activeReplicas: 5
+    idleReplicas: 0
     idleTimeout: 30m
 ---
 # A FireboltEngine that inherits IAM, scheduling, image, storage, engine
-# config, rollout, and autoscaling from the class via spec.engineClassRef.
+# config, rollout, and autoStop from the class via spec.engineClassRef.
 # Per-engine resources live on spec.template and ride above the class
 # template in the merge order, so the values below override anything the
 # class defines for the engine container's resources block.

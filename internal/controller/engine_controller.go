@@ -217,8 +217,8 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	)
 
 	// Resolve the referenced FireboltEngineClass before reading engine state:
-	// getEngineState's drain decision and the autoscaler both consume
-	// class-inherited settings (rollout, drainCheckEnabled, autoscaling), and
+	// getEngineState's drain decision and the autoStop both consume
+	// class-inherited settings (rollout, drainCheckEnabled, autoStop), and
 	// computeEngineReconcile merges the class template / storage / config.
 	// Resolution is bubbled up to controller-runtime on every failure.
 	// NotFound (errFireboltEngineClassNotFound) is normally caught at
@@ -398,14 +398,14 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	requeueAfter := result.RequeueAfter
 
-	// Autoscaler runs only after a clean main reconcile and only in terminal
+	// AutoStop runs only after a clean main reconcile and only in terminal
 	// phases. It may patch spec.replicas (level-driven: the patch flows
 	// through the FireboltEngine watch and the next reconcile picks it up
 	// via the existing blue-green path). Errors here do not poison the main
 	// reconcile result, since the cluster state we just wrote is consistent.
-	asResult, asErr := r.runAutoscaler(ctx, engine, classInfo)
+	asResult, asErr := r.runAutoStop(ctx, engine, classInfo)
 	if asErr != nil {
-		log.Error(asErr, "Autoscaler step failed; will retry on next reconcile")
+		log.Error(asErr, "AutoStop step failed; will retry on next reconcile")
 	}
 	if asResult.RequeueAfter > 0 && (requeueAfter == 0 || asResult.RequeueAfter < requeueAfter) {
 		requeueAfter = asResult.RequeueAfter

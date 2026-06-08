@@ -1,6 +1,11 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "redirects": [],
+  "redirects": [
+    {
+      "source": "/engine/autoscaling-and-wake-up",
+      "destination": "/engine/auto-stop-and-wake-up"
+    }
+  ],
   "navigation": {
     "groups": [
       {
@@ -36,7 +41,7 @@
               "engine/overview",
               "engine/engine-reconciliation",
               "engine/engine-rollouts",
-              "engine/autoscaling-and-wake-up",
+              "engine/auto-stop-and-wake-up",
               "engine/engine-scaling",
               {
                 "group": "Object storage",

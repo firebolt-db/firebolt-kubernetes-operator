@@ -92,67 +92,67 @@ spec:
 
               Beyond Template, the class carries defaults for a subset of
               non-pod-template FireboltEngine settings (Storage, CustomEngineConfig,
-              Rollout, DrainCheckEnabled, DrainCheckInterval, Autoscaling). Each
+              Rollout, DrainCheckEnabled, DrainCheckInterval, AutoStop). Each
               resolves engine-if-set → class-if-set → operator default: a referencing
               engine that sets the corresponding spec field owns it, the class value
               applies when the engine leaves it unset, and the operator default sits
               beneath both. This lets a platform team standardize storage, engine
-              config, and rollout/autoscaling policy across a fleet without repeating
+              config, and rollout/autoStop policy across a fleet without repeating
               it on every FireboltEngine.
             properties:
-              autoscaling:
+              autoStop:
                 description: |-
-                  Autoscaling is the default autoscaling policy for referencing engines
-                  that leave spec.autoscaling unset. Resolution is whole-struct: an
-                  engine that sets spec.autoscaling owns the entire policy and this
+                  AutoStop is the default autoStop policy for referencing engines
+                  that leave spec.autoStop unset. Resolution is whole-struct: an
+                  engine that sets spec.autoStop owns the entire policy and this
                   value is not field-merged into it; when the engine omits it, the
-                  class policy applies; when neither sets it, autoscaling is disabled.
+                  class policy applies; when neither sets it, autoStop is disabled.
                 properties:
-                  enabled:
-                    default: false
-                    description: Enabled turns the autoscaler on for this engine.
-                      Defaults to false.
-                    type: boolean
-                  idleTimeout:
-                    default: 30m
+                  activeReplicas:
                     description: |-
-                      IdleTimeout is how long the engine must observe zero in-flight and
-                      suspended queries before the autoscaler scales down to MinReplicas.
-                      Defaults to 30 minutes.
-                    type: string
-                  maxReplicas:
-                    description: |-
-                      MaxReplicas is the replica count the autoscaler scales up to when the
-                      engine is active (during a Schedule window or following a wake-up).
-                      Required when Enabled is true.
+                      ActiveReplicas is the replica count the engine runs at while active
+                      (during a Schedule window or following a wake-up). Required when Enabled
+                      is true.
                     format: int32
                     minimum: 1
                     type: integer
-                  minReplicas:
+                  enabled:
+                    default: false
+                    description: Enabled turns auto-stop on for this engine. Defaults
+                      to false.
+                    type: boolean
+                  idleReplicas:
                     default: 0
                     description: |-
-                      MinReplicas is the floor the autoscaler scales down to once IdleTimeout
-                      elapses with no observed query activity. 0 enables scale-to-zero.
+                      IdleReplicas is the replica count the engine scales down to once
+                      IdleTimeout elapses with no query activity. 0 fully stops the engine.
                       Defaults to 0.
                     format: int32
                     minimum: 0
                     type: integer
+                  idleTimeout:
+                    default: 30m
+                    description: |-
+                      IdleTimeout is how long the engine must observe zero in-flight and
+                      suspended queries before it scales down to IdleReplicas. Defaults to
+                      30 minutes.
+                    type: string
                   pollInterval:
                     default: 1m
                     description: |-
-                      PollInterval is how often the autoscaler scrapes engine metrics to
+                      PollInterval is how often the operator scrapes engine metrics to
                       re-evaluate idleness. Defaults to 1 minute.
                     type: string
                   schedule:
                     description: |-
-                      Schedule is an optional list of UTC time windows during which the
-                      autoscaler holds the engine at MaxReplicas regardless of observed
-                      activity. Useful for "always-on during business hours" policies.
+                      Schedule is an optional list of UTC time windows during which the engine
+                      is held at ActiveReplicas regardless of observed activity. Useful for
+                      "always-on during business hours" policies.
                     items:
                       description: |-
-                        ScheduleWindow is a recurring UTC time window during which the autoscaler
-                        keeps the engine pinned at MaxReplicas. End may be less than Start to
-                        express a window that crosses midnight (e.g. 22:00-02:00).
+                        ScheduleWindow is a recurring UTC time window during which the engine is
+                        pinned at ActiveReplicas. End may be less than Start to express a window
+                        that crosses midnight (e.g. 22:00-02:00).
                       properties:
                         days:
                           description: |-
@@ -189,12 +189,12 @@ spec:
                       type: object
                     type: array
                 required:
+                - activeReplicas
                 - enabled
-                - maxReplicas
                 type: object
                 x-kubernetes-validations:
-                - message: maxReplicas must be >= minReplicas
-                  rule: 'self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas
+                - message: activeReplicas must be >= idleReplicas
+                  rule: 'self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas
                     : 0)'
               customEngineConfig:
                 description: |-

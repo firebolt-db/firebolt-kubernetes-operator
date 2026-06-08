@@ -669,23 +669,23 @@ For the complete list of configurable fields in the engine spec, see the [README
 | `phase` | string | Current phase (stable/creating/switching/draining/cleaning/stopped) |
 | `observedGeneration` | int | Kubernetes metadata generation last reconciled |
 | `conditions` | list | Status conditions (e.g. `InstanceReady`) |
-| `lastActivityTime` | timestamp/null | Most recent autoscaler observation that recorded activity |
-| `autoscaledAt` | timestamp/null | Most recent autoscaler-driven `spec.replicas` mutation |
-| `autoscalerReason` | string | One of `Disabled`/`ScheduleActive`/`Stopped`/`Initializing`/`ActivityObserved`/`ScrapeFailed`/`Idle`/`WakeRequested` |
+| `lastActivityTime` | timestamp/null | Most recent auto-stop observation that recorded activity |
+| `lastScaledAt` | timestamp/null | Most recent auto-stop-driven `spec.replicas` mutation |
+| `autoStopReason` | string | One of `Disabled`/`ScheduleActive`/`Stopped`/`Initializing`/`ActivityObserved`/`ScrapeFailed`/`Idle`/`WakeRequested` |
 
-### Autoscaling
+### Auto-stop
 
-When `spec.autoscaling.enabled=true`, the operator owns `spec.replicas` (HPA-style) and toggles it between `minReplicas` (default `0`, scale-to-zero) and `maxReplicas` based on:
+When `spec.autoStop.enabled=true`, the operator owns `spec.replicas` and drives it between two fixed levels: `activeReplicas` while active and `idleReplicas` (default `0`, which fully stops the engine) once idle. This is an activity-gated toggle, not proportional autoscaling. It scales up to `activeReplicas` on a schedule window or wake-up, and down to `idleReplicas` after `idleTimeout` of no activity, decided from:
 
 - the same `firebolt_running_queries + firebolt_suspended_queries` gauges that drive the drain check, summed across the active generation;
 - `idleTimeout` (default 30m) measured from `status.lastActivityTime`;
-- optional UTC `schedule[]` windows that pin replicas at `maxReplicas` regardless of activity.
+- optional UTC `schedule[]` windows that pin replicas at `activeReplicas` regardless of activity.
 
-Scale events are level-driven: the autoscaler patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. The autoscaler runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [architecture](architecture#autoscaler) for the full decision precedence and configuration reference.
+Scale events are level-driven: auto-stop patches `spec.replicas`; the existing `FireboltEngine` watch fires; the next reconcile converges via the normal blue-green path. Auto-stop runs only in `stable`/`stopped` phases so it cannot fight a rollout. See [architecture](architecture#auto-stop) for the full decision precedence and configuration reference.
 
 ### Gateway wake-up
 
-When an engine is at zero replicas, the gateway can wake it by stamping the `firebolt.io/wake-requested` annotation (RFC 3339 timestamp) on the FireboltEngine CR. The engine autoscaler treats a fresh value (within 5 minutes of now) as a request to scale up to `maxReplicas`, bypassing the idle-timeout check. The operator provisions per-instance RBAC for this:
+When an engine is at zero replicas, the gateway can wake it by stamping the `firebolt.io/wake-requested` annotation (RFC 3339 timestamp) on the FireboltEngine CR. Auto-stop treats a fresh value (within 5 minutes of now) as a request to scale up to `activeReplicas`, bypassing the idle-timeout check. The operator provisions per-instance RBAC for this:
 
 - `ServiceAccount` `<instance>-gateway`
 - `Role` `<instance>-gateway-wake` granting `get/list/patch` on `fireboltengines` in the namespace

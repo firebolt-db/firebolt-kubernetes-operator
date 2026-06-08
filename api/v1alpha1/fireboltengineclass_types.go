@@ -46,12 +46,12 @@ import (
 //
 // Beyond Template, the class carries defaults for a subset of
 // non-pod-template FireboltEngine settings (Storage, CustomEngineConfig,
-// Rollout, DrainCheckEnabled, DrainCheckInterval, Autoscaling). Each
+// Rollout, DrainCheckEnabled, DrainCheckInterval, AutoStop). Each
 // resolves engine-if-set → class-if-set → operator default: a referencing
 // engine that sets the corresponding spec field owns it, the class value
 // applies when the engine leaves it unset, and the operator default sits
 // beneath both. This lets a platform team standardize storage, engine
-// config, and rollout/autoscaling policy across a fleet without repeating
+// config, and rollout/autoStop policy across a fleet without repeating
 // it on every FireboltEngine.
 type FireboltEngineClassSpec struct {
 	// Template is the pod template merged into engines that reference this
@@ -117,13 +117,13 @@ type FireboltEngineClassSpec struct {
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
 
-	// Autoscaling is the default autoscaling policy for referencing engines
-	// that leave spec.autoscaling unset. Resolution is whole-struct: an
-	// engine that sets spec.autoscaling owns the entire policy and this
+	// AutoStop is the default autoStop policy for referencing engines
+	// that leave spec.autoStop unset. Resolution is whole-struct: an
+	// engine that sets spec.autoStop owns the entire policy and this
 	// value is not field-merged into it; when the engine omits it, the
-	// class policy applies; when neither sets it, autoscaling is disabled.
+	// class policy applies; when neither sets it, autoStop is disabled.
 	// +optional
-	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
+	AutoStop *AutoStopSpec `json:"autoStop,omitempty"`
 }
 
 // FireboltEngineClassStatus is the observed state of a FireboltEngineClass.

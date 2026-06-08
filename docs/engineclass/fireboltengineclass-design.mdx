@@ -77,7 +77,7 @@ resolution so the renderer and the drift comparator agree.
 | `rollout` | engine > class > `graceful`. |
 | `drainCheckEnabled` | engine > class > `true`. |
 | `drainCheckInterval` | engine > class > operator default. |
-| `autoscaling` | Whole-struct. An engine that sets `spec.autoscaling` owns the entire policy. The class policy applies only when the engine omits it. |
+| `autoStop` | Whole-struct. An engine that sets `spec.autoStop` owns the entire policy. The class policy applies only when the engine omits it. |
 
 `rollout`, `drainCheckEnabled`, and `drainCheckInterval` carry no CRD default on
 `FireboltEngine`. The Firebolt Operator applies the default in the resolver
@@ -107,5 +107,5 @@ either the engine or the class) through their own resolved-value comparators.
 Any mismatch bumps `currentGeneration`, whether the class template was edited in
 place, the engine flipped to a different class, or the reference was cleared.
 Class changes to `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and
-`autoscaling` do not reshape the pod, so they take effect on the next reconcile
+`autoStop` do not reshape the pod, so they take effect on the next reconcile
 without forcing a new generation.
