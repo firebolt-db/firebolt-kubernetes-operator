@@ -21,11 +21,9 @@ import (
 	"errors"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -53,15 +51,14 @@ type FireboltEngineClassCustomValidator struct {
 	Reader client.Reader
 }
 
-var _ webhook.CustomValidator = &FireboltEngineClassCustomValidator{}
+var _ admission.Validator[*FireboltEngineClass] = &FireboltEngineClassCustomValidator{}
 
 // SetupFireboltEngineClassWebhookWithManager registers the validating webhook
 // with the manager. FireboltEngineClass has no defaulting webhook today:
 // every kubebuilder default is enforced via openapi schema rather than
 // mutating admission, so a Default() implementation would have nothing to do.
 func SetupFireboltEngineClassWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&FireboltEngineClass{}).
+	return ctrl.NewWebhookManagedBy(mgr, &FireboltEngineClass{}).
 		WithValidator(&FireboltEngineClassCustomValidator{Reader: mgr.GetAPIReader()}).
 		Complete()
 }
@@ -70,11 +67,7 @@ func SetupFireboltEngineClassWebhookWithManager(mgr ctrl.Manager) error {
 // operator-owned-path rejection set against spec.template via
 // ValidateOperatorOwnedPodTemplate, returning every violation in one
 // admission response so users see all errors at once.
-func (v *FireboltEngineClassCustomValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	ec, ok := obj.(*FireboltEngineClass)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", obj)
-	}
+func (v *FireboltEngineClassCustomValidator) ValidateCreate(_ context.Context, ec *FireboltEngineClass) (admission.Warnings, error) {
 	return nil, validateFireboltEngineClassSpec(ec).ToAggregate()
 }
 
@@ -83,12 +76,8 @@ func (v *FireboltEngineClassCustomValidator) ValidateCreate(_ context.Context, o
 // every rejected path stays rejected: a typo that admission caught at
 // Create must still be caught on a subsequent Update.
 func (v *FireboltEngineClassCustomValidator) ValidateUpdate(
-	_ context.Context, _, newObj runtime.Object,
+	_ context.Context, _, ec *FireboltEngineClass,
 ) (admission.Warnings, error) {
-	ec, ok := newObj.(*FireboltEngineClass)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", newObj)
-	}
 	return nil, validateFireboltEngineClassSpec(ec).ToAggregate()
 }
 
@@ -108,11 +97,7 @@ func (v *FireboltEngineClassCustomValidator) ValidateUpdate(
 // so that a webhook outage cannot bypass this guard. List errors
 // propagate as admission errors for the same reason: better to refuse
 // the delete than to admit it on incomplete information.
-func (v *FireboltEngineClassCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	ec, ok := obj.(*FireboltEngineClass)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltEngineClass, got %T", obj)
-	}
+func (v *FireboltEngineClassCustomValidator) ValidateDelete(ctx context.Context, ec *FireboltEngineClass) (admission.Warnings, error) {
 	if v.Reader == nil {
 		return nil, errors.New("FireboltEngineClass delete webhook has no API reader configured")
 	}
