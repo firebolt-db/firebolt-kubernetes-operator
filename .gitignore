@@ -38,6 +38,9 @@ e2e-report/
 e2e-reports/
 test/e2e/pod-logs
 
+# rapid (property test) failure captures, written on a failing run
+**/testdata/rapid/
+
 # Formal-verification artifacts (regenerated via `make formal-dump`)
 formal/*.dot
 

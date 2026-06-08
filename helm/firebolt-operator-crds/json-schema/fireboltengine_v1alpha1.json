@@ -7445,9 +7445,6 @@
                   "x-kubernetes-list-type": "map"
                 }
               },
-              "required": [
-                "containers"
-              ],
               "type": "object",
               "additionalProperties": false
             }
