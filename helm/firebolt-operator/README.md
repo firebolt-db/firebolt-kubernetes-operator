@@ -37,7 +37,6 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | additionalArgs | list | `[]` | Additional CLI arguments passed to the operator binary. |
 | additionalEnv | list | `[]` | Additional environment variables for the operator container. |
 | affinity | object | `{}` | Affinity rules for the operator pod. |
-| apiserverProxyMetrics | object | {} | Opt-in grant for the apiserver pod-proxy subresource used when a `FireboltInstance.spec.metricScrapeMode=ApiserverProxy`. The default metric-scrape mode is `PodIP` — direct HTTP to engine pod IPs — and needs no `pods/proxy` permission, so the chart's manager RBAC does not include it. Flip `apiserverProxyMetrics.enabled` to true to render a dedicated ClusterRole (or per-namespace Role when `watchNamespaces` is set) that grants only `pods/proxy: get`. If you set `metricScrapeMode=ApiserverProxy` on any FireboltInstance without flipping this value, the operator's metric scrape will surface a 403 from the apiserver. |
 | engineResourceBounds.maxCPU | string | `""` | Maximum allowed FireboltEngine.spec.resources CPU (requests and limits). Example: "32". |
 | engineResourceBounds.maxEphemeralStorage | string | `""` | Maximum allowed FireboltEngine.spec.resources ephemeral-storage (requests and limits). Example: "10Ti". |
 | engineResourceBounds.maxMemory | string | `""` | Maximum allowed FireboltEngine.spec.resources memory (requests and limits). Example: "256Gi". |
@@ -71,6 +70,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | podMonitor.gateway | object | `{"enabled":false,"interval":"15s"}` | Create a PodMonitor for gateway pods (port 9090, /stats/prometheus). |
 | podSecurityContext | object | `{"fsGroup":65532,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context. fsGroup matches the distroless-nonroot UID used by the default `controller` image so mounted Secret files (e.g. the webhook cert) are readable by the operator process. |
 | priorityClassName | string | `""` | Priority class name for the operator pod. |
+| rbac.apiserverProxyGrant | bool | `false` | Render an additional ClusterRole (or per-namespace Role when `watchNamespaces` is set) granting only `pods/proxy: get`. Required when any FireboltInstance opts into `spec.metricScrapeMode=ApiserverProxy`; the default `metricScrapeMode=PodIP` reaches engine metrics directly on the pod IP and does not need this permission. Leaving this false while an instance is set to `ApiserverProxy` makes the metric scrape surface as a 403 from the apiserver. |
 | rbac.create | bool | `true` | Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources. |
 | replicaCount | int | `1` | Number of operator replicas. |
 | resources | object | requests: 10m/64Mi, limits: 500m/128Mi | CPU/memory resource requests and limits for the operator pod. |

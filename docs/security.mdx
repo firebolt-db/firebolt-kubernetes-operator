@@ -49,7 +49,7 @@ The default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches
 engine metrics through pod IPs and does not need `pods/proxy: get`,
 so the chart's manager RBAC does not include that verb. Setting
 `metricScrapeMode=ApiserverProxy` on any FireboltInstance requires
-`apiserverProxyMetrics.enabled=true` on the operator chart, which
+`rbac.apiserverProxyGrant=true` on the operator chart, which
 renders a dedicated `ClusterRole` (or per-namespace `Role` when
 `watchNamespaces` is set) granting only that one verb. Without the
 toggle, the metric scrape surfaces as a 403 from the apiserver.

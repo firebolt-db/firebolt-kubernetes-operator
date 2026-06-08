@@ -24,7 +24,7 @@ import (
 )
 
 // Pins the operator chart's manager-rbac.yaml and apiserver-proxy-rbac.yaml
-// templates to the four-cell matrix of (watchNamespaces, apiserverProxyMetrics)
+// templates to the four-cell matrix of (watchNamespaces, rbac.apiserverProxyGrant)
 // combinations. The toggle is the load-bearing piece of the namespace-scoped
 // install posture (FB-1494): if the chart silently drops the namespaced
 // `Role`/`RoleBinding` shape, or accidentally renders both ClusterRole and
@@ -115,7 +115,7 @@ func TestChartRBACToggle_ClusterWideDefault(t *testing.T) {
 		t.Errorf("cluster-wide mode must not render namespaced RoleBinding for manager; got %d", len(got))
 	}
 	if got := count(ms, "ClusterRole", "firebolt-operator-apiserver-proxy"); len(got) != 0 {
-		t.Errorf("apiserverProxyMetrics off must not render apiserver-proxy ClusterRole; got %d", len(got))
+		t.Errorf("rbac.apiserverProxyGrant off must not render apiserver-proxy ClusterRole; got %d", len(got))
 	}
 }
 
@@ -141,7 +141,7 @@ func TestChartRBACToggle_Namespaced(t *testing.T) {
 
 func TestChartRBACToggle_ApiserverProxyClusterWide(t *testing.T) {
 	helmAvailable(t)
-	ms := renderChart(t, "--set", "apiserverProxyMetrics.enabled=true")
+	ms := renderChart(t, "--set", "rbac.apiserverProxyGrant=true")
 
 	if got := count(ms, "ClusterRole", "firebolt-operator-apiserver-proxy"); len(got) != 1 {
 		t.Errorf("apiserver-proxy ClusterRole: want 1, got %d", len(got))
@@ -157,7 +157,7 @@ func TestChartRBACToggle_ApiserverProxyClusterWide(t *testing.T) {
 func TestChartRBACToggle_ApiserverProxyNamespaced(t *testing.T) {
 	helmAvailable(t)
 	ms := renderChart(t,
-		"--set", "apiserverProxyMetrics.enabled=true",
+		"--set", "rbac.apiserverProxyGrant=true",
 		"--set", "watchNamespaces={tenant-a,tenant-b}",
 	)
 

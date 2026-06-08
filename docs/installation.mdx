@@ -84,7 +84,7 @@ If you also need the apiserver pod-proxy permission (because you set
 instance), enable the matching opt-in:
 
 ```bash
---set apiserverProxyMetrics.enabled=true
+--set rbac.apiserverProxyGrant=true
 ```
 
 This renders a dedicated `ClusterRole` (or per-namespace `Role` when

@@ -138,8 +138,8 @@ type FireboltEngineReconciler struct {
 // `pods/proxy: get` is intentionally NOT in the canonical RBAC. The
 // default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches engine
 // metrics through pod IPs and needs no apiserver subresource. Users who
-// opt into `metricScrapeMode=ApiserverProxy` enable the chart value
-// `apiserverProxyMetrics.enabled` to render a dedicated ClusterRole (or
+// opt into `metricScrapeMode=ApiserverProxy` set the chart value
+// `rbac.apiserverProxyGrant=true` to render a dedicated ClusterRole (or
 // per-NS Role when `watchNamespaces` is set) that grants only that one
 // verb. See `helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`.
 
