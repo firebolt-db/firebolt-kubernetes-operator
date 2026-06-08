@@ -6,13 +6,16 @@ sidebarTitle: Overview
 
 ## Overview
 
-`FireboltEngineClass` is an optional namespaced resource that holds a reusable pod-template fragment. Engines in the same namespace reference it through `spec.engineClassRef` so scheduling, identity, sidecars, and engine image settings stay consistent without duplicating YAML on every engine.
+The `FireboltEngineClass` can be used to share pod-template properties
+among multiple engines. Engines within the same namespace can reference a `FireboltEngineClass` through `spec.engineClassRef`. This eliminates
+the need to repeat identical per-engine properties like serviceAccountName, nodeSelector, tolerations, pod annotations.
 
-The pattern echoes `StorageClass` / `IngressClass` / `GatewayClass` in the "shared template referenced by name" sense, but `FireboltEngineClass` is **namespaced** rather than cluster-scoped. Its template carries namespace-resolved identifiers: ServiceAccount names, Secret / ConfigMap / PVC volume references, and per-tenant IAM annotations. Kubernetes resolves those names in the engine's namespace at pod admission time, so the class and its consumer engines stay co-located.
+The pattern echoes known Kubernetes patterns like `StorageClass` or `GatewayClass` in the "shared template referenced by name"
+sense, but `FireboltEngineClass` is **namespaced** rather than cluster-scoped.
 
-Multiple classes can exist per namespace. The engine picks one by name. Usage is optional.
-
-- [FireboltEngineClass design](./fireboltengineclass-design) documents merge precedence with `FireboltEngine.spec.template`, deletion, and rollout behavior when a class changes.
+Multiple classes can exist per namespace. The engine picks one by name. Usage is optional. The
+[FireboltEngineClass design](./fireboltengineclass-design) documents the merge precedence
+with `FireboltEngine.spec.template`, deletion, and rollout behavior when a class changes.
 
 For the allowlist of user-settable vs. operator-owned template fields, see the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference).
 
@@ -27,4 +30,74 @@ NAME                BOUND   READY   AGE
 compute-optimized   3       True    24h
 ```
 
-Examples: [`firebolt-engine-class.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/firebolt-engine-class.yaml), [`instance-with-engines.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/instance-with-engines.yaml).
+## Examples
+
+### Create a FireboltEngineClass
+
+The `FireboltEngineClass` can hold shared pod-level properties for engines in the same namespace.
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngineClass
+metadata:
+  name: default
+  namespace: firebolt
+spec:
+  template:
+    metadata:
+      labels:
+        owner: firebolt
+    spec:
+      containers:
+        - name: engine
+          image: ghcr.io/firebolt-db/engine:dev
+```
+
+Apply the manifest:
+
+```bash
+kubectl apply --server-side -f firebolt-engine-class.yaml
+```
+
+### Create a FireboltEngine
+
+The `FireboltEngine` can reference a `FireboltEngineClass` through `spec.engineClassRef`.
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: demo-instance
+  engineClassRef: default
+  replicas: 1
+  customEngineConfig:
+    storage:
+      type: minio
+      api_scheme: "s3://"
+      bucket_name: my-engine-bucket
+      minio:
+        endpoint: http://floci.firebolt.svc.cluster.local:4566
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: "3Gi"
+            limits:
+              memory: "3Gi"
+```
+
+Apply the manifest:
+
+```bash
+kubectl apply --server-side -f engine.yaml
+```
+
+### Additional resources
+See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference) for the full field surface.
+See [`firebolt-engine-class.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/firebolt-engine-class.yaml), [`instance-with-engines.yaml`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples/instance-with-engines.yaml).

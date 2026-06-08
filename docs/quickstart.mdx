@@ -84,32 +84,6 @@ kubectl get fire -n firebolt
 
 Wait until the instance is `Ready` before creating an engine. See the [FireboltInstance CRD reference](./crd-reference/instance-crd-reference) for all supported fields and phases.
 
-## Create a FireboltEngineClass
-
-The engine container image lives on a `FireboltEngineClass` rather than on the engine itself. The class can also hold shared pod-level settings for engines in the same namespace.
-
-```yaml
-apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineClass
-metadata:
-  name: default
-  namespace: firebolt
-spec:
-  template:
-    spec:
-      containers:
-        - name: engine
-          image: ghcr.io/firebolt-db/engine:dev
-```
-
-Apply the manifest:
-
-```bash
-kubectl apply --server-side -f firebolt-engine-class.yaml
-```
-
-See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference) for the full field surface.
-
 ## Configure object storage
 
 Every FireboltEngine requires object storage for managed tablet data. Local filesystem storage mode is not supported by the Firebolt Operator and the engine will refuse to start without object storage.
@@ -124,7 +98,7 @@ This deploys floci into the `firebolt` namespace, exposes it at `http://floci.fi
 
 ## Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it and the `FireboltEngineClass`. The `customEngineConfig.storage` block points the engine at the object storage configured above.
+Once the instance is `Ready`, create an engine that references it. The `customEngineConfig.storage` block points the engine at the object storage configured above.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
@@ -134,7 +108,6 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   replicas: 1
   customEngineConfig:
     storage:
@@ -189,62 +162,6 @@ kubectl run query --rm -i --image=curlimages/curl --restart=Never -n firebolt --
 ```
 
 You should see the query result in the output.
-
-## Scale or update
-
-Patch `spec.replicas` to scale the engine:
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":2}}'
-```
-
-The Firebolt Operator handles the zero-downtime transition automatically.
-
-## Stop and resume
-
-Set `spec.replicas` to `0` to stop the engine without deleting the custom resource:
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":0}}'
-```
-
-Resume by setting a non-zero replica count:
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":2}}'
-```
-
-## Connect to engines
-
-### Instance gateway
-
-The recommended entry point is the instance gateway. The Envoy proxy routes requests based on the `X-Firebolt-Engine` header and handles retries during blue-green transitions.
-
-```text
-POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
-Headers:
-  X-Firebolt-Engine: my-engine
-  Content-Type: text/plain
-Body: <SQL>
-```
-
-### Per-engine service
-
-Each engine also exposes a headless Service at `<engine>-service.<namespace>.svc.cluster.local:3473`. Use this when your client implements its own connection-level load balancing and DNS re-resolution.
-
-With this entry point the caller is responsible for:
-
-- Periodically re-resolving the Service hostname so that newly ready pods are picked up and draining pods are dropped.
-- Treating a request on a single endpoint that fails with a transport error as "pick another endpoint", not "retry this request".
-
-## Rollout strategies
-
-**Graceful** is the default strategy. The Firebolt Operator creates a new generation, switches traffic, waits for the old generation to drain, then deletes it. Use this for production.
-
-**Recreate** creates a new generation, switches traffic, and immediately deletes the old generation. Use this for dev or test environments, or when interrupted queries are acceptable.
 
 ## Clean up
 

@@ -13,6 +13,29 @@ proxy (DFP) to resolve the per-engine headless Service at request time.
 - [Gateway query routing](./gateway-query-routing) describes Envoy routing, retries, graceful shutdown, and why the Firebolt Operator does not gate on EndpointSlice updates.
 - [Gateway sizing](./gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.
 
+## Connect to engines
+
+### Instance gateway (recommended)
+
+The recommended entry point is the instance gateway. The Envoy proxy routes requests based on the `X-Firebolt-Engine` header and handles retries during blue-green transitions.
+
+```text
+POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
+Headers:
+  X-Firebolt-Engine: my-engine
+  Content-Type: text/plain
+Body: <SQL>
+```
+
+### Per-engine service
+
+Each engine also exposes a headless Service at `<engine>-service.<namespace>.svc.cluster.local:3473`. Use this when your client implements its own connection-level load balancing and DNS re-resolution.
+
+With this entry point the caller is responsible for:
+
+- Periodically re-resolving the Service hostname so that newly ready pods are picked up and draining pods are dropped.
+- Treating a request on a single endpoint that fails with a transport error as "pick another endpoint", not "retry this request".
+
 ### Configuration
 
 The gateway ConfigMap (`{instance}-gateway-config`) is a pure function of the `FireboltInstance`. The Firebolt Operator does not regenerate it on engine create, delete, scale, or blue-green events, so those events never trigger a gateway rollout.
@@ -60,3 +83,13 @@ Missing or under-permissioned user service accounts do **not** fail at admission
 kubectl auth can-i patch fireboltengines.compute.firebolt.io \
   --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
 ```
+
+## Rolling update parameters
+
+### Gateway deployment
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| `maxSurge` | `25%` | Standard Kubernetes default for gradual rollout |
+| `maxUnavailable` | `0` | Maintain full capacity during image switches |
+| PodDisruptionBudget | `maxUnavailable: 1` | Allow voluntary disruptions while maintaining availability |

@@ -21,6 +21,12 @@
                   "instance/gateway/gateway-query-routing",
                   "instance/gateway/gateway-sizing"
                 ]
+              },
+              {
+                "group": "Metadata",
+                "pages": [
+                  "instance/metadata/overview"
+                ]
               }
             ]
           },
@@ -31,6 +37,7 @@
               "engine/engine-reconciliation",
               "engine/engine-rollouts",
               "engine/autoscaling-and-wake-up",
+              "engine/engine-scaling",
               {
                 "group": "Object storage",
                 "pages": [
