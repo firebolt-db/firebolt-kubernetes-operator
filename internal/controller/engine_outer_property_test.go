@@ -290,36 +290,52 @@ func (m *outerEngineSim) Check(t *rapid.T) {
 }
 
 // checkNoOrphans is the post-deletion invariant: once the engine is reaped,
-// no child resources matching its labels may remain.
+// the operator must have initiated deletion of every child matching its
+// labels.
+//
+// envtest runs no garbage collector, so a child the operator deletes with
+// foreground propagation lingers with a deletionTimestamp (and a
+// foregroundDeletion finalizer) until a GC that never comes here; a real
+// cluster completes it. Such a child is already reaped from the operator's
+// standpoint, so only a child with a zero deletionTimestamp is a genuine
+// orphan the operator failed to delete. checkOwnerRefs separately guarantees
+// every survivor carries an ownerRef back to the engine, so the production GC
+// cascade is exercised independently. Counting terminating children here is
+// what made this invariant flake: it tripped only on sequences that abandoned
+// a generation (foreground-deleting its StatefulSet) before the engine was
+// reaped.
 func (m *outerEngineSim) checkNoOrphans(t *rapid.T) {
 	matchLabels := client.MatchingLabels{LabelEngine: outerEngineName}
 	inNs := client.InNamespace(m.namespace)
 
 	var stsList appsv1.StatefulSetList
 	if err := m.env.cli.List(m.ctx, &stsList, inNs, matchLabels); err != nil {
-		t.Fatalf("List STatefulSets after delete: %v", err)
+		t.Fatalf("List StatefulSets after delete: %v", err)
 	}
-	if len(stsList.Items) > 0 {
-		t.Fatalf("Inv_DeleteCleansChildren: %d StatefulSet(s) survive after engine reaped",
-			len(stsList.Items))
+	for i := range stsList.Items {
+		if stsList.Items[i].DeletionTimestamp.IsZero() {
+			t.Fatalf("Inv_DeleteCleansChildren: StatefulSet %q survives un-deleted after engine reaped", stsList.Items[i].Name)
+		}
 	}
 
 	var cmList corev1.ConfigMapList
 	if err := m.env.cli.List(m.ctx, &cmList, inNs, matchLabels); err != nil {
 		t.Fatalf("List ConfigMaps after delete: %v", err)
 	}
-	if len(cmList.Items) > 0 {
-		t.Fatalf("Inv_DeleteCleansChildren: %d ConfigMap(s) survive after engine reaped",
-			len(cmList.Items))
+	for i := range cmList.Items {
+		if cmList.Items[i].DeletionTimestamp.IsZero() {
+			t.Fatalf("Inv_DeleteCleansChildren: ConfigMap %q survives un-deleted after engine reaped", cmList.Items[i].Name)
+		}
 	}
 
 	var svcList corev1.ServiceList
 	if err := m.env.cli.List(m.ctx, &svcList, inNs, matchLabels); err != nil {
 		t.Fatalf("List Services after delete: %v", err)
 	}
-	if len(svcList.Items) > 0 {
-		t.Fatalf("Inv_DeleteCleansChildren: %d Service(s) survive after engine reaped",
-			len(svcList.Items))
+	for i := range svcList.Items {
+		if svcList.Items[i].DeletionTimestamp.IsZero() {
+			t.Fatalf("Inv_DeleteCleansChildren: Service %q survives un-deleted after engine reaped", svcList.Items[i].Name)
+		}
 	}
 }
 
