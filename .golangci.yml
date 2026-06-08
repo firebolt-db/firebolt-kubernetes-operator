@@ -120,6 +120,13 @@ linters:
           disabled: false
         - name: import-shadowing
           disabled: false
+        # enforce-switch-style (net-new in the revive bundled with
+        # golangci-lint v2.9.0) requires a default clause on every switch,
+        # including exhaustive type switches where it adds only noise. Keep
+        # the prior enforcement surface rather than adopt it as part of the
+        # go1.26 linter bump.
+        - name: enforce-switch-style
+          disabled: true
 
   exclusions:
     generated: lax
@@ -145,6 +152,13 @@ linters:
       - linters:
           - revive
         text: "unknown option \"inline\" in json tag"
+      # internal/metrics is a deliberate, widely-imported package name; the
+      # var-naming rule in the revive bundled with golangci-lint v2.9.0 flags
+      # it as colliding with the stdlib runtime/metrics base name. Renaming
+      # the package is not worth the churn.
+      - linters:
+          - revive
+        text: "avoid package names that conflict with Go standard library"
       # Test helpers run kubectl and kind as subprocesses; these are not
       # user-facing and don't need CommandContext or input sanitization.
       - linters:
@@ -163,6 +177,16 @@ linters:
         source: "kubebuilder:validation:"
       - path: _test\.go
         text: "is deprecated:"
+      # controller-runtime v0.24 deprecated three APIs this operator still
+      # relies on: the server-side-apply patch sentinel client.Apply, the
+      # manager helper GetEventRecorderFor, and the api-package scheme.Builder.
+      # All three remain functional in v0.24; their replacements (the typed
+      # Client.Apply with ApplyConfigurations, the new events API, and direct
+      # runtime scheme registration) are separate, behaviour-sensitive
+      # migrations rather than part of this dependency bump.
+      - linters:
+          - staticcheck
+        text: '(client\.Apply|GetEventRecorderFor|scheme\.Builder) is deprecated'
       - path: (.+)\.go$
         text: "package-comments: should have a package comment"
       - path: (.+)\.go$

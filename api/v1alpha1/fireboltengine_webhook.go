@@ -23,11 +23,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -145,7 +143,7 @@ type FireboltEngineCustomValidator struct {
 	ResourceBounds EngineResourceBounds
 }
 
-var _ webhook.CustomValidator = &FireboltEngineCustomValidator{}
+var _ admission.Validator[*FireboltEngine] = &FireboltEngineCustomValidator{}
 
 // SetupFireboltEngineWebhookWithManager wires the validator into the
 // manager's webhook server. The validator holds an APIReader rather than
@@ -159,8 +157,7 @@ func SetupFireboltEngineWebhookWithManager(mgr ctrl.Manager, bounds *EngineResou
 	if bounds != nil {
 		v.ResourceBounds = *bounds
 	}
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&FireboltEngine{}).
+	return ctrl.NewWebhookManagedBy(mgr, &FireboltEngine{}).
 		WithValidator(v).
 		Complete()
 }
@@ -168,11 +165,7 @@ func SetupFireboltEngineWebhookWithManager(mgr ctrl.Manager, bounds *EngineResou
 // ValidateCreate rejects a new FireboltEngine when spec.engineClassRef
 // references a FireboltEngineClass that does not exist, or when spec.resources
 // carries a value above the configured bound.
-func (v *FireboltEngineCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	eng, ok := obj.(*FireboltEngine)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltEngine, got %T", obj)
-	}
+func (v *FireboltEngineCustomValidator) ValidateCreate(ctx context.Context, eng *FireboltEngine) (admission.Warnings, error) {
 	return nil, v.validate(ctx, eng).ToAggregate()
 }
 
@@ -184,19 +177,15 @@ func (v *FireboltEngineCustomValidator) ValidateCreate(ctx context.Context, obj 
 // to nil / to another existing class, or by reducing spec.resources to
 // fit the new bound.
 func (v *FireboltEngineCustomValidator) ValidateUpdate(
-	ctx context.Context, _, newObj runtime.Object,
+	ctx context.Context, _, eng *FireboltEngine,
 ) (admission.Warnings, error) {
-	eng, ok := newObj.(*FireboltEngine)
-	if !ok {
-		return nil, fmt.Errorf("expected FireboltEngine, got %T", newObj)
-	}
 	return nil, v.validate(ctx, eng).ToAggregate()
 }
 
 // ValidateDelete is a no-op. The engine has no cross-resource invariants
 // to enforce on deletion; the controller cleans up generation-scoped
 // resources via owner references.
-func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ *FireboltEngine) (admission.Warnings, error) {
 	return nil, nil
 }
 
