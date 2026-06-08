@@ -177,16 +177,6 @@ linters:
         source: "kubebuilder:validation:"
       - path: _test\.go
         text: "is deprecated:"
-      # controller-runtime v0.24 deprecated three APIs this operator still
-      # relies on: the server-side-apply patch sentinel client.Apply, the
-      # manager helper GetEventRecorderFor, and the api-package scheme.Builder.
-      # All three remain functional in v0.24; their replacements (the typed
-      # Client.Apply with ApplyConfigurations, the new events API, and direct
-      # runtime scheme registration) are separate, behaviour-sensitive
-      # migrations rather than part of this dependency bump.
-      - linters:
-          - staticcheck
-        text: '(client\.Apply|GetEventRecorderFor|scheme\.Builder) is deprecated'
       - path: (.+)\.go$
         text: "package-comments: should have a package comment"
       - path: (.+)\.go$
