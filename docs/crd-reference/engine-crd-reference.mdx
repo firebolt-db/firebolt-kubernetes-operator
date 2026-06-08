@@ -9,7 +9,7 @@ sidebarTitle: FireboltEngine CRD reference
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace. |
-| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this engine's namespace. The class supplies defaults this engine inherits when it leaves the matching field unset: `spec.template` (merged under this engine's template, engine wins), `spec.storage`, `spec.customEngineConfig`, `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoscaling`. Engine image comes from the class template. There is no per-engine image field on this CR. |
+| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this engine's namespace. The class supplies defaults this engine inherits when it leaves the matching field unset: `spec.template` (merged under this engine's template, engine wins), `spec.storage`, `spec.customEngineConfig`, `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop`. Engine image comes from the class template. There is no per-engine image field on this CR. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. `0` stops the engine; the CR is preserved. |
 | `spec.template` | No | - | `PodTemplateSpec` for per-engine overrides. Engine container: `spec.template.spec.containers[name=="engine"]`. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-engine-templates) and [Pod template merge](../engine/engine-reconciliation#pod-template-merge). |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. Inherited from the class when unset. |
@@ -17,7 +17,7 @@ sidebarTitle: FireboltEngine CRD reference
 | `spec.drainCheckInterval` | No | `5s` | Poll interval for old-pod drain status. Inherited from the class when unset. |
 | `spec.storage` | No | `emptyDir` | Per-pod data volume (distinct from `customEngineConfig.storage`). One of `persistentVolumeClaim`, `emptyDir`, or `hostPath`. Unset defaults to `emptyDir`. Inherited from the class when this engine names no backend. Changes force a new generation. |
 | `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath the class config (engine keys win). **Required** for start, from this field or the class. Operator-owned paths are stripped. Changes force a new generation. |
-| `spec.autoscaling` | No | disabled | When `enabled`, the autoscaler owns `spec.replicas`. Inherited whole-struct from the class when unset. |
+| `spec.autoStop` | No | disabled | When `enabled`, auto-stop owns `spec.replicas`. Inherited whole-struct from the class when unset. |
 | `spec.metadataEndpointOverride` | No | - | Override instance-derived metadata endpoint. |
 
 ## Firebolt Operator-owned fields on engine templates

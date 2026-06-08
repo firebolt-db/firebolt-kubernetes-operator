@@ -30,67 +30,67 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// Autoscaler defaults applied when the corresponding spec fields are unset.
+// AutoStop defaults applied when the corresponding spec fields are unset.
 // Mirroring the kubebuilder defaults here keeps unit tests that build specs
 // as Go literals consistent with CRD-loaded specs.
 const (
-	DefaultAutoscalerIdleTimeout  = 30 * time.Minute
-	DefaultAutoscalerPollInterval = 1 * time.Minute
-	DefaultAutoscalerMinReplicas  = int32(0)
-	// DefaultAutoscalerWakeTTL bounds how long an unrefreshed
+	DefaultAutoStopIdleTimeout  = 30 * time.Minute
+	DefaultAutoStopPollInterval = 1 * time.Minute
+	DefaultAutoStopIdleReplicas = int32(0)
+	// DefaultAutoStopWakeTTL bounds how long an unrefreshed
 	// AnnotationWakeRequested value still triggers a scale-up. Generous
 	// enough to cover engine cold-start (image pull on a fresh node, blue-
 	// green creating phase) while short enough that an abandoned request
 	// does not pin the engine indefinitely after the gateway gives up.
-	DefaultAutoscalerWakeTTL = 5 * time.Minute
+	DefaultAutoStopWakeTTL = 5 * time.Minute
 )
 
-// Autoscaler reason tokens written to status.autoscalerReason. Constants
+// AutoStop reason tokens written to status.autoStopReason. Constants
 // are defined in one place so reconciler code, tests, and documentation
 // share the exact spelling.
 const (
-	AutoscalerReasonDisabled       = "Disabled"
-	AutoscalerReasonScheduleActive = "ScheduleActive"
-	AutoscalerReasonStopped        = "Stopped"
-	AutoscalerReasonActivity       = "ActivityObserved"
-	AutoscalerReasonScrapeFailed   = "ScrapeFailed"
-	AutoscalerReasonIdle           = "Idle"
-	AutoscalerReasonWakeRequested  = "WakeRequested"
-	// AutoscalerReasonInitializing covers the first quiet observation on
+	AutoStopReasonDisabled       = "Disabled"
+	AutoStopReasonScheduleActive = "ScheduleActive"
+	AutoStopReasonStopped        = "Stopped"
+	AutoStopReasonActivity       = "ActivityObserved"
+	AutoStopReasonScrapeFailed   = "ScrapeFailed"
+	AutoStopReasonIdle           = "Idle"
+	AutoStopReasonWakeRequested  = "WakeRequested"
+	// AutoStopReasonInitializing covers the first quiet observation on
 	// an engine that has no LastActivityTime yet: there is nothing to
 	// measure idleFor against, so the decision is "anchor the timestamp
 	// and observe again". Distinct from ActivityObserved, which carries
 	// the stronger claim that the most recent scrape saw running queries.
-	AutoscalerReasonInitializing = "Initializing"
+	AutoStopReasonInitializing = "Initializing"
 )
 
-// AutoscalerObservation is the runtime input the autoscaler consumes each
+// AutoStopObservation is the runtime input the autoStop consumes each
 // cycle, sourced from a metric scrape over the active generation's pods
 // and the FireboltEngine's wake-up annotation.
-type AutoscalerObservation struct {
+type AutoStopObservation struct {
 	// ActiveQueries is the sum of firebolt_running_queries +
 	// firebolt_suspended_queries across the active generation. Set to 0
 	// when the engine has zero replicas (no pods to scrape).
 	ActiveQueries int64
 
 	// ScrapeFailed indicates the metric scrape itself failed (network
-	// error, missing metric, RBAC failure). When true the autoscaler
+	// error, missing metric, RBAC failure). When true the autoStop
 	// conservatively treats this as "activity observed" so a broken probe
 	// never trips an unintended scale-down.
 	ScrapeFailed bool
 
 	// WakeRequestedAt is the parsed timestamp from
 	// metadata.annotations[AnnotationWakeRequested], or nil when the
-	// annotation is absent or malformed. The autoscaler treats a value
-	// within DefaultAutoscalerWakeTTL of now as a request to immediately
-	// scale up to MaxReplicas.
+	// annotation is absent or malformed. The autoStop treats a value
+	// within DefaultAutoStopWakeTTL of now as a request to immediately
+	// scale up to ActiveReplicas.
 	WakeRequestedAt *time.Time
 }
 
-// AutoscalerDecision is the output of computeAutoscalerDecision and is
+// AutoStopDecision is the output of computeAutoStopDecision and is
 // applied by the reconciler: DesiredReplicas may be patched onto
 // spec.replicas, NewLastActivityTime may be written to status.
-type AutoscalerDecision struct {
+type AutoStopDecision struct {
 	// DesiredReplicas is the value spec.replicas should converge to. Equal
 	// to the current replica count when no scale change is needed.
 	DesiredReplicas int32
@@ -98,10 +98,10 @@ type AutoscalerDecision struct {
 	// ScaleAction is true when DesiredReplicas != current spec.replicas.
 	ScaleAction bool
 
-	// Reason is the token written to status.autoscalerReason.
+	// Reason is the token written to status.autoStopReason.
 	Reason string
 
-	// RequeueAfter is the suggested delay before the next autoscaler
+	// RequeueAfter is the suggested delay before the next autoStop
 	// evaluation. Zero means "use the controller's default requeue".
 	RequeueAfter time.Duration
 
@@ -110,70 +110,70 @@ type AutoscalerDecision struct {
 	NewLastActivityTime *metav1.Time
 }
 
-// computeAutoscalerDecision is the pure decision function. It is independent
+// computeAutoStopDecision is the pure decision function. It is independent
 // of the K8s client and of the wall clock so tests drive it with synthetic
 // observations and timestamps.
 //
 // Precedence (intentional, top-down):
 //
-//  1. Autoscaling disabled or unset → no decision (DesiredReplicas left at
+//  1. AutoStop disabled or unset → no decision (DesiredReplicas left at
 //     spec.Replicas, Reason=Disabled).
-//  2. A Schedule window is active → pin replicas at MaxReplicas regardless
+//  2. A Schedule window is active → pin replicas at ActiveReplicas regardless
 //     of activity. Schedule wins over both idle and stopped paths so an
 //     "always-on during business hours" policy can wake a parked engine.
 //  3. Engine is stopped (replicas=0) and no schedule window is active →
 //     no scale change. Wake-up via gateway is handled separately in
-//     commit 3 by an annotation read; the autoscaler's job here is to
+//     commit 3 by an annotation read; the autoStop's job here is to
 //     stay out of the way.
 //  4. Scrape failed or activity observed → refresh LastActivityTime, do
 //     not scale. ScrapeFailed is grouped with Activity intentionally:
 //     a broken probe must never look like quiet enough to scale down.
-//  5. Quiet for >= IdleTimeout and replicas > MinReplicas → scale down
-//     to MinReplicas.
+//  5. Quiet for >= IdleTimeout and replicas > IdleReplicas → scale down
+//     to IdleReplicas.
 //  6. Otherwise: no change, but anchor LastActivityTime on the first
 //     quiet observation so the idle clock starts ticking from a known
 //     point (a fresh engine gets one full IdleTimeout of grace before
 //     its first scale-down).
-func computeAutoscalerDecision(
+func computeAutoStopDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
-	autoscaling *computev1alpha1.AutoscalingSpec,
+	autoStop *computev1alpha1.AutoStopSpec,
 	status *computev1alpha1.FireboltEngineStatus,
-	obs AutoscalerObservation,
+	obs AutoStopObservation,
 	now time.Time,
-) AutoscalerDecision {
-	if autoscaling == nil || !autoscaling.Enabled {
-		return AutoscalerDecision{
+) AutoStopDecision {
+	if autoStop == nil || !autoStop.Enabled {
+		return AutoStopDecision{
 			DesiredReplicas: spec.Replicas,
-			Reason:          AutoscalerReasonDisabled,
+			Reason:          AutoStopReasonDisabled,
 		}
 	}
 
-	as := autoscaling
-	pollInterval := DefaultAutoscalerPollInterval
+	as := autoStop
+	pollInterval := DefaultAutoStopPollInterval
 	if as.PollInterval != nil && as.PollInterval.Duration > 0 {
 		pollInterval = as.PollInterval.Duration
 	}
-	minReplicas := DefaultAutoscalerMinReplicas
-	if as.MinReplicas != nil {
-		minReplicas = *as.MinReplicas
+	idleReplicas := DefaultAutoStopIdleReplicas
+	if as.IdleReplicas != nil {
+		idleReplicas = *as.IdleReplicas
 	}
 
 	// Wake annotation: a fresh stamp from the gateway requests an
-	// immediate scale-up to MaxReplicas. Honored above schedule because
-	// either path lands at the same target (MaxReplicas), but reporting
+	// immediate scale-up to ActiveReplicas. Honored above schedule because
+	// either path lands at the same target (ActiveReplicas), but reporting
 	// WakeRequested is more informative for operators looking at status.
-	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoscalerWakeTTL {
-		return decisionWithScale(spec.Replicas, as.MaxReplicas, AutoscalerReasonWakeRequested, pollInterval)
+	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
+		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
 	}
 
 	if scheduleActive(as.Schedule, now) {
-		return decisionWithScale(spec.Replicas, as.MaxReplicas, AutoscalerReasonScheduleActive, pollInterval)
+		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
 	}
 
 	if spec.Replicas == 0 {
-		return AutoscalerDecision{
+		return AutoStopDecision{
 			DesiredReplicas: 0,
-			Reason:          AutoscalerReasonStopped,
+			Reason:          AutoStopReasonStopped,
 			RequeueAfter:    pollInterval,
 		}
 	}
@@ -189,9 +189,9 @@ func computeAutoscalerDecision(
 		// hold across the whole failure window, not just within a
 		// single decision.
 		nowMeta := metav1.NewTime(now)
-		return AutoscalerDecision{
+		return AutoStopDecision{
 			DesiredReplicas:     spec.Replicas,
-			Reason:              AutoscalerReasonScrapeFailed,
+			Reason:              AutoStopReasonScrapeFailed,
 			RequeueAfter:        pollInterval,
 			NewLastActivityTime: &nowMeta,
 		}
@@ -199,43 +199,43 @@ func computeAutoscalerDecision(
 
 	if obs.ActiveQueries > 0 {
 		nowMeta := metav1.NewTime(now)
-		return AutoscalerDecision{
+		return AutoStopDecision{
 			DesiredReplicas:     spec.Replicas,
-			Reason:              AutoscalerReasonActivity,
+			Reason:              AutoStopReasonActivity,
 			RequeueAfter:        pollInterval,
 			NewLastActivityTime: &nowMeta,
 		}
 	}
 
-	idleTimeout := DefaultAutoscalerIdleTimeout
+	idleTimeout := DefaultAutoStopIdleTimeout
 	if as.IdleTimeout != nil && as.IdleTimeout.Duration > 0 {
 		idleTimeout = as.IdleTimeout.Duration
 	}
 
 	if status.LastActivityTime == nil {
 		nowMeta := metav1.NewTime(now)
-		return AutoscalerDecision{
+		return AutoStopDecision{
 			DesiredReplicas:     spec.Replicas,
-			Reason:              AutoscalerReasonInitializing,
+			Reason:              AutoStopReasonInitializing,
 			RequeueAfter:        pollInterval,
 			NewLastActivityTime: &nowMeta,
 		}
 	}
 
 	idleFor := now.Sub(status.LastActivityTime.Time)
-	if idleFor >= idleTimeout && spec.Replicas > minReplicas {
-		return decisionWithScale(spec.Replicas, minReplicas, AutoscalerReasonIdle, pollInterval)
+	if idleFor >= idleTimeout && spec.Replicas > idleReplicas {
+		return decisionWithScale(spec.Replicas, idleReplicas, AutoStopReasonIdle, pollInterval)
 	}
 
-	return AutoscalerDecision{
+	return AutoStopDecision{
 		DesiredReplicas: spec.Replicas,
-		Reason:          AutoscalerReasonActivity,
+		Reason:          AutoStopReasonActivity,
 		RequeueAfter:    pollInterval,
 	}
 }
 
-func decisionWithScale(current, desired int32, reason string, requeue time.Duration) AutoscalerDecision {
-	return AutoscalerDecision{
+func decisionWithScale(current, desired int32, reason string, requeue time.Duration) AutoStopDecision {
+	return AutoStopDecision{
 		DesiredReplicas: desired,
 		ScaleAction:     desired != current,
 		Reason:          reason,
@@ -345,7 +345,7 @@ func parseHHMM(s string) (int, bool) {
 // and returns the parsed RFC 3339 timestamp, or nil when the annotation is
 // absent or malformed. A malformed value is treated as absent (rather than
 // returning an error) so a typo in an external client cannot wedge the
-// autoscaler — the worst case is "wake never fires" which the gateway will
+// autoStop — the worst case is "wake never fires" which the gateway will
 // notice and re-stamp with a valid value.
 func parseWakeAnnotation(annotations map[string]string) *time.Time {
 	if annotations == nil {
@@ -376,11 +376,11 @@ func windowContains(start, end, minute int) bool {
 	return minute >= start || minute < end
 }
 
-// autoscalerStepResult is what runAutoscaler reports back to Reconcile.
-type autoscalerStepResult struct {
+// autoStopStepResult is what runAutoStop reports back to Reconcile.
+type autoStopStepResult struct {
 	// Decision is the raw decision the pure function produced; useful for
 	// tests asserting on Reason without re-deriving it from status.
-	Decision AutoscalerDecision
+	Decision AutoStopDecision
 	// Patched is true when this step mutated spec.replicas. The caller
 	// should expect a follow-up reconcile from the FireboltEngine watch.
 	Patched bool
@@ -389,36 +389,36 @@ type autoscalerStepResult struct {
 	RequeueAfter time.Duration
 }
 
-// runAutoscaler is the runtime entry point: it scrapes activity metrics,
-// invokes computeAutoscalerDecision, and applies the decision to the
-// cluster. Returns a no-op result when autoscaling is disabled or the
+// runAutoStop is the runtime entry point: it scrapes activity metrics,
+// invokes computeAutoStopDecision, and applies the decision to the
+// cluster. Returns a no-op result when autoStop is disabled or the
 // engine is mid-rollout.
 //
 // Why only PhaseStable / PhaseStopped: scaling decisions during a
 // transition would race with the blue-green flow. Patching spec.replicas
 // while computeCreating is waiting for pods to come up would either
 // abandon the in-flight generation (spec drift triggers a fresh bump in
-// computeCreating) or, worse, cause the autoscaler and the rollout to
+// computeCreating) or, worse, cause the autoStop and the rollout to
 // fight over the same field. Letting transitions complete first keeps
 // the state machine deterministic.
-func (r *FireboltEngineReconciler) runAutoscaler(
+func (r *FireboltEngineReconciler) runAutoStop(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-) (autoscalerStepResult, error) {
-	// Autoscaling resolves engine-if-set → class-if-set → nil (disabled),
-	// so an engine inherits its class's autoscaling policy when it declares
+) (autoStopStepResult, error) {
+	// AutoStop resolves engine-if-set → class-if-set → nil (disabled),
+	// so an engine inherits its class's autoStop policy when it declares
 	// none of its own.
-	autoscaling := effectiveAutoscaling(&engine.Spec, classInfo)
-	if autoscaling == nil || !autoscaling.Enabled {
-		// Autoscaler is off. Clear stale autoscaler-driven fields from a
+	autoStop := effectiveAutoStop(&engine.Spec, classInfo)
+	if autoStop == nil || !autoStop.Enabled {
+		// AutoStop is off. Clear stale autoStop-driven fields from a
 		// previous active cycle so audit tooling never sees values that
-		// no longer correspond to a running autoscaler. AutoscaledAt is
+		// no longer correspond to a running autoStop. LastScaledAt is
 		// left untouched: the doc treats it as historical audit metadata.
 		// LastActivityTime is cleared per its API doc contract.
 		statusDirty := false
-		if engine.Status.AutoscalerReason != AutoscalerReasonDisabled {
-			engine.Status.AutoscalerReason = AutoscalerReasonDisabled
+		if engine.Status.AutoStopReason != AutoStopReasonDisabled {
+			engine.Status.AutoStopReason = AutoStopReasonDisabled
 			statusDirty = true
 		}
 		if engine.Status.LastActivityTime != nil {
@@ -427,19 +427,19 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 		}
 		if statusDirty {
 			if err := r.updateStatus(ctx, engine); err != nil {
-				return autoscalerStepResult{}, fmt.Errorf("autoscaler: clearing stale status: %w", err)
+				return autoStopStepResult{}, fmt.Errorf("autoStop: clearing stale status: %w", err)
 			}
 		}
-		return autoscalerStepResult{}, nil
+		return autoStopStepResult{}, nil
 	}
 	if engine.Status.Phase != computev1alpha1.PhaseStable &&
 		engine.Status.Phase != computev1alpha1.PhaseStopped {
-		return autoscalerStepResult{}, nil
+		return autoStopStepResult{}, nil
 	}
 
-	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoscaler")
+	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoStop")
 
-	obs := AutoscalerObservation{
+	obs := AutoStopObservation{
 		WakeRequestedAt: parseWakeAnnotation(engine.Annotations),
 	}
 	if engine.Spec.Replicas > 0 {
@@ -448,9 +448,9 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 		obs.ScrapeFailed = failed
 	}
 
-	decision := computeAutoscalerDecision(&engine.Spec, autoscaling, &engine.Status, obs, time.Now())
+	decision := computeAutoStopDecision(&engine.Spec, autoStop, &engine.Status, obs, time.Now())
 
-	result := autoscalerStepResult{
+	result := autoStopStepResult{
 		Decision:     decision,
 		RequeueAfter: decision.RequeueAfter,
 	}
@@ -459,24 +459,24 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 	// deserializes the API server's response back into the engine
 	// pointer. The response carries the previously-stored Status, so
 	// any in-memory Status fields set BEFORE r.Update would be silently
-	// clobbered. Always do the spec write first, THEN apply autoscaler
+	// clobbered. Always do the spec write first, THEN apply autoStop
 	// status mutations, THEN r.updateStatus to persist them.
 	if decision.ScaleAction {
-		log.Info("Autoscaler scaling spec.replicas",
+		log.Info("AutoStop scaling spec.replicas",
 			"from", engine.Spec.Replicas,
 			"to", decision.DesiredReplicas,
 			"reason", decision.Reason,
 		)
 		engine.Spec.Replicas = decision.DesiredReplicas
 		if err := r.Update(ctx, engine); err != nil {
-			return result, fmt.Errorf("autoscaler: failed to patch spec.replicas: %w", err)
+			return result, fmt.Errorf("autoStop: failed to patch spec.replicas: %w", err)
 		}
 		result.Patched = true
 	}
 
 	statusDirty := false
-	if engine.Status.AutoscalerReason != decision.Reason {
-		engine.Status.AutoscalerReason = decision.Reason
+	if engine.Status.AutoStopReason != decision.Reason {
+		engine.Status.AutoStopReason = decision.Reason
 		statusDirty = true
 	}
 	if decision.NewLastActivityTime != nil {
@@ -485,13 +485,13 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 	}
 	if decision.ScaleAction {
 		nowMeta := metav1.Now()
-		engine.Status.AutoscaledAt = &nowMeta
+		engine.Status.LastScaledAt = &nowMeta
 		statusDirty = true
 	}
 
 	if statusDirty {
 		if err := r.updateStatus(ctx, engine); err != nil {
-			return result, fmt.Errorf("autoscaler: failed to update status: %w", err)
+			return result, fmt.Errorf("autoStop: failed to update status: %w", err)
 		}
 	}
 
@@ -500,7 +500,7 @@ func (r *FireboltEngineReconciler) runAutoscaler(
 
 // scrapeActiveQueries sums firebolt_running_queries + firebolt_suspended_queries
 // across the active generation's running pods. Returns (sum, scrapeFailed):
-// scrapeFailed=true means the result is unreliable and the autoscaler should
+// scrapeFailed=true means the result is unreliable and the autoStop should
 // treat this poll as "activity observed" rather than scaling down.
 //
 // We treat "spec.replicas > 0 but no running pods yet" as scrapeFailed for the
@@ -509,7 +509,7 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
 ) (int64, bool) {
-	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoscaler")
+	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoStop")
 	if engine.Status.ActiveGeneration < 0 {
 		return 0, true
 	}

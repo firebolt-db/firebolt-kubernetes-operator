@@ -17310,7 +17310,7 @@ spec:
                 default: PodIP
                 description: |-
                   MetricScrapeMode selects the transport the operator uses to scrape
-                  engine pod /metrics for the drain probe and autoscaler activity
+                  engine pod /metrics for the drain probe and autoStop activity
                   poll. Read fresh on every scrape so it can be flipped without a
                   controller restart. Defaults to PodIP; flip to ApiserverProxy
                   only when in-cluster pod IPs aren't reachable from the controller

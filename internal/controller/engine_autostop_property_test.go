@@ -16,10 +16,10 @@ limitations under the License.
 
 package controller
 
-// Property tests for computeAutoscalerDecision. The decision function is
+// Property tests for computeAutoStopDecision. The decision function is
 // pure (no K8s client, no real clock), so a uniform random-input rapid
 // harness can drive it through every combination of:
-//   - autoscaling on/off and the (MinReplicas, MaxReplicas, IdleTimeout,
+//   - autoStop on/off and the (IdleReplicas, ActiveReplicas, IdleTimeout,
 //     PollInterval) tuning knobs
 //   - status.LastActivityTime nil vs. age in (-1h, +1h] vs. now
 //   - obs.ActiveQueries / obs.SuspendedQueries / obs.ScrapeFailed
@@ -27,8 +27,8 @@ package controller
 //   - an optional Schedule window encompassing or not encompassing now
 //
 // After every draw, the test asserts the precedence-rule invariants
-// listed in computeAutoscalerDecision's docstring. The previous coverage
-// was example-based (engine_autoscaler_test.go), which fixes a single
+// listed in computeAutoStopDecision's docstring. The previous coverage
+// was example-based (engine_autoStop_test.go), which fixes a single
 // concrete (spec, obs, time) triple per case; the random sampler reaches
 // the cross-product the example tests never enumerate, so a regression
 // that re-orders precedence rules or drops a guard surfaces here even
@@ -49,39 +49,39 @@ import (
 // machines and CI runs.
 var referenceTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-func TestComputeAutoscalerDecision_Properties(t *testing.T) {
+func TestComputeAutoStopDecision_Properties(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		in := drawAutoscalerInput(t)
-		dec := computeAutoscalerDecision(in.spec, in.spec.Autoscaling, in.status, in.obs, referenceTime)
+		in := drawAutoStopInput(t)
+		dec := computeAutoStopDecision(in.spec, in.spec.AutoStop, in.status, in.obs, referenceTime)
 
-		assertAutoscalerWellFormed(t, in, dec)
-		assertAutoscalerPrecedence(t, in, dec)
+		assertAutoStopWellFormed(t, in, dec)
+		assertAutoStopPrecedence(t, in, dec)
 	})
 }
 
-// autoscalerInput is the materialized random draw the property checker
+// autoStopInput is the materialized random draw the property checker
 // consumes. Keeping spec/status/obs together makes the per-property
 // assertions short and lets the rapid trace pinpoint which knob produced
 // the failure.
-type autoscalerInput struct {
+type autoStopInput struct {
 	spec   *computev1alpha1.FireboltEngineSpec
 	status *computev1alpha1.FireboltEngineStatus
-	obs    AutoscalerObservation
+	obs    AutoStopObservation
 	// Convenience copies of derived inputs the assertions need to inspect
 	// without re-reading them from the struct chain.
-	autoscalingEnabled bool
-	minReplicas        int32
-	maxReplicas        int32
-	idleTimeout        time.Duration
-	pollInterval       time.Duration
-	scheduleActiveNow  bool
-	wakeFresh          bool
+	autoStopEnabled   bool
+	idleReplicas      int32
+	activeReplicas    int32
+	idleTimeout       time.Duration
+	pollInterval      time.Duration
+	scheduleActiveNow bool
+	wakeFresh         bool
 }
 
-func drawAutoscalerInput(t *rapid.T) autoscalerInput {
-	enabled := rapid.Bool().Draw(t, "autoscalingEnabled")
-	maxReplicas := int32(rapid.IntRange(1, 10).Draw(t, "maxReplicas"))
-	minReplicas := int32(rapid.IntRange(0, int(maxReplicas)).Draw(t, "minReplicas"))
+func drawAutoStopInput(t *rapid.T) autoStopInput {
+	enabled := rapid.Bool().Draw(t, "autoStopEnabled")
+	activeReplicas := int32(rapid.IntRange(1, 10).Draw(t, "activeReplicas"))
+	idleReplicas := int32(rapid.IntRange(0, int(activeReplicas)).Draw(t, "idleReplicas"))
 	idle := time.Duration(rapid.IntRange(1, 120).Draw(t, "idleMinutes")) * time.Minute
 	poll := time.Duration(rapid.IntRange(10, 300).Draw(t, "pollSeconds")) * time.Second
 	replicas := int32(rapid.IntRange(0, 10).Draw(t, "specReplicas"))
@@ -99,18 +99,18 @@ func drawAutoscalerInput(t *rapid.T) autoscalerInput {
 		// no schedule (0)
 	}
 
-	as := &computev1alpha1.AutoscalingSpec{
-		Enabled:      enabled,
-		MaxReplicas:  maxReplicas,
-		MinReplicas:  &minReplicas,
-		IdleTimeout:  &metav1.Duration{Duration: idle},
-		PollInterval: &metav1.Duration{Duration: poll},
-		Schedule:     schedule,
+	as := &computev1alpha1.AutoStopSpec{
+		Enabled:        enabled,
+		ActiveReplicas: activeReplicas,
+		IdleReplicas:   &idleReplicas,
+		IdleTimeout:    &metav1.Duration{Duration: idle},
+		PollInterval:   &metav1.Duration{Duration: poll},
+		Schedule:       schedule,
 	}
 
 	spec := &computev1alpha1.FireboltEngineSpec{
-		Replicas:    replicas,
-		Autoscaling: as,
+		Replicas: replicas,
+		AutoStop: as,
 	}
 
 	// status.LastActivityTime: nil or a stamp in (-2*idle, +0] of now.
@@ -128,27 +128,27 @@ func drawAutoscalerInput(t *rapid.T) autoscalerInput {
 	if rapid.Bool().Draw(t, "hasWakeStamp") {
 		// Age either inside the TTL (fresh) or outside (stale). 0..2*TTL
 		// covers both deterministically.
-		ageSec := rapid.IntRange(0, int(2*DefaultAutoscalerWakeTTL.Seconds())).Draw(t, "wakeAgeSec")
+		ageSec := rapid.IntRange(0, int(2*DefaultAutoStopWakeTTL.Seconds())).Draw(t, "wakeAgeSec")
 		stamp := referenceTime.Add(-time.Duration(ageSec) * time.Second)
 		wakeAt = &stamp
-		wakeFresh = referenceTime.Sub(stamp) < DefaultAutoscalerWakeTTL
+		wakeFresh = referenceTime.Sub(stamp) < DefaultAutoStopWakeTTL
 	}
 
-	obs := AutoscalerObservation{
+	obs := AutoStopObservation{
 		ActiveQueries:   active,
 		ScrapeFailed:    scrapeFailed,
 		WakeRequestedAt: wakeAt,
 	}
 
-	return autoscalerInput{
+	return autoStopInput{
 		spec: spec, status: &status, obs: obs,
-		autoscalingEnabled: enabled,
-		minReplicas:        minReplicas,
-		maxReplicas:        maxReplicas,
-		idleTimeout:        idle,
-		pollInterval:       poll,
-		scheduleActiveNow:  scheduleActiveNow,
-		wakeFresh:          wakeFresh,
+		autoStopEnabled:   enabled,
+		idleReplicas:      idleReplicas,
+		activeReplicas:    activeReplicas,
+		idleTimeout:       idle,
+		pollInterval:      poll,
+		scheduleActiveNow: scheduleActiveNow,
+		wakeFresh:         wakeFresh,
 	}
 }
 
@@ -220,10 +220,10 @@ func itoaSmall(n int) string {
 // Property assertions
 // ---------------------------------------------------------------------
 
-// assertAutoscalerWellFormed checks the structural invariants every
+// assertAutoStopWellFormed checks the structural invariants every
 // decision must satisfy regardless of input: non-negative replicas,
 // ScaleAction matches DesiredReplicas-vs-current, recognized Reason.
-func assertAutoscalerWellFormed(t *rapid.T, in autoscalerInput, dec AutoscalerDecision) {
+func assertAutoStopWellFormed(t *rapid.T, in autoStopInput, dec AutoStopDecision) {
 	if dec.DesiredReplicas < 0 {
 		t.Fatalf("DesiredReplicas = %d, want >= 0", dec.DesiredReplicas)
 	}
@@ -232,42 +232,42 @@ func assertAutoscalerWellFormed(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 		t.Fatalf("ScaleAction = %v, want %v (DesiredReplicas=%d, current=%d)",
 			dec.ScaleAction, wantScale, dec.DesiredReplicas, in.spec.Replicas)
 	}
-	if !isKnownAutoscalerReason(dec.Reason) {
+	if !isKnownAutoStopReason(dec.Reason) {
 		t.Fatalf("Reason = %q is not in the known reason set", dec.Reason)
 	}
 }
 
-// isKnownAutoscalerReason guards against silently introducing a new
+// isKnownAutoStopReason guards against silently introducing a new
 // reason token without updating consumers (status surfacing, metrics,
 // docs). Every reason the production code can emit must appear here.
-func isKnownAutoscalerReason(r string) bool {
+func isKnownAutoStopReason(r string) bool {
 	switch r {
-	case AutoscalerReasonDisabled,
-		AutoscalerReasonScheduleActive,
-		AutoscalerReasonStopped,
-		AutoscalerReasonActivity,
-		AutoscalerReasonScrapeFailed,
-		AutoscalerReasonIdle,
-		AutoscalerReasonWakeRequested,
-		AutoscalerReasonInitializing:
+	case AutoStopReasonDisabled,
+		AutoStopReasonScheduleActive,
+		AutoStopReasonStopped,
+		AutoStopReasonActivity,
+		AutoStopReasonScrapeFailed,
+		AutoStopReasonIdle,
+		AutoStopReasonWakeRequested,
+		AutoStopReasonInitializing:
 		return true
 	}
 	return false
 }
 
-// assertAutoscalerPrecedence checks the precedence rules listed in
-// computeAutoscalerDecision's docstring. Each rule is gated on the
+// assertAutoStopPrecedence checks the precedence rules listed in
+// computeAutoStopDecision's docstring. Each rule is gated on the
 // preconditions that make it the winning branch, so the assertion is
 // vacuous when the winning rule is elsewhere; the rapid harness
 // reaches every branch over enough draws.
-func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDecision) {
-	if !in.autoscalingEnabled {
+func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision) {
+	if !in.autoStopEnabled {
 		// Rule 1: disabled.
-		if dec.Reason != AutoscalerReasonDisabled {
-			t.Fatalf("autoscaling disabled, Reason = %q, want %q", dec.Reason, AutoscalerReasonDisabled)
+		if dec.Reason != AutoStopReasonDisabled {
+			t.Fatalf("autoStop disabled, Reason = %q, want %q", dec.Reason, AutoStopReasonDisabled)
 		}
 		if dec.DesiredReplicas != in.spec.Replicas {
-			t.Fatalf("autoscaling disabled, DesiredReplicas = %d, want unchanged %d",
+			t.Fatalf("autoStop disabled, DesiredReplicas = %d, want unchanged %d",
 				dec.DesiredReplicas, in.spec.Replicas)
 		}
 		return
@@ -275,32 +275,32 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 
 	// Rule 2: wake stamp wins over everything except disabled.
 	if in.wakeFresh {
-		if dec.Reason != AutoscalerReasonWakeRequested {
-			t.Fatalf("fresh WakeRequestedAt, Reason = %q, want %q", dec.Reason, AutoscalerReasonWakeRequested)
+		if dec.Reason != AutoStopReasonWakeRequested {
+			t.Fatalf("fresh WakeRequestedAt, Reason = %q, want %q", dec.Reason, AutoStopReasonWakeRequested)
 		}
-		if dec.DesiredReplicas != in.maxReplicas {
+		if dec.DesiredReplicas != in.activeReplicas {
 			t.Fatalf("fresh WakeRequestedAt, DesiredReplicas = %d, want %d",
-				dec.DesiredReplicas, in.maxReplicas)
+				dec.DesiredReplicas, in.activeReplicas)
 		}
 		return
 	}
 
 	// Rule 3: schedule active wins over idle / stopped.
 	if in.scheduleActiveNow {
-		if dec.Reason != AutoscalerReasonScheduleActive {
-			t.Fatalf("scheduleActive, Reason = %q, want %q", dec.Reason, AutoscalerReasonScheduleActive)
+		if dec.Reason != AutoStopReasonScheduleActive {
+			t.Fatalf("scheduleActive, Reason = %q, want %q", dec.Reason, AutoStopReasonScheduleActive)
 		}
-		if dec.DesiredReplicas != in.maxReplicas {
+		if dec.DesiredReplicas != in.activeReplicas {
 			t.Fatalf("scheduleActive, DesiredReplicas = %d, want %d",
-				dec.DesiredReplicas, in.maxReplicas)
+				dec.DesiredReplicas, in.activeReplicas)
 		}
 		return
 	}
 
 	// Rule 4: stopped engine stays stopped when no schedule / wake.
 	if in.spec.Replicas == 0 {
-		if dec.Reason != AutoscalerReasonStopped {
-			t.Fatalf("spec.Replicas==0, Reason = %q, want %q", dec.Reason, AutoscalerReasonStopped)
+		if dec.Reason != AutoStopReasonStopped {
+			t.Fatalf("spec.Replicas==0, Reason = %q, want %q", dec.Reason, AutoStopReasonStopped)
 		}
 		if dec.DesiredReplicas != 0 {
 			t.Fatalf("spec.Replicas==0, DesiredReplicas = %d, want 0", dec.DesiredReplicas)
@@ -310,8 +310,8 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 
 	// Rule 5: scrape failed refreshes lastActivity AND keeps replicas.
 	if in.obs.ScrapeFailed {
-		if dec.Reason != AutoscalerReasonScrapeFailed {
-			t.Fatalf("scrapeFailed, Reason = %q, want %q", dec.Reason, AutoscalerReasonScrapeFailed)
+		if dec.Reason != AutoStopReasonScrapeFailed {
+			t.Fatalf("scrapeFailed, Reason = %q, want %q", dec.Reason, AutoStopReasonScrapeFailed)
 		}
 		if dec.DesiredReplicas != in.spec.Replicas {
 			t.Fatalf("scrapeFailed, DesiredReplicas = %d, want unchanged %d",
@@ -326,8 +326,8 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 
 	// Rule 6: active queries refresh lastActivity AND keep replicas.
 	if in.obs.ActiveQueries > 0 {
-		if dec.Reason != AutoscalerReasonActivity {
-			t.Fatalf("ActiveQueries>0, Reason = %q, want %q", dec.Reason, AutoscalerReasonActivity)
+		if dec.Reason != AutoStopReasonActivity {
+			t.Fatalf("ActiveQueries>0, Reason = %q, want %q", dec.Reason, AutoStopReasonActivity)
 		}
 		if dec.DesiredReplicas != in.spec.Replicas {
 			t.Fatalf("ActiveQueries>0, DesiredReplicas = %d, want unchanged %d",
@@ -344,8 +344,8 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 
 	// Rule 7: first quiet observation initializes anchor.
 	if in.status.LastActivityTime == nil {
-		if dec.Reason != AutoscalerReasonInitializing {
-			t.Fatalf("first quiet obs, Reason = %q, want %q", dec.Reason, AutoscalerReasonInitializing)
+		if dec.Reason != AutoStopReasonInitializing {
+			t.Fatalf("first quiet obs, Reason = %q, want %q", dec.Reason, AutoStopReasonInitializing)
 		}
 		if dec.DesiredReplicas != in.spec.Replicas {
 			t.Fatalf("first quiet obs, DesiredReplicas = %d, want unchanged", dec.DesiredReplicas)
@@ -359,15 +359,15 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 
 	// Rule 8: idle-timeout reached AND above floor -> scale down.
 	idleFor := referenceTime.Sub(in.status.LastActivityTime.Time)
-	if idleFor >= in.idleTimeout && in.spec.Replicas > in.minReplicas {
-		if dec.Reason != AutoscalerReasonIdle {
+	if idleFor >= in.idleTimeout && in.spec.Replicas > in.idleReplicas {
+		if dec.Reason != AutoStopReasonIdle {
 			t.Fatalf("idleFor=%s >= IdleTimeout=%s and replicas=%d > min=%d, Reason = %q, want %q",
-				idleFor, in.idleTimeout, in.spec.Replicas, in.minReplicas,
-				dec.Reason, AutoscalerReasonIdle)
+				idleFor, in.idleTimeout, in.spec.Replicas, in.idleReplicas,
+				dec.Reason, AutoStopReasonIdle)
 		}
-		if dec.DesiredReplicas != in.minReplicas {
-			t.Fatalf("idle scale-down, DesiredReplicas = %d, want MinReplicas=%d",
-				dec.DesiredReplicas, in.minReplicas)
+		if dec.DesiredReplicas != in.idleReplicas {
+			t.Fatalf("idle scale-down, DesiredReplicas = %d, want IdleReplicas=%d",
+				dec.DesiredReplicas, in.idleReplicas)
 		}
 		return
 	}
@@ -375,8 +375,8 @@ func assertAutoscalerPrecedence(t *rapid.T, in autoscalerInput, dec AutoscalerDe
 	// Rule 9: not yet idle OR already at floor -> no scale, reason
 	// Activity (the production code reports "Activity" as a stable
 	// resting reason when nothing else applies).
-	if dec.Reason != AutoscalerReasonActivity {
-		t.Fatalf("quiet-but-not-idle, Reason = %q, want %q", dec.Reason, AutoscalerReasonActivity)
+	if dec.Reason != AutoStopReasonActivity {
+		t.Fatalf("quiet-but-not-idle, Reason = %q, want %q", dec.Reason, AutoStopReasonActivity)
 	}
 	if dec.DesiredReplicas != in.spec.Replicas {
 		t.Fatalf("quiet-but-not-idle, DesiredReplicas = %d, want unchanged", dec.DesiredReplicas)

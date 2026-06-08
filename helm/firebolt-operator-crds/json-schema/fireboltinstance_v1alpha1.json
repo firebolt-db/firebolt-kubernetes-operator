@@ -14597,7 +14597,7 @@
         },
         "metricScrapeMode": {
           "default": "PodIP",
-          "description": "MetricScrapeMode selects the transport the operator uses to scrape\nengine pod /metrics for the drain probe and autoscaler activity\npoll. Read fresh on every scrape so it can be flipped without a\ncontroller restart. Defaults to PodIP; flip to ApiserverProxy\nonly when in-cluster pod IPs aren't reachable from the controller\n(out-of-cluster `make run`, or networks that block node-to-node\non MetricsPort but allow apiserver-proxy).",
+          "description": "MetricScrapeMode selects the transport the operator uses to scrape\nengine pod /metrics for the drain probe and autoStop activity\npoll. Read fresh on every scrape so it can be flipped without a\ncontroller restart. Defaults to PodIP; flip to ApiserverProxy\nonly when in-cluster pod IPs aren't reachable from the controller\n(out-of-cluster `make run`, or networks that block node-to-node\non MetricsPort but allow apiserver-proxy).",
           "enum": [
             "PodIP",
             "ApiserverProxy"

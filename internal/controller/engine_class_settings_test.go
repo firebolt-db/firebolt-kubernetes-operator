@@ -159,23 +159,23 @@ func TestGetDrainCheckIntervalWithClass(t *testing.T) {
 	}
 }
 
-func TestEffectiveAutoscaling(t *testing.T) {
+func TestEffectiveAutoStop(t *testing.T) {
 	classAS := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
-		s.Autoscaling = &computev1alpha1.AutoscalingSpec{Enabled: true, MaxReplicas: 5}
+		s.AutoStop = &computev1alpha1.AutoStopSpec{Enabled: true, ActiveReplicas: 5}
 	})
 	engineAS := &computev1alpha1.FireboltEngineSpec{
-		Autoscaling: &computev1alpha1.AutoscalingSpec{Enabled: true, MaxReplicas: 2},
+		AutoStop: &computev1alpha1.AutoStopSpec{Enabled: true, ActiveReplicas: 2},
 	}
 	bare := &computev1alpha1.FireboltEngineSpec{}
 
-	if got := effectiveAutoscaling(engineAS, classAS); got == nil || got.MaxReplicas != 2 {
-		t.Errorf("engine autoscaling should win whole-struct, got %+v", got)
+	if got := effectiveAutoStop(engineAS, classAS); got == nil || got.ActiveReplicas != 2 {
+		t.Errorf("engine autoStop should win whole-struct, got %+v", got)
 	}
-	if got := effectiveAutoscaling(bare, classAS); got == nil || got.MaxReplicas != 5 {
-		t.Errorf("class autoscaling should fill in when engine unset, got %+v", got)
+	if got := effectiveAutoStop(bare, classAS); got == nil || got.ActiveReplicas != 5 {
+		t.Errorf("class autoStop should fill in when engine unset, got %+v", got)
 	}
-	if got := effectiveAutoscaling(bare, nil); got != nil {
-		t.Errorf("autoscaling should be nil (disabled) when neither set, got %+v", got)
+	if got := effectiveAutoStop(bare, nil); got != nil {
+		t.Errorf("autoStop should be nil (disabled) when neither set, got %+v", got)
 	}
 }
 

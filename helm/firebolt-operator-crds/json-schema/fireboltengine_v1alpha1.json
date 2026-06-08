@@ -15,41 +15,41 @@
     "spec": {
       "description": "FireboltEngineSpec defines the desired state of a Firebolt engine.\n\nThe CEL rule freezes spec.metadataEndpointOverride once it has been set\n(or unset) at creation time. The field selects the cross-cluster metadata\ntopology the engine's nodes bake into their on-disk configuration; letting\nusers mutate it later would silently force a full blue-green rollout (it\nparticipates in stsMatchesSpec via AnnotationMetadataOverride) and would\nbreak the instanceInfo-drift invariant computeStable relies on to allow\nin-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces\nbyte-identical content only when all ConfigMap inputs are frozen).\nThe wording mirrors the set-once pattern on FireboltInstanceSpec.ID,\nadapted for an optional pointer field via has(): absent-on-create may\nstill transition to set, but any set value may not subsequently be\nchanged or cleared.",
       "properties": {
-        "autoscaling": {
-          "description": "Autoscaling configures automatic replica management for this engine.\nWhen omitted or with Enabled=false, replicas is governed entirely by\nthe user. When enabled, the autoscaler owns spec.replicas (HPA-style)\nand mutates it based on query activity and Schedule windows.",
+        "autoStop": {
+          "description": "AutoStop configures automatic stop and wake-up for this engine. When\nomitted or with Enabled=false, spec.replicas is governed entirely by the\nuser. When enabled, the operator owns spec.replicas and drives it between\nIdleReplicas and ActiveReplicas based on idleness, wake-up requests, and\nSchedule windows. It is an activity-gated toggle, not proportional\nautoscaling.",
           "properties": {
-            "enabled": {
-              "default": false,
-              "description": "Enabled turns the autoscaler on for this engine. Defaults to false.",
-              "type": "boolean"
-            },
-            "idleTimeout": {
-              "default": "30m",
-              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before the autoscaler scales down to MinReplicas.\nDefaults to 30 minutes.",
-              "type": "string"
-            },
-            "maxReplicas": {
-              "description": "MaxReplicas is the replica count the autoscaler scales up to when the\nengine is active (during a Schedule window or following a wake-up).\nRequired when Enabled is true.",
+            "activeReplicas": {
+              "description": "ActiveReplicas is the replica count the engine runs at while active\n(during a Schedule window or following a wake-up). Required when Enabled\nis true.",
               "format": "int32",
               "minimum": 1,
               "type": "integer"
             },
-            "minReplicas": {
+            "enabled": {
+              "default": false,
+              "description": "Enabled turns auto-stop on for this engine. Defaults to false.",
+              "type": "boolean"
+            },
+            "idleReplicas": {
               "default": 0,
-              "description": "MinReplicas is the floor the autoscaler scales down to once IdleTimeout\nelapses with no observed query activity. 0 enables scale-to-zero.\nDefaults to 0.",
+              "description": "IdleReplicas is the replica count the engine scales down to once\nIdleTimeout elapses with no query activity. 0 fully stops the engine.\nDefaults to 0.",
               "format": "int32",
               "minimum": 0,
               "type": "integer"
             },
+            "idleTimeout": {
+              "default": "30m",
+              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before it scales down to IdleReplicas. Defaults to\n30 minutes.",
+              "type": "string"
+            },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is how often the autoscaler scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
+              "description": "PollInterval is how often the operator scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
               "type": "string"
             },
             "schedule": {
-              "description": "Schedule is an optional list of UTC time windows during which the\nautoscaler holds the engine at MaxReplicas regardless of observed\nactivity. Useful for \"always-on during business hours\" policies.",
+              "description": "Schedule is an optional list of UTC time windows during which the engine\nis held at ActiveReplicas regardless of observed activity. Useful for\n\"always-on during business hours\" policies.",
               "items": {
-                "description": "ScheduleWindow is a recurring UTC time window during which the autoscaler\nkeeps the engine pinned at MaxReplicas. End may be less than Start to\nexpress a window that crosses midnight (e.g. 22:00-02:00).",
+                "description": "ScheduleWindow is a recurring UTC time window during which the engine is\npinned at ActiveReplicas. End may be less than Start to express a window\nthat crosses midnight (e.g. 22:00-02:00).",
                 "properties": {
                   "days": {
                     "description": "Days lists the UTC weekdays the window applies to. Empty means every\nday. The window is anchored to the day on which Start falls; if End\ncrosses midnight the trailing portion still belongs to the listed day.",
@@ -90,14 +90,14 @@
             }
           },
           "required": [
-            "enabled",
-            "maxReplicas"
+            "activeReplicas",
+            "enabled"
           ],
           "type": "object",
           "x-kubernetes-validations": [
             {
-              "message": "maxReplicas must be >= minReplicas",
-              "rule": "self.maxReplicas >= (has(self.minReplicas) ? self.minReplicas : 0)"
+              "message": "activeReplicas must be >= idleReplicas",
+              "rule": "self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas : 0)"
             }
           ],
           "additionalProperties": false
@@ -7473,13 +7473,8 @@
           "description": "ActiveGeneration is the generation currently serving traffic.",
           "type": "integer"
         },
-        "autoscaledAt": {
-          "description": "AutoscaledAt is the timestamp of the most recent autoscaler-driven\nmutation of spec.replicas. Distinguishes autoscaler scale events from\nuser edits in audit trails.",
-          "format": "date-time",
-          "type": "string"
-        },
-        "autoscalerReason": {
-          "description": "AutoscalerReason is a short token describing the most recent autoscaler\ndecision: \"Idle\", \"ScheduleActive\", \"ActivityObserved\", \"ScrapeFailed\",\n\"Disabled\", \"Stopped\", \"Initializing\", \"WakeRequested\".",
+        "autoStopReason": {
+          "description": "AutoStopReason is a short token describing the most recent auto-stop\ndecision: \"Idle\", \"ScheduleActive\", \"ActivityObserved\", \"ScrapeFailed\",\n\"Disabled\", \"Stopped\", \"Initializing\", \"WakeRequested\".",
           "type": "string"
         },
         "conditions": {
@@ -7547,12 +7542,17 @@
           "type": "integer"
         },
         "lastActivityTime": {
-          "description": "LastActivityTime is the timestamp of the most recent autoscaler\nobservation that recorded in-flight or suspended queries. The\nautoscaler scales down once now() - LastActivityTime exceeds\nspec.autoscaling.idleTimeout. Cleared when autoscaling is disabled.",
+          "description": "LastActivityTime is the timestamp of the most recent auto-stop\nobservation that recorded in-flight or suspended queries. The engine\nscales down once now() - LastActivityTime exceeds\nspec.autoStop.idleTimeout. Cleared when auto-stop is disabled.",
           "format": "date-time",
           "type": "string"
         },
         "lastReconciled": {
           "description": "LastReconciled is the timestamp of the last reconciliation.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "lastScaledAt": {
+          "description": "LastScaledAt is the timestamp of the most recent auto-stop-driven\nmutation of spec.replicas. Distinguishes auto-stop scale events from\nuser edits in audit trails.",
           "format": "date-time",
           "type": "string"
         },

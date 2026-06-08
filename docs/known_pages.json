@@ -11,6 +11,8 @@
   "/crd-reference/instance-crd-reference/",
   "/engine",
   "/engine/",
+  "/engine/auto-stop-and-wake-up",
+  "/engine/auto-stop-and-wake-up/",
   "/engine/autoscaling-and-wake-up",
   "/engine/autoscaling-and-wake-up/",
   "/engine/engine-reconciliation",
