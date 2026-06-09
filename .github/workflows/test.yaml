@@ -7,10 +7,19 @@ permissions: {}
 
 jobs:
   test:
-    name: Run on Ubuntu
+    name: Run on Ubuntu (${{ matrix.variant }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      # Run the unit suite under both image variants so a bump to
+      # config/images/defaults.latest.env is gated by the same tests as the
+      # implicit-default `dev` build. `fail-fast: false` keeps one variant's
+      # failure from cancelling the other, so a variant-specific regression
+      # stays visible.
+      fail-fast: false
+      matrix:
+        variant: [dev, latest]
     steps:
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
@@ -35,18 +44,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # `make test` runs against the implicit-default `dev` image variant.
-      # The `latest` variant is intentionally NOT exercised in CI yet —
-      # until the engine/metadata `:latest` GHCR aliases (and the auto-PR
-      # that bumps `defaults.latest.env` off them) are in place, the
-      # `latest` variant would just validate a frozen-in-time pinned build
-      # that nobody is bumping. Once those land, flip the project default
-      # back to `latest` and add a matrix here so `make test` runs once
-      # per variant and both gate every PR.
-      - name: Running Tests (default = dev variant)
+      # `make test` runs once per image variant (see the matrix above):
+      # `dev` tracks the mutable `:dev` aliases, `latest` pins to the
+      # release-* build in config/images/defaults.latest.env. Both gate
+      # every PR, so a bump to defaults.latest.env is validated here too.
+      - name: Running Tests (${{ matrix.variant }} variant)
         run: |
           go mod tidy
-          make test
+          make test IMAGE_VARIANT=${{ matrix.variant }}
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
@@ -54,7 +59,13 @@ jobs:
       # real reconciler against envtest, so it catches CRD/admission regressions
       # that the pure-function property test and `make test` miss — e.g. the
       # k8s 1.36 `spec.template.spec.containers: Required value` rejection.
+      #
+      # `make test-property` builds with `-tags outerharness` only — it never
+      # adds the `latest` tag, so the image variant does not change what it
+      # exercises. Run it once (on the `dev` leg) instead of duplicating it
+      # across the matrix.
       - name: Running outer-Reconcile property tests
+        if: matrix.variant == 'dev'
         run: make test-property
         env:
           GOPRIVATE: github.com/firebolt-db/*

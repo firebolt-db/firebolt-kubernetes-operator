@@ -50,7 +50,7 @@ jobs:
           fi
 
   test-e2e:
-    name: E2E Tests
+    name: E2E Tests (${{ matrix.variant }})
     needs: detect
     if: needs.detect.outputs.docs_only != 'true'
     runs-on: ubuntu-16core-64gb-600ssd-amd64
@@ -58,6 +58,16 @@ jobs:
       id-token: write
       contents: read
       packages: read
+    strategy:
+      # Run the E2E suite under both image variants. `dev` tracks the
+      # mutable `:dev` aliases; `latest` pins to the release-* build in
+      # config/images/defaults.latest.env. `fail-fast: false` keeps one
+      # variant's failure from cancelling the other so a variant-specific
+      # regression stays visible, and each matrix leg runs on its own
+      # runner (so the hardcoded KIND_CLUSTER name does not collide).
+      fail-fast: false
+      matrix:
+        variant: [dev, latest]
     steps:
       - name: Clean Up Disk Space on public GitHub Runner
         if: runner.os == 'Linux'
@@ -169,15 +179,13 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
-      # The E2E suite runs against the implicit-default `dev` image variant.
-      # The `latest` variant is intentionally NOT exercised in CI yet —
-      # until the engine/metadata `:latest` GHCR aliases (and the auto-PR
-      # that bumps `defaults.latest.env` off them) are in place, the
-      # `latest` variant would just validate a frozen-in-time pinned build
-      # that nobody is bumping. Once those land, flip the project default
-      # back to `latest` and add a matrix here so `prepare-test-e2e` and
-      # `test-e2e` run once per variant and both gate every PR.
-      - name: Prepare Kind cluster and images (default = dev variant)
+      # The E2E suite runs once per image variant (see the matrix above):
+      # `prepare-test-e2e` loads the variant's engine/metadata images into
+      # Kind and `test-e2e` runs the suite against them, so a bump to
+      # config/images/defaults.latest.env is exercised end-to-end here too.
+      # IMAGE_VARIANT MUST be threaded into both make calls so the images
+      # loaded into Kind match the operator binary's embedded defaults.
+      - name: Prepare Kind cluster and images (${{ matrix.variant }} variant)
         id: prepare-kind
         # `pipefail` is documented as part of GitHub Actions' default Linux
         # shell (`bash -eo pipefail`), but this runner actually invokes
@@ -193,18 +201,18 @@ jobs:
         run: |
           set -o pipefail
           go mod tidy
-          make prepare-test-e2e KIND_CLUSTER="e2e-ci" 2>&1 | tee prepare-kind.log
+          make prepare-test-e2e KIND_CLUSTER="e2e-ci" IMAGE_VARIANT=${{ matrix.variant }} 2>&1 | tee prepare-kind.log
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
-      - name: Run E2E tests (default = dev variant)
+      - name: Run E2E tests (${{ matrix.variant }} variant)
         id: run-e2e
         # Same pipefail rationale as `prepare-kind`: tee would otherwise
         # mask a non-zero exit from `make test-e2e` and we'd lose the
         # connection between the failing step and its log file.
         run: |
           set -o pipefail
-          make test-e2e KIND_CLUSTER="e2e-ci" GINKGO_PROCS=6 2>&1 | tee run-e2e.log
+          make test-e2e KIND_CLUSTER="e2e-ci" IMAGE_VARIANT=${{ matrix.variant }} GINKGO_PROCS=6 2>&1 | tee run-e2e.log
         env:
           GOPRIVATE: github.com/firebolt-db/*
           E2E_ARTIFACT_DIR: ${{ github.workspace }}
@@ -217,7 +225,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-report
+          # Per-variant name: matrix legs upload concurrently and
+          # upload-artifact rejects duplicate artifact names within a run.
+          name: e2e-report-${{ matrix.variant }}
           path: |
             e2e-report.xml
             prepare-kind.log
