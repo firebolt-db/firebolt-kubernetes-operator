@@ -45,7 +45,6 @@ especially MDX files.
 - Put UI elements in bold.
 - Use unambiguous date formatting.
 - Do not use em-dashes.
-- Use periods over semicolons. Rather have two short sentences than one with a semicolon in-between.
 
 ## Images
 
