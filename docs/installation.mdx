@@ -15,13 +15,21 @@ This page explains how to install the Firebolt Operator in a Kubernetes cluster.
 
 ## Engine node requirements
 
-Engine pods inherit their locked-memory (`memlock`) limit from the node's container runtime, and engines need at least **8 GiB**. Engines lock memory for `io_uring` at startup, and the default on many managed node images (around 8 MiB) is far too low. When the limit is too low, the engine crashes during startup with an error like this:
+When an engine starts, it locks memory for `io_uring`, so it needs a `memlock` limit of at least **8 GiB**. Each engine pod takes that limit from `containerd`, the container runtime on its node. If the limit is too low, the engine crashes at startup with this error:
 
 ```text
-io_uring_register_buffers ... Cannot allocate memory
+io_uring_register_buffers failed: Cannot allocate memory
 ```
 
-The Firebolt Operator does not raise this limit for you, so every node that runs an engine must provide it. Raise `memlock` on the container runtime (`containerd`) with a systemd drop-in:
+The Firebolt Operator cannot raise this limit for you, so every engine node must provide it. Before you change anything, check the current limit on one of your engine nodes:
+
+```bash
+systemctl show containerd --property=LimitMEMLOCK
+```
+
+This prints either `infinity` or a value in bytes. Anything that is `infinity` or at least 8 GiB (8589934592 bytes) is enough, and that node needs no further change. Some node images already provide a high enough limit, while others default to around 8 MiB, which is far too low.
+
+If the limit is too low, raise `memlock` on the container runtime (`containerd`) with a systemd drop-in:
 
 ```ini
 # /etc/systemd/system/containerd.service.d/memlock.conf
@@ -37,11 +45,13 @@ systemctl restart containerd
 systemctl show containerd --property=LimitMEMLOCK
 ```
 
-Bake this into your node configuration so that upgraded, rotated, and autoscaled nodes get it automatically. How you deliver it depends on your platform.
+If you need to set it, bake the change into your node configuration so that upgraded, rotated, and autoscaled nodes get it automatically. How you deliver it depends on your cloud provider.
 
 ### Amazon EKS
 
-Add the drop-in through your managed node group's launch template user data, so each node configures itself before it registers. Include the following as a shell-script part of the launch template's MIME multipart user data:
+If you are using the Amazon EKS AMI, the `memlock` limit is already `infinity`, so you don't need to change anything on your engine nodes.
+
+If you are using a different OS, you need to verify the setting. One way to configure it on AWS is via an EC2 user-data script.
 
 ```bash
 #!/bin/bash
@@ -50,9 +60,6 @@ printf '[Service]\nLimitMEMLOCK=infinity\n' \
   > /etc/systemd/system/containerd.service.d/memlock.conf
 systemctl daemon-reload
 systemctl restart containerd
-```
-
-If you provision nodes with Karpenter, put the same script in the `spec.userData` of your `EC2NodeClass`.
 
 ### Google GKE
 
