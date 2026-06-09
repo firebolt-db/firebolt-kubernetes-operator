@@ -78,11 +78,12 @@ resolution so the renderer and the drift comparator agree.
 | `drainCheckEnabled` | engine > class > `true`. |
 | `drainCheckInterval` | engine > class > operator default. |
 | `autoStop` | Whole-struct. An engine that sets `spec.autoStop` owns the entire policy. The class policy applies only when the engine omits it. |
+| `uiSidecar` | engine > class > `false`. When it resolves to `true`, the Firebolt Operator injects a built-in Core UI sidecar (an `nginx` container named `core-ui`) into each engine pod, unless you already supply a `core-ui` container in the pod template. |
 
-`rollout`, `drainCheckEnabled`, and `drainCheckInterval` carry no CRD default on
-`FireboltEngine`. The Firebolt Operator applies the default in the resolver
-instead, so an unset engine value falls through to the class rather than being
-filled in at admission.
+`rollout`, `drainCheckEnabled`, `drainCheckInterval`, and `uiSidecar` carry no
+CRD default on `FireboltEngine`. The Firebolt Operator applies the default in
+the resolver instead, so an unset engine value falls through to the class
+rather than being filled in at admission.
 
 ## Deletion
 
@@ -102,8 +103,9 @@ engine in the same namespace. The engine controller watches
 `FireboltEngineClass` and enqueues every consumer whose
 `spec.engineClassRef` matches. `stsMatchesSpec` compares the resolved class
 template hash against the `firebolt.io/engine-class-hash` annotation on the
-StatefulSet, and detects `storage` and `customEngineConfig` changes (from
-either the engine or the class) through their own resolved-value comparators.
+StatefulSet, and detects `storage`, `customEngineConfig`, and `uiSidecar`
+changes (from either the engine or the class) through their own resolved-value
+comparators.
 Any mismatch bumps `currentGeneration`, whether the class template was edited in
 place, the engine flipped to a different class, or the reference was cleared.
 Class changes to `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and

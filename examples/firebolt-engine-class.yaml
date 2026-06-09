@@ -5,8 +5,8 @@
 # reusable pod-template fragment — most notably the cloud-provider IAM
 # binding (kube2iam pod annotation / IRSA service account / Pod Identity)
 # identical for every engine of one instance — plus defaults for a subset
-# of non-template engine settings: storage, customEngineConfig, rollout,
-# drainCheckEnabled, drainCheckInterval, and autoStop.
+# of non-template engine settings: uiSidecar, storage, customEngineConfig,
+# rollout, drainCheckEnabled, drainCheckInterval, and autoStop.
 #
 # FireboltEngineClass is namespaced (not cluster-scoped). The template
 # carries namespace-resolved identifiers — ServiceAccount names, Secret /
@@ -96,6 +96,12 @@ spec:
   # --- Non-template defaults (siblings of template) ---
   # Each is inherited by referencing engines that leave the matching
   # spec field unset.
+  #
+  # Inject a built-in Core UI sidecar (the "core-ui" nginx container,
+  # reachable on container port 9100) into every engine pod. Skipped on any
+  # engine that already supplies its own "core-ui" container. Toggling this
+  # reshapes the pod, so it rolls a new blue-green generation.
+  uiSidecar: true
   #
   # Default per-pod data volume. An engine that declares its own
   # spec.storage backend (persistentVolumeClaim / emptyDir / hostPath)

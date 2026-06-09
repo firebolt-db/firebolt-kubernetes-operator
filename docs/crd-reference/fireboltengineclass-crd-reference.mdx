@@ -11,6 +11,7 @@ Every field except `spec.template` is an optional default that a referencing eng
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each engine's `spec.template` (engine wins). See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-class-templates) and [FireboltEngineClass design](../engineclass/fireboltengineclass-design). |
+| `spec.uiSidecar` | No | `false` | Default Core UI sidecar toggle. When it resolves to `true`, the Firebolt Operator injects a built-in `nginx` container named `core-ui` (listening on port `9100`) into each engine pod, unless you already supply a `core-ui` container. The engine `spec.uiSidecar` wins when set. |
 | `spec.storage` | No | `{}` (emptyDir) | Default per-pod data volume. An engine that names any backend (`persistentVolumeClaim`, `emptyDir`, or `hostPath`) on its own `spec.storage` owns it. Otherwise the class backend applies. Backend selection is whole-struct, so the three backends stay mutually exclusive. See the [FireboltEngine CRD reference](./engine-crd-reference). |
 | `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment deep-merged beneath each engine's `spec.customEngineConfig`. The merge order is the operator base, then the class, then the engine, so an engine key wins over the same key on the class. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`) from the class layer too, so the class cannot override identity, routing, or topology. |
 | `spec.rollout` | No | `graceful` | Default rollout strategy, `graceful` or `recreate`. The engine `spec.rollout` wins when set. |
@@ -18,7 +19,7 @@ Every field except `spec.template` is an optional default that a referencing eng
 | `spec.drainCheckInterval` | No | – | Default drain-poll interval. The engine `spec.drainCheckInterval` wins when set. |
 | `spec.autoStop` | No | – | Default auto-stop policy. This is whole-struct. An engine that sets `spec.autoStop` owns the entire policy with no field-merge, and the class policy applies only when the engine omits it. See the [FireboltEngine CRD reference](./engine-crd-reference). |
 
-A class-level change to `spec.storage` or `spec.customEngineConfig` reshapes the rendered engine pod, so it rolls a new blue-green generation on every bound engine. Changes to `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop` are read live and do not by themselves trigger a rollout.
+A class-level change to `spec.uiSidecar`, `spec.storage`, or `spec.customEngineConfig` reshapes the rendered engine pod, so it rolls a new blue-green generation on every bound engine. Changes to `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop` are read live and do not by themselves trigger a rollout.
 
 ## Firebolt Operator-owned fields on class templates
 

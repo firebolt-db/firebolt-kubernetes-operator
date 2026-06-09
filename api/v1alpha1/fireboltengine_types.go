@@ -351,6 +351,22 @@ type FireboltEngineSpec struct {
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
+	// UISidecar enables a built-in Core UI sidecar (an nginx container named
+	// "core-ui" serving the Firebolt Core UI, pointed at this engine on
+	// localhost) in every pod of this engine. It exposes container port 9100
+	// ("web-ui"); the per-engine headless Service resolves to pod IPs, so the
+	// UI is reachable at <pod-ip>:9100 without listing an extra Service port.
+	//
+	// Resolution is engine-if-set → FireboltEngineClass-if-set → operator
+	// default (false). The default is applied by the controller, not the CRD,
+	// so an unset value here falls through to the referenced class instead of
+	// being materialized to false at admission.
+	//
+	// Toggling this changes the pod template and therefore triggers a new
+	// blue-green generation.
+	// +optional
+	UISidecar *bool `json:"uiSidecar,omitempty"`
+
 	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
 	// check on old-generation pods during graceful rollouts. When false, the
 	// operator skips directly to cleaning after switching traffic, without

@@ -222,6 +222,9 @@ var (
 	DefaultEngineImage        = images.DefaultEngine()
 	DefaultEngineRepository   = images.EngineImage
 	DefaultEngineTag          = images.EngineTag
+	// DefaultCoreUIImage is the "repository:tag" reference for the optional
+	// Core UI sidecar injected when an engine/class sets uiSidecar: true.
+	DefaultCoreUIImage = images.DefaultCoreUI()
 )
 
 // resolveImageRef returns "repository:tag" for a component, using fields from
@@ -335,3 +338,23 @@ func GetContainerPorts() []corev1.ContainerPort {
 		{Name: "metrics", ContainerPort: MetricsPort, Protocol: corev1.ProtocolTCP},
 	}
 }
+
+// Core UI sidecar constants. The sidecar is injected only when an engine or
+// its class opts in via uiSidecar: true; see buildCoreUISidecar.
+const (
+	// CoreUIContainerName is the fixed name of the injected Core UI sidecar.
+	// It doubles as the duplicate-injection guard: if a user already supplies
+	// a container with this name via the pod template, the operator does not
+	// inject its own.
+	CoreUIContainerName = "core-ui"
+	// CoreUIPortName / CoreUIPort are the name and number of the container
+	// port the Core UI listens on.
+	CoreUIPortName       = "web-ui"
+	CoreUIPort     int32 = 9100
+	// CoreUIWritableVolumeName is the emptyDir mounted into the UI container
+	// at nginx's writable paths, since it runs with a read-only root FS.
+	CoreUIWritableVolumeName = "nginx-writable-dir"
+	// CoreUIEngineURL is the local engine endpoint the UI talks to: the
+	// engine's http-query port (3473) on loopback within the same pod.
+	CoreUIEngineURL = "http://localhost:3473"
+)

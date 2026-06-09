@@ -66,6 +66,8 @@ var (
 	EnvoyTag      = defaults["ENVOY_TAG"]
 	EngineImage   = defaults["ENGINE_IMAGE"]
 	EngineTag     = defaults["ENGINE_TAG"]
+	CoreUIImage   = defaults["CORE_UI_IMAGE"]
+	CoreUITag     = defaults["CORE_UI_TAG"]
 )
 
 // DefaultMetadata returns "repo:tag" for the metadata service image.
@@ -76,6 +78,9 @@ func DefaultEnvoy() string { return EnvoyImage + ":" + EnvoyTag }
 
 // DefaultEngine returns "repo:tag" for the engine (firebolt-db) image.
 func DefaultEngine() string { return EngineImage + ":" + EngineTag }
+
+// DefaultCoreUI returns "repo:tag" for the optional Core UI sidecar image.
+func DefaultCoreUI() string { return CoreUIImage + ":" + CoreUITag }
 
 // Variant reports which defaults file is embedded in this build, "latest"
 // or "dev". The two variants must travel together across the operator
