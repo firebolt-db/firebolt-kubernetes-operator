@@ -45,7 +45,7 @@ import (
 // ports, or environment.
 //
 // Beyond Template, the class carries defaults for a subset of
-// non-pod-template FireboltEngine settings (Storage, CustomEngineConfig,
+// FireboltEngine settings (UISidecar, Storage, CustomEngineConfig,
 // Rollout, DrainCheckEnabled, DrainCheckInterval, AutoStop). Each
 // resolves engine-if-set → class-if-set → operator default: a referencing
 // engine that sets the corresponding spec field owns it, the class value
@@ -69,6 +69,15 @@ type FireboltEngineClassSpec struct {
 	// template schema, but the marker does not propagate into a child
 	// that has its own typed sub-schema (metadata: {type: object}).
 	Template corev1.PodTemplateSpec `json:"template"`
+
+	// UISidecar is the default Core UI sidecar setting for referencing engines
+	// that leave spec.uiSidecar unset. When true, the operator injects a
+	// built-in nginx container named "core-ui" (serving the Firebolt Core UI,
+	// pointed at the local engine) into each pod. The operator default (false)
+	// applies when neither side sets it; nil here means the class does not
+	// override.
+	// +optional
+	UISidecar *bool `json:"uiSidecar,omitempty"`
 
 	// Storage is the default per-pod data-volume configuration for engines
 	// that reference this class and do not declare a storage backend of

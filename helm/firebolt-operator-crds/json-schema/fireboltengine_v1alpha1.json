@@ -7451,6 +7451,10 @@
           },
           "type": "object",
           "additionalProperties": false
+        },
+        "uiSidecar": {
+          "description": "UISidecar enables a built-in Core UI sidecar (an nginx container named\n\"core-ui\" serving the Firebolt Core UI, pointed at this engine on\nlocalhost) in every pod of this engine. It exposes container port 9100\n(\"web-ui\"); the per-engine headless Service resolves to pod IPs, so the\nUI is reachable at <pod-ip>:9100 without listing an extra Service port.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (false). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to false at admission.\n\nToggling this changes the pod template and therefore triggers a new\nblue-green generation.",
+          "type": "boolean"
         }
       },
       "required": [

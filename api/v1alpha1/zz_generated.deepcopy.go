@@ -308,6 +308,11 @@ func (in *FireboltEngineClassList) DeepCopyObject() runtime.Object {
 func (in *FireboltEngineClassSpec) DeepCopyInto(out *FireboltEngineClassSpec) {
 	*out = *in
 	in.Template.DeepCopyInto(&out.Template)
+	if in.UISidecar != nil {
+		in, out := &in.UISidecar, &out.UISidecar
+		*out = new(bool)
+		**out = **in
+	}
 	in.Storage.DeepCopyInto(&out.Storage)
 	if in.CustomEngineConfig != nil {
 		in, out := &in.CustomEngineConfig, &out.CustomEngineConfig
@@ -407,6 +412,11 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 		in, out := &in.Template, &out.Template
 		*out = new(v1.PodTemplateSpec)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.UISidecar != nil {
+		in, out := &in.UISidecar, &out.UISidecar
+		*out = new(bool)
+		**out = **in
 	}
 	if in.DrainCheckEnabled != nil {
 		in, out := &in.DrainCheckEnabled, &out.DrainCheckEnabled

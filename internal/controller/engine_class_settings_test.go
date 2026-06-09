@@ -131,6 +131,34 @@ func TestEffectiveDrainCheckEnabled(t *testing.T) {
 	}
 }
 
+func TestEffectiveUISidecarEnabled(t *testing.T) {
+	// classInfoWith runs the real newFireboltEngineClassInfo constructor, so
+	// this also covers the class spec → FireboltEngineClassInfo propagation.
+	classEnabled := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
+		s.UISidecar = ptr(true)
+	})
+	engineDisabled := &computev1alpha1.FireboltEngineSpec{UISidecar: ptr(false)}
+	bare := &computev1alpha1.FireboltEngineSpec{}
+
+	tests := []struct {
+		name      string
+		spec      *computev1alpha1.FireboltEngineSpec
+		classInfo *FireboltEngineClassInfo
+		want      bool
+	}{
+		{"engine wins over class", engineDisabled, classEnabled, false},
+		{"class fills in when engine nil", bare, classEnabled, true},
+		{"operator default (false) when neither set", bare, nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := effectiveUISidecarEnabled(tc.spec, tc.classInfo); got != tc.want {
+				t.Errorf("effectiveUISidecarEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetDrainCheckIntervalWithClass(t *testing.T) {
 	classInterval := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
 		s.DrainCheckInterval = &metav1.Duration{Duration: 11 * time.Second}

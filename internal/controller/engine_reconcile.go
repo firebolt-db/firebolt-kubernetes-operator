@@ -74,11 +74,12 @@ type FireboltEngineClassInfo struct {
 	// Template is the FireboltEngineClass.spec.template ready to merge.
 	Template *corev1.PodTemplateSpec
 
-	// Storage, CustomEngineConfig, Rollout, DrainCheckEnabled,
+	// UISidecar, Storage, CustomEngineConfig, Rollout, DrainCheckEnabled,
 	// DrainCheckInterval, and AutoStop carry the class's defaults for the
-	// matching non-pod-template engine settings. They are consumed by the
-	// effective* helpers, each of which resolves engine-if-set →
-	// class-if-set → operator default. Copied verbatim from the class spec.
+	// matching engine settings. They are consumed by the effective* helpers,
+	// each of which resolves engine-if-set → class-if-set → operator default.
+	// Copied verbatim from the class spec.
+	UISidecar          *bool
 	Storage            computev1alpha1.EngineStorageSpec
 	CustomEngineConfig *apiextensionsv1.JSON
 	Rollout            computev1alpha1.RolloutStrategy
@@ -113,6 +114,7 @@ func newFireboltEngineClassInfo(ec *computev1alpha1.FireboltEngineClass) *Firebo
 	return &FireboltEngineClassInfo{
 		Name:               ec.Name,
 		Template:           tmpl,
+		UISidecar:          ec.Spec.UISidecar,
 		Storage:            *ec.Spec.Storage.DeepCopy(),
 		CustomEngineConfig: ec.Spec.CustomEngineConfig.DeepCopy(),
 		Rollout:            ec.Spec.Rollout,
@@ -699,6 +701,17 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
 
+	// Optional built-in Core UI sidecar (engine/class uiSidecar: true).
+	// effectiveSidecarsWithUI is the single source of truth for the sidecar
+	// set — stsMatchesSpec uses it too, so the injected container does not
+	// read back as drift. The nginx-writable emptyDir is added only when we
+	// actually inject our own container (a user-supplied core-ui brings its
+	// own volumes).
+	sidecars := effectiveSidecarsWithUI(spec, classInfo, pullPolicy)
+	if shouldInjectCoreUI(spec, classInfo) {
+		podVolumes = append(podVolumes, buildCoreUIWritableVolume())
+	}
+
 	// Reclaim per-pod PVCs when the (old-generation) StatefulSet is deleted
 	// during blue-green cleaning. WhenScaled stays Retain so a within-
 	// generation scale-down does not silently drop a node's data.
@@ -810,7 +823,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 								},
 							},
 						},
-					}, effectiveSidecars(spec, classInfo)...),
+					}, sidecars...),
 					Volumes: podVolumes,
 				},
 			},
@@ -1178,6 +1191,20 @@ func effectiveDrainCheckEnabled(spec *computev1alpha1.FireboltEngineSpec, classI
 	return true
 }
 
+// effectiveUISidecarEnabled resolves whether the built-in Core UI sidecar
+// should be injected: engine-if-set → class-if-set → operator default
+// (false). Unlike the drain-check default this is off, matching the
+// firebolt-instance-helm chart's uiSidecar: false default.
+func effectiveUISidecarEnabled(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+	if spec.UISidecar != nil {
+		return *spec.UISidecar
+	}
+	if classInfo != nil && classInfo.UISidecar != nil {
+		return *classInfo.UISidecar
+	}
+	return false
+}
+
 // effectiveAutoStop resolves the autoStop policy whole-struct:
 // engine-if-set → class-if-set → nil (autoStop disabled). An engine
 // that sets spec.autoStop owns the entire policy; the class value is
@@ -1425,6 +1452,98 @@ func appendSidecars(dst []corev1.Container, src []corev1.Container) []corev1.Con
 		dst = append(dst, copied)
 	}
 	return dst
+}
+
+// shouldInjectCoreUI reports whether the operator injects its own built-in
+// Core UI sidecar: the feature resolves to enabled (engine→class→false) and
+// the user has not already supplied a container named CoreUIContainerName
+// via the pod template (in which case theirs wins and we stay out of the way).
+func shouldInjectCoreUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+	return effectiveUISidecarEnabled(spec, classInfo) &&
+		!containsContainerNamed(effectiveSidecars(spec, classInfo), CoreUIContainerName)
+}
+
+// effectiveSidecarsWithUI returns effectiveSidecars plus the built-in Core UI
+// sidecar when shouldInjectCoreUI is true. buildStatefulSet and stsMatchesSpec
+// MUST resolve the sidecar set through this one helper, or the injected UI
+// container would read back from the API as perpetual drift and roll a new
+// blue-green generation on every reconcile. pullPolicy is the engine's
+// effective image pull policy, applied to the injected UI container.
+func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo, pullPolicy corev1.PullPolicy) []corev1.Container {
+	sidecars := effectiveSidecars(spec, classInfo)
+	if shouldInjectCoreUI(spec, classInfo) {
+		sidecars = append(sidecars, buildCoreUISidecar(pullPolicy))
+	}
+	return sidecars
+}
+
+// buildCoreUISidecar returns the built-in Core UI sidecar container injected
+// when an engine or its class sets uiSidecar: true. It mirrors the
+// firebolt-instance-helm chart's core-ui container: an nginx-based UI pointed
+// at the local engine (CoreUIEngineURL) over loopback, listening on
+// CoreUIPort, with a hardened securityContext (read-only root FS, drop ALL,
+// runs as the engine UID/GID) and nginx's writable paths backed by an
+// emptyDir. API-server defaults are stamped so a read-back of the rendered
+// StatefulSet does not look like drift (see containersEqualAfterDefaults).
+func buildCoreUISidecar(pullPolicy corev1.PullPolicy) corev1.Container {
+	runAsUser := DefaultEngineUID
+	runAsGroup := DefaultEngineGID
+	c := corev1.Container{
+		Name:            CoreUIContainerName,
+		Image:           DefaultCoreUIImage,
+		ImagePullPolicy: pullPolicy,
+		Env: []corev1.EnvVar{
+			{Name: "FIREBOLT_CORE_URL", Value: CoreUIEngineURL},
+		},
+		Ports: []corev1.ContainerPort{
+			{Name: CoreUIPortName, ContainerPort: CoreUIPort, Protocol: corev1.ProtocolTCP},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("25m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: boolPtr(false),
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			RunAsNonRoot:             boolPtr(true),
+			RunAsUser:                &runAsUser,
+			RunAsGroup:               &runAsGroup,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: CoreUIWritableVolumeName, MountPath: "/var/tmp"},
+			{Name: CoreUIWritableVolumeName, MountPath: "/var/cache/nginx"},
+			{Name: CoreUIWritableVolumeName, MountPath: "/var/run/nginx"},
+		},
+	}
+	applyContainerAPIServerDefaults(&c)
+	return c
+}
+
+// buildCoreUIWritableVolume returns the emptyDir backing nginx's writable
+// paths in the read-only-rootfs Core UI sidecar.
+func buildCoreUIWritableVolume() corev1.Volume {
+	return corev1.Volume{
+		Name:         CoreUIWritableVolumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	}
+}
+
+// containsContainerNamed reports whether any container in cs has the given name.
+func containsContainerNamed(cs []corev1.Container, name string) bool {
+	for i := range cs {
+		if cs[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // engineClassInitContainers returns the init containers from the class
@@ -2332,7 +2451,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !sidecarsMatch(podSpec.Containers, effectiveSidecars(spec, classInfo)) {
+	if !sidecarsMatch(podSpec.Containers, effectiveSidecarsWithUI(spec, classInfo, expectedPullPolicy)) {
 		return false
 	}
 

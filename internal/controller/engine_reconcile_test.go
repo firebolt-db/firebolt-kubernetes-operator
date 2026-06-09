@@ -158,6 +158,117 @@ func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.Statefu
 	return sts
 }
 
+func TestBuildStatefulSetUISidecar(t *testing.T) {
+	findContainer := func(sts *appsv1.StatefulSet, name string) *corev1.Container {
+		for i := range sts.Spec.Template.Spec.Containers {
+			if sts.Spec.Template.Spec.Containers[i].Name == name {
+				return &sts.Spec.Template.Spec.Containers[i]
+			}
+		}
+		return nil
+	}
+	hasVolume := func(sts *appsv1.StatefulSet, name string) bool {
+		for _, v := range sts.Spec.Template.Spec.Volumes {
+			if v.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("absent by default", func(t *testing.T) {
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+		if findContainer(sts, CoreUIContainerName) != nil {
+			t.Errorf("did not expect a %q container by default", CoreUIContainerName)
+		}
+		if hasVolume(sts, CoreUIWritableVolumeName) {
+			t.Errorf("did not expect the %q volume by default", CoreUIWritableVolumeName)
+		}
+	})
+
+	t.Run("injected when enabled", func(t *testing.T) {
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+
+		c := findContainer(sts, CoreUIContainerName)
+		if c == nil {
+			t.Fatalf("expected a %q container when uiSidecar=true", CoreUIContainerName)
+		}
+		if c.Image != DefaultCoreUIImage {
+			t.Errorf("core-ui image = %q, want %q", c.Image, DefaultCoreUIImage)
+		}
+		if len(c.Ports) != 1 || c.Ports[0].ContainerPort != CoreUIPort || c.Ports[0].Name != CoreUIPortName {
+			t.Errorf("core-ui ports = %+v, want one %q port %d", c.Ports, CoreUIPortName, CoreUIPort)
+		}
+		if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
+			t.Error("core-ui should run with a read-only root filesystem")
+		}
+		if !hasVolume(sts, CoreUIWritableVolumeName) {
+			t.Errorf("expected the %q volume when uiSidecar=true", CoreUIWritableVolumeName)
+		}
+		// The engine container must remain present and first.
+		if sts.Spec.Template.Spec.Containers[0].Name != computev1alpha1.EngineContainerName {
+			t.Errorf("engine container should stay first, got %q", sts.Spec.Template.Spec.Containers[0].Name)
+		}
+	})
+
+	t.Run("no drift on its own output", func(t *testing.T) {
+		// A freshly built UI-sidecar STS must match its own spec, or every
+		// reconcile would roll a new blue-green generation. This load-bears on
+		// buildStatefulSet and stsMatchesSpec sharing effectiveSidecarsWithUI
+		// and on applyContainerAPIServerDefaults stamping.
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec = false for a freshly built UI-sidecar STS (drift)")
+		}
+	})
+
+	t.Run("toggling is detected as drift", func(t *testing.T) {
+		off := testSpec()
+		on := testSpec()
+		on.UISidecar = ptr(true)
+		if stsMatchesSpec(buildStatefulSet(off, testEngineName, testNamespace, 0, nil), on, nil) {
+			t.Error("enabling uiSidecar should be detected as drift")
+		}
+		if stsMatchesSpec(buildStatefulSet(on, testEngineName, testNamespace, 0, nil), off, nil) {
+			t.Error("disabling uiSidecar should be detected as drift")
+		}
+	})
+
+	t.Run("user-supplied core-ui suppresses injection", func(t *testing.T) {
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Containers = append(p.Containers, corev1.Container{
+				Name:  CoreUIContainerName,
+				Image: "example.com/my-own-ui:v1",
+			})
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+
+		var count int
+		var img string
+		for _, c := range sts.Spec.Template.Spec.Containers {
+			if c.Name == CoreUIContainerName {
+				count++
+				img = c.Image
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected exactly one %q container, got %d", CoreUIContainerName, count)
+		}
+		if img != "example.com/my-own-ui:v1" {
+			t.Errorf("user-supplied core-ui should win, got image %q", img)
+		}
+		if hasVolume(sts, CoreUIWritableVolumeName) {
+			t.Error("operator should not add its writable volume when the user supplies core-ui")
+		}
+	})
+}
+
 // storageBackendCase parameterizes a reconciler test across the engine
 // storage backends. applySpec mutates testSpec()'s Storage in place to
 // select the backend; seedSTS builds the matching seed StatefulSet that
