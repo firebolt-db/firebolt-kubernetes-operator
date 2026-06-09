@@ -1,3 +1,14 @@
+# 1.0.36
+
+appVersion: v4.9.1
+
+## [4.9.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.9.0...v4.9.1) (2026-06-09)
+
+### Bug Fixes
+
+* semicolons are regular English (FB-1539) ([#122](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/122)) ([04e3a8a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/04e3a8aee2e4568456da41d9d084b1fc6b95c6a0))
+
+
 # 1.0.35
 
 appVersion: v4.9.0
