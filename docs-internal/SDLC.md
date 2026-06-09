@@ -140,8 +140,9 @@ release tags too, where `docker pull` is a cheap manifest check.
 Selecting a variant:
 
 - `make build` / `make test` / `make test-e2e` — implicit default is `dev`
-  (no extra Go build tag set). Until the `:latest` aliases land, this is
-  also what CI runs.
+  (no extra Go build tag set). CI runs both variants: the `test` and
+  `test-e2e` workflows carry a `variant: [dev, latest]` matrix, so every PR
+  is gated on `dev` and `latest`.
 - `make build IMAGE_VARIANT=latest`, `make test IMAGE_VARIANT=latest`,
   `make prepare-test-e2e IMAGE_VARIANT=latest`, `make test-e2e IMAGE_VARIANT=latest` —
   switches the operator binary's embedded defaults *and* the E2E
