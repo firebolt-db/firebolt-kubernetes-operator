@@ -1,3 +1,14 @@
+# 1.0.39
+
+appVersion: v4.12.0
+
+## [4.12.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.11.0...v4.12.0) (2026-06-10)
+
+### Features
+
+* **kubectl-firebolt:** add engine/instance management plugin (FB-1455) ([#94](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/94)) ([39215aa](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/39215aab0b586efa9cfc8c3662668a05e5cc09cc))
+
+
 # 1.0.38
 
 appVersion: v4.11.0
