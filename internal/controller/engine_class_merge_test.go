@@ -352,12 +352,12 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 		t.Error("engine Lifecycle missing class-supplied PreStop hook")
 	}
 
-	// Operator mounts (nodes-config + data) must remain at the head;
+	// Operator mounts (data + nodes-config) must remain at the head;
 	// shared-cache appended after.
 	if len(engine.VolumeMounts) < 3 {
 		t.Fatalf("engine VolumeMounts = %+v, want operator mounts + class mount", engine.VolumeMounts)
 	}
-	if engine.VolumeMounts[0].Name != "nodes-config" || engine.VolumeMounts[1].Name != DataVolumeName {
+	if engine.VolumeMounts[0].Name != DataVolumeName || engine.VolumeMounts[1].Name != "nodes-config" {
 		t.Errorf("operator volumeMounts displaced from leading position: %+v", engine.VolumeMounts[:2])
 	}
 	if engine.VolumeMounts[len(engine.VolumeMounts)-1].Name != "shared-cache" {

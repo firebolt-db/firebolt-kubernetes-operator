@@ -33,7 +33,7 @@ applies these defaults on the `engine` container:
 | `runAsNonRoot` | `true` |
 | Capabilities | drop `ALL` |
 | `allowPrivilegeEscalation` | `false` |
-| Read-only root filesystem | `false` (persistent state lives on the data volume at `/firebolt-core/volume`) |
+| Read-only root filesystem | `true` (unix domain socket via emptyDir at `/var/run/firebolt`; status file and engine data on the PVC at `/firebolt-data/data`) |
 | Seccomp | not set |
 
 You can replace that entire container `securityContext` wholesale through
