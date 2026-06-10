@@ -705,10 +705,13 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	// effectiveSidecarsWithUI is the single source of truth for the sidecar
 	// set — stsMatchesSpec uses it too, so the injected container does not
 	// read back as drift. The nginx-writable emptyDir is added only when we
-	// actually inject our own container (a user-supplied core-ui brings its
-	// own volumes).
+	// inject our own container, and only if the merged pod template does not
+	// already carry a volume of that name — `nginx-writable-dir` is not in
+	// operatorOwnedPodVolumeNames, so a user/class template could supply one,
+	// and appending unconditionally would emit a duplicate volume that fails
+	// pod-template validation.
 	sidecars := effectiveSidecarsWithUI(spec, classInfo, pullPolicy)
-	if shouldInjectCoreUI(spec, classInfo) {
+	if shouldInjectCoreUI(spec, classInfo) && !containsVolumeNamed(podVolumes, CoreUIWritableVolumeName) {
 		podVolumes = append(podVolumes, buildCoreUIWritableVolume())
 	}
 
@@ -1540,6 +1543,16 @@ func buildCoreUIWritableVolume() corev1.Volume {
 func containsContainerNamed(cs []corev1.Container, name string) bool {
 	for i := range cs {
 		if cs[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// containsVolumeNamed reports whether any volume in vs has the given name.
+func containsVolumeNamed(vs []corev1.Volume, name string) bool {
+	for i := range vs {
+		if vs[i].Name == name {
 			return true
 		}
 	}
