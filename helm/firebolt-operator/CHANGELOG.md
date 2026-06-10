@@ -1,3 +1,14 @@
+# 1.0.41
+
+appVersion: v4.13.0
+
+## [4.13.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.12.1...v4.13.0) (2026-06-10)
+
+### Features
+
+* provide quickstart.yaml for public website (FB-1581) ([#127](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/127)) ([2e159d3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2e159d34d80f664be32ab637040793fe417bb47e))
+
+
 # 1.0.40
 
 appVersion: v4.12.1
