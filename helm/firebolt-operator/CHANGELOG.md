@@ -1,3 +1,19 @@
+# 1.0.38
+
+appVersion: v4.11.0
+
+## [4.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.10.0...v4.11.0) (2026-06-10)
+
+### Features
+
+* add uiSidecar toggle for a built-in Core UI sidecar (FB-1578) ([8abec52](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8abec527a3396d3051971154625f7c35f5c27b0f))
+
+### Bug Fixes
+
+* avoid duplicate Core UI writable volume on uiSidecar injection (FB-1578) ([a5ffd82](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a5ffd8239dd11e969fd671a1abf6b478e2655ce2))
+* skip Core UI injection when an init container is named core-ui (FB-1578) ([384562e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/384562e26cddf45c21a5ecf8cd1ecbbfe1cfc4d3))
+
+
 # 1.0.37
 
 appVersion: v4.10.0
