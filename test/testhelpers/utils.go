@@ -24,7 +24,8 @@ import (
 	"os/exec"
 	"strings"
 
-	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck // dot import is standard Ginkgo usage
+	//revive:disable-next-line:dot-imports
+	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // dot import is standard Ginkgo usage
 )
 
 const (
