@@ -181,6 +181,15 @@ linters:
         text: "package-comments: should have a package comment"
       - path: (.+)\.go$
         text: Error return value of .((os\.)?std(out|err)\..*|.*Flush|.*printf?). is not checked
+      # The kubectl-firebolt CLI's job is to write results to stdout/stderr, and
+      # a failed write there is not independently actionable. The errcheck rule
+      # above predates the golangci-lint v2.9.0 bump, which strengthened revive's
+      # unhandled-error and began flagging fmt.Print*/Fprint* (and errcheck began
+      # flagging fmt.Fprintln). Exempt those fmt write calls too.
+      - linters:
+          - revive
+          - errcheck
+        text: "fmt\\.(Print|Fprint)"
     paths:
       - third_party$
       - builtin$

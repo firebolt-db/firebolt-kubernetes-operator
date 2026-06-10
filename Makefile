@@ -260,6 +260,10 @@ build: manifests generate ## Build manager binary.
 	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
+.PHONY: kubectl-firebolt
+kubectl-firebolt: ## Build the kubectl-firebolt plugin for the host platform (install on PATH to use as `kubectl firebolt`).
+	go build -ldflags "$(LDFLAGS)" -o bin/kubectl-firebolt ./cmd/kubectl-firebolt
+
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	DOCKER_BUILDKIT=1 $(CONTAINER_TOOL) build \

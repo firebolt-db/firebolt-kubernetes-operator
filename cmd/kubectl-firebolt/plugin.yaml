@@ -1,0 +1,60 @@
+# DRAFT krew manifest for the kubectl-firebolt plugin (v0.0.1).
+#
+# NOT yet usable: the `uri` and `sha256` fields are placeholders. A release
+# pipeline (e.g. GoReleaser) must build the per-platform archives, upload them,
+# and fill in the real download URLs + checksums before this can be installed
+# with `kubectl krew install`. Until then, build locally: `make kubectl-firebolt`.
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: firebolt
+spec:
+  version: v0.0.1
+  homepage: https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/cmd/kubectl-firebolt
+  shortDescription: Manage Firebolt engines and instances
+  description: |
+    Manage FireboltEngine and FireboltInstance resources via the Firebolt
+    Kubernetes operator. The plugin builds the custom resources from the
+    operator's own API types and applies them with kubectl:
+    create / list / delete / port-forward engines, and list / port-forward
+    instances. Add --print-commands (alias --debug) to print the kubectl
+    commands it would run instead of running them.
+  caveats: |
+    Requires `kubectl` on PATH — the plugin shells out to it.
+    Run `kubectl firebolt --help` to get started.
+  platforms:
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/firebolt-db/firebolt-kubernetes-operator/releases/download/kubectl-firebolt-v0.0.1/kubectl-firebolt_v0.0.1_darwin_arm64.tar.gz
+      sha256: REPLACE_WITH_SHA256  # darwin/arm64 archive checksum
+      bin: kubectl-firebolt
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/firebolt-db/firebolt-kubernetes-operator/releases/download/kubectl-firebolt-v0.0.1/kubectl-firebolt_v0.0.1_darwin_amd64.tar.gz
+      sha256: REPLACE_WITH_SHA256  # darwin/amd64 archive checksum
+      bin: kubectl-firebolt
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/firebolt-db/firebolt-kubernetes-operator/releases/download/kubectl-firebolt-v0.0.1/kubectl-firebolt_v0.0.1_linux_amd64.tar.gz
+      sha256: REPLACE_WITH_SHA256  # linux/amd64 archive checksum
+      bin: kubectl-firebolt
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/firebolt-db/firebolt-kubernetes-operator/releases/download/kubectl-firebolt-v0.0.1/kubectl-firebolt_v0.0.1_linux_arm64.tar.gz
+      sha256: REPLACE_WITH_SHA256  # linux/arm64 archive checksum
+      bin: kubectl-firebolt
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      uri: https://github.com/firebolt-db/firebolt-kubernetes-operator/releases/download/kubectl-firebolt-v0.0.1/kubectl-firebolt_v0.0.1_windows_amd64.zip
+      sha256: REPLACE_WITH_SHA256  # windows/amd64 archive checksum
+      bin: kubectl-firebolt.exe
