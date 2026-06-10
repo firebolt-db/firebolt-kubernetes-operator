@@ -59,15 +59,15 @@ func All() map[string]string {
 
 // Operator default images, sourced from the embedded defaults file.
 var (
-	PostgresImage = defaults["POSTGRES_IMAGE"]
-	MetadataImage = defaults["METADATA_IMAGE"]
-	MetadataTag   = defaults["METADATA_TAG"]
-	EnvoyImage    = defaults["ENVOY_IMAGE"]
-	EnvoyTag      = defaults["ENVOY_TAG"]
-	EngineImage   = defaults["ENGINE_IMAGE"]
-	EngineTag     = defaults["ENGINE_TAG"]
-	CoreUIImage   = defaults["CORE_UI_IMAGE"]
-	CoreUITag     = defaults["CORE_UI_TAG"]
+	PostgresImage  = defaults["POSTGRES_IMAGE"]
+	MetadataImage  = defaults["METADATA_IMAGE"]
+	MetadataTag    = defaults["METADATA_TAG"]
+	EnvoyImage     = defaults["ENVOY_IMAGE"]
+	EnvoyTag       = defaults["ENVOY_TAG"]
+	EngineImage    = defaults["ENGINE_IMAGE"]
+	EngineTag      = defaults["ENGINE_TAG"]
+	EngineWebImage = defaults["ENGINE_WEB_IMAGE"]
+	EngineWebTag   = defaults["ENGINE_WEB_TAG"]
 )
 
 // DefaultMetadata returns "repo:tag" for the metadata service image.
@@ -79,8 +79,8 @@ func DefaultEnvoy() string { return EnvoyImage + ":" + EnvoyTag }
 // DefaultEngine returns "repo:tag" for the engine (firebolt-db) image.
 func DefaultEngine() string { return EngineImage + ":" + EngineTag }
 
-// DefaultCoreUI returns "repo:tag" for the optional Core UI sidecar image.
-func DefaultCoreUI() string { return CoreUIImage + ":" + CoreUITag }
+// DefaultEngineWeb returns "repo:tag" for the optional engine web UI sidecar image.
+func DefaultEngineWeb() string { return EngineWebImage + ":" + EngineWebTag }
 
 // Variant reports which defaults file is embedded in this build, "latest"
 // or "dev". The two variants must travel together across the operator

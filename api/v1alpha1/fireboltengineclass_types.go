@@ -41,8 +41,10 @@ import (
 // rejection set is built from operatorauthority.go.
 //
 // Non-engine containers (sidecars) and additional init containers are
-// fully user-owned: the webhook does not constrain their image, command,
-// ports, or environment.
+// user-owned: the webhook does not constrain their image, command, ports,
+// or environment. The exception is the reserved EngineWebContainerName
+// ("engine-web") that the operator injects for spec.uiSidecar; a user
+// container or init container with that name is rejected.
 //
 // Beyond Template, the class carries defaults for a subset of
 // FireboltEngine settings (UISidecar, Storage, CustomEngineConfig,
@@ -70,12 +72,12 @@ type FireboltEngineClassSpec struct {
 	// that has its own typed sub-schema (metadata: {type: object}).
 	Template corev1.PodTemplateSpec `json:"template"`
 
-	// UISidecar is the default Core UI sidecar setting for referencing engines
+	// UISidecar is the default UI sidecar setting for referencing engines
 	// that leave spec.uiSidecar unset. When true, the operator injects a
-	// built-in nginx container named "core-ui" (serving the Firebolt Core UI,
-	// pointed at the local engine) into each pod. The operator default (false)
-	// applies when neither side sets it; nil here means the class does not
-	// override.
+	// built-in, operator-owned nginx container named "engine-web" (serving the
+	// Firebolt Engine Web UI, pointed at the local engine) into each pod. The
+	// operator default (false) applies when neither side sets it; nil here
+	// means the class does not override.
 	// +optional
 	UISidecar *bool `json:"uiSidecar,omitempty"`
 

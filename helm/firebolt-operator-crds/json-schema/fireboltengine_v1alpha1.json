@@ -182,7 +182,7 @@
               "additionalProperties": false
             },
             "hostPath": {
-              "description": "HostPath backs the engine's data mount with a directory on the\nnode filesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode the engine pod could be scheduled onto, with permissions\nreadable by the engine UID. Use to expose instance-store NVMe on\nthe node.",
+              "description": "HostPath backs the engine's data mount with a directory on the\nnode filesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode the engine pod could be scheduled onto, with permissions\nreadable by the engine web UID. Use to expose instance-store NVMe on\nthe node.",
               "properties": {
                 "path": {
                   "description": "Path is the absolute filesystem path on the host node.",
@@ -7453,7 +7453,7 @@
           "additionalProperties": false
         },
         "uiSidecar": {
-          "description": "UISidecar enables a built-in Core UI sidecar (an nginx container named\n\"core-ui\" serving the Firebolt Core UI, pointed at this engine on\nlocalhost) in every pod of this engine. It exposes container port 9100\n(\"web-ui\"); the per-engine headless Service resolves to pod IPs, so the\nUI is reachable at <pod-ip>:9100 without listing an extra Service port.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (false). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to false at admission.\n\nToggling this changes the pod template and therefore triggers a new\nblue-green generation.",
+          "description": "UISidecar enables a built-in UI sidecar (an operator-owned nginx\ncontainer named \"engine-web\" serving the Firebolt Engine Web UI, pointed at\nthis engine on localhost) in every pod of this engine. It exposes\ncontainer port 9100 (\"web-ui\"); the per-engine headless Service resolves\nto pod IPs, so the UI is reachable at <pod-ip>:9100 without listing an\nextra Service port. The \"engine-web\" container name is reserved: a\nuser-supplied container or init container with that name is rejected.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (false). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to false at admission.\n\nToggling this changes the pod template and therefore triggers a new\nblue-green generation.",
           "type": "boolean"
         }
       },

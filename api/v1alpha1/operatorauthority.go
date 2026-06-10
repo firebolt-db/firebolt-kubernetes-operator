@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -50,6 +51,16 @@ const ReservedFireboltKeyPrefix = "firebolt.io/"
 // `firebolt-core`, but that's an image-internal path and doesn't surface
 // on the pod template.
 const EngineContainerName = "engine"
+
+// EngineWebContainerName is the fixed name of the operator-injected Engine Web UI
+// sidecar, deployed into engine pods when spec.uiSidecar resolves to true.
+// Like EngineContainerName it is operator-owned: the FireboltEngineClass
+// validating webhook rejects a user-supplied container or init container
+// with this name (on both the engine and class templates) so the operator's
+// injected sidecar can never collide with one the user wrote. The operator
+// renders the container end-to-end, so there is no user-extension surface
+// on it the way there is on the engine container.
+const EngineWebContainerName = "engine-web"
 
 // GatewayContainerName is the fixed name of the Envoy container inside
 // the FireboltInstance gateway Deployment's pod template. The
@@ -270,6 +281,15 @@ type PodTemplateRules struct {
 	// an init container named PrimaryContainerName is still rejected
 	// (it would collide with the operator-rendered primary container).
 	AllowInitContainers bool
+
+	// ReservedContainerNames are additional operator-owned container names
+	// (beyond PrimaryContainerName) that the operator may inject into the
+	// rendered pod, e.g. the optional engine web UI sidecar. A user container
+	// or init container with one of these names is rejected even when
+	// AllowSidecars / AllowInitContainers is true: the operator-rendered
+	// container would otherwise collide with it, and Kubernetes requires
+	// container names to be unique across the regular and init lists.
+	ReservedContainerNames []string
 }
 
 // PrimaryContainerFields declares which container-level fields a user
@@ -319,6 +339,7 @@ var FireboltEngineClassPodTemplateRules = PodTemplateRules{
 	ReservedPrimaryVolumeMountNames: operatorOwnedEngineVolumeNames,
 	AllowSidecars:                   true,
 	AllowInitContainers:             true,
+	ReservedContainerNames:          []string{EngineWebContainerName},
 }
 
 // GatewayPodTemplateRules is the ruleset for FireboltInstance.spec.gateway.template.
@@ -565,6 +586,10 @@ func validateContainersAgainstRules(containers []corev1.Container, base *field.P
 			}
 			primarySeen = true
 			errs = append(errs, validatePrimaryContainerFields(c, path, rules)...)
+		case slices.Contains(rules.ReservedContainerNames, c.Name):
+			errs = append(errs, field.Forbidden(path.Child("name"),
+				fmt.Sprintf("container name %q is reserved by the %s operator and cannot be set on the pod template",
+					c.Name, rules.Component)))
 		case !rules.AllowSidecars:
 			errs = append(errs, field.Forbidden(path,
 				fmt.Sprintf("additional containers are not allowed on the %s pod template; only the %q container may be defined here",
@@ -595,6 +620,10 @@ func validateInitContainersAgainstRules(initContainers []corev1.Container, base 
 			errs = append(errs, field.Forbidden(path.Child("name"),
 				fmt.Sprintf("init container name %q collides with the %s container; pick a different name",
 					rules.PrimaryContainerName, rules.Component)))
+		} else if slices.Contains(rules.ReservedContainerNames, initContainers[i].Name) {
+			errs = append(errs, field.Forbidden(path.Child("name"),
+				fmt.Sprintf("init container name %q is reserved by the %s operator; pick a different name",
+					initContainers[i].Name, rules.Component)))
 		}
 	}
 	return errs

@@ -187,17 +187,17 @@ const (
 	// kernel uses it to chown the per-pod data PVC so the (non-root) engine
 	// process can read and write its own volume.
 	DefaultEngineFSGroup int64 = 3473
-	// DefaultEngineUID is the non-root UID the engine container runs
+	// DefaultEngineWebD is the non-root UID the engine container runs
 	// under when FireboltEngine.spec.securityContext does not override
 	// it. 3473 matches DefaultEngineFSGroup so the process's primary
 	// GID, the volume-mount fsGroup, and the port mnemonic all line up
 	// — and matches the sibling firebolt-instance-helm chart's engine
 	// StatefulSet, so engines moved between deployment paths keep their
 	// on-disk ownership.
-	DefaultEngineUID int64 = 3473
+	DefaultEngineWebD int64 = 3473
 	// DefaultEngineGID is the non-root GID the engine container runs
-	// under. Pinned to the same value as DefaultEngineUID and
-	// DefaultEngineFSGroup; see DefaultEngineUID.
+	// under. Pinned to the same value as DefaultEngineWebD and
+	// DefaultEngineFSGroup; see DefaultEngineWebD.
 	DefaultEngineGID int64 = 3473
 	// EngineShutdownMarginSeconds is subtracted from terminationGracePeriodSeconds
 	// to compute shutdown_wait_unfinished. The remaining margin covers container
@@ -222,9 +222,9 @@ var (
 	DefaultEngineImage        = images.DefaultEngine()
 	DefaultEngineRepository   = images.EngineImage
 	DefaultEngineTag          = images.EngineTag
-	// DefaultCoreUIImage is the "repository:tag" reference for the optional
-	// Core UI sidecar injected when an engine/class sets uiSidecar: true.
-	DefaultCoreUIImage = images.DefaultCoreUI()
+	// DefaultEngineWebImage is the "repository:tag" reference for the optional
+	// engine web UI sidecar injected when an engine/class sets uiSidecar: true.
+	DefaultEngineWebImage = images.DefaultEngineWeb()
 )
 
 // resolveImageRef returns "repository:tag" for a component, using fields from
@@ -339,22 +339,21 @@ func GetContainerPorts() []corev1.ContainerPort {
 	}
 }
 
-// Core UI sidecar constants. The sidecar is injected only when an engine or
-// its class opts in via uiSidecar: true; see buildCoreUISidecar.
+// Engine Web UI sidecar constants. The sidecar is injected only when an engine or
+// its class opts in via uiSidecar: true; see buildEngineWebSidecar. Its
+// container name is the operator-owned EngineWebContainerName (api/v1alpha1),
+// which the validating webhook reserves so a user container cannot collide.
 const (
-	// CoreUIContainerName is the fixed name of the injected Core UI sidecar.
-	// It doubles as the duplicate-injection guard: if a user already supplies
-	// a container with this name via the pod template, the operator does not
-	// inject its own.
-	CoreUIContainerName = "core-ui"
-	// CoreUIPortName / CoreUIPort are the name and number of the container
-	// port the Core UI listens on.
-	CoreUIPortName       = "web-ui"
-	CoreUIPort     int32 = 9100
-	// CoreUIWritableVolumeName is the emptyDir mounted into the UI container
-	// at nginx's writable paths, since it runs with a read-only root FS.
-	CoreUIWritableVolumeName = "nginx-writable-dir"
-	// CoreUIEngineURL is the local engine endpoint the UI talks to: the
+	// EngineWebPortName / EngineWebPort are the name and number of the container
+	// port the engine web UI listens on.
+	EngineWebPortName       = "web-ui"
+	EngineWebPort     int32 = 9100
+	// EngineWebWritableVolumeName is the emptyDir mounted into the UI container
+	// at nginx's writable paths, since it runs with a read-only root FS. It is
+	// listed in operatorOwnedPodVolumeNames so a user volume of this name is
+	// dropped at render and cannot collide with the operator's.
+	EngineWebWritableVolumeName = "nginx-writable-dir"
+	// EngineWebBackendURL is the local engine endpoint the UI talks to: the
 	// engine's http-query port (3473) on loopback within the same pod.
-	CoreUIEngineURL = "http://localhost:3473"
+	EngineWebBackendURL = "http://localhost:3473"
 )

@@ -167,22 +167,23 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		}
 		return nil
 	}
-	hasVolume := func(sts *appsv1.StatefulSet, name string) bool {
+	countVolumes := func(sts *appsv1.StatefulSet, name string) int {
+		var n int
 		for _, v := range sts.Spec.Template.Spec.Volumes {
 			if v.Name == name {
-				return true
+				n++
 			}
 		}
-		return false
+		return n
 	}
 
 	t.Run("absent by default", func(t *testing.T) {
 		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
-		if findContainer(sts, CoreUIContainerName) != nil {
-			t.Errorf("did not expect a %q container by default", CoreUIContainerName)
+		if findContainer(sts, computev1alpha1.EngineWebContainerName) != nil {
+			t.Errorf("did not expect a %q container by default", computev1alpha1.EngineWebContainerName)
 		}
-		if hasVolume(sts, CoreUIWritableVolumeName) {
-			t.Errorf("did not expect the %q volume by default", CoreUIWritableVolumeName)
+		if countVolumes(sts, EngineWebWritableVolumeName) != 0 {
+			t.Errorf("did not expect the %q volume by default", EngineWebWritableVolumeName)
 		}
 	})
 
@@ -191,21 +192,21 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		spec.UISidecar = ptr(true)
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
-		c := findContainer(sts, CoreUIContainerName)
+		c := findContainer(sts, computev1alpha1.EngineWebContainerName)
 		if c == nil {
-			t.Fatalf("expected a %q container when uiSidecar=true", CoreUIContainerName)
+			t.Fatalf("expected a %q container when uiSidecar=true", computev1alpha1.EngineWebContainerName)
 		}
-		if c.Image != DefaultCoreUIImage {
-			t.Errorf("core-ui image = %q, want %q", c.Image, DefaultCoreUIImage)
+		if c.Image != DefaultEngineWebImage {
+			t.Errorf("engine-web image = %q, want %q", c.Image, DefaultEngineWebImage)
 		}
-		if len(c.Ports) != 1 || c.Ports[0].ContainerPort != CoreUIPort || c.Ports[0].Name != CoreUIPortName {
-			t.Errorf("core-ui ports = %+v, want one %q port %d", c.Ports, CoreUIPortName, CoreUIPort)
+		if len(c.Ports) != 1 || c.Ports[0].ContainerPort != EngineWebPort || c.Ports[0].Name != EngineWebPortName {
+			t.Errorf("engine-web ports = %+v, want one %q port %d", c.Ports, EngineWebPortName, EngineWebPort)
 		}
 		if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
-			t.Error("core-ui should run with a read-only root filesystem")
+			t.Error("engine-web should run with a read-only root filesystem")
 		}
-		if !hasVolume(sts, CoreUIWritableVolumeName) {
-			t.Errorf("expected the %q volume when uiSidecar=true", CoreUIWritableVolumeName)
+		if countVolumes(sts, EngineWebWritableVolumeName) != 1 {
+			t.Errorf("expected exactly one %q volume when uiSidecar=true", EngineWebWritableVolumeName)
 		}
 		// The engine container must remain present and first.
 		if sts.Spec.Template.Spec.Containers[0].Name != computev1alpha1.EngineContainerName {
@@ -238,94 +239,31 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		}
 	})
 
-	t.Run("user-supplied core-ui suppresses injection", func(t *testing.T) {
-		spec := testSpec()
-		spec.UISidecar = ptr(true)
-		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
-			p.Containers = append(p.Containers, corev1.Container{
-				Name:  CoreUIContainerName,
-				Image: "example.com/my-own-ui:v1",
-			})
-		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-
-		var count int
-		var img string
-		for _, c := range sts.Spec.Template.Spec.Containers {
-			if c.Name == CoreUIContainerName {
-				count++
-				img = c.Image
-			}
-		}
-		if count != 1 {
-			t.Fatalf("expected exactly one %q container, got %d", CoreUIContainerName, count)
-		}
-		if img != "example.com/my-own-ui:v1" {
-			t.Errorf("user-supplied core-ui should win, got image %q", img)
-		}
-		if hasVolume(sts, CoreUIWritableVolumeName) {
-			t.Error("operator should not add its writable volume when the user supplies core-ui")
-		}
-	})
-
-	t.Run("existing nginx-writable-dir volume is not duplicated", func(t *testing.T) {
-		// uiSidecar is on and the merged template already carries a volume
-		// named nginx-writable-dir but no core-ui container. The operator
-		// injects its container and must reuse the existing volume rather
-		// than append a second one with the same name, which would fail
-		// pod-template validation with a duplicate volume.
+	t.Run("reserved writable volume is never duplicated", func(t *testing.T) {
+		// nginx-writable-dir is operator-owned (operatorOwnedPodVolumeNames),
+		// so a user/class volume of that name is dropped at render and only the
+		// operator's emptyDir survives. (A user container named engine-web is
+		// rejected by the webhook, so it can never reach buildStatefulSet — see
+		// the webhook tests.)
 		spec := testSpec()
 		spec.UISidecar = ptr(true)
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
 			p.Volumes = append(p.Volumes, corev1.Volume{
-				Name:         CoreUIWritableVolumeName,
-				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				Name: EngineWebWritableVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{Path: "/tmp/shadow"},
+				},
 			})
 		})
 		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
 
-		var volCount int
+		if got := countVolumes(sts, EngineWebWritableVolumeName); got != 1 {
+			t.Fatalf("expected exactly one %q volume, got %d", EngineWebWritableVolumeName, got)
+		}
 		for _, v := range sts.Spec.Template.Spec.Volumes {
-			if v.Name == CoreUIWritableVolumeName {
-				volCount++
+			if v.Name == EngineWebWritableVolumeName && v.EmptyDir == nil {
+				t.Error("the reserved engine-web volume should be the operator's emptyDir, not a user volume")
 			}
-		}
-		if volCount != 1 {
-			t.Fatalf("expected exactly one %q volume, got %d", CoreUIWritableVolumeName, volCount)
-		}
-		if findContainer(sts, CoreUIContainerName) == nil {
-			t.Errorf("expected the %q container to still be injected", CoreUIContainerName)
-		}
-	})
-
-	t.Run("init container named core-ui suppresses injection", func(t *testing.T) {
-		// Container names must be unique across init and regular containers,
-		// so the operator must not inject its core-ui sidecar when an init
-		// container already uses that name (it would fail pod admission).
-		spec := testSpec()
-		spec.UISidecar = ptr(true)
-		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
-			p.InitContainers = append(p.InitContainers, corev1.Container{
-				Name:  CoreUIContainerName,
-				Image: "busybox:1.36",
-			})
-		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-
-		if findContainer(sts, CoreUIContainerName) != nil {
-			t.Error("operator must not inject a core-ui container when an init container already uses that name")
-		}
-		if hasVolume(sts, CoreUIWritableVolumeName) {
-			t.Error("operator must not add its writable volume when injection is suppressed")
-		}
-		var initFound bool
-		for _, c := range sts.Spec.Template.Spec.InitContainers {
-			if c.Name == CoreUIContainerName {
-				initFound = true
-			}
-		}
-		if !initFound {
-			t.Error("expected the user's core-ui init container to be preserved")
 		}
 	})
 }
@@ -1506,8 +1444,8 @@ func TestStsMatchesSpec(t *testing.T) {
 		if got.RunAsNonRoot == nil || !*got.RunAsNonRoot {
 			t.Errorf("RunAsNonRoot = %v, want true (firebolt-instance-helm parity)", got.RunAsNonRoot)
 		}
-		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
-			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineWebD {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineWebD)
 		}
 		if got.RunAsGroup == nil || *got.RunAsGroup != DefaultEngineGID {
 			t.Errorf("RunAsGroup = %v, want %d", got.RunAsGroup, DefaultEngineGID)
