@@ -267,6 +267,36 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 			t.Error("operator should not add its writable volume when the user supplies core-ui")
 		}
 	})
+
+	t.Run("existing nginx-writable-dir volume is not duplicated", func(t *testing.T) {
+		// uiSidecar is on and the merged template already carries a volume
+		// named nginx-writable-dir but no core-ui container. The operator
+		// injects its container and must reuse the existing volume rather
+		// than append a second one with the same name, which would fail
+		// pod-template validation with a duplicate volume.
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.Volumes = append(p.Volumes, corev1.Volume{
+				Name:         CoreUIWritableVolumeName,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			})
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+
+		var volCount int
+		for _, v := range sts.Spec.Template.Spec.Volumes {
+			if v.Name == CoreUIWritableVolumeName {
+				volCount++
+			}
+		}
+		if volCount != 1 {
+			t.Fatalf("expected exactly one %q volume, got %d", CoreUIWritableVolumeName, volCount)
+		}
+		if findContainer(sts, CoreUIContainerName) == nil {
+			t.Errorf("expected the %q container to still be injected", CoreUIContainerName)
+		}
+	})
 }
 
 // storageBackendCase parameterizes a reconciler test across the engine
