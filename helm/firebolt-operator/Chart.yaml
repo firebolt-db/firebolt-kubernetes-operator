@@ -2,8 +2,8 @@ apiVersion: v2
 name: firebolt-operator
 description: Helm chart for the Firebolt Kubernetes Operator
 type: application
-version: 1.0.40
-appVersion: "v4.12.1"
+version: 1.0.41
+appVersion: "v4.13.0"
 icon: https://raw.githubusercontent.com/firebolt-db/firebolt-instance-helm/refs/heads/main/static/firebolt.png
 home: "https://github.com/firebolt-db/firebolt-kubernetes-operator"
 sources: ["https://github.com/firebolt-db/firebolt-kubernetes-operator"]
