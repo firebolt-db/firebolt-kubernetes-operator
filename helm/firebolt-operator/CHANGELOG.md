@@ -55,7 +55,7 @@ appVersion: v4.10.0
 
 ### Features
 
-* read-only engine root filesystem and data-dir rename to /firebolt-data/data ([#124](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/124)) ([6fdea13](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6fdea13b7b8fb599a42521e7d671d601d17a0849))
+* read-only engine root filesystem ([#124](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/124)) ([6fdea13](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6fdea13b7b8fb599a42521e7d671d601d17a0849))
 
 
 # 1.0.36

@@ -162,11 +162,11 @@ const (
 	// ConfigMountPath is where the engine config.yaml is mounted in the container.
 	// FireboltCoreServer reads <root>/config.yaml from its --data-dir when present,
 	// so the file must land at this path inside the container.
-	ConfigMountPath = "/firebolt-data/data/config.yaml"
+	ConfigMountPath = "/firebolt-core/volume/config.yaml"
 
 	// DataMountPath is where the engine's per-pod PVC is mounted. Matches the
 	// path the engine binary uses for its working data.
-	DataMountPath = "/firebolt-data/data"
+	DataMountPath = "/firebolt-core/volume"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
 	// VolumeClaimTemplates and the corresponding container VolumeMount.
 	DataVolumeName = "data"
@@ -310,7 +310,7 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-data/data
+exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-core/volume
 `
 
 // GetServicePorts returns the externally-meaningful service ports for a

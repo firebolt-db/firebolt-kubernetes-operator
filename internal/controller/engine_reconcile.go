@@ -2143,7 +2143,7 @@ func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec)
 // no user value is supplied. Mirrors the firebolt-instance-helm chart's
 // engine StatefulSet (UID/GID 3473): non-root, no extra capabilities,
 // no privilege escalation, read-only root filesystem; engine runtime
-// writes go to the data PVC at /firebolt-data/data and an emptyDir at
+// writes go to the data PVC at /firebolt-core/volume and an emptyDir at
 // /var/run/firebolt.
 func defaultEngineContainerSecurityContext() *corev1.SecurityContext {
 	runAsUser := DefaultEngineWebD
