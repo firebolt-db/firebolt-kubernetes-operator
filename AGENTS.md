@@ -205,6 +205,7 @@ E2E rules:
 - Prefer a short polling loop that exits as soon as the condition is met over a long fixed sleep.
 - Run focused tests via `make test-e2e GINKGO_FOCUS=...`; do not invoke `ginkgo` directly.
 - When a test fails because pods never become ready, check engine container logs.
+- The engine operator runs with the orphaned-generation GC **disabled by default** (`StartOperator` / `SetupTestInstance`), so happy-path specs assert the primary reconcile path never orphans a generation. A spec that drives **mid-flight spec changes** — rapid replica edits that abandon a half-built blue-green generation — MUST start its operator with `WithGC()`: the primary path deliberately leaves abandoned generations for the GC to reap, so without GC their `*-g<N>` StatefulSets linger. Symptom of getting this wrong: a spec times out in `WaitForEngineReady` waiting for *N* ready pods while extra `*-g<N>` pods from a superseded generation stay Running (it counts ready pods across all generations by the engine label).
 
 Do not delete Docker images or kind clusters; assume the kind cluster is already set up.
 

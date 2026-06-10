@@ -307,7 +307,11 @@ var _ = Describe("Firebolt Engine", func() {
 		BeforeAll(func() {
 			By("Setting up FireboltInstance for rapid changes test")
 			var err error
-			lc, err = SetupTestInstance(ctx, instanceName)
+			// This suite drives rapid mid-flight replica changes that abandon
+			// half-built generations. The primary reconcile path leaves those
+			// for GC to reap, so the engine operator must run with GC enabled
+			// to converge back to a single generation.
+			lc, err = SetupTestInstance(ctx, instanceName, WithGC())
 			Expect(err).NotTo(HaveOccurred())
 			By("Creating client pod")
 			Expect(CreateClientPod(ctx, clientPod)).To(Succeed())

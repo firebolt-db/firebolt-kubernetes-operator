@@ -119,11 +119,29 @@ type OperatorInstance struct {
 // operatorInstanceCounter is used to generate unique controller names
 var operatorInstanceCounter atomic.Int64
 
+// EngineOperatorOption customizes the engine reconciler that StartOperator
+// runs. Defaults track the operator's happy-path posture; an option opts into
+// the behavior a particular spec needs.
+type EngineOperatorOption func(*controller.FireboltEngineReconciler)
+
+// WithGC enables the orphaned-generation garbage collector on the engine
+// reconciler. Specs that drive mid-flight spec changes — rapid replica edits
+// that abandon a half-built generation — must use it: the primary reconcile
+// path deliberately leaves abandoned generations for GC to reap, so without GC
+// their StatefulSets linger and a pod-count assertion never converges to the
+// desired replica count. Happy-path specs omit it to assert the primary path
+// never orphans a generation.
+func WithGC() EngineOperatorOption {
+	return func(r *controller.FireboltEngineReconciler) {
+		r.DisableGC = false
+	}
+}
+
 // StartOperator starts an engine operator scoped to the given instance name.
 // The reconciler drops reconcile requests for any engine whose
 // spec.instanceRef does not match instanceName, so multiple operator instances
 // can coexist in the same namespace without stepping on each other.
-func StartOperator(instanceName string) (*OperatorInstance, error) {
+func StartOperator(instanceName string, opts ...EngineOperatorOption) (*OperatorInstance, error) {
 	config, err := getRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -158,6 +176,9 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 		return nil, fmt.Errorf("failed to create clientset: %w", err)
 	}
 
+	// GC is off by default (DisableGC: true) so happy-path specs assert the
+	// primary reconcile path never orphans a generation. Specs that drive
+	// mid-flight spec changes opt into GC via WithGC(); see EngineOperatorOption.
 	reconciler := &controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
@@ -165,6 +186,9 @@ func StartOperator(instanceName string) (*OperatorInstance, error) {
 		InstanceFilter:  instanceName,
 		DisableGC:       true,
 		MetricsRecorder: fireboltmetrics.NoOpEngineRecorder{},
+	}
+	for _, opt := range opts {
+		opt(reconciler)
 	}
 
 	controllerName := fmt.Sprintf("fireboltengine-%d", operatorInstanceCounter.Add(1))
@@ -505,7 +529,6 @@ func UpdateEngineReplicas(ctx context.Context, name string, replicas int) error 
 		engine.Spec.Replicas = int32(replicas)
 	})
 }
-
 
 // UpdateEngineScheduling sets NodeSelector, Tolerations, and Affinity on the
 // engine CR in a single update (with retry on conflict). All three fields are
@@ -1730,8 +1753,9 @@ type TestInstanceLifecycle struct {
 // SetupTestInstance starts an isolated instance operator, creates a
 // FireboltInstance with the given name, waits for it to become Ready, and
 // starts an engine operator bound to that instance. Returns a lifecycle
-// handle that TeardownTestInstance consumes.
-func SetupTestInstance(ctx context.Context, name string) (*TestInstanceLifecycle, error) {
+// handle that TeardownTestInstance consumes. Engine-operator options (e.g.
+// WithGC) are forwarded to the engine operator it starts.
+func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
 	instanceOp, err := StartInstanceOperator(name)
 	if err != nil {
 		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
@@ -1752,7 +1776,7 @@ func SetupTestInstance(ctx context.Context, name string) (*TestInstanceLifecycle
 		instanceOp.Stop()
 		return nil, fmt.Errorf("wait instance %s ready: %w", name, err)
 	}
-	engineOp, err := StartOperator(name)
+	engineOp, err := StartOperator(name, opts...)
 	if err != nil {
 		if delErr := DeleteInstance(ctx, name); delErr != nil {
 			fmt.Fprintf(GinkgoWriter, "SetupTestInstance: best-effort DeleteInstance(%s) after engine operator start failure also failed: %v\n", name, delErr)
