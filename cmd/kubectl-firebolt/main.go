@@ -150,9 +150,16 @@ func newInstanceListCmd() *cobra.Command {
 func newInstancePortForwardCmd() *cobra.Command {
 	var localPort int
 	cmd := &cobra.Command{
-		Use:   "port-forward <name>",
-		Short: "Port-forward to the instance's gateway; route queries with `X-Firebolt-Engine: <engine-name>`",
-		Args:  cobra.ExactArgs(1),
+		Use:   "port-forward <instance-name>",
+		Short: "Port-forward to a FireboltInstance's gateway service",
+		Long: `Port-forward to the gateway service of the named FireboltInstance.
+
+The argument is the FireboltInstance name; the command forwards to
+svc/<instance-name>-gateway. To route a query to a specific engine behind the
+gateway, set the HTTP header "X-Firebolt-Engine: <engine-name>" — that engine
+name is not this argument.`,
+		Example: "  kubectl firebolt instance port-forward my-instance -n my-ns --local-port 8123",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			if flagPrintCommands {
@@ -229,9 +236,11 @@ func newEngineCreateCmd() *cobra.Command {
 		timeout     string
 	)
 	cmd := &cobra.Command{
-		Use:   "create <name>",
+		Use:   "create <engine-name>",
 		Short: "Create a FireboltEngine and wait for it to become Ready",
-		Args:  cobra.ExactArgs(1),
+		Example: "  kubectl firebolt engine create my-engine --instance my-instance -n my-ns \\\n" +
+			"    --type my-engine-class --bucket my-bucket --replicas 2",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := time.ParseDuration(timeout); err != nil {
 				return fmt.Errorf("invalid --timeout %q (use a Go duration like 3m, 180s, or 1h): %w", timeout, err)
@@ -305,7 +314,7 @@ func newEngineCreateCmd() *cobra.Command {
 
 func newEngineDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <name>",
+		Use:   "delete <engine-name>",
 		Short: "Delete a FireboltEngine",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -331,9 +340,14 @@ func newEngineDeleteCmd() *cobra.Command {
 func newEnginePortForwardCmd() *cobra.Command {
 	var localPort int
 	cmd := &cobra.Command{
-		Use:   "port-forward <name>",
-		Short: "Port-forward to the engine",
-		Args:  cobra.ExactArgs(1),
+		Use:   "port-forward <engine-name>",
+		Short: "Port-forward to a FireboltEngine's service",
+		Long: `Port-forward to the service of the named FireboltEngine.
+
+The argument is the FireboltEngine name; the command forwards to
+svc/<engine-name>-service.`,
+		Example: "  kubectl firebolt engine port-forward my-engine -n my-ns --local-port 8123",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			if flagPrintCommands {
