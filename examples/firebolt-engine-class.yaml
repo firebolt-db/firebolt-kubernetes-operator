@@ -31,7 +31,8 @@
 # StatefulSet contract (terminationGracePeriodSeconds, subdomain,
 # hostname, restartPolicy, activeDeadlineSeconds), or label/annotation
 # keys under the firebolt.io/ prefix. Sidecar containers and additional
-# init containers are fully user-owned.
+# init containers are user-owned, except the reserved "engine-web" name
+# (the operator's optional UI sidecar), which is rejected.
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngineClass
 metadata:
@@ -83,9 +84,9 @@ spec:
         - name: engine
           image: ghcr.io/firebolt-db/engine:latest
           imagePullPolicy: IfNotPresent
-        # Sidecar containers (anything not named "engine") pass through
-        # verbatim — image, command, ports, env, mounts. They share
-        # the pod lifecycle with the engine container.
+        # Sidecar containers (anything not named "engine" or the reserved
+        # "engine-web") pass through verbatim — image, command, ports, env,
+        # mounts. They share the pod lifecycle with the engine container.
         - name: log-shipper
           image: fluent/fluent-bit:latest
       # Init containers run before the engine container starts.
@@ -97,10 +98,11 @@ spec:
   # Each is inherited by referencing engines that leave the matching
   # spec field unset.
   #
-  # Inject a built-in Core UI sidecar (the "core-ui" nginx container,
-  # reachable on container port 9100) into every engine pod. Skipped on any
-  # engine that already supplies its own "core-ui" container. Toggling this
-  # reshapes the pod, so it rolls a new blue-green generation.
+  # Inject a built-in, operator-owned UI sidecar (the "engine-web" nginx
+  # container, reachable on container port 9100) into every engine pod. The
+  # "engine-web" container name is reserved: a user-supplied container or init
+  # container with that name is rejected. Toggling this reshapes the pod, so
+  # it rolls a new blue-green generation.
   uiSidecar: true
   #
   # Default per-pod data volume. An engine that declares its own

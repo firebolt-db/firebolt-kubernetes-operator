@@ -78,7 +78,7 @@ resolution so the renderer and the drift comparator agree.
 | `drainCheckEnabled` | engine > class > `true`. |
 | `drainCheckInterval` | engine > class > operator default. |
 | `autoStop` | Whole-struct. An engine that sets `spec.autoStop` owns the entire policy. The class policy applies only when the engine omits it. |
-| `uiSidecar` | engine > class > `false`. When it resolves to `true`, the Firebolt Operator injects a built-in Core UI sidecar (an `nginx` container named `core-ui`) into each engine pod, unless you already supply a `core-ui` container in the pod template. |
+| `uiSidecar` | engine > class > `false`. When it resolves to `true`, the Firebolt Operator injects a built-in, operator-owned `nginx` container named `engine-web` (serving the Engine Web UI, pointed at the local engine) into each engine pod. The `engine-web` name is reserved: a user-supplied container or init container with that name is rejected. |
 
 `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and `uiSidecar` carry no
 CRD default on `FireboltEngine`. The Firebolt Operator applies the default in

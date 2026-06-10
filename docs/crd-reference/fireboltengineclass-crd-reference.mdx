@@ -11,7 +11,7 @@ Every field except `spec.template` is an optional default that a referencing eng
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each engine's `spec.template` (engine wins). See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-class-templates) and [FireboltEngineClass design](../engineclass/fireboltengineclass-design). |
-| `spec.uiSidecar` | No | `false` | Default Core UI sidecar toggle. When it resolves to `true`, the Firebolt Operator injects a built-in `nginx` container named `core-ui` (listening on port `9100`) into each engine pod, unless you already supply a `core-ui` container. The engine `spec.uiSidecar` wins when set. |
+| `spec.uiSidecar` | No | `false` | Default UI sidecar toggle. When it resolves to `true`, the Firebolt Operator injects a built-in, operator-owned `nginx` container named `engine-web` (serving the Engine Web UI, listening on port `9100`) into each engine pod. The `engine-web` container name is reserved, so a user-supplied container or init container with that name is rejected. The engine `spec.uiSidecar` wins when set. |
 | `spec.storage` | No | `{}` (emptyDir) | Default per-pod data volume. An engine that names any backend (`persistentVolumeClaim`, `emptyDir`, or `hostPath`) on its own `spec.storage` owns it. Otherwise the class backend applies. Backend selection is whole-struct, so the three backends stay mutually exclusive. See the [FireboltEngine CRD reference](./engine-crd-reference). |
 | `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment deep-merged beneath each engine's `spec.customEngineConfig`. The merge order is the operator base, then the class, then the engine, so an engine key wins over the same key on the class. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`) from the class layer too, so the class cannot override identity, routing, or topology. |
 | `spec.rollout` | No | `graceful` | Default rollout strategy, `graceful` or `recreate`. The engine `spec.rollout` wins when set. |
@@ -54,7 +54,7 @@ allowlist applies to `FireboltEngine.spec.template`.
 | `securityContext` | Yes | Engine wins if non-nil; operator `fsGroup` defaults always stamped. |
 | `initContainers[*]` | Yes | Class + engine, concatenated. Init container named `engine` is **rejected**. |
 | `containers[name=="engine"]` | Limited | See engine container table below. |
-| `containers[name!="engine"]` | Yes | Sidecars: fully user-owned. |
+| `containers[name!="engine"]` | Yes | Sidecars: user-owned, except the reserved `engine-web` name (the operator's UI sidecar), which is rejected. |
 | `terminationGracePeriodSeconds` | **No** | Hardcoded to 60s (same on engine template). |
 | `subdomain`, `hostname` | **No** | Headless-DNS contract. |
 | `restartPolicy`, `activeDeadlineSeconds` | **No** | StatefulSet semantics. |

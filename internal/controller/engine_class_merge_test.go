@@ -558,8 +558,8 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 		if got == nil {
 			t.Fatal("effectiveEngineContainerSecurityContext returned nil; expected hardened default")
 		}
-		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
-			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineWebD {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineWebD)
 		}
 		if got.RunAsGroup == nil || *got.RunAsGroup != DefaultEngineGID {
 			t.Errorf("RunAsGroup = %v, want %d", got.RunAsGroup, DefaultEngineGID)
@@ -617,8 +617,8 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 		if got == nil {
 			t.Fatal("engine container SecurityContext is nil on freshly-built STS; the hardened default is not reaching production")
 		}
-		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineUID {
-			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineUID)
+		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineWebD {
+			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineWebD)
 		}
 		if !stsMatchesSpec(sts, spec, nil) {
 			t.Error("stsMatchesSpec returned false for a freshly built STS — drift comparator must also use the default")

@@ -61,7 +61,7 @@ type EngineStorageSpec struct {
 	// node filesystem. Pods are implicitly node-pinned (the directory only
 	// exists where it was created); the path must pre-exist on every
 	// node the engine pod could be scheduled onto, with permissions
-	// readable by the engine UID. Use to expose instance-store NVMe on
+	// readable by the engine web UID. Use to expose instance-store NVMe on
 	// the node.
 	// +optional
 	HostPath *EngineHostPathSpec `json:"hostPath,omitempty"`
@@ -351,11 +351,13 @@ type FireboltEngineSpec struct {
 	// +optional
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 
-	// UISidecar enables a built-in Core UI sidecar (an nginx container named
-	// "core-ui" serving the Firebolt Core UI, pointed at this engine on
-	// localhost) in every pod of this engine. It exposes container port 9100
-	// ("web-ui"); the per-engine headless Service resolves to pod IPs, so the
-	// UI is reachable at <pod-ip>:9100 without listing an extra Service port.
+	// UISidecar enables a built-in UI sidecar (an operator-owned nginx
+	// container named "engine-web" serving the Firebolt Engine Web UI, pointed at
+	// this engine on localhost) in every pod of this engine. It exposes
+	// container port 9100 ("web-ui"); the per-engine headless Service resolves
+	// to pod IPs, so the UI is reachable at <pod-ip>:9100 without listing an
+	// extra Service port. The "engine-web" container name is reserved: a
+	// user-supplied container or init container with that name is rejected.
 	//
 	// Resolution is engine-if-set → FireboltEngineClass-if-set → operator
 	// default (false). The default is applied by the controller, not the CRD,

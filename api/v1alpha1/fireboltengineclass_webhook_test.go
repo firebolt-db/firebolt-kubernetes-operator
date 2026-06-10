@@ -270,6 +270,26 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			},
 			wantField: "spec.template.spec.initContainers[1].name",
 		},
+		{
+			name: "sidecar named engine-web is reserved",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers = append(ec.Spec.Template.Spec.Containers, corev1.Container{
+					Name:  EngineWebContainerName,
+					Image: "x",
+				})
+			},
+			wantField: "spec.template.spec.containers[2].name",
+		},
+		{
+			name: "init container named engine-web is reserved",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.InitContainers = append(ec.Spec.Template.Spec.InitContainers, corev1.Container{
+					Name:  EngineWebContainerName,
+					Image: "x",
+				})
+			},
+			wantField: "spec.template.spec.initContainers[1].name",
+		},
 		// Security / footgun pod-level fields (FB-1426 follow-up).
 		{
 			name: "pod hostNetwork",
