@@ -12,6 +12,18 @@ The operator manages three custom resources:
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `FireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
+## `kubectl firebolt` plugin
+
+For day-to-day management there's **`kubectl-firebolt`**, a kubectl plugin that creates, lists, deletes, and port-forwards FireboltEngines and FireboltInstances without hand-authoring manifests:
+
+```bash
+make kubectl-firebolt    # builds bin/kubectl-firebolt; put it on PATH
+kubectl firebolt engine create my-engine -n my-ns --instance my-instance --type my-engine-class
+kubectl firebolt engine list -o wide
+```
+
+It builds the CRs from this repo's `api/v1alpha1` types, so it versions in lockstep with the CRDs. See [`cmd/kubectl-firebolt/README.md`](cmd/kubectl-firebolt/README.md) for install, the full command set, and output formats.
+
 ## Use this with a coding agent
 
 Paste the following prompt into your favorite coding agent and let it drive the whole local install for you. Ours is Claude Code.
