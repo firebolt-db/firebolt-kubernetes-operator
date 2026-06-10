@@ -1,0 +1,211 @@
+# All-in-one quickstart bundle: everything a local Kind cluster needs to run a
+# single Firebolt engine, in one manifest.
+#
+# This file deliberately does NOT install the Firebolt Operator itself — install
+# the operator and its CRDs with Helm first (see docs/quickstart.mdx), then:
+#
+#   kubectl apply --server-side -f https://raw.githubusercontent.com/firebolt-db/firebolt-kubernetes-operator/main/examples/quickstart-website/quickstart.yaml
+#
+# What it creates, in order:
+#   1. The `firebolt` namespace.
+#   2. floci (https://github.com/floci-io/floci), a small S3-compatible emulator,
+#      plus a one-shot Job that creates the bucket the engine uses. Local
+#      clusters have no real object storage and every FireboltEngine requires
+#      object storage for managed tablet data — local filesystem mode is
+#      unsupported. On a real cluster you delete the floci resources and point
+#      the engine at S3, GCS, or Azure Blob instead.
+#   3. A FireboltInstance (shared metadata + gateway).
+#   4. A FireboltEngine that references the instance and the floci bucket. No
+#      FireboltEngineClass is needed — the engine runs the operator's default
+#      image. Pin a specific image per engine via
+#      spec.template.spec.containers[name=engine].image when you need to.
+#
+# Apply order is best-effort: the operator waits for the instance to become
+# Ready before bringing the engine up, and the engine retries until the floci
+# bucket exists, so applying everything at once converges on its own.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: firebolt
+---
+# floci: zero-auth S3-compatible emulator. Requests are still SigV4-signed but
+# the credentials are not validated, so `type: minio` (which makes the engine
+# use dummy credentials internally) needs no Secret or AWS env vars.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: floci
+  namespace: firebolt
+  labels:
+    app: floci
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: floci
+  template:
+    metadata:
+      labels:
+        app: floci
+    spec:
+      # The kubelet auto-injects FLOCI_PORT=tcp://<svc-ip>:4566 into pods that
+      # share a namespace with the floci Service. floci's Quarkus runtime treats
+      # FLOCI_PORT as a config key and tries to coerce "tcp://..." to an
+      # integer, which CrashLoopBackOffs the container. Disabling service links
+      # suppresses that env block; the pod still reaches the Service by DNS.
+      enableServiceLinks: false
+      containers:
+        - name: floci
+          image: floci/floci:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: api
+              containerPort: 4566
+              protocol: TCP
+          env:
+            - name: FLOCI_DEFAULT_REGION
+              value: us-east-1
+          readinessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 1
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 4566
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: floci
+  namespace: firebolt
+  labels:
+    app: floci
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 4566
+      targetPort: 4566
+      protocol: TCP
+  selector:
+    app: floci
+---
+# One-shot Job that creates the bucket the engine expects. The bundle applies
+# this Job at the same time as the floci Deployment, so floci is usually not
+# listening yet (and its image may still be pulling) when the Job's first pod
+# runs. Rather than relying on Job-level `backoffLimit` retries lining up with
+# floci's startup — a race that can leave the Job permanently Failed with no one
+# to recreate it — the container polls floci itself until it is reachable and the
+# bucket exists. Bucket creation is idempotent: a pre-existing bucket makes
+# create-bucket fail with BucketAlreadyOwnedByYou, so the loop falls back to
+# head-bucket to treat "already there" as success.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: floci-create-bucket
+  namespace: firebolt
+  labels:
+    app: floci-create-bucket
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app: floci-create-bucket
+    spec:
+      enableServiceLinks: false
+      restartPolicy: Never
+      containers:
+        - name: aws
+          image: amazon/aws-cli:2.17.0
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: mock
+            - name: AWS_SECRET_ACCESS_KEY
+              value: mock
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ENDPOINT_URL
+              value: http://floci.firebolt.svc.cluster.local:4566
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # Poll for up to ~5 minutes: floci is still starting when this Job
+              # runs, so retry create-bucket (falling back to head-bucket for the
+              # already-exists case) until one succeeds or we hit the deadline.
+              deadline=$(( $(date +%s) + 300 ))
+              until aws s3api create-bucket --bucket my-engine-bucket 2>/dev/null \
+                || aws s3api head-bucket --bucket my-engine-bucket 2>/dev/null; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "timed out waiting for floci to become reachable" >&2
+                  exit 1
+                fi
+                echo "floci not ready yet; retrying in 5s..."
+                sleep 5
+              done
+              aws s3api head-bucket --bucket my-engine-bucket
+              echo "bucket my-engine-bucket is ready"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+# Shared per-namespace infrastructure (Postgres, metadata service, Envoy
+# gateway). The engine references this by name through spec.instanceRef.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: quickstart
+  namespace: firebolt
+spec:
+  metadata: {}
+  gateway: {}
+---
+# A single engine pointed at the floci bucket. It runs the operator's default
+# image; no FireboltEngineClass is required.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  replicas: 1
+  customEngineConfig:
+    storage:
+      type: minio
+      api_scheme: "s3://"
+      bucket_name: my-engine-bucket
+      minio:
+        endpoint: http://floci.firebolt.svc.cluster.local:4566
+  # Per-engine pod overrides live under spec.template. The operator owns the
+  # container named "engine"; put per-pod tuning (resources, env, image, ...)
+  # here.
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: "3Gi"
+            limits:
+              memory: "3Gi"

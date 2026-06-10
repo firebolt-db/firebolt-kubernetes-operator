@@ -117,9 +117,10 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: firebolt-production
-  # Engine container image lives on an FireboltEngineClass (FB-1145); the engine
-  # references the class by name. Mutating the class' container image
-  # is the canonical path for runtime version upgrades.
+  # The engine runs the operator's default image unless overridden. Set the
+  # image on the engine's own spec.template, or share one across many engines
+  # via a FireboltEngineClass referenced by name. Mutating the class' container
+  # image is the canonical path for a shared runtime version upgrade.
   engineClassRef: engine-default
   replicas: 5
   resources:

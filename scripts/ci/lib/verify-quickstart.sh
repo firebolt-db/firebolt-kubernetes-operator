@@ -89,3 +89,54 @@ wait_engine_ready() {
   dump_namespace_debug "${namespace}"
   return 1
 }
+
+# Run a query through the instance gateway and assert the result contains an
+# expected substring. This mirrors the curl example in docs/quickstart.mdx:
+# the gateway Service is <instance>-gateway in the same namespace, and the
+# target engine is selected via the X-Firebolt-Engine header.
+#
+# Usage:
+#   run_query <namespace> <instance> <engine> [query] [expected] [attempts] [sleep]
+#
+# A FireboltEngine reporting Ready=True can still need a few seconds before the
+# gateway routes queries to it (engine HTTP listener warming up), so this polls.
+run_query() {
+  local namespace="$1"
+  local instance="$2"
+  local engine="$3"
+  local query="${4:-SELECT 42}"
+  local expected="${5:-42}"
+  local attempts="${6:-12}"
+  local sleep_seconds="${7:-5}"
+
+  local gateway="${instance}-gateway"
+  echo "Running query against ${gateway} (engine=${engine}) in namespace ${namespace}: ${query}"
+
+  local output=""
+  for i in $(seq 1 "${attempts}"); do
+    # Unique pod name per attempt: --rm deletes the pod on a clean attach, but
+    # an attempt that errors out can leave the pod behind and collide on retry.
+    local pod
+    pod="query-$(date +%s)-${RANDOM}"
+    if output=$(kubectl run "${pod}" --rm -i --restart=Never \
+        --image=curlimages/curl -n "${namespace}" -- \
+        curl --silent --show-error --fail-with-body \
+        "http://${gateway}/query" \
+        -H "X-Firebolt-Engine: ${engine}" \
+        -H "Content-Type: text/plain" \
+        --data-binary "${query}" 2>/dev/null); then
+      if printf '%s' "${output}" | grep -q "${expected}"; then
+        echo "Query succeeded after ${i} attempt(s); result contains '${expected}':"
+        printf '%s\n' "${output}"
+        return 0
+      fi
+    fi
+    echo "  attempt ${i}/${attempts}: no '${expected}' in result yet (sleep ${sleep_seconds}s)"
+    sleep "${sleep_seconds}"
+  done
+
+  echo "Timed out running query against ${gateway} in namespace ${namespace}"
+  echo "last output: ${output:-<none>}"
+  dump_namespace_debug "${namespace}"
+  return 1
+}

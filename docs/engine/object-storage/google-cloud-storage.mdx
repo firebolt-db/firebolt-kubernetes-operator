@@ -70,7 +70,7 @@ Point the engine at the bucket through `spec.customEngineConfig.storage` and run
 
 The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Google Cloud Storage, set `type` to `gcs`. The default scheme for `gcs` is `gs://`.
 
-The following manifest creates the ServiceAccount, an `FireboltEngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the service account email and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
+The following manifest creates the ServiceAccount and a `FireboltEngine` that references it. The engine runs the operator's default image, so no `FireboltEngineClass` is required. Replace the service account email and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
 
 ```yaml
 apiVersion: v1
@@ -83,25 +83,12 @@ metadata:
     iam.gke.io/gcp-service-account: firebolt-engine@my-project.iam.gserviceaccount.com
 ---
 apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineClass
-metadata:
-  name: default
-  namespace: firebolt
-spec:
-  template:
-    spec:
-      containers:
-        - name: engine
-          image: ghcr.io/firebolt-db/engine:dev
----
-apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
   name: my-engine
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   serviceAccountName: my-engine
   replicas: 2
   customEngineConfig:
@@ -109,13 +96,17 @@ spec:
       type: gcs
       api_scheme: "gs://"
       bucket_name: firebolt-engine-demo-data
-  resources:
-    requests:
-      cpu: "2"
-      memory: "4Gi"
-    limits:
-      cpu: "2"
-      memory: "4Gi"
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
 ```
 
 Apply the manifest:
@@ -178,7 +169,6 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   serviceAccountName: my-engine
   replicas: 2
   customEngineConfig:

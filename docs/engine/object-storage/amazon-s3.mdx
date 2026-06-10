@@ -121,7 +121,7 @@ Point the engine at the bucket through `spec.customEngineConfig.storage` and run
 
 The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Amazon S3, set `type` to `s3`.
 
-The following manifest creates the ServiceAccount, an `FireboltEngineClass` that supplies the engine image, and a `FireboltEngine` that references both. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
+The following manifest creates the ServiceAccount and a `FireboltEngine` that references it. The engine runs the operator's default image, so no `FireboltEngineClass` is required. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
 
 ```yaml
 apiVersion: v1
@@ -134,25 +134,12 @@ metadata:
     eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<engine-s3-role>
 ---
 apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineClass
-metadata:
-  name: default
-  namespace: firebolt
-spec:
-  template:
-    spec:
-      containers:
-        - name: engine
-          image: ghcr.io/firebolt-db/engine:dev
----
-apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
   name: my-engine
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   serviceAccountName: my-engine
   replicas: 2
   customEngineConfig:
@@ -160,13 +147,17 @@ spec:
       type: s3
       api_scheme: "s3://"
       bucket_name: firebolt-engine-demo-data
-  resources:
-    requests:
-      cpu: "2"
-      memory: "4Gi"
-    limits:
-      cpu: "2"
-      memory: "4Gi"
+  template:
+    spec:
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
 ```
 
 Apply the manifest:
@@ -175,20 +166,26 @@ Apply the manifest:
 kubectl apply -f engine-s3.yaml
 ```
 
-The engine resolves the AWS region and credentials from the pod's AWS environment, which IRSA or Pod Identity provides. On EKS, the identity webhook injects the region automatically. To set the region explicitly, add an `AWS_REGION` environment variable to the engine container through the `FireboltEngineClass`:
+The engine resolves the AWS region and credentials from the pod's AWS environment, which IRSA or Pod Identity provides. On EKS, the identity webhook injects the region automatically. To set the region explicitly, add an `AWS_REGION` environment variable to the engine container through `spec.template`:
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineClass
+kind: FireboltEngine
 metadata:
-  name: default
+  name: my-engine
   namespace: firebolt
 spec:
+  instanceRef: quickstart
+  serviceAccountName: my-engine
+  customEngineConfig:
+    storage:
+      type: s3
+      api_scheme: "s3://"
+      bucket_name: firebolt-engine-demo-data
   template:
     spec:
       containers:
         - name: engine
-          image: ghcr.io/firebolt-db/engine:dev
           env:
             - name: AWS_REGION
               value: us-east-1
@@ -249,7 +246,6 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   serviceAccountName: my-engine
   replicas: 2
   customEngineConfig:

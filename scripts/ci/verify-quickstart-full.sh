@@ -93,6 +93,10 @@ BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" CLASS="$ENGINE_CLASS_NAME" yq 
 ' "${REPO_ROOT}/examples/engine-full.yaml" | kubectl apply -n "$NAMESPACE" -f -
 wait_engine_ready "$NAMESPACE" "$ENGINE_NAME"
 
+# Prove the engine is actually serving queries through the gateway, not just
+# reporting Ready. Mirrors the curl example in docs/quickstart.mdx.
+run_query "$NAMESPACE" "$INSTANCE_NAME" "$ENGINE_NAME"
+
 echo "✅ verify-quickstart full passed (namespace=${NAMESPACE})"
 echo "Cleaning up namespace ${NAMESPACE}..."
 kubectl delete namespace "$NAMESPACE" --wait=false
