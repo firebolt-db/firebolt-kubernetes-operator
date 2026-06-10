@@ -1,3 +1,14 @@
+# 1.0.40
+
+appVersion: v4.12.1
+
+## [4.12.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/v4.12.0...v4.12.1) (2026-06-10)
+
+### Bug Fixes
+
+* **kubectl-firebolt:** name and document command positional arguments (FB-1595) ([ac38e09](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ac38e091f930342ac4212bc62311e983ccf7e1e8))
+
+
 # 1.0.39
 
 appVersion: v4.12.0
