@@ -297,6 +297,37 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 			t.Errorf("expected the %q container to still be injected", CoreUIContainerName)
 		}
 	})
+
+	t.Run("init container named core-ui suppresses injection", func(t *testing.T) {
+		// Container names must be unique across init and regular containers,
+		// so the operator must not inject its core-ui sidecar when an init
+		// container already uses that name (it would fail pod admission).
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			p.InitContainers = append(p.InitContainers, corev1.Container{
+				Name:  CoreUIContainerName,
+				Image: "busybox:1.36",
+			})
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+
+		if findContainer(sts, CoreUIContainerName) != nil {
+			t.Error("operator must not inject a core-ui container when an init container already uses that name")
+		}
+		if hasVolume(sts, CoreUIWritableVolumeName) {
+			t.Error("operator must not add its writable volume when injection is suppressed")
+		}
+		var initFound bool
+		for _, c := range sts.Spec.Template.Spec.InitContainers {
+			if c.Name == CoreUIContainerName {
+				initFound = true
+			}
+		}
+		if !initFound {
+			t.Error("expected the user's core-ui init container to be preserved")
+		}
+	})
 }
 
 // storageBackendCase parameterizes a reconciler test across the engine

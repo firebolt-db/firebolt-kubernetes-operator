@@ -1459,11 +1459,18 @@ func appendSidecars(dst []corev1.Container, src []corev1.Container) []corev1.Con
 
 // shouldInjectCoreUI reports whether the operator injects its own built-in
 // Core UI sidecar: the feature resolves to enabled (engine→class→false) and
-// the user has not already supplied a container named CoreUIContainerName
-// via the pod template (in which case theirs wins and we stay out of the way).
+// no container named CoreUIContainerName already exists in the merged pod
+// template. The name is checked against both regular sidecars and init
+// containers because Kubernetes requires container names to be unique across
+// the two lists — injecting alongside an existing core-ui (a bring-your-own
+// sidecar, or an unrelated init container that happens to share the name)
+// would fail pod admission with a duplicate-name error.
 func shouldInjectCoreUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
-	return effectiveUISidecarEnabled(spec, classInfo) &&
-		!containsContainerNamed(effectiveSidecars(spec, classInfo), CoreUIContainerName)
+	if !effectiveUISidecarEnabled(spec, classInfo) {
+		return false
+	}
+	return !containsContainerNamed(effectiveSidecars(spec, classInfo), CoreUIContainerName) &&
+		!containsContainerNamed(effectiveInitContainers(spec, classInfo), CoreUIContainerName)
 }
 
 // effectiveSidecarsWithUI returns effectiveSidecars plus the built-in Core UI
