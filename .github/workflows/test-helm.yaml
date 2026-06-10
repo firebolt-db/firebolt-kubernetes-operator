@@ -174,3 +174,6 @@ jobs:
 
       - name: Run helm-test target
         run: make helm-test
+
+      - name: Verify website quickstart bundle
+        run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"

@@ -120,21 +120,9 @@ This deploys floci into the `firebolt` namespace at `http://floci.firebolt.svc.c
 
 ### Create a FireboltEngine
 
-Once the instance is `Ready`, create an engine that references it. The engine container image lives on a `FireboltEngineClass` rather than on the engine itself (FB-1145), so the minimal viable engine ships in two manifests — a class with the image, and an engine referencing the class. The `customEngineConfig.storage` block points the engine at the object storage configured above. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) and the [FireboltEngineClass CRD Reference](docs/crd-reference/fireboltengineclass-crd-reference.mdx) for the full field surface.
+Once the instance is `Ready`, create an engine that references it. The engine runs the operator's default image, so a single manifest is all you need. The `customEngineConfig.storage` block points the engine at the object storage configured above. To pin a specific engine image, set it on `spec.template.spec.containers[name=engine].image`; to share one image across many engines, put it on a [`FireboltEngineClass`](docs/crd-reference/fireboltengineclass-crd-reference.mdx) instead. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) for the full field surface.
 
 ```yaml
-apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineClass
-metadata:
-  name: default
-  namespace: firebolt
-spec:
-  template:
-    spec:
-      containers:
-        - name: engine
-          image: ghcr.io/firebolt-db/engine:dev
----
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltEngine
 metadata:
@@ -142,7 +130,6 @@ metadata:
   namespace: firebolt
 spec:
   instanceRef: quickstart
-  engineClassRef: default
   replicas: 2
   customEngineConfig:
     storage:
