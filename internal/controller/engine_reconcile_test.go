@@ -1245,7 +1245,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		setSpecTemplateContainer(customSpec, func(c *corev1.Container) {
 			c.SecurityContext = &corev1.SecurityContext{
-				ReadOnlyRootFilesystem: boolPtr(true),
+				AllowPrivilegeEscalation: boolPtr(true),
 			}
 		})
 		// STS still has the old (nil) container SC, so a spec change must
@@ -1253,6 +1253,13 @@ func TestStsMatchesSpec(t *testing.T) {
 		sts := makeSTS(testEngineName, 0, 3)
 		if stsMatchesSpec(sts, customSpec, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
+		}
+	})
+
+	t.Run("default engine container security context has read-only root filesystem", func(t *testing.T) {
+		sc := defaultEngineContainerSecurityContext()
+		if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+			t.Fatal("defaultEngineContainerSecurityContext() must set ReadOnlyRootFilesystem=true")
 		}
 	})
 

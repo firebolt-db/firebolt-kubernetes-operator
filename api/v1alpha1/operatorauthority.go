@@ -115,6 +115,9 @@ const (
 	// VolumeClaimTemplate, an emptyDir, or a hostPath, depending on
 	// FireboltEngineSpec.Storage. Mounted at DataMountPath.
 	EngineDataVolumeName = "data"
+	// EngineRuntimeVolumeName is the emptyDir volume mounted at
+	// /var/run/firebolt for the engine's unix domain socket.
+	EngineRuntimeVolumeName = "runtime"
 	// GatewayConfigVolumeName carries the operator-rendered Envoy
 	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy
 	// container.
@@ -140,6 +143,7 @@ const (
 var operatorOwnedEngineVolumeNames = []string{
 	EngineConfigVolumeName,
 	EngineDataVolumeName,
+	EngineRuntimeVolumeName,
 }
 
 // operatorOwnedGatewayVolumeNames are the volume names the operator

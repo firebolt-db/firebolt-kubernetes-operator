@@ -692,6 +692,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 				},
 			},
 		},
+		{Name: computev1alpha1.EngineRuntimeVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
 	if extraDataVolume != nil {
 		podVolumes = append(podVolumes, *extraDataVolume)
@@ -1599,12 +1600,23 @@ func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngin
 
 // buildEngineContainerVolumeMounts returns the volumeMounts stamped
 // on the rendered engine container: operator-owned mounts first
-// (config + data), then class then engine user-supplied mounts in that
-// order (excluding any that try to redefine an operator-owned name).
-// Shared between buildStatefulSet and the drift comparator so the
+// (data, config, runtime), then class then engine user-supplied mounts
+// in that order (excluding any that try to redefine an operator-owned
+// name). Shared between buildStatefulSet and the drift comparator so the
 // order and filtering stays consistent across both paths.
 func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
+	// ConfigMountPath (config.yaml) sits inside DataMountPath, so the data
+	// volume is listed first: the engine then reads the operator-rendered
+	// config.yaml as a read-only overlay on top of the writable data volume.
+	// This slice order is for readability only -- the container runtime
+	// (containerd, CRI-O, Docker) sorts mounts by destination-path depth, so
+	// the shallower DataMountPath is mounted before the deeper ConfigMountPath
+	// regardless of the order here.
 	out := []corev1.VolumeMount{
+		{
+			Name:      DataVolumeName,
+			MountPath: DataMountPath,
+		},
 		{
 			Name:      "nodes-config",
 			MountPath: ConfigMountPath,
@@ -1612,8 +1624,8 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 			ReadOnly:  true,
 		},
 		{
-			Name:      DataVolumeName,
-			MountPath: DataMountPath,
+			Name:      computev1alpha1.EngineRuntimeVolumeName,
+			MountPath: "/var/run/firebolt",
 		},
 	}
 	return append(out, effectiveEngineVolumeMounts(spec, classInfo)...)
@@ -2023,15 +2035,15 @@ func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec)
 // container-level SecurityContext applied to the engine container when
 // no user value is supplied. Mirrors the firebolt-instance-helm chart's
 // engine StatefulSet (UID/GID 3473): non-root, no extra capabilities,
-// no privilege escalation, writable root filesystem (the engine writes
-// ephemeral files at startup; persistent state lives on the data PVC
-// mounted separately).
+// no privilege escalation, read-only root filesystem; engine runtime
+// writes go to the data PVC at /firebolt-data/data and an emptyDir at
+// /var/run/firebolt.
 func defaultEngineContainerSecurityContext() *corev1.SecurityContext {
 	runAsUser := DefaultEngineUID
 	runAsGroup := DefaultEngineGID
 	return &corev1.SecurityContext{
 		AllowPrivilegeEscalation: boolPtr(false),
-		ReadOnlyRootFilesystem:   boolPtr(false),
+		ReadOnlyRootFilesystem:   boolPtr(true),
 		RunAsNonRoot:             boolPtr(true),
 		RunAsUser:                &runAsUser,
 		RunAsGroup:               &runAsGroup,
