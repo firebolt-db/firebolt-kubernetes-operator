@@ -14,7 +14,7 @@ When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the o
 
 ## `kubectl firebolt` plugin
 
-For day-to-day management there's **`kubectl-firebolt`**, a kubectl plugin that creates, lists, deletes, and port-forwards FireboltEngines and FireboltInstances without hand-authoring manifests:
+For convenient management there's **`kubectl-firebolt`**, a kubectl plugin that creates, lists, deletes, and port-forwards FireboltEngines and FireboltInstances without hand-authoring manifests:
 
 ```bash
 make kubectl-firebolt    # builds bin/kubectl-firebolt; put it on PATH
