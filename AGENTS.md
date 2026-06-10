@@ -11,6 +11,7 @@ Engines require a ready instance. See [docs/architecture.mdx](docs/architecture.
 ```
 api/v1alpha1/          # CRD type definitions and webhooks
 cmd/main.go            # operator entry point
+cmd/kubectl-firebolt/  # kubectl-firebolt plugin entry point
 config/
   crd/bases/           # generated CRD manifests
   images/              # embedded default image tags (dev / latest variants)
@@ -26,6 +27,7 @@ helm/
   firebolt-operator-crds/ # CRD-only Helm chart
 internal/
   controller/          # reconcilers, state machines, gateway, drain logic
+  infra/               # kubectl-firebolt plugin library (typed CRs + kubectl)
   metrics/             # Prometheus metric recorders
 scripts/               # CI helpers, Kind setup, image loading, code generation
 test/
@@ -140,6 +142,13 @@ FireboltEngineClass holds a reusable pod-template fragment plus defaults for a s
 - Class drift for the two pod-affecting non-template fields is detected by their own effective-aware comparators, NOT the class hash: `storageMatchesSpec(sts, spec, classInfo)` and `customEngineConfigHash(spec, classInfo)` both resolve through the effective helper, so a class storage/config edit rolls a new generation. `rollout` / `drainCheckEnabled` / `drainCheckInterval` / `autoStop` do not reshape the pod and are read live, so they are intentionally absent from both the hash and `stsMatchesSpec`. The `firebolt.io/engine-class-hash` annotation covers only `spec.template`.
 - `rollout` and `drainCheckEnabled` carry NO `+kubebuilder:default` on `FireboltEngineSpec`: the default (graceful / true) is applied last in the `effective*` resolver, not by the apiserver, so an unset engine value stays empty and can fall through to the class. Re-adding a CRD default to either field would silently disable class inheritance for it.
 - The operator-owned set on `FireboltEngineClass.spec.template` lives in `api/v1alpha1/operatorauthority.go` (`ValidateOperatorOwnedPodTemplate`). The validating webhook returns those `field.Forbidden` errors verbatim; the FireboltEngineClass status controller re-runs the same check as a defense-in-depth `Ready=False/OperatorOwnedFieldSet` signal. Adding a new operator-owned field belongs in `ValidateOperatorOwnedPodTemplate` and propagates everywhere automatically.
+
+### kubectl-firebolt plugin
+
+`internal/infra/` + `cmd/kubectl-firebolt/` implement the `kubectl-firebolt` plugin — a command-line client that creates and inspects FireboltEngine / FireboltInstance / FireboltEngineClass resources. It builds those CRs from the typed `api/v1alpha1` structs and applies them with `kubectl`, so it is a first-class consumer of the CRD surface that compiles against the same types.
+
+- **Any large functional change to the operator MUST be verified to stay in line with the plugin.** This covers CRD field shapes, the engine-create contract (`engineClassRef`, the per-engine `spec.template` overrides, storage, `customEngineConfig`), resource kinds/group, and readiness conditions. Update `internal/infra/` in the same change and confirm `go build ./...`, `go test ./internal/infra/...`, and `make kubectl-firebolt` still pass.
+- Because the plugin compiles against the CRD types, a field rename surfaces as a build error in `internal/infra/`. Fix it by realigning the plugin — do **not** loosen it to hide the change. See [internal/infra/AGENTS.md](internal/infra/AGENTS.md) for the plugin's own invariants.
 - Image and pull-policy on the engine container were intentionally moved out of `FireboltEngineSpec.Image` into the FireboltEngineClass template (FB-1145). There is no per-engine image override; rolling a new image is done by mutating the referenced class. The e2e Image Switching test in `test/e2e/e2e_test.go` is the canonical pattern.
 
 ### RBAC changes
