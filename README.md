@@ -49,158 +49,9 @@ Workflow:
 
 This is the fast path if you want the agent to drive the install for you. If you would rather run the steps yourself, skip to the [Quick start](#quick-start) below.
 
-## Prerequisites
-
-- **Kubernetes 1.28+** -- the CRDs use CEL transition rules (`oldSelf`) for field immutability.
-
 ## Quick start
 
-### Deploy the operator
-
-**Production:**
-
-```bash
-helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
-helm upgrade --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator --skip-crds
-```
-
-There are two supported ways to install the CRDs:
-
-- **Separate CRD chart (recommended for managed upgrades):** install
-  `firebolt-operator-crds` first, then install or upgrade the operator chart.
-  This chart keeps CRDs in Helm templates, so future `helm upgrade
-  firebolt-crds ...` runs can update the CRD definitions. Use `--skip-crds`
-  on the operator chart in this flow so Helm does not also try its bundled
-  install-time CRD step.
-- **Bundled operator chart CRDs:** the operator chart also carries CRDs in its
-  `crds/` directory. Helm treats that directory specially: CRDs are installed
-  before chart templates on `helm install`, skipped with a warning if they
-  already exist, and can be skipped explicitly with `--skip-crds`. Helm does
-  not upgrade or delete CRDs from `crds/`, so use this path when install-time
-  bootstrapping is enough and manage CRD updates separately.
-
-**Local development (Kind):**
-
-```bash
-make prepare-test-e2e   # one-time: creates Kind cluster + publishes test images
-make local-deploy       # builds operator, loads into Kind, deploys via Helm
-```
-
-`make prepare-test-e2e` starts a local Docker registry container (`kind-registry` on `127.0.0.1:5001`) and configures every kind node to mirror `ghcr.io` and `docker.io` through it. Workload images are pushed to that registry once and pulled on demand by each node, so the multi-GB engine image is no longer duplicated per kind node. To recreate the registry from scratch (e.g. after a stale push), run `make flush-local-registry`.
-
-### Create a FireboltInstance
-
-An instance provisions the metadata infrastructure. See the [FireboltInstance CRD Reference](docs/crd-reference/instance-crd-reference.mdx) for all fields, phases, gateway sizing, and examples.
-
-```yaml
-apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltInstance
-metadata:
-  name: quickstart
-  namespace: firebolt
-spec:
-  metadata: {}
-  gateway: {}
-```
-
-Check progress:
-
-```bash
-kubectl get fire -n firebolt
-```
-
-### Configure object storage
-
-Every FireboltEngine requires object storage for managed tablet data. Local filesystem storage mode is not supported by the Firebolt Operator and the engine will refuse to start without object storage.
-
-On a real cluster, point the engine at an existing bucket (S3, GCS, or Azure Blob) and grant access through your platform's workload identity. For a local cluster (Kind, minikube), deploy a small S3-compatible emulator ([floci](https://github.com/floci-io/floci)) and create a bucket:
-
-```bash
-kubectl apply -f examples/object-storage-local.yaml
-```
-
-This deploys floci into the `firebolt` namespace at `http://floci.firebolt.svc.cluster.local:4566` and creates a `my-engine-bucket` bucket, which the engine references through `spec.customEngineConfig.storage` below.
-
-### Create a FireboltEngine
-
-Once the instance is `Ready`, create an engine that references it. The engine runs the operator's default image, so a single manifest is all you need. The `customEngineConfig.storage` block points the engine at the object storage configured above. To pin a specific engine image, set it on `spec.template.spec.containers[name=engine].image`; to share one image across many engines, put it on a [`FireboltEngineClass`](docs/crd-reference/fireboltengineclass-crd-reference.mdx) instead. See the [FireboltEngine CRD Reference](docs/crd-reference/engine-crd-reference.mdx) for the full field surface.
-
-```yaml
-apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngine
-metadata:
-  name: my-engine
-  namespace: firebolt
-spec:
-  instanceRef: quickstart
-  replicas: 2
-  customEngineConfig:
-    storage:
-      type: minio
-      api_scheme: "s3://"
-      bucket_name: my-engine-bucket
-      minio:
-        endpoint: http://floci.firebolt.svc.cluster.local:4566
-  template:
-    spec:
-      containers:
-        - name: engine
-          resources:
-            requests:
-              cpu: "2"
-              memory: "4Gi"
-            limits:
-              memory: "4Gi"
-```
-
-### Scale or update
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":5}}'
-```
-
-The operator handles the zero-downtime transition automatically.
-
-### Stop and resume
-
-Set `spec.replicas` to `0` to stop the engine without deleting the CR:
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":0}}'
-```
-
-Resume by setting a non-zero replica count:
-
-```bash
-kubectl patch fireng my-engine -n firebolt \
-  --type merge -p '{"spec":{"replicas":3}}'
-```
-
-### Connecting to engines
-
-**Through the instance gateway (recommended):** the Envoy proxy routes requests based on the `X-Firebolt-Engine` header and handles retries during blue-green transitions.
-
-```
-POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
-Headers:
-  X-Firebolt-Engine: my-engine
-  Content-Type: text/plain
-Body: <SQL>
-```
-
-**Directly against the per-engine Service:** each engine exposes a headless Service at `<engine>-service.<namespace>.svc.cluster.local:3473`. Use this when your client implements its own connection-level load balancing and DNS re-resolution.
-
-With this entry point the caller is responsible for
-- Periodically re-resolving the Service hostname (Kubernetes TTL on the in-cluster DNS response is typically 5s) so that newly-ready pods are picked up and draining pods are dropped
-- Treating a request on a single endpoint that fails with a transport error as "pick another endpoint", not "retry this request";
-
-## Rollout strategies
-
-**Graceful (default):** new generation is created, traffic is switched, old generation is drained (waits for running queries to complete), then deleted. Use for production.
-
-**Recreate:** new generation is created, traffic is switched, old generation is immediately deleted. Use for dev/test or when you can tolerate interrupted queries.
+For a step-by-step walkthrough, follow the quickstart guide in our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstart) or using the documentation source file at [`docs/quickstart.mdx`](docs/quickstart.mdx).
 
 ## Firebolt Operator flags
 
@@ -236,11 +87,12 @@ the manager uses when you run it directly. The Helm chart default is what the
 ## Running tests
 
 ```bash
+make lint               # golangci-lint
 make test               # unit tests (envtest, no cluster required)
 make test-e2e           # E2E tests (requires Kind cluster)
-make lint               # golangci-lint
 ```
 
 ## Where to go next
-
-For implementation detail, conventions, and rules for making changes, see [`AGENTS.md`](AGENTS.md).
+- For **contributor** detail, conventions, and rules for making changes to this repo, see [`AGENTS.md`](AGENTS.md).
+- The Helm chart for the operator lives in [helm/firebolt-operator](helm/firebolt-operator/README.md).
+- The pure CRD chart for the operator lives in [helm/firebolt-operator-crds](helm/firebolt-operator-crds/README.md).
