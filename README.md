@@ -12,6 +12,9 @@ The operator manages three custom resources:
 
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `FireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
+## Documentation
+For more detailed information checkout our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstartoverview)
+
 ## `kubectl firebolt` plugin
 
 For convenient management there's **`kubectl-firebolt`**, a kubectl plugin that creates, lists, deletes, and port-forwards FireboltEngines and FireboltInstances without hand-authoring manifests:
@@ -237,26 +240,6 @@ make test               # unit tests (envtest, no cluster required)
 make test-e2e           # E2E tests (requires Kind cluster)
 make lint               # golangci-lint
 ```
-
-## Documentation
-
-### Reference
-
-- [docs/crd-reference/instance-crd-reference.mdx](docs/crd-reference/instance-crd-reference.mdx) -- FireboltInstance spec, phases, and monitoring
-- [docs/crd-reference/engine-crd-reference.mdx](docs/crd-reference/engine-crd-reference.mdx) -- FireboltEngine spec, phases, conditions, and managed resources
-- [docs/crd-reference/fireboltengineclass-crd-reference.mdx](docs/crd-reference/fireboltengineclass-crd-reference.mdx) -- FireboltEngineClass spec, the operator-owned rejection set on `spec.template`, and the watch-driven rollout contract
-- [docs/instance/gateway/gateway-sizing.mdx](docs/instance/gateway/gateway-sizing.mdx) -- gateway replica count, memory limits, and the 2 MiB buffer constraint
-- [docs/troubleshooting.mdx](docs/troubleshooting.mdx) -- common issues with instances and engines
-- [docs/monitoring.mdx](docs/monitoring.mdx) -- observability and metrics
-- [docs/security.mdx](docs/security.mdx) -- operator vs. platform responsibilities for pod hardening, network isolation, and secrets
-
-### Design
-
-- [docs/architecture.mdx](docs/architecture.mdx) -- full architecture and reconciliation model
-- [docs-internal/operator-based-scaling.md](docs-internal/operator-based-scaling.md) -- zero-downtime blue-green scaling design
-- [docs-internal/formal-verification.md](docs-internal/formal-verification.md) -- TLA+ specifications and model checking
-- [docs-internal/SDLC.md](docs-internal/SDLC.md) -- release lifecycle and image tagging conventions
-- [docs-internal/option-b-per-engine-envoy-clusters.md](docs-internal/option-b-per-engine-envoy-clusters.md) -- per-engine Envoy cluster model (proposal, not implemented)
 
 ## Where to go next
 
