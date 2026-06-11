@@ -54,7 +54,7 @@ Unit tests live alongside their source files in `internal/controller/` and `inte
 - `make helm-docs` -- regenerate Helm chart READMEs from `values.yaml` comments
 - `make setup-local-registry` -- start the local Docker registry that kind nodes mirror through (idempotent)
 - `make flush-local-registry` -- drop and recreate the local registry (clears cached images)
-- `make prepare-test-e2e` -- create Kind cluster and publish test images to the local registry
+- `make prepare-test-e2e` -- full e2e setup: regenerate manifests/DeepCopy, create or reuse the Kind cluster, and publish test images to the local registry (runs `manifests generate setup-kind load-test-images`)
 - `make local-deploy` -- build operator, load into Kind, deploy via Helm
 - `make local-undeploy` -- remove the operator Helm release
 - `make cleanup-test-e2e` -- delete the Kind cluster (local registry is left running)
@@ -81,6 +81,7 @@ GINKGO_FOCUS="your test description" make test-e2e
 
 You are expected to operate as a strategic collaborator, not a code generator.
 
+- **Verify; never assume.** Do not assume how something works -- confirm it against the source of truth (the code first, documentation second) before acting or advising. State the fact you relied on (file, line, target, or doc) when it matters. An unverified claim is a bug waiting to happen.
 - **Challenge weak assumptions.** If a request contradicts the existing structure, conventions, or sound engineering practice, propose a better path before implementing. Surface the trade-off explicitly.
 - **Surface viability concerns early.** Before writing code, sanity-check that the requested approach fits the stack, the data model, and any cross-component constraints. If something will not work, say so.
 - **Think end-to-end.** A change is not done when the code compiles. It is done when the surrounding integration works: callers updated, configuration wired, downstream consumers verified.
@@ -118,6 +119,25 @@ Code is not done until it is covered by tests where tests are reasonable.
 - If a change is genuinely untestable in the current harness (e.g., cloud-only infrastructure, external service integration), you MUST say so explicitly in your response and explain why.
 - Prefer fast, deterministic tests at the lowest reasonable level (unit > integration > end-to-end).
 - A change that ships without tests, and without an explicit reason for not having them, is incomplete.
+
+## How we work (agentic workflow)
+
+Every change is tracked and lands through a branch and a pull request -- no exceptions.
+
+- **A documented issue comes first.** Every task MUST have a corresponding issue before any work starts -- a Linear ticket or a GitHub issue. If none exists, create one. No issue, no work.
+- **Never touch `main` directly.** You MUST NEVER work in, commit to, or push to `main`. All work happens on a feature branch and merges via a reviewed PR. `main` is only ever advanced by merging a PR or by the `semantic-release` automation's release commit.
+- **Branch names tie the branch to its issue**, so work is traceable. Prefix the branch with the tracker identifier:
+  - Linear: `FB-<number>-<short-kebab-description>` (e.g. `FB-661-pods-not-ready-message`).
+  - GitHub issue: `<issue-number>-<short-kebab-description>`.
+  - Branch off the latest `main`, not off another in-flight feature branch.
+- **PRs follow the template.** Pull requests MUST follow [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md): fill in **Background** (with `ISSUE-REF`), **Summary** (what changes and what it means going forward), and **Test Plan**. Re-check the template before opening a PR in case it has changed.
+- **Conventional-commit subjects drive releases.** `semantic-release` (`.releaserc.json`) parses the commits merged to `main` to compute the next version and release notes, so every commit subject MUST follow the format in "Commit conventions" (under Project-specific rules below).
+
+Linear specifics:
+
+- **Team:** `Firebolt` (key `FB`). All issue identifiers use the `FB-` prefix.
+- **Project:** `Firebolt Operator`.
+- Any new Linear issue created in connection with this repo MUST be filed under team `Firebolt` AND project `Firebolt Operator`. Filing it in the team without the project leaves it unscoped.
 
 ## Known issues
 
