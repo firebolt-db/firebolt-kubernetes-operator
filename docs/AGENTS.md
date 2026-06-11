@@ -5,6 +5,7 @@ especially MDX files.
 
 ## Brand and naming
 - In documentation and readme files, always use "the Firebolt Operator" over "the operator" or "the Kubernetes operator" or "the Firebolt Kubernetes Operator".
+- Capitalize Firebolt Instance, Instance (when referring to Firebolt Instance) Engine, Firebolt Engine, Metadata Service, Gateway, Postgres
 
 ## CRD reference accuracy
 - The CRD reference pages under `docs/crd-reference/` (`instance-crd-reference.mdx`, `engine-crd-reference.mdx`, `fireboltengineclass-crd-reference.mdx`) are spec/owned-field/phase/status property references only. Narrative design content lives under `docs/engine/`, `docs/engineclass/`, and `docs/instance/`. They are hand-maintained and not generated.
@@ -45,6 +46,7 @@ especially MDX files.
 - Put UI elements in bold.
 - Use unambiguous date formatting.
 - Do not use em-dashes.
+- Use block-style YAML instead of inline braces.
 
 ## Images
 
