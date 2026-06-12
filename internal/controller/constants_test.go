@@ -25,8 +25,8 @@ import (
 )
 
 // TestResolveImageRef pins the partial-override semantics that make
-// ImageSpec.Repository and ImageSpec.Tag independently optional.
-// Each dimension must fall back to its component default on its own so users
+// ImageSpec.Repository and ImageSpec.Tag independently optional. Each
+// dimension must fall back to its component default on its own so users
 // can pull from a mirror without restating the tag (or pin a tag without
 // restating the repository).
 func TestResolveImageRef(t *testing.T) {
