@@ -1,3 +1,7 @@
+# 0.1.2
+
+fix(helm): remove operator pod resource request/limit defaults (FB-1653) (#5)
+
 # 0.1.1
 
 appVersion: v0.1.1
