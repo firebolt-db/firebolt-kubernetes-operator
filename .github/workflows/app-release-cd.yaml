@@ -73,9 +73,14 @@ jobs:
           # semantic-release made no release. That is expected when this push
           # carried only non-releasable commits (docs/chore/...) -> stay green
           # and quiet. But if this push DID contain a releasable commit
-          # (feat/fix/breaking) and still produced no release, a release is
-          # genuinely missing for code now on main (e.g. two merges landed close
-          # together) -> fail loudly so it can be recovered.
+          # (feat/fix/breaking, or chore(deps)) and still produced no release, a
+          # release is genuinely missing for code now on main (e.g. two merges
+          # landed close together) -> fail loudly so it can be recovered.
+          #
+          # Releasable types must match the releaseRules in .releaserc.json:
+          # feat/fix/perf/revert + any breaking (!) by preset default, plus
+          # chore(deps) via our custom rule. Only the `deps` scope of chore is
+          # releasable, so chore alone stays non-releasable below.
 
           # Only a push has a set of "pushed commits" to judge. A manual
           # workflow_dispatch with nothing to release is intentional, not a
@@ -96,13 +101,13 @@ jobs:
             BODIES=$(git show -s --format='%b' "$AFTER")
           fi
 
-          if printf '%s\n' "$SUBJECTS" | grep -Eq '^(feat|fix)(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:' \
+          if printf '%s\n' "$SUBJECTS" | grep -Eq '^(feat|fix|perf|revert)(\([^)]+\))?!?:|^chore\(deps\)!?:|^[a-z]+(\([^)]+\))?!:' \
              || printf '%s\n' "$BODIES" | grep -Eq 'BREAKING[ -]CHANGE'; then
             echo "::error title=Releasable push produced no release::This push contained releasable commit(s) but semantic-release produced no release — a release is missing for code already on main (likely two merges landed close together). Re-run this workflow (or push a release) to recover it." 1>&2
             printf '%s\n' "$SUBJECTS" | sed 's/^/  - /' 1>&2
             exit 8
           else
-            echo "No releasable commits in this push (docs/chore) — nothing to release."
+            echo "No releasable commits in this push (docs/chore/...) — nothing to release."
           fi
 
       - name: Publish GitHub release
