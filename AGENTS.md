@@ -39,7 +39,8 @@ Unit tests live alongside their source files in `internal/controller/` and `inte
 
 ## Build, test, and lint
 
-- `make build` -- compile to `bin/manager`
+- `make` / `make help` -- print the Firebolt logo and the lifecycle-grouped target list (this is the default goal; bare `make` does **not** build)
+- `make build` (or `make all`) -- compile to `bin/manager`
 - `make manifests` -- regenerate CRDs from type markers
 - `make generate` -- regenerate DeepCopy methods
 - `make test` -- unit tests (uses envtest; no cluster required)
