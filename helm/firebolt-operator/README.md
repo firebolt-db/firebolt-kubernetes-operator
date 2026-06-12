@@ -73,7 +73,7 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | rbac.apiserverProxyGrant | bool | `false` | Render an additional ClusterRole (or per-namespace Role when `watchNamespaces` is set) granting only `pods/proxy: get`. Required when any FireboltInstance opts into `spec.metricScrapeMode=ApiserverProxy`; the default `metricScrapeMode=PodIP` reaches engine metrics directly on the pod IP and does not need this permission. Leaving this false while an instance is set to `ApiserverProxy` makes the metric scrape surface as a 403 from the apiserver. |
 | rbac.create | bool | `true` | Whether to create ClusterRole, ClusterRoleBinding, and leader-election RBAC resources. |
 | replicaCount | int | `1` | Number of operator replicas. |
-| resources | object | requests: 10m/64Mi, limits: 500m/128Mi | CPU/memory resource requests and limits for the operator pod. |
+| resources | object | `{}` | CPU/memory resource requests and limits for the operator pod. Empty by default so the chart imposes no requests or limits; set them to match your cluster's scheduling and quota policy. |
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount (e.g. for IRSA / Workload Identity). |
 | serviceAccount.create | bool | `true` | Whether to create a ServiceAccount. |
 | serviceAccount.name | string | `""` | The name of the ServiceAccount to use. If empty, a name is generated from the fullname template. |
