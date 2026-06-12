@@ -215,15 +215,10 @@ additionalArgs: []
 # -- Additional environment variables for the operator container.
 additionalEnv: []
 
-# -- CPU/memory resource requests and limits for the operator pod.
-# @default -- requests: 10m/64Mi, limits: 500m/128Mi
-resources:
-  limits:
-    cpu: 500m
-    memory: 128Mi
-  requests:
-    cpu: 10m
-    memory: 64Mi
+# -- CPU/memory resource requests and limits for the operator pod. Empty by
+# default so the chart imposes no requests or limits; set them to match your
+# cluster's scheduling and quota policy.
+resources: {}
 
 # -- Extra volumes attached to the operator Pod. Rendered as-is into
 # `pod.spec.volumes`. Useful for mounting externally-provisioned certs,
