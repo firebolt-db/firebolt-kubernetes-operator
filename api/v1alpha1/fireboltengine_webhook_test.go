@@ -321,7 +321,7 @@ func fakeReaderWithClassContainer(t *testing.T, name string, resources corev1.Re
 }
 
 // TestFireboltEngineValidator_ClassResourcesExceedBound covers the
-// FB-1426 class-blindness fix: an engine that omits its own
+// class-aware half of the bounds check: an engine that omits its own
 // spec.template resources but references a class whose engine
 // container carries oversized resources must be rejected too. The
 // rendered StatefulSet would otherwise carry the class's resources

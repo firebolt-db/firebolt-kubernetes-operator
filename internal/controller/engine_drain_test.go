@@ -77,8 +77,8 @@ func TestParsePrometheusGaugeRejectsLabeledSeries(t *testing.T) {
 	}
 }
 
-// TestGetTerminationGracePeriod_AlwaysDefault pins the post-FB-1426
-// invariant: TGPS is operator-owned. Neither the engine spec nor any
+// TestGetTerminationGracePeriod_AlwaysDefault pins the invariant
+// that TGPS is operator-owned. Neither the engine spec nor any
 // pod template can change it — getTerminationGracePeriod always returns
 // the operator default, and the admission webhook rejects user-supplied
 // TGPS on both engine.spec.template and FireboltEngineClass.spec.template.
@@ -107,11 +107,10 @@ func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 }
 
 // TestEngineShutdownWaitSeconds_ClampsAndMargin exercises the
-// gracePeriod → shutdown-wait conversion directly. Post-FB-1426 the
-// production TGPS is always the operator default, so this test pins
-// down only the helper's arithmetic (margin subtraction + 1s floor)
-// rather than threading TGPS through a spec field that no longer
-// exists.
+// gracePeriod → shutdown-wait conversion directly. The production
+// TGPS is always the operator default, so this test pins down only
+// the helper's arithmetic (margin subtraction + 1s floor); there is
+// no spec field to thread TGPS through.
 func TestEngineShutdownWaitSeconds_ClampsAndMargin(t *testing.T) {
 	tests := []struct {
 		name string

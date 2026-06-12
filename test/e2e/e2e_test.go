@@ -293,7 +293,7 @@ var _ = Describe("Firebolt Engine", func() {
 	// controller can settle. Running concurrently with other Describes
 	// pushed kube-scheduler's VolumeBinding plugin into 409-Conflict retries
 	// on PreBind, leaving pods stuck in FailedScheduling and the engine in a
-	// half-rolled-out state past the rapid-changes timeout. See FB-996.
+	// half-rolled-out state past the rapid-changes timeout.
 	Describe("Rapid Config Changes", Ordered, Serial, func() {
 		var (
 			instanceName = "inst-rapid" + queryConfig.Suffix
@@ -357,7 +357,7 @@ var _ = Describe("Firebolt Engine", func() {
 			// path multiple times. The original 15-change variant produced ~32
 			// short-lived PVCs in <1s, which overran the kind cluster's
 			// scheduler+PV-controller and stranded pods in FailedScheduling well
-			// past the rapid-changes timeout. See FB-996.
+			// past the rapid-changes timeout.
 			By("Rapidly applying 7 config changes alternating between 3 and 1, ending with 1")
 			for i := 0; i < 7; i++ {
 				replicas := 3
@@ -508,8 +508,8 @@ var _ = Describe("Firebolt Engine", func() {
 
 	// Test 6: Image switching via FireboltEngineClass mutation.
 	//
-	// Image override moved from spec.image on FireboltEngine to
-	// containers[engine].image on the referenced FireboltEngineClass (FB-1145).
+	// The engine image is defined by containers[engine].image on the
+	// referenced FireboltEngineClass; FireboltEngine has no per-engine image field.
 	// The engine is created with spec.engineClassRef pointing at a
 	// dedicated class; mutating the class's container image is the
 	// canonical path for runtime version upgrades. The engine controller's

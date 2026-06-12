@@ -485,8 +485,7 @@ func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
 // the class-side test above for the engine-template path: an engine
 // that sets spec.template.spec.volumes[name=="data"] on the PVC
 // backend must not introduce a duplicate-volume admission failure
-// either. The post-FB-1426 engine template surfaces this path; before
-// FB-1426 only the class could trigger it.
+// either.
 func TestAppendUserPodVolumes_PVCBackendDropsCollidingEngineData(t *testing.T) {
 	operator := []corev1.Volume{
 		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
@@ -546,12 +545,11 @@ func TestSidecarsMatch_TolerantOfAPIServerDefaults(t *testing.T) {
 // hardened firebolt-instance-helm-parity default (drop ALL, non-root
 // 3473, no privilege escalation) — otherwise the pod runs with
 // whatever the engine image's USER directive happens to be, and the
-// hardening parity FB-1297 set out to deliver is lost.
+// hardening parity with the instance components is lost.
 //
 // This is distinct from the existing test on
 // getEngineContainerSecurityContext (the test-fixture wrapper); the
-// production wiring is what matters and is what was missed in the
-// original FB-1297 attempt.
+// production wiring is what matters.
 func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 	t.Run("default applied when neither spec nor class sets it", func(t *testing.T) {
 		got := effectiveEngineContainerSecurityContext(testSpec(), nil)

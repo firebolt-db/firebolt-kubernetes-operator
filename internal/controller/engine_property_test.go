@@ -367,8 +367,8 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 // triggering spec drift detection. The action rotates among multiple
 // carriers — ServiceAccountName, engine container Resources, pod
 // labels — so the rapid harness covers every drift-comparator branch
-// the FB-1426 merge layer added, not only the SA single-value path.
-// Each carrier lives under spec.template post-FB-1426 and is read by
+// of the template merge layer, not only the SA single-value path.
+// Each carrier lives under spec.template and is read by
 // the matching effective* helper in stsMatchesSpec, so a regression
 // that breaks one branch (e.g. forgets to compare resources on the
 // engine container) gets caught.
@@ -424,7 +424,7 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 	}
 }
 
-// ApplyClassUnready models the FB-1145 / FB-1298 class-Ready gate by
+// ApplyClassUnready models the class-Ready gate by
 // nulling out the resolved classInfo. The production controller's
 // resolveFireboltEngineClassInfo refuses to consume an unready class
 // and short-circuits the reconcile, so the compute layer never sees

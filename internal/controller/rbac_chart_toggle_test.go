@@ -26,7 +26,7 @@ import (
 // Pins the operator chart's manager-rbac.yaml and apiserver-proxy-rbac.yaml
 // templates to the four-cell matrix of (watchNamespaces, rbac.apiserverProxyGrant)
 // combinations. The toggle is the load-bearing piece of the namespace-scoped
-// install posture (FB-1494): if the chart silently drops the namespaced
+// install posture: if the chart silently drops the namespaced
 // `Role`/`RoleBinding` shape, or accidentally renders both ClusterRole and
 // per-NS Role at the same time, the operator's RBAC stops matching its cache
 // scope and reconciles 403 in production. The cell-by-cell assertions below

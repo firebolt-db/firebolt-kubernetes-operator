@@ -78,7 +78,7 @@ const (
 // controller XML-escapes user input at render time, but the patterns here
 // reject XML metacharacters at admission time as defense-in-depth so a
 // malformed CR is rejected at apply rather than producing a config that
-// only works because the controller scrubs it (FB-1163).
+// only works because the controller scrubs it.
 type PostgresSpec struct {
 	// Host is the PostgreSQL server hostname or IP. Allowed characters are
 	// letters, digits, ".", "-", ":", "[", and "]" (the last three for IPv6

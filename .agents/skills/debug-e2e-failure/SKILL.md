@@ -158,7 +158,7 @@ For each failed spec, read at minimum:
 - The `envoy` / gateway logs if the failure mentions 5xx, drained, or cutover.
 - The `pensieve` / `metadata` / `metadata-pg` logs if the failure mentions metadata or readiness of shared infra.
 
-Cross-reference with `docs/architecture.mdx` ("Graceful pod shutdown" and "Why no EndpointSlice gate") whenever the failure looks like a brief request error during a blue-green cutover — those sections enumerate the layered data-plane contract and the historical FB-661 footgun.
+Cross-reference with `docs/architecture.mdx` ("Graceful pod shutdown" and "Why no EndpointSlice gate") whenever the failure looks like a brief request error during a blue-green cutover — those sections enumerate the layered data-plane contract and the removed-EndpointSlice-gate footgun.
 
 If the artifact is missing, search the job log / `run-e2e.log` for inline pod-log dumps (the suite prints them on failure):
 

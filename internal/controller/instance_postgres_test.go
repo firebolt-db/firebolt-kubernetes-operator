@@ -26,8 +26,8 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// FB-1164: lock in the SecurityContext hardening on the internal
-// PostgreSQL pod template. The official postgres:16-alpine image runs
+// Lock in the SecurityContext hardening on the internal PostgreSQL
+// pod template. The official postgres:16-alpine image runs
 // fine as the built-in non-root postgres user (UID 70) with a read-only
 // root filesystem, provided /var/run/postgresql and /tmp are backed by
 // writable emptyDir mounts. These tests are the regression guard against
@@ -209,8 +209,7 @@ func TestBuildPostgresStatefulSetPGDataLayout(t *testing.T) {
 // kubelet does not inject `<SVC>_PORT=tcp://...` style vars for every
 // Service in the namespace. DNS is the only service-discovery channel
 // the postgres container needs, and the auto-injected vars risk
-// shadowing real config keys in colocated workloads (cf. floci's
-// `FLOCI_PORT` collision in FB-1215).
+// shadowing real config keys in colocated workloads.
 func TestBuildPostgresStatefulSetDisablesServiceLinks(t *testing.T) {
 	sts := buildPostgresStatefulSet(mkPostgresInstance())
 	esl := sts.Spec.Template.Spec.EnableServiceLinks

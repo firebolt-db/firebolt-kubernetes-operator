@@ -72,9 +72,9 @@ func (v *FireboltEngineClassCustomValidator) ValidateCreate(_ context.Context, e
 }
 
 // ValidateUpdate enforces the same path rejection set as ValidateCreate.
-// FireboltEngineClass spec is mutable (per the FB-1145 design call), but
-// every rejected path stays rejected: a typo that admission caught at
-// Create must still be caught on a subsequent Update.
+// FireboltEngineClass spec is mutable by design, but every rejected path
+// stays rejected: a typo that admission caught at Create must still be
+// caught on a subsequent Update.
 func (v *FireboltEngineClassCustomValidator) ValidateUpdate(
 	_ context.Context, _, ec *FireboltEngineClass,
 ) (admission.Warnings, error) {
