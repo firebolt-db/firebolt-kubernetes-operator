@@ -19,7 +19,6 @@ config/
   manager/             # manager deployment manifest
   samples/             # example CRs
 docs/                  # published Mintlify docs (MDX + docs.json)
-docs-internal/         # internal design notes, SDLC, slides (not published)
 examples/              # user-facing example manifests
 formal/                # TLA+ specifications and model-checker configs
 helm/
@@ -97,20 +96,9 @@ You MUST keep documentation in sync with code. When making changes:
 - **AGENTS.md** -- update the relevant `AGENTS.md` (root or scoped) if you change structure, conventions, public interfaces, commands, config formats, or add or remove modules. If your change makes existing AGENTS.md content wrong, fix it before finishing.
 - **README.md** -- update if your change affects what a human reader needs to know to understand the project: setup, headline architecture, or what the project is for. Keep the README an overview; push detail into AGENTS.md.
 - **docs/architecture.mdx** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
-- **docs/** and **docs-internal/** -- keep published docs (`docs/`) and internal design notes (`docs-internal/`) up to date as code changes. Documents about historical or unimplemented features in `docs-internal/` do not need updates unless they become wrong.
+- **docs/** -- keep the published docs (`docs/`) up to date as code changes.
 
 A pull request that changes structure or interfaces without a documentation update is incomplete.
-
-## Document resolved issues
-
-You MUST capture non-obvious problems you solve. When you encounter and fix a quirk, footgun, surprising framework behavior, environment trap, or anything that took meaningful debugging:
-
-- Add a short entry to [KNOWN_ISSUES.md](KNOWN_ISSUES.md) at the repo root, or to the scoped `KNOWN_ISSUES.md` in the module where the issue lives.
-- State the symptom, the cause, and the resolution in two or three sentences.
-- This prevents the next agent from rediscovering the same problem.
-- **Prune entries once the trap is gone.** `KNOWN_ISSUES.md` is a log of *live* footguns, not a changelog. When you eliminate an issue at the root — remove the workaround, drop the dependency, finish migrating off the deprecated API — delete its entry, or trim it to whatever residual footgun still survives, rather than leaving a "Resolved" note. *How* a fix was made lives in the commit history and code comments; this file should only carry what can still bite the next agent.
-
-If the issue is project-wide, put it in the root `KNOWN_ISSUES.md`. If it is scoped to one module, put it in that module's `KNOWN_ISSUES.md`.
 
 ## Proactive harness
 
@@ -142,7 +130,7 @@ Linear specifics:
 
 ## Known issues
 
-See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the running log of non-obvious problems, framework footguns, and environment traps. Add new entries there, not here.
+Non-obvious problems, framework footguns, and environment traps that can still bite the next agent are recorded inline below.
 
 - **GitHub Actions `pull_request.paths` filters also suppress `closed` events.** If a workflow creates external state on `opened` or `synchronize` and must clean it up on `closed`, do not rely on trigger-level `paths` filters. Put path relevance checks inside the job instead, and let `closed` events reach the workflow so cleanup can run even when the final PR diff no longer includes the original files.
 
@@ -200,8 +188,6 @@ Every webhook-enforced invariant has a controller-side counterpart so the same C
 - **`FireboltEngine.spec.resources` bounds (`--engine-max-*`).** Webhook rejects. Controller's `r.ResourceBounds.Validate` runs every reconcile via the same code path and surfaces `engine.ConditionReady=False/ResourceBoundsExceeded` with the field path and the configured maximum. Plumb the bounds from `cmd/main.go` into both the webhook and the reconciler so they cannot diverge.
 
 CRD CEL rules (the third enforcement layer) are independent of webhook state — they are baked into the CRD and run inside the apiserver. Use them for invariants where webhook + controller cannot together close a race (the only current example is the `spec.id` empty-to-ULID transition).
-
-The full per-invariant matrix lives at [`docs-internal/webhook-hardening-plan.md`](docs-internal/webhook-hardening-plan.md).
 
 ### Local image-loading mechanism
 
@@ -273,5 +259,5 @@ When breaking work into a plan, divide it into self-contained commits. Each comm
 ### Code quality
 
 - Ignoring errors is forbidden except with a documented rationale in a comment.
-- No ticket references (`FB-<ticket>`, `FIR-<ticket>`, or any tracker ID) in code or docs: not in comments, identifiers, strings, doc prose, or `docs-internal/` notes. Tickets go in the commit message only (see Commit conventions).
-- Comments and docs state how the code behaves now, not what just changed. Do not narrate edits ("previously", "changed to", "fixed the bug where", "new:"); record durable footguns in `KNOWN_ISSUES.md` (see Document resolved issues), not inline.
+- No ticket references (`FB-<ticket>`, `FIR-<ticket>`, or any tracker ID) in code or docs: not in comments, identifiers, strings, or doc prose. Tickets go in the commit message only (see Commit conventions).
+- Comments and docs state how the code behaves now, not what just changed. Do not narrate edits ("previously", "changed to", "fixed the bug where", "new:").

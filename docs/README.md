@@ -2,8 +2,6 @@
 
 Published user-facing docs for this project are aggregated into [docs.firebolt.io](https://docs.firebolt.io) under **Self-Managed → Firebolt Operator**.
 
-Internal design notes and release docs live in [`docs-internal/`](../docs-internal/) and are not published.
-
 ## Layout
 
 | Path | Purpose |
@@ -30,8 +28,6 @@ Fork PRs do not receive aggregation (the workflow requires `head.repo == base.re
 When this PR **merges**, packdb marks its aggregation PR ready for review. Squash-merge that packdb PR into `master` to publish the docs (urgent fixes can be cherry-picked to `release/packdb-*` like any other docs change).
 
 When this PR is **closed without merge**, packdb closes its aggregation PR and deletes the aggregate branch.
-
-For the full cross-repo pipeline (CI dispatch, GitHub Apps, Mintlify, release branches), see [docs-internal/documentation-workflow.md](../docs-internal/documentation-workflow.md).
 
 ## Required secrets
 

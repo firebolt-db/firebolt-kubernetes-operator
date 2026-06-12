@@ -11,8 +11,7 @@ set -euo pipefail
 # NOT catch this — the Secret is only written by a real install.
 #
 # config/crd/bases stays full-fat; the chart ships description-slimmed copies
-# via scripts/strip-crd-descriptions.py (run by `make manifests`). See
-# KNOWN_ISSUES.md (release-Secret size).
+# via scripts/strip-crd-descriptions.py (run by `make manifests`).
 #
 # Hermetic: installs into its own namespace/release and uninstalls on exit, so
 # the rest of the test-helm flow (operator chart via `make local-deploy`)

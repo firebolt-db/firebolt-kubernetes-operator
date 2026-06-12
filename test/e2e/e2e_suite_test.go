@@ -87,9 +87,6 @@ const (
 // upgradeTagSuffix MUST stay in sync with UPGRADE_TAG_SUFFIX in
 // scripts/load-e2e-images.sh — the script is what materialises this tag
 // in the registry, and a mismatch surfaces as an opaque ImagePullBackOff.
-//
-// See docs-internal/SDLC.md "Default image bumps" and README.md "Bumping Default
-// Image Versions" for the variant rules.
 const upgradeTagSuffix = "-uptest"
 
 var (

@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 """Generate the TLA+ state-cover test fixture for the FireboltInstance reconciler.
 
-Phase 5 of the formal-verification plan (docs-internal/formal-verification.md): for each
+Phase 5 of the formal-verification plan: for each
 reachable state in the TLC state graph of FireboltInstance.tla, the generated Go
 test materialises the state in the in-memory instanceSim, calls the same
 setInstanceReadyRollup + computePhase functions the production code calls, and
