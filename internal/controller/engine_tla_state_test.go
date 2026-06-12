@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 
 package controller
 
-// Phase 3 of the formal-verification plan (docs-internal/formal-verification.md):
+// Phase 3 of the formal-verification plan:
 // deterministic exhaustive state-cover testing for computeEngineReconcile.
 //
 // For every reachable state in the TLC state graph (regenerated via

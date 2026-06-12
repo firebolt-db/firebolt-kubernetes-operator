@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 
 package controller
 
-// Phase 5 of the formal-verification plan (docs-internal/formal-verification.md):
+// Phase 5 of the formal-verification plan:
 // deterministic exhaustive state-cover testing for the FireboltInstance
 // reconciler, mirroring the engine_tla_state_test.go harness.
 //
