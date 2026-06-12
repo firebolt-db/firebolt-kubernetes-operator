@@ -154,7 +154,7 @@ EnvSetInstanceReady(v) ==
                    stsSpecVer, svcTargetGen, podsReady, podsDrained, classReady>>
 
 \* FireboltEngineClass becomes ready or not-ready. Symmetric to
-\* EnvSetInstanceReady: models the FB-1145 / FB-1298 class-Ready gate
+\* EnvSetInstanceReady: models the class-Ready gate
 \* (resolveFireboltEngineClassInfo refuses to consume a class whose
 \* Ready=False/OperatorOwnedFieldSet condition is set; Reconcile then
 \* surfaces ConditionReady=False/FireboltEngineClassUnready on the engine
@@ -175,8 +175,8 @@ EnvSetClassReady(v) ==
 \* infinitely often, not simultaneously, so TLC can find a behavior
 \* where the two flags alternate and the gated reconcile never opens.
 \* WF on EnvSetGatesOpen forces a moment where both gates are open,
-\* satisfying the SF on the gated reconcile actions. The pre-FB-1426
-\* spec did not need this because the gate was a single flag.
+\* satisfying the SF on the gated reconcile actions. A single-flag
+\* gate would not need this; the two-flag gate does.
 EnvSetGatesOpen ==
     /\ \/ instanceReady = FALSE
        \/ classReady = FALSE

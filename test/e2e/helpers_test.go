@@ -331,8 +331,8 @@ func CreateBareEngineWithClassRef(ctx context.Context, instanceRef, name, classR
 // resource requests/limits, bypassing the default 100m/2Gi the other
 // helpers stamp on. Used by failure-isolation tests that need an engine
 // to fail at startup (e.g. memory limit small enough to OOMKill the
-// container before its first health probe). Resources now live under
-// spec.template.spec.containers[engine] (FB-1426).
+// container before its first health probe). Resources live under
+// spec.template.spec.containers[engine].
 func CreateEngineWithResources(ctx context.Context, instanceName, name string, replicas int, resources corev1.ResourceRequirements) error {
 	cl, err := getCRDClient()
 	if err != nil {
@@ -411,8 +411,8 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 // whose spec.template carries the engine container image. The class is the
 // canonical knob for switching engine images at runtime — mutating
 // containers[engine].image on the class triggers a blue-green rollout
-// on every FireboltEngine in the same namespace that references it
-// (FB-1145). FireboltEngineClass is namespaced; the class and its consumer
+// on every FireboltEngine in the same namespace that references it.
+// FireboltEngineClass is namespaced; the class and its consumer
 // engines must share a namespace.
 func CreateFireboltEngineClass(ctx context.Context, name, image string) error {
 	cl, err := getCRDClient()

@@ -26,8 +26,9 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// TestBuildStatefulSet_DataVolumeBackends guards FB-1085: the engine pod's
-// /firebolt-core/volume mount can be backed by the default emptyDir, an
+// TestBuildStatefulSet_DataVolumeBackends guards the data-volume backend
+// matrix: the engine pod's /firebolt-core/volume mount can be backed by
+// the default emptyDir, an
 // opt-in per-pod PVC, an explicit emptyDir with knobs, or a hostPath. The
 // PVC backend emits a single VolumeClaimTemplate (and no pod-level data
 // Volume); the other backends suppress the VCT and instead add a pod-level

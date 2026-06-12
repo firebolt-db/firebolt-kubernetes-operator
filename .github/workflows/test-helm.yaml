@@ -160,8 +160,8 @@ jobs:
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
-      # Guards the CRDs against regrowing past Helm's 1 MiB release-Secret cap
-      # (FB-1475). Runs before the operator chart so these cluster-scoped CRDs
+      # Guards the CRDs against regrowing past Helm's 1 MiB release-Secret
+      # cap. Runs before the operator chart so these cluster-scoped CRDs
       # are not already present; the script installs the dedicated CRD chart,
       # waits for the CRDs to be Established, then uninstalls.
       - name: Verify CRD chart installs under Helm's 1 MiB Secret cap

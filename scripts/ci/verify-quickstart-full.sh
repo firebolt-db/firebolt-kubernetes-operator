@@ -37,9 +37,9 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 setup_floci "$NAMESPACE" "$FLOCI_BUCKET"
 
 echo "Applying instance-full with metadata image pinned from config/images/defaults.${IMAGE_VARIANT}.env..."
-# spec.metadata.image was removed in FB-1322; the metadata container's
-# image lives on the embedded PodTemplateSpec at
-# spec.metadata.template.spec.containers[name=="metadata"].image. The
+# The metadata container's image lives on the embedded PodTemplateSpec at
+# spec.metadata.template.spec.containers[name=="metadata"].image; there is
+# no flat spec.metadata.image field. The
 # example file already declares that container — we just overwrite
 # image and imagePullPolicy.
 METADATA_REF="${METADATA_IMAGE}:${METADATA_TAG}" yq eval '
@@ -52,11 +52,10 @@ echo "Relabeling Kind nodes for engine-full scheduling..."
 kubectl label nodes --all firebolt.dev/pool=engine --overwrite
 kubectl label nodes --all topology.kubernetes.io/zone=us-east-1a --overwrite
 
-echo "Creating FireboltEngineClass that pins the CI engine image (the per-engine spec.image field was removed in FB-1145)..."
+echo "Creating FireboltEngineClass that pins the CI engine image (the engine image is defined on the class; there is no per-engine spec.image field)..."
 ENGINE_CLASS_NAME="${ENGINE_NAME}-ci-class"
-# FireboltEngineClass is namespaced (FB-1145); apply it to the engine's
-# namespace so spec.engineClassRef resolves. Pre-namespace-flip this
-# worked under the cluster default namespace; now the class must live
+# FireboltEngineClass is namespaced; apply it to the engine's
+# namespace so spec.engineClassRef resolves — the class must live
 # with its consumer.
 cat <<EOF | kubectl apply -n "$NAMESPACE" -f -
 apiVersion: compute.firebolt.io/v1alpha1

@@ -23,7 +23,7 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// FB-1163: defense-in-depth admission patterns on
+// Defense-in-depth admission patterns on
 // spec.metadata.postgres.{host,database,schema}. The controller XML-escapes
 // these fields before rendering the pensieve config; these specs lock in
 // that the CRD also rejects XML metacharacters at admission time so a

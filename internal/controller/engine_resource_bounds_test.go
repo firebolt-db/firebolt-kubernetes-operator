@@ -274,8 +274,8 @@ func TestEngineReconcile_EmptyResourceBoundsIsNoOp(t *testing.T) {
 	}
 }
 
-// TestEngineReconcile_ClassResourceBoundsExceeded pins the FB-1426
-// class-blindness fix on the controller side: an engine that omits
+// TestEngineReconcile_ClassResourceBoundsExceeded pins the controller
+// side of the class-aware bounds gate: an engine that omits
 // spec.template resources but references a class whose engine
 // container carries oversized resources must trip the bounds gate
 // just like the webhook does. Otherwise the webhook-disabled path

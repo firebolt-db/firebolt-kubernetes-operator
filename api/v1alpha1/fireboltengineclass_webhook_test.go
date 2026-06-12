@@ -290,7 +290,7 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			},
 			wantField: "spec.template.spec.initContainers[1].name",
 		},
-		// Security / footgun pod-level fields (FB-1426 follow-up).
+		// Security / footgun pod-level fields.
 		{
 			name: "pod hostNetwork",
 			mutate: func(ec *FireboltEngineClass) {
@@ -416,7 +416,7 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 
 // TestFireboltEngineClassValidator_SidecarsUnconstrained pins down that sidecar
 // containers can carry whatever the user wants — image, command, ports,
-// env, probes. Sidecar parity is a deliberate FB-1145 design choice;
+// env, probes. Sidecar freedom is a deliberate design choice;
 // regressing it would silently turn the FireboltEngineClass into a strict
 // pod-spec allowlist.
 func TestFireboltEngineClassValidator_SidecarsUnconstrained(t *testing.T) {
@@ -496,10 +496,11 @@ func TestFireboltEngineClassValidator_AllowsDeleteWhenUnbound(t *testing.T) {
 }
 
 // TestFireboltEngineClassValidator_RejectsDeleteWhenStatusZeroButRefExists pins
-// down the race the live-list switch is designed to close: an engine
+// down the race the live list is designed to close: an engine
 // references the class but status.boundEngines is still at its zero-value
-// default (no reconcile yet). Pre-FB-1145-fix this delete would succeed
-// and orphan the engine; with the live list it must be refused.
+// default (no reconcile yet). Trusting the status field alone would let
+// this delete succeed and orphan the engine; with the live list it must
+// be refused.
 func TestFireboltEngineClassValidator_RejectsDeleteWhenStatusZeroButRefExists(t *testing.T) {
 	scheme := fireboltEngineClassWebhookScheme(t)
 	ec := validFireboltEngineClass()

@@ -78,13 +78,13 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 	}
 }
 
-// TestBuildMetadataConfigXML_EscapesUserFields locks in the FB-1163 fix:
+// TestBuildMetadataConfigXML_EscapesUserFields locks in XML escaping:
 // every user-controlled string interpolated into the pensieve config
 // template must be XML-escaped. Without escaping, a malicious operator
 // could inject extra XML elements (e.g. a second <host>) and redirect
 // the metadata service to an attacker-controlled PostgreSQL.
 //
-// This test pretends the CRD admission Pattern (which now also rejects
+// This test pretends the CRD admission Pattern (which also rejects
 // these strings at admission time) is bypassed — controller-internal
 // code must remain safe even if a future change widens the pattern.
 func TestBuildMetadataConfigXML_EscapesUserFields(t *testing.T) {

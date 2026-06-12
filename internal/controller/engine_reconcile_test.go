@@ -82,8 +82,8 @@ func testSpec() *computev1alpha1.FireboltEngineSpec {
 
 // setSpecTemplateContainer mutates spec.Template (creating it as needed)
 // so the engine container carries the provided customization. Tests
-// that previously wrote spec.Resources / spec.SecurityContext directly
-// reach the equivalent post-FB-1426 shape through this helper.
+// that customize engine-container fields (resources, securityContext,
+// env, ...) reach the spec.template shape through this helper.
 func setSpecTemplateContainer(spec *computev1alpha1.FireboltEngineSpec, mutate func(*corev1.Container)) {
 	if spec.Template == nil {
 		spec.Template = &corev1.PodTemplateSpec{}
@@ -136,10 +136,8 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 // makeSTS returns the seed StatefulSet used by reconciler tests that
 // need a "stable, in-sync with testSpec" fixture. It delegates to the
 // real buildStatefulSet so every field stsMatchesSpec inspects is
-// stamped consistently; previously this helper hand-rolled the STS,
-// which silently fell out of sync whenever stsMatchesSpec grew a new
-// comparison (e.g. the FB-1426 engine-container Env / VolumeMounts /
-// extra-pod-spec checks).
+// stamped consistently; a hand-rolled STS would silently fall out of
+// sync whenever stsMatchesSpec grows a new comparison.
 func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
 	sts := buildStatefulSet(spec, engineName, testNamespace, gen, nil)
@@ -1592,10 +1590,9 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 	})
 
 	t.Run("rendered affinity is not aliased to spec", func(t *testing.T) {
-		// Regression guard: pre-FB-1426 effectiveAffinity returned the
-		// spec pointer directly, asymmetric with the other effective*
-		// helpers that copy. Mutating the rendered STS's Affinity must
-		// not bleed back into the spec.
+		// Regression guard: effectiveAffinity must deep-copy like the
+		// other effective* helpers. Mutating the rendered STS's
+		// Affinity must not bleed back into the spec.
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
 			p.Affinity = &corev1.Affinity{
@@ -1629,9 +1626,9 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 	})
 }
 
-// TestBuildStatefulSet_HonorsExtraPodSpecFields covers the FB-1426
-// follow-up that wired through every PodSpec field the operator
-// embeds via spec.template but did not previously consume. Each
+// TestBuildStatefulSet_HonorsExtraPodSpecFields covers the long tail
+// of PodSpec fields the operator passes through from spec.template
+// beyond the core carriers. Each
 // sub-test sets one field on the engine template and asserts both:
 // (a) the value lands on the rendered StatefulSet's pod template,
 // (b) stsMatchesSpec sees it (no false drift) and detects removal
@@ -1828,7 +1825,7 @@ func TestStsMatchesSpec_TolerantOfPodSpecAPIServerDefaults(t *testing.T) {
 }
 
 // TestBuildStatefulSet_HonorsExtraEngineContainerFields covers the
-// FB-1426 follow-up that exposed new engine-container fields under
+// pass-through engine-container fields under
 // spec.template.spec.containers[engine]. Each sub-test sets one field
 // and asserts both that the rendered container carries it and that
 // stsMatchesSpec sees the match (no false drift) and detects removal.
@@ -2223,9 +2220,8 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 
 // Engine pods must not get the kubelet's legacy Docker-link env block —
 // the FIREBOLT_* prefix is owned by the engine's own config schema and a
-// future Service named `firebolt-*` could shadow a real config key the
-// way floci's `FLOCI_PORT` did in FB-1215. DNS is the only service-
-// discovery channel the engine needs.
+// future Service named `firebolt-*` could shadow a real config key.
+// DNS is the only service-discovery channel the engine needs.
 func TestBuildStatefulSet_DisablesServiceLinks(t *testing.T) {
 	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
 	esl := sts.Spec.Template.Spec.EnableServiceLinks

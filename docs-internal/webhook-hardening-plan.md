@@ -1,8 +1,7 @@
-# Webhook hardening plan (FB-1298)
+# Webhook hardening plan
 
 Closes the divergences between webhook-on and webhook-off behavior, plus the
-test coverage gaps, surfaced by the audit on branch
-`feat/FB-1298-webhook-coverage`. Supersedes the earlier `webhook-invariants.md`.
+test coverage gaps, surfaced by a webhook-coverage audit.
 
 ## TL;DR
 
@@ -214,7 +213,7 @@ behavior in.
   recommending webhooks for synchronous apply-time signal.
 - **Open question (separate ticket).** Flip the chart default to
   `webhook.enabled: true` with cert-manager prerequisite, behind a
-  deprecation across one minor version. Out of scope for FB-1298.
+  deprecation across one minor version. Out of scope for this plan.
 
 ### W10. Documentation & minor cleanup
 
