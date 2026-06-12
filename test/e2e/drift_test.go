@@ -159,12 +159,10 @@ var _ = Describe("Drift Reconciliation", Ordered, func() {
 		// The harder listMap-conflict case (foreign-applied sidecar
 		// container in spec.template.spec.containers) is covered by
 		// the next spec, "preserves a foreign-SSA sidecar container on
-		// the gateway Deployment". The original FB-556 comment
-		// describing that case as known-broken under typed-struct
-		// apply has been moved there pending empirical confirmation
-		// from CI; if the sidecar spec passes the punt was speculative,
-		// if it fails we have a failing assertion that justifies the
-		// applyconfiguration rewrite.
+		// the gateway Deployment", which empirically pins whether
+		// typed-struct apply preserves the sidecar; a failure there
+		// is the assertion that would justify an applyconfiguration
+		// rewrite.
 
 		By("Applying an annotation to the gateway Deployment with a foreign field manager")
 		annotationPatch := []byte(fmt.Sprintf(`{

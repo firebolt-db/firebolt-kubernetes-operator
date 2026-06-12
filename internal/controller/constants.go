@@ -301,7 +301,7 @@ func resolveContainerImagePullPolicy(image string, policy corev1.PullPolicy) cor
 // the label is absent and POD_INDEX will be empty; in that case we fall
 // back to extracting the ordinal from HOSTNAME (<sts-name>-<ordinal>).
 //
-// `firebolt server` is the unified entrypoint introduced in packdb FB-914;
+// `firebolt server` is the engine image's unified entrypoint;
 // FIREBOLT_CORE_MODE=1 (set as a container env var) selects the firebolt-core
 // code path so the operator-rendered config (config.yaml at the data-dir root)
 // is treated as authoritative and not rewritten at startup.

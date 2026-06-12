@@ -1,6 +1,6 @@
 ### Why no EndpointSlice gate
 
-A previous design (removed in **FB-661**, commits `be577f2` and `d6dce81`) had the Firebolt Operator wait in `Switching` for the cluster Service's EndpointSlice to contain at least one Ready endpoint. It was deleted when the cluster Service became headless: with kube-proxy out of the data path, K8s automatically excludes not-ready pods from the headless DNS A-record set, and the gate was redundant.
+A previous design (removed in commits `be577f2` and `d6dce81`) had the Firebolt Operator wait in `Switching` for the cluster Service's EndpointSlice to contain at least one Ready endpoint. It was deleted when the cluster Service became headless: with kube-proxy out of the data path, K8s automatically excludes not-ready pods from the headless DNS A-record set, and the gate was redundant.
 
 The same conclusion holds for the *symmetric* version of the gate: "wait until the EndpointSlice no longer references the **draining** generation before transitioning from `draining` to `cleaning`":
 

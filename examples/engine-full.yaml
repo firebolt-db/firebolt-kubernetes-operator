@@ -31,7 +31,7 @@ spec:
   drainCheckEnabled: true
   drainCheckInterval: 10s
 
-  # Per-engine pod overrides (FB-1426). All pod-template surface area —
+  # Per-engine pod overrides. All pod-template surface area —
   # serviceAccountName, resources, env, volume mounts, scheduling, pod
   # annotations / labels — lives under spec.template. The operator
   # owns container name "engine" and the StatefulSet-level

@@ -769,7 +769,7 @@ func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rul
 	return errs
 }
 
-// validatePrimaryAllowlistedExtras covers the FB-1426 follow-up
+// validatePrimaryAllowlistedExtras covers the optional primary-container
 // allowlist toggles: WorkingDir, TerminationMessagePath/Policy,
 // VolumeDevices, ResizePolicy. Each is rejected when the ruleset
 // does not opt the component in.

@@ -69,7 +69,7 @@ spec:
   instanceRef: firebolt
   engineClassRef: shared-compute
   replicas: 2
-  # Per-engine pod overrides (FB-1426). Merge order, top wins:
+  # Per-engine pod overrides. Merge order, top wins:
   #   operator defaults < class template (shared-compute) < spec.template
   template:
     spec:

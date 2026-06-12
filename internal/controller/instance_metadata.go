@@ -102,7 +102,7 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 	// and MUST be XML-escaped to prevent injection of additional XML
 	// elements that would alter the pensieve configuration. The CRD also
 	// applies a Pattern admission check on host/database/schema as
-	// defense-in-depth (FB-1163).
+	// defense-in-depth.
 	return fmt.Sprintf(`<?xml version="1.0"?>
 <config>
   <pensieve_lite>

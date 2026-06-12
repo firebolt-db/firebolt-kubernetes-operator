@@ -766,8 +766,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 					// inject for every Service in the namespace. DNS is the
 					// real service-discovery channel here; the auto-injected
 					// vars are dead weight that also risks colliding with
-					// firebolt-core's own config keys (cf. floci's
-					// `FLOCI_PORT` collision in FB-1215).
+					// firebolt-core's own config keys.
 					EnableServiceLinks: boolPtr(false),
 					ImagePullSecrets:   effectiveImagePullSecrets(spec, classInfo),
 					Containers: append([]corev1.Container{
@@ -898,11 +897,11 @@ func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec, classInfo *
 
 // getTerminationGracePeriod returns the TGPS value to stamp on the
 // engine StatefulSet's pod template. Always the operator's default —
-// TGPS is operator-owned end-to-end since FB-1426: the engine pod
-// template validator rejects user input on
+// TGPS is operator-owned end-to-end: the engine pod template
+// validator rejects user input on
 // spec.template.spec.terminationGracePeriodSeconds (matching the
-// existing rejection on the class template), so there is no user
-// surface to consult here. Kept as a function (rather than inlining
+// rejection on the class template), so there is no user surface to
+// consult here. Kept as a function (rather than inlining
 // the constant) so a future change that surfaces the knob lands in
 // one place.
 func getTerminationGracePeriod(_ *computev1alpha1.FireboltEngineSpec) int64 {
@@ -944,8 +943,7 @@ func engineShutdownWaitSeconds(gracePeriod int64) int64 {
 
 // enginePodServiceAccountName returns the ServiceAccount name the user
 // declared on spec.template.spec.serviceAccountName, or "" when not
-// declared (namespace default). Post-FB-1426 the field lives on the
-// template rather than on the spec directly.
+// declared (namespace default).
 func enginePodServiceAccountName(spec *computev1alpha1.FireboltEngineSpec) string {
 	return engineTemplate(spec).Spec.ServiceAccountName
 }
@@ -1017,9 +1015,8 @@ func effectiveTolerations(spec *computev1alpha1.FireboltEngineSpec, classInfo *F
 // The return value is a deep copy of whichever side won so callers can
 // freely mutate it (e.g. buildStatefulSet stamping it onto a fresh STS
 // that is later JSON-serialized) without aliasing live spec state into
-// the rendered StatefulSet. Pre-FB-1426 this helper returned the spec
-// pointer directly, asymmetric with effectiveTolerations /
-// effectiveNodeSelector which already copy.
+// the rendered StatefulSet — effectiveTolerations /
+// effectiveNodeSelector copy for the same reason.
 func effectiveAffinity(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *corev1.Affinity {
 	if a := engineTemplate(spec).Spec.Affinity; a != nil {
 		return a.DeepCopy()
@@ -1762,9 +1759,9 @@ func buildEngineContainerEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo
 			Value: "true",
 		},
 		// Selects the firebolt-core code path inside the unified
-		// `firebolt` binary (packdb FB-914): the operator-rendered
-		// config (config.yaml at the data-dir root) is honored as-is
-		// and not rewritten at startup.
+		// `firebolt` binary: the operator-rendered config
+		// (config.yaml at the data-dir root) is honored as-is and
+		// not rewritten at startup.
 		{
 			Name:  computev1alpha1.EngineCoreModeEnvKey,
 			Value: "1",
@@ -2285,9 +2282,8 @@ func overheadEqual(a, b corev1.ResourceList) bool {
 // engineContainerExtraFieldsMatch is the drift comparator for engine-
 // container fields the operator passes through from the engine
 // template (with the FireboltEngineClass template's value as a
-// fallback): Env, EnvFrom, VolumeMounts, Lifecycle, plus the FB-1426
-// follow-up surface (WorkingDir, TerminationMessagePath/Policy,
-// VolumeDevices, ResizePolicy). Image, ImagePullPolicy, Resources,
+// fallback): Env, EnvFrom, VolumeMounts, Lifecycle, WorkingDir,
+// TerminationMessagePath/Policy, VolumeDevices, ResizePolicy. Image, ImagePullPolicy, Resources,
 // SecurityContext have their own per-field comparisons in
 // stsMatchesSpec because they precede the field-by-field block by a
 // long history of regression tests; the rest live here so adding a

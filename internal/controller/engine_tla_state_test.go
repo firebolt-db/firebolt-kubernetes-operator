@@ -247,7 +247,7 @@ func parseSAToken(s string) int {
 }
 
 // tlaShouldGateOut returns true when one of the outer Reconcile method's
-// gates (instance-Ready or class-Ready, FB-1145/1298) would prevent
+// gates (instance-Ready or class-Ready) would prevent
 // computeEngineReconcile from running at all. Both gates engage when
 // the corresponding flag is false and phase is in {stable, stopped,
 // creating}; the other phases (switching, draining, cleaning) bypass

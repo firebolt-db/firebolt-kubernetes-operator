@@ -127,7 +127,7 @@ Every change is tracked and lands through a branch and a pull request -- no exce
 - **A documented issue comes first.** Every task MUST have a corresponding issue before any work starts -- a Linear ticket or a GitHub issue. If none exists, create one. No issue, no work.
 - **Never touch `main` directly.** You MUST NEVER work in, commit to, or push to `main`. All work happens on a feature branch and merges via a reviewed PR. `main` is only ever advanced by merging a PR or by the `semantic-release` automation's release commit.
 - **Branch names tie the branch to its issue**, so work is traceable. Prefix the branch with the tracker identifier:
-  - Linear: `FB-<number>-<short-kebab-description>` (e.g. `FB-661-pods-not-ready-message`).
+  - Linear: `FB-<number>-<short-kebab-description>` (e.g. `FB-<number>-pods-not-ready-message`).
   - GitHub issue: `<issue-number>-<short-kebab-description>`.
   - Branch off the latest `main`, not off another in-flight feature branch.
 - **PRs follow the template.** Pull requests MUST follow [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md): fill in **Background** (with `ISSUE-REF`), **Summary** (what changes and what it means going forward), and **Test Plan**. Re-check the template before opening a PR in case it has changed.
@@ -152,7 +152,7 @@ See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for the running log of non-obvious proble
 Before touching the engine reconciler -- especially `engine_reconcile.go`, `engine_state.go`, or `instance_gateway.go` -- read the relevant section of [docs/architecture.mdx](docs/architecture.mdx) first.
 
 - The blue-green state machine (`creating -> switching -> draining -> cleaning`) is formalised in [formal/FireboltEngine.tla](formal/FireboltEngine.tla). A change in one belongs in both, and `make formal-verify` is the CI guard.
-- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.mdx` document the chain and call out a previously-removed design (FB-661) that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
+- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.mdx` document the chain and call out a previously-removed design that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
 
 ### FireboltEngineClass merge layer
 
@@ -169,7 +169,7 @@ FireboltEngineClass holds a reusable pod-template fragment plus defaults for a s
 
 - **Any large functional change to the operator MUST be verified to stay in line with the plugin.** This covers CRD field shapes, the engine-create contract (`engineClassRef`, the per-engine `spec.template` overrides, storage, `customEngineConfig`), resource kinds/group, and readiness conditions. Update `internal/infra/` in the same change and confirm `go build ./...`, `go test ./internal/infra/...`, and `make kubectl-firebolt` still pass.
 - Because the plugin compiles against the CRD types, a field rename surfaces as a build error in `internal/infra/`. Fix it by realigning the plugin — do **not** loosen it to hide the change. See [internal/infra/AGENTS.md](internal/infra/AGENTS.md) for the plugin's own invariants.
-- Image and pull-policy on the engine container were intentionally moved out of `FireboltEngineSpec.Image` into the FireboltEngineClass template (FB-1145). There is no per-engine image override; rolling a new image is done by mutating the referenced class. The e2e Image Switching test in `test/e2e/e2e_test.go` is the canonical pattern.
+- Image and pull-policy on the engine container live only on the FireboltEngineClass template; `FireboltEngineSpec` deliberately has no image field. There is no per-engine image override; rolling a new image is done by mutating the referenced class. The e2e Image Switching test in `test/e2e/e2e_test.go` is the canonical pattern.
 
 ### RBAC changes
 
@@ -256,7 +256,7 @@ Rules:
 - Body: explain what changed and *why*.
 - The `FB-<ticket>` reference is required; take it from the branch name or last commit.
 
-Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (FB-661)`
+Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (FB-<ticket>)`
 
 **Staging**: always add files by explicit path (`git add file1 file2`). Never use `git add -A`, `git add .`, or `git add --all` -- untracked files that are not meant to be versioned will be committed.
 

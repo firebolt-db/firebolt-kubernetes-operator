@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Install the dedicated CRD Helm chart against the current (kind) cluster and
 # fail if `helm install` is rejected. This is the canonical guard against the
-# CRDs growing back past Kubernetes' 1 MiB release-Secret cap (FB-1475): Helm
+# CRDs growing back past Kubernetes' 1 MiB release-Secret cap: Helm
 # packs the chart + rendered manifest, gzip+base64, into the
 # sh.helm.release.v1.* Secret, and the apiserver refuses any Secret over
 # 1048576 bytes, so an over-budget CRD chart aborts here with

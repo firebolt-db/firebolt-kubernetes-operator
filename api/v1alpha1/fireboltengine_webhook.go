@@ -170,7 +170,7 @@ func (v *FireboltEngineCustomValidator) ValidateCreate(ctx context.Context, eng 
 }
 
 // ValidateUpdate enforces the same existence and bound checks as
-// ValidateCreate. Symmetric handling matches FB-1145: a typo on edit
+// ValidateCreate. Symmetric handling is deliberate: a typo on edit
 // deserves the same immediate feedback as a typo on create. Recovery
 // from a broken state (class deleted somehow, bound lowered after the
 // engine was created) is always possible by setting spec.engineClassRef
@@ -260,9 +260,9 @@ func (v *FireboltEngineCustomValidator) resolveEngineClass(
 // with any requests/limits, that wins wholesale. Otherwise the class's
 // container resources fill in. Either way the value rendered onto the
 // StatefulSet pod must clear the ceiling, so both sources are checked
-// here (and not only the engine's own template — that pre-FB-1426 gap
-// let a class with oversized requests escape admission whenever the
-// engine relied on class-supplied resources).
+// here — checking only the engine's own template would let a class
+// with oversized requests escape admission whenever the engine relies
+// on class-supplied resources.
 //
 // The error's field path points at the merged location
 // (spec.template.spec.containers[engine].resources.*) regardless of
