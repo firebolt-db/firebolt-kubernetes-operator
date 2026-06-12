@@ -13,7 +13,7 @@ The operator manages three custom resources:
 When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `FireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
 ## Documentation
-For more detailed information checkout our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstartoverview)
+For more detailed information checkout our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstart)
 
 ## `kubectl firebolt` plugin
 
