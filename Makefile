@@ -52,8 +52,9 @@ CONTAINER_TOOL ?= docker
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
-.PHONY: all
-all: build
+# Bare `make` prints the help screen (the Firebolt logo + categorised targets),
+# not a build. Run `make build` (or `make all`) to compile the manager binary.
+.DEFAULT_GOAL := help
 
 ##@ General
 
@@ -70,7 +71,17 @@ all: build
 
 .PHONY: help
 help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@printf '\033[33m%s\n' \
+	' _____ ___ ____  _____ ____   ___  _     _____ ' \
+	'|  ___|_ _|  _ \| ____| __ ) / _ \| |   |_   _|' \
+	'| |_   | || |_) |  _| |  _ \| | | | |     | |  ' \
+	'|  _|  | ||  _ <| |___| |_) | |_| | |___  | |  ' \
+	'|_|   |___|_| \_\_____|____/ \___/|_____| |_|  '
+	@printf '\033[0m\n'
+	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+.PHONY: all
+all: build ## Build the manager binary (compile only).
 
 ##@ Development
 
@@ -92,6 +103,15 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, CRDs, C
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
+
+.PHONY: build
+build: manifests generate ## Build manager binary.
+	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
+
+.PHONY: kubectl-firebolt
+kubectl-firebolt: ## Build the kubectl-firebolt plugin for the host platform (install on PATH to use as `kubectl firebolt`).
+	go build -ldflags "$(LDFLAGS)" -o bin/kubectl-firebolt ./cmd/kubectl-firebolt
 
 # envtest's embedded kube-apiserver does not honour SIGTERM on macOS; it only
 # exits when envtest's SIGKILL fallback fires after the stop timeout. Shrink
@@ -121,148 +141,23 @@ test-webhook-integration: manifests generate setup-envtest ## Run the webhook-on
 	$(ENVTEST_STOP_TIMEOUT_ENV) KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -tags webhook_integration -count=1 ./internal/controller/...
 
-KIND_CLUSTER ?= operator-test-e2e
-
-# Local Docker registry that kind nodes mirror through (avoids per-node
-# duplication of multi-GB images on multi-node clusters). Override
-# REGISTRY_PORT / REGISTRY_NAME if 5001 / kind-registry collide with another
-# tool. The same defaults are baked into scripts/setup-local-registry.sh.
-REGISTRY_NAME ?= kind-registry
-REGISTRY_PORT ?= 5001
-
-.PHONY: setup-local-registry
-setup-local-registry: ## Start the local Docker registry that kind nodes mirror through.
-	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-local-registry.sh
-
-.PHONY: cleanup-local-registry
-cleanup-local-registry: ## Stop and remove the local Docker registry container (cached images are lost).
-	@docker rm -f $(REGISTRY_NAME) >/dev/null 2>&1 || true
-	@echo "Removed local registry '$(REGISTRY_NAME)' (if it existed). Re-run 'make setup-local-registry' to recreate."
-
-.PHONY: flush-local-registry
-flush-local-registry: cleanup-local-registry setup-local-registry ## Recreate the local registry from scratch (drops cached images).
-
-.PHONY: setup-kind
-setup-kind: setup-local-registry ## Create a Kind cluster if it does not exist (also starts the local registry).
-	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
-
-.PHONY: load-test-images
-load-test-images: ## Publish required Docker images to the local registry (via mirror, kind nodes pull on demand).
-	IMAGE_VARIANT=$(IMAGE_VARIANT) REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
-
-.PHONY: prepare-test-e2e
-prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, publish images
-
-GINKGO_FOCUS ?=
-
-# GINKGO_PROCS controls how many Ginkgo processes run specs in parallel.
-# Default: half of the host's online CPUs, with a floor of 1. Override on the
-# command line (e.g. GINKGO_PROCS=1 for serial debugging).
-GINKGO_PROCS ?= $(shell n=$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2); p=$$((n / 2)); [ $$p -lt 1 ] && p=1; echo $$p)
-
-# GINKGO_TAGS is the full --tags value passed to ginkgo: always "e2e", plus
-# the variant-specific build tag (currently only "latest") so the embedded
-# defaults match the images that load-e2e-images.sh just pushed into Kind.
-# The "dev" variant carries no extra tag — it is the implicit default.
-ifeq ($(GO_BUILD_TAGS_BASE),)
-GINKGO_TAGS := e2e
-else
-GINKGO_TAGS := e2e,$(GO_BUILD_TAGS_BASE)
-endif
-
-.PHONY: test-e2e
-test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
-		REGISTRY_HOST_ENDPOINT="localhost:$(REGISTRY_PORT)" \
-		"$(GINKGO)" run \
-		--tags=$(GINKGO_TAGS) \
-		-v \
-		--no-color \
-		--junit-report=e2e-report.xml \
-		--poll-progress-after=30s \
-		--poll-progress-interval=30s \
-		--procs=$(GINKGO_PROCS) \
-		--timeout=30m \
-		$(if $(GINKGO_FOCUS),--focus="$(GINKGO_FOCUS)") \
-		./test/e2e/
-
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
-
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
-
-##@ Formal Verification
-
-TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
-TLA2TOOLS_VERSION ?= v1.8.0
-TLA2TOOLS_URL ?= https://github.com/tlaplus/tlaplus/releases/download/$(TLA2TOOLS_VERSION)/tla2tools.jar
-
-$(TLA2TOOLS): $(LOCALBIN)
-	wget -q -O "$(TLA2TOOLS)" "$(TLA2TOOLS_URL)"
-
-.PHONY: tla2tools
-tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
-
-.PHONY: formal-check
-formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
-	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
-	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
-
-.PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
-	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
-		-config formal/FireboltEngine.cfg \
-		-dump dot,actionlabels formal/FireboltEngine.dot \
-		formal/FireboltEngine.tla
-	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
-		-config formal/FireboltInstance.cfg \
-		-dump dot,actionlabels formal/FireboltInstance.dot \
-		formal/FireboltInstance.tla
-
-.PHONY: formal-gen
-formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
-	python3 scripts/gen-tla-state-tests.py \
-		--dot formal/FireboltEngine.dot \
-		--out internal/controller/engine_tla_states_data_test.go
-	python3 scripts/gen-tla-instance-state-tests.py \
-		--dot formal/FireboltInstance.dot \
-		--out internal/controller/instance_tla_states_data_test.go
-
-.PHONY: formal-verify
-formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
-	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
-		if ! git diff --quiet -- "$$f"; then \
-			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
-			git --no-pager diff -- "$$f"; \
-			exit 1; \
-		fi; \
-	done
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	"$(GOLANGCI_LINT)" run --fix $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
 
-.PHONY: docs-check
-docs-check: ## Validate Mintlify navigation (path depth and lost pages)
-	$(MAKE) -C docs check
-
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+.PHONY: docs-check
+docs-check: ## Validate Mintlify navigation (path depth and lost pages)
+	$(MAKE) -C docs check
+
 ##@ Build
-
-.PHONY: build
-build: manifests generate ## Build manager binary.
-	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
-
-.PHONY: kubectl-firebolt
-kubectl-firebolt: ## Build the kubectl-firebolt plugin for the host platform (install on PATH to use as `kubectl firebolt`).
-	go build -ldflags "$(LDFLAGS)" -o bin/kubectl-firebolt ./cmd/kubectl-firebolt
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
@@ -328,6 +223,17 @@ helm-template: ## Render Helm chart templates locally.
 	helm template firebolt-operator $(HELM_CHART_DIR)
 	helm template firebolt-crds $(HELM_CRD_CHART_DIR)
 
+.PHONY: helm-package
+helm-package: ## Package the Helm charts into dist/.
+	mkdir -p dist
+	helm package $(HELM_CHART_DIR) --destination dist/
+	helm package $(HELM_CRD_CHART_DIR) --destination dist/
+
+.PHONY: helm-push
+helm-push: helm-package ## Package and push the Helm charts to ECR.
+	helm push dist/firebolt-operator-[0-9]*.tgz $(HELM_REGISTRY)
+	helm push dist/firebolt-operator-crds-*.tgz $(HELM_REGISTRY)
+
 .PHONY: helm-test
 HELM_TEST_BASIC_NS ?= helm-verify-basic
 HELM_TEST_FULL_NS ?= helm-verify-full
@@ -363,16 +269,123 @@ helm-test-crds: ## Verify the CRD chart installs within Helm's 1 MiB release-Sec
 	fi
 	./scripts/ci/verify-crd-chart-install.sh "$(HELM_TEST_CRDS_NS)"
 
-.PHONY: helm-package
-helm-package: ## Package the Helm charts into dist/.
-	mkdir -p dist
-	helm package $(HELM_CHART_DIR) --destination dist/
-	helm package $(HELM_CRD_CHART_DIR) --destination dist/
+##@ E2E
 
-.PHONY: helm-push
-helm-push: helm-package ## Package and push the Helm charts to ECR.
-	helm push dist/firebolt-operator-[0-9]*.tgz $(HELM_REGISTRY)
-	helm push dist/firebolt-operator-crds-*.tgz $(HELM_REGISTRY)
+KIND_CLUSTER ?= operator-test-e2e
+
+# Local Docker registry that kind nodes mirror through (avoids per-node
+# duplication of multi-GB images on multi-node clusters). Override
+# REGISTRY_PORT / REGISTRY_NAME if 5001 / kind-registry collide with another
+# tool. The same defaults are baked into scripts/setup-local-registry.sh.
+REGISTRY_NAME ?= kind-registry
+REGISTRY_PORT ?= 5001
+
+.PHONY: setup-local-registry
+setup-local-registry: ## Start the local Docker registry that kind nodes mirror through.
+	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-local-registry.sh
+
+.PHONY: setup-kind
+setup-kind: setup-local-registry ## Create a Kind cluster if it does not exist (also starts the local registry).
+	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
+
+.PHONY: load-test-images
+load-test-images: ## Publish required Docker images to the local registry (via mirror, kind nodes pull on demand).
+	IMAGE_VARIANT=$(IMAGE_VARIANT) REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+
+.PHONY: prepare-test-e2e
+prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, publish images
+
+GINKGO_FOCUS ?=
+
+# GINKGO_PROCS controls how many Ginkgo processes run specs in parallel.
+# Default: half of the host's online CPUs, with a floor of 1. Override on the
+# command line (e.g. GINKGO_PROCS=1 for serial debugging).
+GINKGO_PROCS ?= $(shell n=$$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2); p=$$((n / 2)); [ $$p -lt 1 ] && p=1; echo $$p)
+
+# GINKGO_TAGS is the full --tags value passed to ginkgo: always "e2e", plus
+# the variant-specific build tag (currently only "latest") so the embedded
+# defaults match the images that load-e2e-images.sh just pushed into Kind.
+# The "dev" variant carries no extra tag — it is the implicit default.
+ifeq ($(GO_BUILD_TAGS_BASE),)
+GINKGO_TAGS := e2e
+else
+GINKGO_TAGS := e2e,$(GO_BUILD_TAGS_BASE)
+endif
+
+.PHONY: test-e2e
+test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+		REGISTRY_HOST_ENDPOINT="localhost:$(REGISTRY_PORT)" \
+		"$(GINKGO)" run \
+		--tags=$(GINKGO_TAGS) \
+		-v \
+		--no-color \
+		--junit-report=e2e-report.xml \
+		--poll-progress-after=30s \
+		--poll-progress-interval=30s \
+		--procs=$(GINKGO_PROCS) \
+		--timeout=30m \
+		$(if $(GINKGO_FOCUS),--focus="$(GINKGO_FOCUS)") \
+		./test/e2e/
+
+.PHONY: flush-local-registry
+flush-local-registry: cleanup-local-registry setup-local-registry ## Recreate the local registry from scratch (drops cached images).
+
+.PHONY: cleanup-local-registry
+cleanup-local-registry: ## Stop and remove the local Docker registry container (cached images are lost).
+	@docker rm -f $(REGISTRY_NAME) >/dev/null 2>&1 || true
+	@echo "Removed local registry '$(REGISTRY_NAME)' (if it existed). Re-run 'make setup-local-registry' to recreate."
+
+.PHONY: cleanup-test-e2e
+cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
+	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+
+##@ Formal Verification
+
+TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
+TLA2TOOLS_VERSION ?= v1.8.0
+TLA2TOOLS_URL ?= https://github.com/tlaplus/tlaplus/releases/download/$(TLA2TOOLS_VERSION)/tla2tools.jar
+
+$(TLA2TOOLS): $(LOCALBIN)
+	wget -q -O "$(TLA2TOOLS)" "$(TLA2TOOLS_URL)"
+
+.PHONY: tla2tools
+tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
+
+.PHONY: formal-check
+formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
+
+.PHONY: formal-dump
+formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/FireboltEngine.cfg \
+		-dump dot,actionlabels formal/FireboltEngine.dot \
+		formal/FireboltEngine.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/FireboltInstance.cfg \
+		-dump dot,actionlabels formal/FireboltInstance.dot \
+		formal/FireboltInstance.tla
+
+.PHONY: formal-gen
+formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
+	python3 scripts/gen-tla-state-tests.py \
+		--dot formal/FireboltEngine.dot \
+		--out internal/controller/engine_tla_states_data_test.go
+	python3 scripts/gen-tla-instance-state-tests.py \
+		--dot formal/FireboltInstance.dot \
+		--out internal/controller/instance_tla_states_data_test.go
+
+.PHONY: formal-verify
+formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
+		if ! git diff --quiet -- "$$f"; then \
+			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
+			git --no-pager diff -- "$$f"; \
+			exit 1; \
+		fi; \
+	done
 
 ##@ Dependencies
 
