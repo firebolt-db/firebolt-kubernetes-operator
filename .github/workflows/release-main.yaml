@@ -477,23 +477,39 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login "${{ env.GHCR_REGISTRY }}" --username "${GITHUB_ACTOR}" --password-stdin
 
-      - name: Package and push charts
+      - name: Package and push released charts
+        # Publish only the chart(s) whose component released in this run. With
+        # separate-pull-requests each chart releases independently, so packaging
+        # and pushing both unconditionally would republish the unchanged chart at
+        # its existing OCI version -- overwriting an already-released artifact
+        # (its appVersion may have moved on since) and failing outright on a
+        # registry that rejects duplicate versions.
+        env:
+          OPERATOR_RELEASED: ${{ needs.release-please.outputs.helm_operator_release_created }}
+          CRDS_RELEASED: ${{ needs.release-please.outputs.helm_crds_release_created }}
         run: |
-          OPERATOR_VERSION="$(yq '.version' helm/firebolt-operator/Chart.yaml)"
-          CRD_VERSION="$(yq '.version' helm/firebolt-operator-crds/Chart.yaml)"
-          mkdir -p /tmp/helm-packages
-          helm package helm/firebolt-operator --destination /tmp/helm-packages
-          helm package helm/firebolt-operator-crds --destination /tmp/helm-packages
           REGISTRY="oci://${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.HELM_CHARTS_NAMESPACE }}"
-          for tgz in /tmp/helm-packages/*.tgz; do
-            helm push "$tgz" "$REGISTRY"
-            echo "Pushed $(basename "$tgz") to $REGISTRY"
-          done
+          mkdir -p /tmp/helm-packages
           {
             echo "### Helm charts published :rocket:"
             echo ""
             echo "| Chart | Version | Registry |"
             echo "|-------|---------|----------|"
-            echo "| \`firebolt-operator\` | \`${OPERATOR_VERSION}\` | \`${REGISTRY}\` |"
-            echo "| \`firebolt-operator-crds\` | \`${CRD_VERSION}\` | \`${REGISTRY}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          publish_chart() {
+            chart_dir="$1"
+            chart_name="$2"
+            version="$(yq '.version' "${chart_dir}/Chart.yaml")"
+            helm package "$chart_dir" --destination /tmp/helm-packages
+            helm push "/tmp/helm-packages/${chart_name}-${version}.tgz" "$REGISTRY"
+            echo "Pushed ${chart_name}-${version} to $REGISTRY"
+            echo "| \`${chart_name}\` | \`${version}\` | \`${REGISTRY}\` |" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          if [ "$OPERATOR_RELEASED" = "true" ]; then
+            publish_chart helm/firebolt-operator firebolt-operator
+          fi
+          if [ "$CRDS_RELEASED" = "true" ]; then
+            publish_chart helm/firebolt-operator-crds firebolt-operator-crds
+          fi
