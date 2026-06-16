@@ -8,6 +8,8 @@ permissions: {}
 jobs:
   test:
     name: Run on Ubuntu (${{ matrix.variant }})
+    # release-please maintains its own release branches; skip CI on them.
+    if: ${{ !startsWith(github.head_ref, 'release-please') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

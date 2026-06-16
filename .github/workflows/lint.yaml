@@ -8,6 +8,8 @@ permissions: {}
 jobs:
   lint:
     name: Run on Ubuntu
+    # release-please maintains its own release branches; skip CI on them.
+    if: ${{ !startsWith(github.head_ref, 'release-please') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
