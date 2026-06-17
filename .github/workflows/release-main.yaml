@@ -441,16 +441,17 @@ jobs:
     # Sole chart publisher. Runs whenever release-please cuts a chart release (a
     # chart release PR merged), regardless of whether that PR originated from a
     # plain helm change or from the chore(deps) appVersion commit that an app release
-    # produces. Stands down when an app release happens in the same run -- the app
-    # run only opens the chart PRs (via sync-chart-appversion), it does not publish
-    # charts itself. Keyed on the release_created outputs rather than a diff
-    # heuristic so it is correct on workflow_dispatch too.
+    # produces. Gated purely on the chart release_created outputs: a chart release
+    # cut in this run means the chart's GitHub release/tag exists, so the matching
+    # OCI chart MUST be pushed. This holds even when an app release is cut in the
+    # same run (two release PRs merged in one push, or workflow_dispatch) -- the app
+    # jobs run in parallel and never publish charts, so there is no double-publish.
+    # An app-only run leaves both chart release_created outputs false, so this job
+    # correctly stands down then. Keyed on the release_created outputs rather than a
+    # diff heuristic so it is correct on workflow_dispatch too.
     if: >-
-      needs.release-please.outputs.app_release_created != 'true' &&
-      (
-        needs.release-please.outputs.helm_operator_release_created == 'true' ||
-        needs.release-please.outputs.helm_crds_release_created == 'true'
-      )
+      needs.release-please.outputs.helm_operator_release_created == 'true' ||
+      needs.release-please.outputs.helm_crds_release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

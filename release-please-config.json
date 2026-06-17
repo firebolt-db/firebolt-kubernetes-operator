@@ -66,6 +66,7 @@
       "version-file": "version.txt",
       "changelog-path": "CHANGELOG.md",
       "exclude-paths": [
+        ".github",
         "helm",
         "docs",
         "examples",
