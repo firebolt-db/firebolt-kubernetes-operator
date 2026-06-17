@@ -70,7 +70,8 @@
         "helm",
         "docs",
         "examples",
-        "formal"
+        "formal",
+        "scripts"
       ]
     },
     "helm/firebolt-operator": {
