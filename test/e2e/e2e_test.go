@@ -508,13 +508,16 @@ var _ = Describe("Firebolt Engine", func() {
 
 	// Test 6: Image switching via FireboltEngineClass mutation.
 	//
-	// The engine image is defined by containers[engine].image on the
-	// referenced FireboltEngineClass; FireboltEngine has no per-engine image field.
-	// The engine is created with spec.engineClassRef pointing at a
-	// dedicated class; mutating the class's container image is the
-	// canonical path for runtime version upgrades. The engine controller's
-	// FireboltEngineClass watch fires immediately, stsMatchesSpec detects the
-	// AnnotationEngineClassHash drift, and a clean blue-green rolls.
+	// This test switches the image by mutating the referenced
+	// FireboltEngineClass, the canonical path for sharing one image across
+	// many engines and rolling a version for all of them at once. An engine
+	// can also override the image directly on its own spec.template engine
+	// container (effectiveEngineImage prefers that over the class), but that
+	// per-engine path is not what this test exercises. The engine is created
+	// with spec.engineClassRef pointing at a dedicated class; mutating the
+	// class's container image makes the engine controller's FireboltEngineClass
+	// watch fire immediately, stsMatchesSpec detects the AnnotationEngineClassHash
+	// drift, and a clean blue-green rolls.
 	Describe("Image Switching", Ordered, func() {
 		var (
 			instanceName = "inst-image" + queryConfig.Suffix
