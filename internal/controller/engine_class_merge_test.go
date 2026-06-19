@@ -76,6 +76,98 @@ func TestEffectiveServiceAccountName(t *testing.T) {
 	}
 }
 
+// TestEffectiveEngineImage pins the engine image / pull-policy resolution
+// order: engine spec.template engine container → FireboltEngineClass template
+// engine container → operator default. Image and pull policy are tracked
+// independently, so a user can override either one alone and inherit the
+// other. This is the unit-level guard for the per-engine image override that
+// the e2e Image Switching test (which only exercises the class-mutation path)
+// does not cover.
+func TestEffectiveEngineImage(t *testing.T) {
+	defaultImage := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+	defaultPullPolicy := resolveImagePullPolicy(nil)
+
+	classEngine := func(image string, pullPolicy corev1.PullPolicy) *FireboltEngineClassInfo {
+		return newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:            computev1alpha1.EngineContainerName,
+				Image:           image,
+				ImagePullPolicy: pullPolicy,
+			}},
+		}))
+	}
+	engineSpec := func(image string, pullPolicy corev1.PullPolicy) *computev1alpha1.FireboltEngineSpec {
+		spec := testSpec()
+		setSpecTemplateContainer(spec, func(c *corev1.Container) {
+			c.Image = image
+			c.ImagePullPolicy = pullPolicy
+		})
+		return spec
+	}
+
+	tests := []struct {
+		name           string
+		spec           *computev1alpha1.FireboltEngineSpec
+		classInfo      *FireboltEngineClassInfo
+		wantImage      string
+		wantPullPolicy corev1.PullPolicy
+	}{
+		{
+			name:           "operator default when neither engine nor class sets an image",
+			spec:           testSpec(),
+			classInfo:      nil,
+			wantImage:      defaultImage,
+			wantPullPolicy: defaultPullPolicy,
+		},
+		{
+			name:           "class fills in when the engine leaves the image empty",
+			spec:           testSpec(),
+			classInfo:      classEngine("class/engine:v1", corev1.PullAlways),
+			wantImage:      "class/engine:v1",
+			wantPullPolicy: corev1.PullAlways,
+		},
+		{
+			name:           "engine spec.template image wins over the class",
+			spec:           engineSpec("engine/img:v9", corev1.PullNever),
+			classInfo:      classEngine("class/engine:v1", corev1.PullAlways),
+			wantImage:      "engine/img:v9",
+			wantPullPolicy: corev1.PullNever,
+		},
+		{
+			name:           "engine image override without a class falls back to the default pull policy",
+			spec:           engineSpec("engine/img:v9", ""),
+			classInfo:      nil,
+			wantImage:      "engine/img:v9",
+			wantPullPolicy: defaultPullPolicy,
+		},
+		{
+			name:           "engine pull-policy-only override inherits the class image",
+			spec:           engineSpec("", corev1.PullAlways),
+			classInfo:      classEngine("class/engine:v1", corev1.PullIfNotPresent),
+			wantImage:      "class/engine:v1",
+			wantPullPolicy: corev1.PullAlways,
+		},
+		{
+			name:           "engine image-only override inherits the class pull policy",
+			spec:           engineSpec("engine/img:v9", ""),
+			classInfo:      classEngine("class/engine:v1", corev1.PullAlways),
+			wantImage:      "engine/img:v9",
+			wantPullPolicy: corev1.PullAlways,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotImage, gotPullPolicy := effectiveEngineImage(tc.spec, tc.classInfo)
+			if gotImage != tc.wantImage {
+				t.Errorf("image = %q, want %q", gotImage, tc.wantImage)
+			}
+			if gotPullPolicy != tc.wantPullPolicy {
+				t.Errorf("pullPolicy = %q, want %q", gotPullPolicy, tc.wantPullPolicy)
+			}
+		})
+	}
+}
+
 func TestEffectiveNodeSelector_MergesKeys(t *testing.T) {
 	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		NodeSelector: map[string]string{"pool": "engine", "zone": "a"},
