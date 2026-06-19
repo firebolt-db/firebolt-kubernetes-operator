@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "pull-request-title-pattern": "chore(release): ${component} ${version}",
+  "pull-request-header": "Automated release PR.",
+  "pull-request-footer": "This PR was generated with Release Please.",
+  "separate-pull-requests": true,
+  "always-update": true,
+  "bump-minor-pre-major": true,
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug Fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance Improvements"
+    },
+    {
+      "type": "revert",
+      "section": "Reverts"
+    },
+    {
+      "type": "chore",
+      "scope": "deps",
+      "section": "Dependencies"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation",
+      "hidden": true
+    },
+    {
+      "type": "style",
+      "section": "Styles",
+      "hidden": true
+    },
+    {
+      "type": "refactor",
+      "section": "Code Refactoring",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "build",
+      "section": "Build System",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "Continuous Integration",
+      "hidden": true
+    }
+  ],
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "component": "firebolt-operator",
+      "include-v-in-tag": true,
+      "version-file": "version.txt",
+      "changelog-path": "CHANGELOG.md",
+      "exclude-paths": [
+        ".github",
+        "helm",
+        "docs",
+        "examples",
+        "formal",
+        "scripts"
+      ]
+    },
+    "helm/firebolt-operator": {
+      "release-type": "helm",
+      "component": "firebolt-operator-chart",
+      "include-v-in-tag": false,
+      "changelog-path": "CHANGELOG.md"
+    },
+    "helm/firebolt-operator-crds": {
+      "release-type": "helm",
+      "component": "firebolt-operator-crds-chart",
+      "include-v-in-tag": false
+    }
+  }
+}
