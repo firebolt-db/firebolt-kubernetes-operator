@@ -13,7 +13,7 @@ spec:
   instanceRef: firebolt
   replicas: 2
 
-  # Per-replica engine data volume at /firebolt-core/volume. Changing storage
+  # Per-replica engine data volume at /var/lib/firebolt. Changing storage
   # triggers a blue-green rollout. Omit storage entirely (or set it to {}) to
   # accept the operator default of an emptyDir; opt into a PersistentVolumeClaim
   # by setting persistentVolumeClaim (with or without explicit fields). The

@@ -17,7 +17,7 @@ struct fields:
    (`name`, `command`, `args`, `ports`, probes, reserved env keys),
    the StatefulSet-bound pod fields (`terminationGracePeriodSeconds=60`,
    `subdomain`, `hostname`, `restartPolicy`, `activeDeadlineSeconds`),
-   and the operator-owned volumes / mounts (`nodes-config`, data). Always win.
+   and the operator-owned volumes / mounts (`engine-config`, data). Always win.
 2. **`FireboltEngineClass.spec.template`** (when `spec.engineClassRef`
    is set): Fills in user-owned fields the engine template doesn't set.
 3. **`FireboltEngine.spec.template`**: Wins over the class on conflict.
@@ -40,7 +40,7 @@ on the resolved value):
 | pod-template labels | Reserved keys (`firebolt.io/engine`, `firebolt.io/generation`) non-overridable. Engine template labels > class labels |
 | pod-template annotations | engine template annotations > class annotations |
 | pod-level `securityContext` | engine template > class > Firebolt Operator default (FSGroup, FSGroupChangePolicy always stamped) |
-| pod-level `volumes` | Firebolt Operator-owned volumes (`nodes-config`, data) come first. Class volumes then engine volumes are appended in that order. Names colliding with operator volumes are dropped |
+| pod-level `volumes` | Firebolt Operator-owned volumes (`engine-config`, data) come first. Class volumes then engine volumes are appended in that order. Names colliding with operator volumes are dropped |
 | pod-level `imagePullSecrets` | class slice + engine slice, concatenated |
 | init containers | class slice + engine slice, concatenated (mirrors `tolerations`) |
 | sidecar containers (anything not named `engine`) | class sidecars + engine sidecars, appended after the operator-built engine container |

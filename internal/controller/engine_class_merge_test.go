@@ -444,12 +444,12 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 		t.Error("engine Lifecycle missing class-supplied PreStop hook")
 	}
 
-	// Operator mounts (data + nodes-config) must remain at the head;
+	// Operator mounts (data + engine-config) must remain at the head;
 	// shared-cache appended after.
 	if len(engine.VolumeMounts) < 3 {
 		t.Fatalf("engine VolumeMounts = %+v, want operator mounts + class mount", engine.VolumeMounts)
 	}
-	if engine.VolumeMounts[0].Name != DataVolumeName || engine.VolumeMounts[1].Name != "nodes-config" {
+	if engine.VolumeMounts[0].Name != DataVolumeName || engine.VolumeMounts[1].Name != "engine-config" {
 		t.Errorf("operator volumeMounts displaced from leading position: %+v", engine.VolumeMounts[:2])
 	}
 	if engine.VolumeMounts[len(engine.VolumeMounts)-1].Name != "shared-cache" {
@@ -457,7 +457,7 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 	}
 
 	// The pod must carry the matching pod-level volume so the kubelet
-	// can resolve the sidecar mount; the operator's data + nodes-config
+	// can resolve the sidecar mount; the operator's data + engine-config
 	// volumes stay at the head.
 	volNames := make([]string, len(sts.Spec.Template.Spec.Volumes))
 	for i := range sts.Spec.Template.Spec.Volumes {
@@ -503,19 +503,19 @@ func TestBuildStatefulSet_AppendsClassImagePullSecrets(t *testing.T) {
 
 // TestAppendUserPodVolumes_OperatorReservedNamesWin covers the
 // defense against a class or engine template redefining the operator-owned
-// volume names (DataVolumeName, "nodes-config"): the operator entry must
+// volume names (DataVolumeName, "engine-config"): the operator entry must
 // remain. Otherwise a FireboltEngineClass author (or an engine template
 // author) could silently break engine startup or data persistence by
 // collision.
 func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 	operator := []corev1.Volume{
-		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
+		{Name: "engine-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
 		{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 	}
 	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Volumes: []corev1.Volume{
 			// Names colliding with operator-owned volumes are dropped.
-			{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "class-cfg"}}}},
+			{Name: "engine-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "class-cfg"}}}},
 			{Name: DataVolumeName, VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/mnt"}}},
 			{Name: "extra", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		},
@@ -526,7 +526,7 @@ func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 		t.Fatalf("got %d volumes, want 3 (2 operator + 1 non-colliding class)", len(got))
 	}
 	if got[0].ConfigMap == nil || got[0].ConfigMap.Name != "op-cfg" {
-		t.Errorf("operator nodes-config replaced by class entry: %+v", got[0])
+		t.Errorf("operator engine-config replaced by class entry: %+v", got[0])
 	}
 	if got[1].EmptyDir == nil {
 		t.Errorf("operator data volume replaced by class hostPath entry: %+v", got[1])
@@ -548,11 +548,11 @@ func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 // The static reservation in operatorOwnedPodVolumeNames must catch
 // this even when the operator-built slice happens not to carry "data".
 func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
-	// PVC backend: only "nodes-config" is in the operator slice — the
+	// PVC backend: only "engine-config" is in the operator slice — the
 	// data volume is provisioned by VolumeClaimTemplates and never
 	// appears in pod-level Volumes.
 	operator := []corev1.Volume{
-		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
+		{Name: "engine-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
 	}
 	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		Volumes: []corev1.Volume{
@@ -569,7 +569,7 @@ func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
 		}
 	}
 	if len(got) != 2 {
-		t.Fatalf("got %d volumes, want 2 (operator nodes-config + non-colliding class extra)", len(got))
+		t.Fatalf("got %d volumes, want 2 (operator engine-config + non-colliding class extra)", len(got))
 	}
 }
 
@@ -580,7 +580,7 @@ func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
 // either.
 func TestAppendUserPodVolumes_PVCBackendDropsCollidingEngineData(t *testing.T) {
 	operator := []corev1.Volume{
-		{Name: "nodes-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
+		{Name: "engine-config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: "op-cfg"}}}},
 	}
 	spec := testSpec()
 	setSpecTemplatePod(spec, func(p *corev1.PodSpec) {

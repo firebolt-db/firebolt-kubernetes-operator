@@ -622,7 +622,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 
 	volumeMounts := buildEngineContainerVolumeMounts(spec, classInfo)
 	engineEnv := buildEngineContainerEnv(spec, classInfo)
-	// The "data" volume backing /firebolt-core/volume is either a per-pod
+	// The "data" volume backing /var/lib/firebolt is either a per-pod
 	// PVC (the default; the StatefulSet controller synthesizes the pod
 	// Volume from the VolumeClaimTemplate) or a node-local emptyDir /
 	// hostPath that we add to pod.spec.volumes explicitly.
@@ -685,7 +685,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	podVolumes := []corev1.Volume{
 		{
-			Name: "nodes-config",
+			Name: "engine-config",
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
@@ -1651,7 +1651,7 @@ func effectiveEngineEnvFrom(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 // effectiveEngineVolumeMounts concatenates additional volumeMounts on
 // the engine container from both class and engine templates, class
 // first. Entries whose name collides with an operator-reserved volume
-// ("nodes-config", DataVolumeName) are skipped on both sides: the
+// ("engine-config", DataVolumeName) are skipped on both sides: the
 // operator owns those mount paths and a user override would silently
 // break startup (config volume) or data persistence (data volume).
 func effectiveEngineVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
@@ -1673,7 +1673,7 @@ func effectiveEngineVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, class
 func appendUserVolumeMounts(dst, src []corev1.VolumeMount) []corev1.VolumeMount {
 	for i := range src {
 		name := src[i].Name
-		if name == "nodes-config" || name == DataVolumeName {
+		if name == "engine-config" || name == DataVolumeName {
 			continue
 		}
 		dst = append(dst, *src[i].DeepCopy())
@@ -1721,14 +1721,14 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 			MountPath: DataMountPath,
 		},
 		{
-			Name:      "nodes-config",
+			Name:      "engine-config",
 			MountPath: ConfigMountPath,
 			SubPath:   ConfigFileName,
 			ReadOnly:  true,
 		},
 		{
 			Name:      computev1alpha1.EngineRuntimeVolumeName,
-			MountPath: "/var/run/firebolt",
+			MountPath: "/run/firebolt",
 		},
 	}
 	return append(out, effectiveEngineVolumeMounts(spec, classInfo)...)
@@ -1923,7 +1923,7 @@ func appendUserPodVolumes(operator []corev1.Volume, spec *computev1alpha1.Firebo
 // making the runtime-derived reservation insufficient.
 func operatorOwnedPodVolumeNames() map[string]struct{} {
 	return map[string]struct{}{
-		"nodes-config":              {},
+		"engine-config":             {},
 		DataVolumeName:              {},
 		EngineWebWritableVolumeName: {},
 	}
@@ -2140,8 +2140,8 @@ func getEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngineSpec)
 // no user value is supplied. Mirrors the firebolt-instance-helm chart's
 // engine StatefulSet (UID/GID 3473): non-root, no extra capabilities,
 // no privilege escalation, read-only root filesystem; engine runtime
-// writes go to the data PVC at /firebolt-core/volume and an emptyDir at
-// /var/run/firebolt.
+// writes go to the data volume at /var/lib/firebolt and an emptyDir at
+// /run/firebolt.
 func defaultEngineContainerSecurityContext() *corev1.SecurityContext {
 	runAsUser := DefaultEngineWebD
 	runAsGroup := DefaultEngineGID
@@ -2644,7 +2644,7 @@ const (
 
 // resolveStorageBackend returns the effective backend for an
 // EngineStorageSpec. If no sibling pointer is set we default to
-// BackendEmptyDir: engine data at /firebolt-core/volume is regenerable
+// BackendEmptyDir: engine data at /var/lib/firebolt is regenerable
 // cache (authoritative state lives in the metadata service and the
 // managed-table S3 bucket), so an ephemeral pod-local volume is the
 // safe default and avoids a hard dependency on a dynamic-provisioner

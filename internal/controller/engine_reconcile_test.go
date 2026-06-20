@@ -2660,7 +2660,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 			Name:    "prep-disk",
 			Image:   "busybox:1.36",
 			Command: []string{"sh", "-c"},
-			Args:    []string{"chown -R 3473:3473 /firebolt-core/volume"},
+			Args:    []string{"chown -R 3473:3473 /var/lib/firebolt"},
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: boolPtrInt64(0),
 			},
