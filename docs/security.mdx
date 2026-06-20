@@ -49,6 +49,30 @@ Firebolt Operator only stamps `fsGroup` (3473) and
 Sidecar containers and init containers pass through from your template
 without operator hardening.
 
+#### Writable directories and arbitrary UIDs
+
+The engine image owns two writable directories: the data dir
+(`/var/lib/firebolt`, the PVC mount) and the unix socket dir
+(`/run/firebolt`, an `emptyDir`). Both are group-owned by root (GID 0)
+with mode `2770` (`g=u` plus the setgid bit), not the broad `777` the
+image used previously. The read-only application payload at
+`/opt/firebolt` stays `firebolt:firebolt 0755`.
+
+This follows the OpenShift "arbitrary UID" convention: a platform that
+assigns a random non-namespace UID still places the process in group 0,
+so the GID-0 group ownership keeps both directories readable and
+writable, while `other` gets nothing. The setgid bit makes files the
+engine creates at runtime inherit group 0. The engine runs with
+`umask 0007` so it does not strip those group bits off new files. Under
+the default UID/GID `3473/3473` the user owns the directories outright,
+so the same layout works without OpenShift.
+
+Mounted volumes override the image's directory permissions. When a
+platform assigns an arbitrary UID, give the engine a writable data dir
+either through the stamped `fsGroup` (which `chown`s the PVC to the
+group) or by mounting volumes already group-0-writable, and avoid
+pinning a `runAsUser` that is not a member of group 0.
+
 Validating webhooks on `FireboltEngine` and `FireboltEngineClass` (and
 the engine reconciler when webhooks are off) reject operator-owned paths
 on engine templates: command, args, ports, probes, reserved env keys, and
