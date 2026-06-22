@@ -32,8 +32,8 @@ import (
 
 // Each second-level Describe owns its own FireboltInstance and client pod so
 // they run in parallel across Ginkgo procs. Crash recovery specs stop and
-// restart the engine operator within a single It, so the instance operator is
-// set up directly in BeforeAll and the engine operator is managed per-It.
+// restart the engine operator within a single It, so the instance operator
+// is set up directly in BeforeAll and the engine operator is managed per-It.
 
 var _ = Describe("Crash Recovery", func() {
 	Describe("Phase: Creating - Initial Deployment", Ordered, func() {
