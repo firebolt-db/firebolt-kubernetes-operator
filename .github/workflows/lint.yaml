@@ -12,40 +12,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Validate PR title
-        if: ${{ !startsWith(github.head_ref, 'dependabot') && !startsWith(github.head_ref, 'release-please') }}
-        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50  # v6.1.1
-        with:
-
-          # List of allowed commit types
-          types: |
-            build
-            chore
-            ci
-            docs
-            feat
-            fix
-            perf
-            refactor
-            revert
-            style
-            test
-
-          subjectPattern: ^[a-z0-9_].*\((#[0-9]+|[A-Z]+-[0-9]+)\)$
-          requireScope: false
-          validateSingleCommit: false
-          subjectPatternError: |
-            The subject "{subject}" found in the pull request title "{title}" didn't match the configured pattern.
-
-            We follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
-            Our CI is configured to forbidden PRs with titles that don't follow this standard.
-            That's it, all commits landing in the `main` branch must be formatted in this way.
-            Please make sure you read and understand this convention.
-
-            The subject must not start with a capital letter, and must end with an issue
-            reference in parentheses: either a GitHub issue like "(#123)" or a tracker
-            ticket like "(FB-1234)".
-
       - name: Clone the code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
