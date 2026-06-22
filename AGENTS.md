@@ -248,7 +248,7 @@ Do not delete Docker images or kind clusters; assume the kind cluster is already
 Ask before creating or amending commits.
 
 ```
-<type>(<scope>): <description> (FB-<ticket>)
+<type>(<scope>): <description> (<issue-ref>)
 ```
 
 Types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
@@ -259,9 +259,9 @@ Rules:
 
 - Subject: imperative mood, lowercase, no trailing period; keep it under 100 characters.
 - Body: explain what changed and *why*.
-- The `FB-<ticket>` reference is required; take it from the branch name or last commit.
+- An issue reference is required: either a GitHub issue (`#123`) or a Linear ticket (`FB-<ticket>`); take it from the branch name or last commit.
 
-Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (FB-<ticket>)`
+Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (#123)`
 
 **Staging**: always add files by explicit path (`git add file1 file2`). Never use `git add -A`, `git add .`, or `git add --all` -- untracked files that are not meant to be versioned will be committed.
 
@@ -277,5 +277,5 @@ When breaking work into a plan, divide it into self-contained commits. Each comm
 ### Code quality
 
 - Ignoring errors is forbidden except with a documented rationale in a comment.
-- No ticket references (`FB-<ticket>`, `FIR-<ticket>`, or any tracker ID) in code or docs: not in comments, identifiers, strings, or doc prose. Tickets go in the commit message only (see Commit conventions).
+- No issue references (`FB-<ticket>`, `FIR-<ticket>`, any tracker ID, or a GitHub issue number like `#123`) in code or docs: not in comments, identifiers, strings, or doc prose. They go in the commit message only (see Commit conventions).
 - Comments and docs state how the code behaves now, not what just changed. Do not narrate edits ("previously", "changed to", "fixed the bug where", "new:").
