@@ -47,9 +47,9 @@ const ReservedFireboltKeyPrefix = "firebolt.io/"
 // inside each generation's StatefulSet pod template. The drain check, the
 // stsMatchesSpec drift detection, and the FireboltEngineClass validating webhook
 // all rely on it being stable and operator-owned. The name matches the
-// public CRD ("engine"); the binary entrypoint inside the image is still
-// `firebolt-core`, but that's an image-internal path and doesn't surface
-// on the pod template.
+// public CRD ("engine"); the engine binary inside the image lives at
+// /opt/firebolt/firebolt, but that's an image-internal path and doesn't
+// surface on the pod template.
 const EngineContainerName = "engine"
 
 // EngineWebContainerName is the fixed name of the operator-injected Engine Web UI
@@ -120,14 +120,14 @@ const (
 	// EngineConfigVolumeName is the projected-volume name carrying the
 	// engine config.yaml (operator-rendered ConfigMap). It is mounted
 	// at ConfigMountPath on the engine container.
-	EngineConfigVolumeName = "nodes-config"
+	EngineConfigVolumeName = "engine-config"
 	// EngineDataVolumeName is the data volume backing the engine's
 	// per-pod state — either a PVC synthesized from the StatefulSet's
 	// VolumeClaimTemplate, an emptyDir, or a hostPath, depending on
 	// FireboltEngineSpec.Storage. Mounted at DataMountPath.
 	EngineDataVolumeName = "data"
 	// EngineRuntimeVolumeName is the emptyDir volume mounted at
-	// /var/run/firebolt for the engine's unix domain socket.
+	// /run/firebolt for the engine's unix domain socket.
 	EngineRuntimeVolumeName = "runtime"
 	// GatewayConfigVolumeName carries the operator-rendered Envoy
 	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy

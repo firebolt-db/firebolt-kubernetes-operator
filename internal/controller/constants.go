@@ -160,13 +160,14 @@ const (
 	MetricSuspendedQueries = "firebolt_suspended_queries"
 
 	// ConfigMountPath is where the engine config.yaml is mounted in the container.
-	// FireboltCoreServer reads <root>/config.yaml from its --data-dir when present,
-	// so the file must land at this path inside the container.
-	ConfigMountPath = "/firebolt-core/volume/config.yaml"
+	// With --server-config unset the engine falls back to <data-dir>/config.yaml,
+	// so the file must land at DataMountPath/config.yaml inside the container.
+	ConfigMountPath = "/var/lib/firebolt/config.yaml"
 
-	// DataMountPath is where the engine's per-pod PVC is mounted. Matches the
-	// path the engine binary uses for its working data.
-	DataMountPath = "/firebolt-core/volume"
+	// DataMountPath is where the engine's per-pod data volume is mounted. Matches
+	// the --data-dir passed to the engine binary: the writable state root that
+	// holds persistent_data, diagnostic_data, and scratch.
+	DataMountPath = "/var/lib/firebolt"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
 	// VolumeClaimTemplates and the corresponding container VolumeMount.
 	DataVolumeName = "data"
@@ -301,7 +302,9 @@ func resolveContainerImagePullPolicy(image string, policy corev1.PullPolicy) cor
 // the label is absent and POD_INDEX will be empty; in that case we fall
 // back to extracting the ordinal from HOSTNAME (<sts-name>-<ordinal>).
 //
-// `firebolt server` is the engine image's unified entrypoint;
+// `firebolt server` is the engine image's unified entrypoint; the binary lives
+// at /opt/firebolt/firebolt (read-only payload) and the writable state root is
+// passed as --data-dir /var/lib/firebolt.
 // FIREBOLT_CORE_MODE=1 (set as a container env var) selects the firebolt-core
 // code path so the operator-rendered config (config.yaml at the data-dir root)
 // is treated as authoritative and not rewritten at startup.
@@ -310,7 +313,7 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-exec /firebolt-core/firebolt server --node "$POD_INDEX" --data-dir /firebolt-core/volume
+exec /opt/firebolt/firebolt server --node "$POD_INDEX" --data-dir /var/lib/firebolt
 `
 
 // GetServicePorts returns the externally-meaningful service ports for a

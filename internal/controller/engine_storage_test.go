@@ -27,7 +27,7 @@ import (
 )
 
 // TestBuildStatefulSet_DataVolumeBackends guards the data-volume backend
-// matrix: the engine pod's /firebolt-core/volume mount can be backed by
+// matrix: the engine pod's /var/lib/firebolt mount can be backed by
 // the default emptyDir, an
 // opt-in per-pod PVC, an explicit emptyDir with knobs, or a hostPath. The
 // PVC backend emits a single VolumeClaimTemplate (and no pod-level data
