@@ -21,22 +21,9 @@ jobs:
       matrix:
         variant: [dev, latest]
     steps:
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        id: app-token
-        with:
-          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
-          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
-          permission-contents: read
-
-      - name: Configure Git for private modules
-        env:
-          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: git config --global url."https://x-access-token:${GH_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
-
       - name: Clone the code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
       - name: Setup Go
