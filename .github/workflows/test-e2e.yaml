@@ -221,3 +221,30 @@ jobs:
             run-e2e.log
             pod-logs/
           retention-days: 30
+
+  # Single stable required-check name for branch protection. Matrix legs
+  # (E2E Tests (dev/latest)) are not reliably emitted as per-combination
+  # checks when skipped, so a docs-only PR would leave them Pending and
+  # block the merge. This gate runs `if: always()`, collapses both matrix
+  # legs into one `needs.test-e2e.result`, and fails closed if `detect`
+  # itself failed (which would otherwise skip the heavy job and report a
+  # false success).
+  e2e-required:
+    name: E2E Tests
+    needs: [detect, test-e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify gated jobs
+        env:
+          DETECT: ${{ needs.detect.result }}
+          E2E: ${{ needs.test-e2e.result }}
+        run: |
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::detect did not succeed (result=$DETECT)"; exit 1
+          fi
+          case "$E2E" in
+            success|skipped) echo "gate satisfied (test-e2e=$E2E)";;
+            *) echo "::error::test-e2e result=$E2E"; exit 1;;
+          esac

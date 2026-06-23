@@ -164,3 +164,28 @@ jobs:
 
       - name: Verify website quickstart bundle
         run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"
+
+  # Single stable required-check name for branch protection. `test-helm`
+  # is a single job that already reports success when skipped, but this
+  # gate closes the `detect` fail-open hole (a failed `detect` would skip
+  # the heavy job and report a false success) and gives branch protection
+  # one stable name independent of the worker job.
+  helm-required:
+    name: Helm Tests
+    needs: [detect, test-helm]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify gated jobs
+        env:
+          DETECT: ${{ needs.detect.result }}
+          HELM: ${{ needs.test-helm.result }}
+        run: |
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::detect did not succeed (result=$DETECT)"; exit 1
+          fi
+          case "$HELM" in
+            success|skipped) echo "gate satisfied (test-helm=$HELM)";;
+            *) echo "::error::test-helm result=$HELM"; exit 1;;
+          esac

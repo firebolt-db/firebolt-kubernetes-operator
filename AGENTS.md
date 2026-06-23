@@ -243,6 +243,26 @@ E2E rules:
 
 Do not delete Docker images or kind clusters; assume the kind cluster is already set up.
 
+### Required checks / rollup gates
+
+GitHub branch protection requires checks by **job `name`** (not workflow name). A check counts as passing when it is `success`, `skipped`, or `neutral` — but **where** the skip happens matters: a workflow skipped by an `on:` filter stays *Pending* (blocks the PR), whereas a job skipped by a job-level `if:` reports *Success*. Matrix-leg names are also not reliably emitted when the leg is skipped. To keep path/branch-conditional workflows compatible with required checks (docs-only PRs must not block forever, but real failures must still fail closed), each conditional or matrix workflow exposes **one stable required-check name backed by a rollup gate job**.
+
+Gate convention: the gate job runs `if: always()`, `needs` the `detect` job plus the heavy/worker job, has `permissions: {}`, uses inline `run:` only (no new pinned action — keeps the action-lint/zizmor surface unchanged), and passes only when `detect` succeeded **and** the gated job is `success` or (intentionally) `skipped`. A failed `detect` fails the gate closed (a skipped heavy job would otherwise count as a false success). `needs.<job>.result` collapses all matrix legs into one result.
+
+Canonical required-check names (each is a gate job except Lint / PR Title):
+
+| Required check | Workflow | Gate job | Worker job |
+|----------------|----------|----------|------------|
+| `E2E Tests` | `test-e2e.yaml` | `e2e-required` | `test-e2e` (matrix dev/latest) |
+| `Helm Tests` | `test-helm.yaml` | `helm-required` | `test-helm` |
+| `Unit Tests` | `test.yaml` | `unit-tests` | `test` (matrix dev/latest) |
+| `TLC model checker` | `formal-verification.yaml` | `tlc-required` | `tlc` (path-scoped via `detect`) |
+| `Actions Lint & Scan` | `lint-and-scan-actions.yaml` | `actions-lint-required` | `actionlint` + `zizmor` (path-scoped via `detect`) |
+| `Lint` | `lint.yaml` | — (always runs) | `lint` |
+| `PR Title` | `pr-title.yaml` | — (always runs; skip reports success) | `validate` |
+
+The `formal-verification.yaml` `detect` job is **path-scoped**: on a PR it sets `relevant=true` only when changed files match `^formal/`, `^scripts/gen-tla-state-tests.py$`, or `_tla_states_data_test.go$` (fail-safe: any uncertainty → `true`); on push to `main` it is always `true`. `lint-and-scan-actions.yaml` follows the same shape (`detect` scoped to `^\.github/`); its `pull_request` trigger drops the `paths` filter so the gate reports on every PR while `actionlint`/`zizmor` run only when workflow/action files changed (the `push` trigger keeps its `paths` filter since pushes do not gate merges). The required name `TLC model checker` lives on the gate so the worker job could be renamed to `TLC` with no branch-protection change. When adding a new conditional/matrix workflow that should gate merges, add a gate following this shape rather than requiring matrix-leg or worker names directly. A gate name appears in the branch-protection / ruleset picker once it has been reported as a completed check on **any ref** — a single PR-branch CI run is enough, so the new required names can be pre-selected from an open PR before the workflow change merges to `main` (no merge-to-`main`-first step required).
+
 ### Commit conventions
 
 Ask before creating or amending commits.
