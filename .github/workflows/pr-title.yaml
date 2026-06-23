@@ -15,7 +15,7 @@ permissions: {}
 
 jobs:
   validate:
-    name: Validate PR title
+    name: PR Title
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
