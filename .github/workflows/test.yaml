@@ -56,3 +56,23 @@ jobs:
         run: make test-property
         env:
           GOPRIVATE: github.com/firebolt-db/*
+
+  # Single stable required-check name for branch protection. The unit
+  # matrix legs (Run on Ubuntu (dev/latest)) were never required directly;
+  # this gate exposes one stable name. The unit suite always runs (no
+  # `detect`), so the gate simply requires `test` to have succeeded.
+  unit-tests:
+    name: Unit Tests
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify gated jobs
+        env:
+          TEST: ${{ needs.test.result }}
+        run: |
+          if [ "$TEST" != "success" ]; then
+            echo "::error::test result=$TEST"; exit 1
+          fi
+          echo "gate satisfied (test=$TEST)"
