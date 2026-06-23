@@ -389,12 +389,18 @@ jobs:
         # it as a conventional `chore(deps):` change -- the chart's bundled operator
         # image is a dependency, and that scope renders under the "Dependencies"
         # changelog section (release-please-config.json) while still being releasable.
-        # That commit flows back through release-please, which opens the chart release
-        # PRs; merging those is what bumps each chart `version` and publishes the chart
+        # That commit flows back through release-please, which opens the firebolt-operator
+        # chart release PR; merging it bumps the chart `version` and publishes the chart
         # (release-helm-standalone). release-please cannot reference another
         # component's version itself (googleapis/release-please#2655), so this minimal
         # glue is required -- but it never touches chart `version` or the manifest, so
         # it does not compete with release-please for ownership of chart versions.
+        #
+        # Only the firebolt-operator chart is synced: it deploys the operator pod and
+        # defaults image.tag to appVersion. The firebolt-operator-crds chart ships only
+        # CRD manifests, references no operator image, and deliberately carries no
+        # appVersion -- so it is left untouched here and releases only when its own CRD
+        # content under helm/firebolt-operator-crds/ actually changes.
         env:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
@@ -402,16 +408,13 @@ jobs:
           APP_VERSION_TAG="v${APP_VERSION}"
 
           yq -i ".appVersion = \"${APP_VERSION_TAG}\"" helm/firebolt-operator/Chart.yaml
-          yq -i ".appVersion = \"${APP_VERSION_TAG}\"" helm/firebolt-operator-crds/Chart.yaml
 
           make helm-docs
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add helm/firebolt-operator/Chart.yaml \
-                  helm/firebolt-operator/README.md \
-                  helm/firebolt-operator-crds/Chart.yaml \
-                  helm/firebolt-operator-crds/README.md
+                  helm/firebolt-operator/README.md
 
           if git diff --staged --quiet; then
             echo "Chart appVersion already ${APP_VERSION_TAG}; nothing to commit."
@@ -427,8 +430,8 @@ jobs:
             echo ""
             if [ "$COMMITTED" = "true" ]; then
               echo "Committed \`chore(deps): set chart appVersion to ${APP_VERSION_TAG}\` to \`main\`."
-              echo "release-please will open chart release PRs that bump each chart \`version\`;"
-              echo "merging them publishes the charts (\`release-helm-standalone\`)."
+              echo "release-please will open the \`firebolt-operator\` chart release PR that bumps its \`version\`;"
+              echo "merging it publishes the chart (\`release-helm-standalone\`)."
             else
               echo "Chart \`appVersion\` was already \`${APP_VERSION_TAG}\`; no chart release needed."
             fi

@@ -3,7 +3,6 @@ name: firebolt-operator-crds
 description: CRDs for the Firebolt Kubernetes Operator
 type: application
 version: 0.1.0
-appVersion: "v0.2.0"
 maintainers:
   - name: firebolt-db
 keywords:
