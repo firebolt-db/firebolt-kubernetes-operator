@@ -9,14 +9,54 @@ on:
   push:
     branches: ["main"]
     paths: [".github/**"]
+  # No `paths` filter on pull_request: the workflow must run on every PR so
+  # the `Actions Lint & Scan` rollup gate always reports a status. The
+  # `detect` job decides whether actionlint/zizmor actually execute (only
+  # when files under .github/ changed). A trigger-level `paths` filter would
+  # leave the required gate Pending on non-.github PRs and block the merge.
   pull_request:
     branches: ["**"]
-    paths: [".github/**"]
 
 permissions: {}
 
 jobs:
+  detect:
+    name: Detect .github change
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - name: Determine whether workflow/action files changed
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # On non-pull_request events (push to main) always run; the push
+          # trigger is already path-filtered to .github/**. On a PR, run the
+          # linters only when files under .github/ changed. Fail-safe: any
+          # uncertainty -> true.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files="$(gh api --paginate \
+            "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
+            --jq '.files[].filename' 2>/dev/null || true)"
+          printf '%s\n' "${files:-<none>}"
+          if [ -z "${files}" ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if printf '%s\n' "${files}" | grep -qE '^\.github/'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   actionlint:
+    needs: detect
+    if: needs.detect.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,6 +74,8 @@ jobs:
           fail_level: error
 
   zizmor:
+    needs: detect
+    if: needs.detect.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,3 +94,34 @@ jobs:
           # Informational findings (e.g. style suggestions like
           # superfluous-actions) are reported but do not fail the job.
           min-severity: low
+
+  # Single stable required-check name for branch protection. The workflow
+  # runs on every PR (no trigger `paths` filter) so this gate always
+  # reports, but the gated jobs only execute when .github/ changed. The
+  # gate runs `if: always()`, requires `detect` to have succeeded, and
+  # passes only when both actionlint and zizmor are `success` or
+  # (intentionally) `skipped` — so a workflow-file regression on a PR that
+  # touches .github/ fails the gate and blocks the merge, while a PR that
+  # touches no .github/ file skips both linters and the gate stays green.
+  actions-lint-required:
+    name: Actions Lint & Scan
+    needs: [detect, actionlint, zizmor]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Verify gated jobs
+        env:
+          DETECT: ${{ needs.detect.result }}
+          ACTIONLINT: ${{ needs.actionlint.result }}
+          ZIZMOR: ${{ needs.zizmor.result }}
+        run: |
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::detect did not succeed (result=$DETECT)"; exit 1
+          fi
+          for r in "actionlint=$ACTIONLINT" "zizmor=$ZIZMOR"; do
+            case "${r#*=}" in
+              success|skipped) echo "gate satisfied (${r})";;
+              *) echo "::error::${r}"; exit 1;;
+            esac
+          done
