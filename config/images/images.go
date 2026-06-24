@@ -14,13 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package images embeds one of the variant-specific defaults files
-// (defaults.latest.env by default, defaults.dev.env when built with
-// `-tags=dev`) and exposes the image references used by both the operator
-// controllers and the E2E tests. The two variants must be consistent across
-// the operator binary, the gateway pod template it builds, and the E2E
-// suite — selecting them at compile time via a build tag is what enforces
-// that consistency.
+// Package images embeds one of the variant-specific defaults files and
+// exposes the image references used by both the operator controllers and the
+// E2E tests. The compile-time selector is the `latest` build tag:
+// defaults.latest.env is embedded with `-tags latest`, defaults.dev.env
+// without it. The build tooling (Makefile / Dockerfile.ci) defaults
+// IMAGE_VARIANT to "latest", so operator and chart builds embed
+// defaults.latest.env unless IMAGE_VARIANT=dev is set. The two variants must
+// be consistent across the operator binary, the gateway pod template it
+// builds, and the E2E suite — selecting them at compile time via a build tag
+// is what enforces that consistency.
 package images
 
 import (

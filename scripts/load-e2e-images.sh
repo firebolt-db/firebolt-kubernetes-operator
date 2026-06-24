@@ -6,7 +6,7 @@ set -euo pipefail
 # into containerd by scripts/setup-kind-cluster.sh).
 #
 # All image values come from config/images/defaults.<variant>.env (single source
-# of truth, where <variant> is IMAGE_VARIANT, defaulting to "dev").
+# of truth, where <variant> is IMAGE_VARIANT, defaulting to "latest").
 #
 # IMAGE_VARIANT MUST match the build tag of the operator binary and the test
 # binary that will run after this script — otherwise the suite asks Kind for
@@ -32,7 +32,7 @@ set -euo pipefail
 
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
-IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
+IMAGE_VARIANT="${IMAGE_VARIANT:-latest}"
 
 # Local registry endpoints. The host-side endpoint is what `docker push`
 # talks to; the in-cluster endpoint is what containerd resolves through the
