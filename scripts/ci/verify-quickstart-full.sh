@@ -5,11 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/lib/verify-quickstart.sh"
 source "${SCRIPT_DIR}/lib/setup-floci.sh"
-# Honour the same IMAGE_VARIANT switch as the Makefile (default: dev) so this
-# script picks the matching defaults.<variant>.env that replaced the now-gone
-# defaults.env in commit 554d320.
-IMAGE_VARIANT="${IMAGE_VARIANT:-dev}"
-# shellcheck source=../../config/images/defaults.dev.env
+# Honour the same IMAGE_VARIANT switch as the Makefile (default: latest) so
+# this script picks the matching defaults.<variant>.env that replaced the
+# now-gone defaults.env in commit 554d320.
+IMAGE_VARIANT="${IMAGE_VARIANT:-latest}"
+# shellcheck source=../../config/images/defaults.latest.env
 set -a
 source "${REPO_ROOT}/config/images/defaults.${IMAGE_VARIANT}.env"
 set +a

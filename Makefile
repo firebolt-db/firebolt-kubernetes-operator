@@ -5,17 +5,15 @@ LDFLAGS := -X main.version=$(VERSION)
 
 # IMAGE_VARIANT selects which config/images/defaults.<variant>.env file is
 # embedded into the operator binary and which images the E2E suite expects to
-# be loaded into Kind. "dev" (default) tracks the mutable `:dev` aliases on
-# the engine/metadata GHCR packages so a regression on `:dev` surfaces in CI
-# before a partner pulling `:dev` sees it; "latest" pins to release-* build
-# tags. "dev" stays the implicit default until the engine/metadata `:latest`
-# GHCR aliases (and the auto-PR that bumps `defaults.latest.env`) are in
-# place; once they land, flip the default back to "latest". The operator
-# binary, the gateway pod template the operator stamps out, the image-load
-# step, and the test process all derive their defaults from the same
-# variant — set IMAGE_VARIANT consistently across `build`,
-# `prepare-test-e2e`, and `test-e2e`.
-IMAGE_VARIANT ?= dev
+# be loaded into Kind. "latest" (default) pins to the release-* build tags in
+# defaults.latest.env and is what ships in the operator image and the Helm
+# chart; "dev" tracks the mutable `:dev` aliases on the engine/metadata GHCR
+# packages so a regression on `:dev` surfaces in CI before a partner pulling
+# `:dev` sees it. The operator binary, the gateway pod template the operator
+# stamps out, the image-load step, and the test process all derive their
+# defaults from the same variant — set IMAGE_VARIANT consistently across
+# `build`, `prepare-test-e2e`, and `test-e2e`.
+IMAGE_VARIANT ?= latest
 
 ifeq ($(IMAGE_VARIANT),latest)
 GO_BUILD_TAGS_BASE := latest

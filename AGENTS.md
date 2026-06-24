@@ -77,6 +77,8 @@ GINKGO_FOCUS="your test description" make test-e2e
 | `e2e,heavy` | Same as `e2e` but uses the heavy query configuration. |
 | `latest` | Swaps embedded defaults to `defaults.latest.env`. Combine with `e2e` for the latest-variant E2E run. |
 
+The rows above describe the raw Go build tags. The build tooling defaults the variant to **latest**: `IMAGE_VARIANT` defaults to `latest` in the `Makefile`, `Dockerfile.ci`, `scripts/load-e2e-images.sh`, and `scripts/ci/verify-quickstart-full.sh`, so `make build` / `make docker-build` / `make test-e2e` (and the released operator image and Helm chart) embed `defaults.latest.env` by default and add the `latest` tag. Set `IMAGE_VARIANT=dev` to build the `dev` variant. A bare `go build` / `go test` with no tag still embeds `defaults.dev.env`.
+
 ### Release workflow (main)
 
 [`/.github/workflows/release-main.yaml`](.github/workflows/release-main.yaml) runs on every push to `main`:

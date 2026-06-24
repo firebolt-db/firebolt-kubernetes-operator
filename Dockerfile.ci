@@ -4,10 +4,10 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 # IMAGE_VARIANT selects which config/images/defaults.<variant>.env file is
-# embedded into the binary. "dev" (the default) embeds defaults.dev.env;
-# "latest" embeds defaults.latest.env via the `latest` Go build tag. Any
-# other value is treated as "dev" (the !latest embed file matches).
-ARG IMAGE_VARIANT=dev
+# embedded into the binary. "latest" (the default) embeds defaults.latest.env
+# via the `latest` Go build tag; "dev" embeds defaults.dev.env. Any value
+# other than "latest" is treated as "dev" (the !latest embed file matches).
+ARG IMAGE_VARIANT=latest
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
