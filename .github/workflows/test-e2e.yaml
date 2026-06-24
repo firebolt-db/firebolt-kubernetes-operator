@@ -2,6 +2,18 @@ name: E2E Tests
 
 on:
   pull_request:
+  # Manual trigger so the suite can run on demand without opening a PR — the
+  # mutable `:dev` engine/metadata aliases change continuously, and this lets
+  # a new `:dev` image be validated against the operator without an empty PR.
+  # `variant` selects which leg(s) run: "dev" (default) for the common
+  # dev-image check, "latest" for the pinned release-* images, or "both".
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Image variant(s) to run
+        type: choice
+        options: [dev, latest, both]
+        default: dev
 
 permissions: {}
 
@@ -29,9 +41,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # The docs-only short-circuit only applies to pull_request events.
+          # A workflow_dispatch run is an explicit request to run the suite,
+          # so always run it (no PR diff exists to inspect anyway).
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            echo "Event '${EVENT_NAME}' is not a pull_request; running full suite."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # List the PR's changed files via the compare API (no checkout
           # needed). "docs" = markdown anywhere, plus docs/.
           # Fail-safe: any uncertainty leaves docs_only=false so the full
@@ -65,9 +86,13 @@ jobs:
       # variant's failure from cancelling the other so a variant-specific
       # regression stays visible, and each matrix leg runs on its own
       # runner (so the hardcoded KIND_CLUSTER name does not collide).
+      #
+      # A pull_request always runs both legs (full merge gate). A manual
+      # workflow_dispatch runs only the selected `variant` input ("both"
+      # expands to the full pair).
       fail-fast: false
       matrix:
-        variant: [dev, latest]
+        variant: ${{ (github.event_name == 'pull_request' || inputs.variant == 'both') && fromJSON('["dev","latest"]') || fromJSON(format('["{0}"]', inputs.variant)) }}
     steps:
       - name: Clean Up Disk Space on public GitHub Runner
         if: runner.os == 'Linux'
