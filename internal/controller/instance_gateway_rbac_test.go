@@ -108,3 +108,72 @@ func TestEffectiveGatewayPodTemplate_ServiceAccountFallback(t *testing.T) {
 		}
 	})
 }
+
+// TestEffectiveGatewayPodTemplate_EngineCAVolume pins down that the
+// engine-CA volume/mount (needed for buildDFPUpstreamTLSTransportSocket's
+// trusted_ca) is wired only once engine TLS is enabled AND ready, and
+// points at the same Secret instance.Status.EngineTLS names.
+func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
+	baseLabels := map[string]string{"firebolt.io/instance": "fb"}
+	findVol := func(pt corev1.PodTemplateSpec, name string) *corev1.Volume {
+		for i := range pt.Spec.Volumes {
+			if pt.Spec.Volumes[i].Name == name {
+				return &pt.Spec.Volumes[i]
+			}
+		}
+		return nil
+	}
+	findMount := func(pt corev1.PodTemplateSpec, name string) *corev1.VolumeMount {
+		for i := range pt.Spec.Containers[0].VolumeMounts {
+			if pt.Spec.Containers[0].VolumeMounts[i].Name == name {
+				return &pt.Spec.Containers[0].VolumeMounts[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("absent when engine TLS is disabled", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"}}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		if v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName); v != nil {
+			t.Errorf("unexpected engine-CA volume with TLS disabled: %+v", v)
+		}
+		if m := findMount(pt, computev1alpha1.GatewayEngineCAVolumeName); m != nil {
+			t.Errorf("unexpected engine-CA mount with TLS disabled: %+v", m)
+		}
+	})
+
+	t.Run("absent when engine TLS is enabled but not yet ready", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Engine: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+		}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		if v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName); v != nil {
+			t.Errorf("unexpected engine-CA volume before EngineTLS is ready: %+v", v)
+		}
+	})
+
+	t.Run("wired once ready", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Engine: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "fb-engine-tls"},
+			},
+		}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName)
+		if v == nil || v.Secret == nil || v.Secret.SecretName != "fb-engine-tls" {
+			t.Errorf("engine-CA volume = %+v, want Secret.SecretName=fb-engine-tls", v)
+		}
+		m := findMount(pt, computev1alpha1.GatewayEngineCAVolumeName)
+		if m == nil || m.MountPath != gatewayEngineCAMountPath || !m.ReadOnly {
+			t.Errorf("engine-CA mount = %+v, want MountPath=%s ReadOnly=true", m, gatewayEngineCAMountPath)
+		}
+	})
+}

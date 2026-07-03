@@ -15042,6 +15042,26 @@
           },
           "type": "array"
         },
+        "engineTLS": {
+          "description": "EngineTLS reports the crypto material the operator has provisioned\nfor engine-listener TLS. Nil when spec.tls.engine is unset or\ndisabled.",
+          "properties": {
+            "createdAt": {
+              "description": "CreatedAt is when this certificate was provisioned.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "secretName": {
+              "description": "SecretName is the cert-manager-managed Secret holding the engine\nlistener's server certificate (data keys \"tls.crt\", \"tls.key\", and,\nwhen the issuer populates it, \"ca.crt\" \u2014 the trust anchor the\ngateway uses to verify engines when re-encrypting upstream).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "createdAt",
+            "secretName"
+          ],
+          "type": "object",
+          "additionalProperties": false
+        },
         "gatewayEndpoint": {
           "description": "GatewayEndpoint is the resolved gateway Service address.",
           "type": "string"

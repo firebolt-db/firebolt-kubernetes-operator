@@ -124,6 +124,21 @@ const (
 	// in-flight retries at once; still bounded so a pathological retry
 	// storm cannot consume the whole gateway.
 	gatewayMaxRetriesPerEngine = 256
+
+	// gatewayEngineCAMountPath is the directory the engine-listener TLS
+	// Secret's CA certificate is mounted at on the Envoy container,
+	// present only once engine TLS is enabled and ready (see
+	// engineUpstreamTLSReady). Referenced as the dynamic_forward_proxy
+	// cluster's trusted_ca in buildDFPUpstreamTLSTransportSocket.
+	gatewayEngineCAMountPath = "/etc/envoy/tls/engine-ca"
+
+	// engineTLSCASecretKey is the data key cert-manager writes the
+	// issuing CA certificate to in a Certificate's target Secret, when
+	// the issuer populates one (e.g. a CA-backed Issuer/ClusterIssuer —
+	// see cert-manager's Issuer.spec.ca doc comment, which documents
+	// "ca.crt" as the default key). Not a corev1-exported constant;
+	// cert-manager does not export one either.
+	engineTLSCASecretKey = "ca.crt"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -218,6 +233,86 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // will fail with a 503 from the dynamic_forward_proxy cluster. There is
 // no compile-time link between the two today; consider extracting a
 // shared constant if you need to change this port.
+// engineUpstreamTLSReady reports whether the gateway should re-encrypt
+// gateway->engine traffic: spec.tls.engine is enabled AND the instance
+// controller has finished provisioning the certificate (Status.EngineTLS
+// populated by ensureEngineTLS in instance_tls.go). Gating on Status
+// (not just Spec) mirrors resolveInstanceInfo's engine-side gating:
+// rendering a trusted_ca file path before the corresponding Secret is
+// mounted would reference a volume that doesn't exist yet.
+func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Engine != nil && instance.Spec.TLS.Engine.Enabled &&
+		instance.Status.EngineTLS != nil
+}
+
+// buildDFPUpstreamTLSTransportSocket returns the dynamic_forward_proxy
+// cluster's transport_socket YAML block (indented to nest under the
+// cluster's other top-level keys — see buildEnvoyConfigYAML's %s
+// placeholder), or "" when engine TLS is not ready.
+//
+// Config approach verified against Envoy's own source
+// (extensions/clusters/dynamic_forward_proxy/cluster.cc): a
+// dynamic_forward_proxy Cluster's transport_socket is a full protobuf
+// field on the parent Cluster message, copied verbatim into every
+// per-authority sub-cluster sub_clusters_config synthesizes at runtime
+// (ClusterFactory::createClusterWithConfig does `config =
+// orig_cluster_config_` before overriding only name/cluster_type/
+// lb_policy/load_assignment) — so configuring TLS once here covers every
+// engine's sub-cluster with no per-authority enumeration needed.
+//
+// Uses a static match_typed_subject_alt_names suffix match against the
+// certificate's own SAN text, NOT Envoy's auto_sni/auto_san_validation
+// mechanism, for three reasons found during implementation research:
+//  1. auto_sni/auto_san_validation becomes a silent no-op (falls back to
+//     manually-set defaults only when upstream_http_protocol_options is
+//     entirely absent) the moment any typed_extension_protocol_options
+//     block is configured on the cluster, and the dynamic_forward_proxy
+//     cluster factory then refuses to load the cluster at all unless
+//     both are explicitly re-enabled — an easy trap to hit by adding
+//     unrelated HTTP-version config later.
+//  2. auto_sni/auto_san_validation are populated in the HTTP router
+//     filter's request path, which active health checks never traverse —
+//     so Option B's SAN check silently doesn't apply to health-check
+//     connections (chain verification via trusted_ca still does). The
+//     static matcher lives in validation_context alongside trusted_ca and
+//     applies uniformly to data-plane AND health-check connections.
+//  3. The certificate's SAN is a static, namespace-wide wildcard (see
+//     engineTLSWildcardDNSName in instance_tls.go) — matching against the
+//     certificate's own SAN text needs no per-authority hostname
+//     enumeration, which sub_clusters_config's dynamically-created,
+//     unbounded sub-cluster set would make impractical anyway.
+//
+// suffix (not exact) is required: an exact matcher would only match a
+// certificate whose SAN is literally the wildcard string
+// "*.<namespace>.svc.cluster.local" verbatim, never any real presented
+// hostname.
+func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !engineUpstreamTLSReady(instance) {
+		return ""
+	}
+	// Trailing newline is required, not cosmetic: buildEnvoyConfigYAML
+	// substitutes this directly before the next line's own text (no
+	// separator newline in the template), so that a disabled/not-ready
+	// instance (empty string here) renders byte-identical to the
+	// pre-TLS config — avoiding a spurious config-hash change, and
+	// therefore a gateway rollout, for every instance that never touches
+	// spec.tls.engine.
+	return fmt.Sprintf(`      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: %s/%s
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    suffix: ".%s.svc.cluster.local"
+`,
+		gatewayEngineCAMountPath, engineTLSCASecretKey, instance.Namespace)
+}
+
 func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 	return fmt.Sprintf(`static_resources:
   listeners:
@@ -518,7 +613,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
-      # Mirror the listener's per_connection_buffer_limit_bytes onto the
+%s      # Mirror the listener's per_connection_buffer_limit_bytes onto the
       # cluster so upstream connection buffers are sized identically. The
       # router consults the smaller of the two when deciding whether a
       # retry's request body fits, so leaving these in lockstep avoids a
@@ -685,17 +780,18 @@ admin:
       address: 127.0.0.1
       port_value: %d
 `,
-		gatewayPerConnectionBufferLimitBytes, // listener: per_connection_buffer_limit_bytes
-		gatewayContainerPort,                 // listener: port_value
-		instance.Namespace,                   // Lua: :authority rewrite
-		instance.Spec.Gateway.MetricsPort,    // stats_listener: port_value
-		gatewayPerConnectionBufferLimitBytes, // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
-		gatewayMaxConnectionsPerEngine,       // circuit_breakers: max_connections
-		gatewayMaxPendingRequestsPerEngine,   // circuit_breakers: max_pending_requests
-		gatewayMaxRequestsPerEngine,          // circuit_breakers: max_requests
-		gatewayMaxRetriesPerEngine,           // circuit_breakers: max_retries
-		gatewayAdminPort,                     // admin_stats endpoint: port_value
-		gatewayAdminPort,                     // admin: port_value
+		gatewayPerConnectionBufferLimitBytes,         // listener: per_connection_buffer_limit_bytes
+		gatewayContainerPort,                         // listener: port_value
+		instance.Namespace,                           // Lua: :authority rewrite
+		instance.Spec.Gateway.MetricsPort,            // stats_listener: port_value
+		buildDFPUpstreamTLSTransportSocket(instance), // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
+		gatewayPerConnectionBufferLimitBytes,         // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayMaxConnectionsPerEngine,               // circuit_breakers: max_connections
+		gatewayMaxPendingRequestsPerEngine,           // circuit_breakers: max_pending_requests
+		gatewayMaxRequestsPerEngine,                  // circuit_breakers: max_requests
+		gatewayMaxRetriesPerEngine,                   // circuit_breakers: max_retries
+		gatewayAdminPort,                             // admin_stats endpoint: port_value
+		gatewayAdminPort,                             // admin: port_value
 	)
 }
 
@@ -1002,9 +1098,27 @@ sleep 8
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
+	// Present only once engine TLS is enabled and ready — see
+	// buildDFPUpstreamTLSTransportSocket's matching gate. Mounting the
+	// whole Secret (not just ca.crt via Items) is fine: the gateway never
+	// reads tls.key, and envoy.yaml only ever points at the ca.crt path.
+	if engineUpstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayEngineCAVolumeName,
+			MountPath: gatewayEngineCAMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayEngineCAVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.EngineTLS.SecretName},
+			},
+		})
+	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
-	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName)
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
+		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName, computev1alpha1.GatewayEngineCAVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {

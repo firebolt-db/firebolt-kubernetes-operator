@@ -259,6 +259,9 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 		},
 	}
 
+	authAndTLSInfo := testInstanceInfoWithAuth()
+	authAndTLSInfo.TLS = testInstanceInfoWithTLS().TLS
+
 	cases := []struct {
 		name string
 		info InstanceInfo
@@ -266,6 +269,8 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 		{name: "disabled", info: testInstanceInfo()},
 		{name: "native", info: testInstanceInfoWithAuth()},
 		{name: "oidc", info: oidcInfo},
+		{name: "engine-tls", info: testInstanceInfoWithTLS()},
+		{name: "auth-and-engine-tls", info: authAndTLSInfo},
 	}
 
 	for _, tc := range cases {

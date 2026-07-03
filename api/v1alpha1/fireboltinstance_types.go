@@ -81,6 +81,14 @@ const (
 	// gate their own reconcile on Status.Auth directly rather than on
 	// the top-level Ready condition.
 	InstanceConditionAuthReady = "AuthReady"
+
+	// InstanceConditionEngineTLSReady reports whether the engine-listener
+	// TLS server certificate (spec.tls.engine) has been provisioned. True
+	// with reason "Disabled" when spec.tls.engine is unset or disabled.
+	// Deliberately not rolled up into InstanceConditionReady, mirroring
+	// InstanceConditionAuthReady: engines and the gateway each gate their
+	// own reconcile on Status.EngineTLS directly.
+	InstanceConditionEngineTLSReady = "EngineTLSReady"
 )
 
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
@@ -688,6 +696,23 @@ type AuthStatus struct {
 	SigningKeys []SigningKeyStatus `json:"signingKeys,omitempty"`
 }
 
+// EngineTLSStatus reports the observed state of engine-listener TLS
+// provisioning — the crypto material engines and the gateway need, as
+// opposed to TLSListenerSpec's desired configuration. Unlike AuthStatus's
+// SigningKeys, this is a single Secret: engine TLS has no cross-engine
+// validation constraint requiring a rotation window, so there is no
+// forward-compatibility reason to model it as a slice yet.
+type EngineTLSStatus struct {
+	// SecretName is the cert-manager-managed Secret holding the engine
+	// listener's server certificate (data keys "tls.crt", "tls.key", and,
+	// when the issuer populates it, "ca.crt" — the trust anchor the
+	// gateway uses to verify engines when re-encrypting upstream).
+	SecretName string `json:"secretName"`
+
+	// CreatedAt is when this certificate was provisioned.
+	CreatedAt metav1.Time `json:"createdAt"`
+}
+
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.
 type FireboltInstanceStatus struct {
 	// Phase is the current lifecycle phase of the Instance.
@@ -716,6 +741,12 @@ type FireboltInstanceStatus struct {
 	// spec.auth is unset or disabled.
 	// +optional
 	Auth *AuthStatus `json:"auth,omitempty"`
+
+	// EngineTLS reports the crypto material the operator has provisioned
+	// for engine-listener TLS. Nil when spec.tls.engine is unset or
+	// disabled.
+	// +optional
+	EngineTLS *EngineTLSStatus `json:"engineTLS,omitempty"`
 
 	// Conditions represent the latest available observations of the Instance's state.
 	// +optional

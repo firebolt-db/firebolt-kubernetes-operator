@@ -104,16 +104,13 @@ spec:
             enabled: true
             defaultRoles: [public]
 
-  # TLS certs are also cert-manager-only. Gateway TLS terminates the
-  # client-facing connection; engine TLS covers engines' own HTTP/Postgres
-  # listeners (reached directly in-cluster, and by the gateway upstream).
+  # TLS certs are also cert-manager-only. tls.engine is live: enabling it
+  # replaces every engine's plaintext http-query listener with TLS-only on
+  # the same port, and the gateway automatically re-encrypts its upstream
+  # connection to engines using the same certificate's CA. tls.gateway
+  # (downstream client->gateway termination) is reserved CRD scaffolding
+  # only — no controller code reads it yet, so setting it has no effect.
   tls:
-    gateway:
-      enabled: true
-      certManager:
-        issuerRef:
-          name: internal-ca
-          kind: ClusterIssuer
     engine:
       enabled: true
       certManager:

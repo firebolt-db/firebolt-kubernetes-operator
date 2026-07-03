@@ -601,6 +601,74 @@ func TestValidateAuth(t *testing.T) {
 	}
 }
 
+func TestValidateTLS(t *testing.T) {
+	tests := []struct {
+		name      string
+		tls       *TLSSpec
+		wantError bool
+	}{
+		{
+			name:      "nil tls is valid",
+			tls:       nil,
+			wantError: false,
+		},
+		{
+			name:      "engine disabled with nothing else set is valid",
+			tls:       &TLSSpec{Engine: &TLSListenerSpec{Enabled: false}},
+			wantError: false,
+		},
+		{
+			name:      "engine enabled with no certManager is rejected",
+			tls:       &TLSSpec{Engine: &TLSListenerSpec{Enabled: true}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with certManager but no issuer name is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with issuer name is valid",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+			}},
+			wantError: false,
+		},
+		{
+			name: "gateway is not yet validated (unwired scaffolding)",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled: true,
+			}},
+			wantError: false,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					TLS: tc.tls,
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 // TestParsePackdbDuration pins down the grammar against packdb's actual
 // duration parser (src/Common/Configuration/Unit/Duration.h): Go's
 // time.ParseDuration grammar plus a "d" (days) unit that Go's standard

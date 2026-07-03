@@ -266,6 +266,144 @@ func TestBuildEnvoyConfigYAMLCircuitBreakers(t *testing.T) {
 	}
 }
 
+// TestBuildEnvoyConfigYAML_EngineTLSDisabled_NoTransportSocket guards
+// that the dynamic_forward_proxy cluster stays plaintext (no
+// transport_socket key) when spec.tls.engine is unset — the status quo
+// this bundled TLS work must not silently change for existing instances.
+func TestBuildEnvoyConfigYAML_EngineTLSDisabled_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	dfp := dfpCluster(t, parsed)
+	if _, present := dfp["transport_socket"]; present {
+		t.Errorf("dynamic_forward_proxy cluster has transport_socket with engine TLS disabled: %v", dfp["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles
+// guards a real regression found during review: the transport_socket
+// %s-placeholder substitution must not leave a stray blank line (or any
+// other byte difference) when engine TLS is disabled, or
+// contentHash(envoyYAML) — and therefore AnnotationConfigHash — changes
+// for every existing non-TLS instance the moment this feature ships,
+// forcing a gateway rollout nobody asked for.
+func TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles(t *testing.T) {
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}
+	first := buildEnvoyConfigYAML(inst)
+	if strings.Contains(first, "CLUSTER_PROVIDED\n\n") {
+		t.Error("emitted config has a blank line after 'lb_policy: CLUSTER_PROVIDED'; " +
+			"buildDFPUpstreamTLSTransportSocket's empty-string case must not leave a stray newline")
+	}
+	// Rendering twice must be byte-for-byte stable, matching every other
+	// buildEnvoyConfigYAML invariant (TestBuildEnvoyConfigYAMLStableAcrossInstances).
+	if second := buildEnvoyConfigYAML(inst); first != second {
+		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSEnabledButNotReady_NoTransportSocket
+// pins down that buildDFPUpstreamTLSTransportSocket gates on
+// Status.EngineTLS (readiness), not just Spec.TLS.Engine.Enabled: a
+// transport_socket referencing an unmounted CA file would break every
+// upstream connection until the volume catches up.
+func TestBuildEnvoyConfigYAML_EngineTLSEnabledButNotReady_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		// Status.EngineTLS deliberately left nil: certificate not yet issued.
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	dfp := dfpCluster(t, parsed)
+	if _, present := dfp["transport_socket"]; present {
+		t.Errorf("dynamic_forward_proxy cluster has transport_socket before EngineTLS is ready: %v", dfp["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured pins
+// down the upstream TLS shape once engine TLS is ready: a
+// trusted_ca pointing at the mounted CA file, and a static
+// match_typed_subject_alt_names suffix matcher against the certificate's
+// namespace-wide wildcard SAN (see buildDFPUpstreamTLSTransportSocket's
+// doc comment for why this is a static suffix match rather than
+// auto_sni/auto_san_validation).
+func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+	dfp := dfpCluster(t, parsed)
+	ts, ok := dfp["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing transport_socket once EngineTLS is ready; keys = %v", keysOf(dfp))
+	}
+	if ts["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("transport_socket.name = %v, want envoy.transport_sockets.tls", ts["name"])
+	}
+	typedConfig, ok := ts["typed_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport_socket.typed_config missing or wrong type: %T", ts["typed_config"])
+	}
+	commonTLS, ok := typedConfig["common_tls_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
+	}
+	validationContext, ok := commonTLS["validation_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("common_tls_context.validation_context missing or wrong type: %T", commonTLS["validation_context"])
+	}
+	trustedCA, ok := validationContext["trusted_ca"].(map[string]any)
+	if !ok {
+		t.Fatalf("validation_context.trusted_ca missing or wrong type: %T", validationContext["trusted_ca"])
+	}
+	wantFilename := gatewayEngineCAMountPath + "/" + engineTLSCASecretKey
+	if trustedCA["filename"] != wantFilename {
+		t.Errorf("trusted_ca.filename = %v, want %v", trustedCA["filename"], wantFilename)
+	}
+	sans, ok := validationContext["match_typed_subject_alt_names"].([]any)
+	if !ok || len(sans) != 1 {
+		t.Fatalf("validation_context.match_typed_subject_alt_names = %v, want a 1-element array", validationContext["match_typed_subject_alt_names"])
+	}
+	san, ok := sans[0].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[0] = %v, want an object", sans[0])
+	}
+	if san["san_type"] != "DNS" {
+		t.Errorf("match_typed_subject_alt_names[0].san_type = %v, want DNS", san["san_type"])
+	}
+	matcher, ok := san["matcher"].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[0].matcher missing or wrong type: %T", san["matcher"])
+	}
+	wantSuffix := ".ns-1.svc.cluster.local"
+	if matcher["suffix"] != wantSuffix {
+		t.Errorf("matcher.suffix = %v, want %v (must be a suffix match, not exact — see doc comment)", matcher["suffix"], wantSuffix)
+	}
+}
+
 // dfpCluster returns the parsed dynamic_forward_proxy cluster (the
 // top-level entry, not its typed_config). Callers needing the inner
 // typed_config use dfpClusterTypedConfig instead.

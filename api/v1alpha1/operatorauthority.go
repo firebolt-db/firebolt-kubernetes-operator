@@ -140,6 +140,11 @@ const (
 	// more than one at once without a name collision. Mounted at
 	// AuthSigningMountPathBase + "/" + <key ID> on the engine container.
 	EngineAuthSigningVolumeNamePrefix = "auth-signing-"
+	// EngineTLSVolumeName is the projected Secret volume carrying the
+	// engine listener's TLS server certificate, present only when
+	// spec.tls.engine is enabled. Mounted at EngineTLSMountPath on the
+	// engine container.
+	EngineTLSVolumeName = "tls-engine"
 	// GatewayConfigVolumeName carries the operator-rendered Envoy
 	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy
 	// container.
@@ -147,6 +152,13 @@ const (
 	// GatewayTmpVolumeName is the writable /tmp emptyDir the Envoy
 	// container needs alongside ReadOnlyRootFilesystem=true.
 	GatewayTmpVolumeName = "tmp"
+	// GatewayEngineCAVolumeName carries the "ca.crt" entry from the
+	// engine-listener TLS Secret, present only when spec.tls.engine is
+	// enabled. Mounted read-only on the Envoy container so the gateway
+	// can validate engine server certificates when re-encrypting
+	// gateway->engine traffic (see buildEnvoyConfigYAML's
+	// dynamic_forward_proxy transport_socket).
+	GatewayEngineCAVolumeName = "engine-ca"
 	// MetadataConfigVolumeName carries the operator-rendered Pensieve
 	// XML config. Mounted at /configs on the metadata container.
 	MetadataConfigVolumeName = "config"
@@ -179,6 +191,7 @@ var operatorOwnedEngineVolumeNames = []string{
 	EngineRuntimeVolumeName,
 	EngineAuthAdminVolumeName,
 	EngineAuthSigningVolumeNamePrefix + "signing-1",
+	EngineTLSVolumeName,
 }
 
 // operatorOwnedGatewayVolumeNames are the volume names the operator
@@ -186,6 +199,7 @@ var operatorOwnedEngineVolumeNames = []string{
 var operatorOwnedGatewayVolumeNames = []string{
 	GatewayConfigVolumeName,
 	GatewayTmpVolumeName,
+	GatewayEngineCAVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator
@@ -225,7 +239,7 @@ type EngineConfigOwnedSection struct {
 // across operator releases even when this list grows: users do not need to
 // chase the protected set in their CRs to keep them applying cleanly.
 var OperatorOwnedEngineConfigPaths = []EngineConfigOwnedSection{
-	{Section: "", Keys: []string{"schema_version"}},
+	{Section: "", Keys: []string{"schema_version", "endpoints"}},
 	{Section: "instance", Keys: []string{"id", "type", "multi_engine", "auth"}},
 	{Section: "engine", Keys: []string{"id", "nodes", "termination_grace_period"}},
 }

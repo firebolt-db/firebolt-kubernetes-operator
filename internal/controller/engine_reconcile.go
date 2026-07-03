@@ -60,6 +60,27 @@ type InstanceInfo struct {
 	// buildConfigMap and buildStatefulSet need to render instance.auth.*
 	// and mount the corresponding Secrets.
 	Auth *ResolvedAuthInfo
+
+	// TLS is nil when the referenced FireboltInstance has spec.tls.engine
+	// unset or disabled. When non-nil, the engine-listener TLS
+	// certificate is confirmed ready (see resolveInstanceInfo's gating)
+	// and carries everything buildConfigMap and buildStatefulSet need to
+	// render endpoints.http.listeners[].tls and mount the corresponding
+	// Secret.
+	TLS *ResolvedEngineTLSInfo
+}
+
+// ResolvedEngineTLSInfo carries the concrete, currently-provisioned
+// engine-listener TLS Secret to mount. Kept separate from
+// computev1alpha1.TLSListenerSpec (rather than embedding it) because the
+// only thing rendering needs beyond "TLS is enabled" (implied by this
+// pointer being non-nil) is the Secret name, which lives on the
+// Instance's Status, not its Spec.
+type ResolvedEngineTLSInfo struct {
+	// SecretName is the cert-manager-managed Secret holding the engine
+	// listener's TLS certificate — copied from
+	// FireboltInstance.Status.EngineTLS.SecretName.
+	SecretName string
 }
 
 // ResolvedAuthInfo carries the desired auth config plus the concrete,
@@ -553,6 +574,9 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 			"format": "json",
 		},
 	}
+	if instanceInfo.TLS != nil {
+		coreConfig["endpoints"] = renderEndpointsConfig()
+	}
 
 	deepMergeJSON(coreConfig, effectiveCustomEngineConfig(spec, classInfo))
 
@@ -582,6 +606,63 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 // key off the same signing-key ID.
 func authSigningKeyPrivateKeyPath(id string) string {
 	return AuthSigningMountPathBase + "/" + id + "/" + corev1.TLSPrivateKeyKey
+}
+
+// engineTLSCertPath and engineTLSKeyPath return the in-container paths to
+// the engine listener's TLS certificate and private key. Must agree with
+// wherever the TLS Secret volume is mounted in buildStatefulSet.
+func engineTLSCertPath() string {
+	return EngineTLSMountPath + "/" + corev1.TLSCertKey
+}
+
+func engineTLSKeyPath() string {
+	return EngineTLSMountPath + "/" + corev1.TLSPrivateKeyKey
+}
+
+// renderEndpointsConfig builds the root-level endpoints.* section of the
+// rendered config.yaml, rendered only when instanceInfo.TLS is non-nil
+// (spec.tls.engine enabled and its certificate provisioned).
+//
+// This renders exactly one http listener: tcp on EngineHTTPQueryPort with
+// tls configured. packdb's EndpointConfig::ApplyToLegacyConfig wipes the
+// built-in plaintext http_port default the instant ANY
+// endpoints.http.listeners entry is rendered (see
+// src/Core/Application/Configuration/EndpointConfig.cpp) — there is no
+// way to render "TLS in addition to the existing plaintext default" short
+// of also declaring a second, explicit plaintext listener. This operator
+// intentionally does NOT do that: engine TLS is all-or-nothing by design
+// (see the FB-896 implementation plan's Phase 2 decision), so enabling it
+// replaces plaintext port 3473 with TLS on the same port rather than
+// opening a second port. Callers that still expect plaintext on this port
+// — the gateway's dynamic_forward_proxy cluster and the engine web UI
+// sidecar's loopback connection — must switch to TLS in the same change
+// that enables this (see buildEnvoyConfigYAML and EngineWebBackendURL).
+//
+// No postgres listener is rendered: packdb's PostgresConfig::Validate
+// rejects tls on a postgres listener outright, and the operator does not
+// expose a postgres endpoint at all today.
+//
+// The kubelet health/readiness probe (HealthPort, 8122) is NOT affected
+// by any of this: verified directly against packdb source
+// (FireboltCoreServer.cpp) that the health-check TCP server is bound
+// from its own "health_check_port" legacy config key, entirely separate
+// from EndpointConfig/http_port/https_port — so it stays plaintext
+// regardless of engine TLS.
+func renderEndpointsConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"http": map[string]interface{}{
+			"listeners": []map[string]interface{}{
+				{
+					"type": "tcp",
+					"port": EngineHTTPQueryPort,
+					"tls": map[string]interface{}{
+						"certificate_file": engineTLSCertPath(),
+						"private_key_file": engineTLSKeyPath(),
+					},
+				},
+			},
+		},
+	}
 }
 
 // authAdminPasswordPath returns the in-container path to the admin
@@ -812,6 +893,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	if h := authHash(instanceInfo.Auth); h != "" {
 		annotations[AnnotationAuthHash] = h
 	}
+	if h := tlsHash(instanceInfo.TLS); h != "" {
+		annotations[AnnotationEngineTLSHash] = h
+	}
 	if classInfo != nil {
 		annotations[AnnotationEngineClassHash] = classInfo.Hash
 	}
@@ -906,6 +990,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		podVolumes = append(podVolumes, *extraDataVolume)
 	}
 	podVolumes = append(podVolumes, buildAuthVolumes(instanceInfo.Auth)...)
+	podVolumes = append(podVolumes, buildEngineTLSVolumes(instanceInfo.TLS)...)
 	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
 
 	// Optional built-in engine web UI sidecar (engine/class uiSidecar: true).
@@ -916,7 +1001,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	// reserves the container name; operatorOwnedPodVolumeNames reserves the
 	// volume), so a user template can never collide with them and injection
 	// is unconditional once the feature resolves to enabled.
-	sidecars := effectiveSidecarsWithUI(spec, classInfo)
+	sidecars := effectiveSidecarsWithUI(spec, instanceInfo, classInfo)
 	if effectiveUISidecarEnabled(spec, classInfo) {
 		podVolumes = append(podVolumes, buildEngineWebWritableVolume())
 	}
@@ -1685,11 +1770,13 @@ func appendSidecars(dst []corev1.Container, src []corev1.Container) []corev1.Con
 // this one helper, or the injected UI container would read back from the API
 // as perpetual drift and roll a new blue-green generation on every reconcile.
 // No collision guard is needed: EngineWebContainerName is reserved by the
-// validating webhook, so a user container can never share the name.
-func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Container {
+// validating webhook, so a user container can never share the name. instanceInfo
+// carries the engine TLS state (instanceInfo.TLS != nil) so the sidecar's
+// backend URL switches to https in lockstep with the engine listener.
+func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) []corev1.Container {
 	sidecars := effectiveSidecars(spec, classInfo)
 	if effectiveUISidecarEnabled(spec, classInfo) {
-		sidecars = append(sidecars, buildEngineWebSidecar(effectiveEngineWebPullPolicy(spec, classInfo)))
+		sidecars = append(sidecars, buildEngineWebSidecar(effectiveEngineWebPullPolicy(spec, classInfo), instanceInfo.TLS != nil))
 	}
 	return sidecars
 }
@@ -1698,7 +1785,7 @@ func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo
 // injected when an engine or its class sets uiSidecar: true. It mirrors the
 // firebolt-instance-helm chart's UI container (renamed to the operator-owned
 // EngineWebContainerName): an nginx-based UI pointed at the local engine
-// (EngineWebBackendURL) over loopback, listening on EngineWebPort, with a
+// (engineWebBackendURL) over loopback, listening on EngineWebPort, with a
 // hardened securityContext (read-only root FS, drop ALL, runs as the engine
 // UID/GID) and nginx's writable paths backed by an emptyDir. API-server
 // defaults are stamped so a read-back of the rendered StatefulSet does not
@@ -1710,7 +1797,22 @@ func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo
 // sidecar that crashes right after startup opens a transient all-ready
 // window that the blue-green promotion gate (checkPodsReady, a single-shot
 // snapshot) can observe and promote on.
-func buildEngineWebSidecar(pullPolicy corev1.PullPolicy) corev1.Container {
+//
+// tlsEnabled mirrors renderEndpointsConfig's condition (instanceInfo.TLS !=
+// nil): once engine TLS is on, port EngineHTTPQueryPort speaks TLS only
+// (see renderEndpointsConfig's doc comment), so the sidecar's backend URL
+// must switch to https in the same generation or its loopback connection
+// to the engine breaks.
+//
+// CAVEAT: this operator does not control DefaultEngineWebImage's contents
+// (a separately built/published image), so whether its embedded nginx
+// config trusts the internal CA that signs the engine's TLS certificate —
+// as opposed to failing closed on an unrecognized issuer — has not been
+// verified against a running container. Verify this against the real
+// image before enabling engine TLS with uiSidecar in production, the same
+// way Phase 1's engine-boot verification was deferred for the auth
+// feature.
+func buildEngineWebSidecar(pullPolicy corev1.PullPolicy, tlsEnabled bool) corev1.Container {
 	runAsUser := DefaultEngineWebD
 	runAsGroup := DefaultEngineGID
 	c := corev1.Container{
@@ -1718,7 +1820,7 @@ func buildEngineWebSidecar(pullPolicy corev1.PullPolicy) corev1.Container {
 		Image:           DefaultEngineWebImage,
 		ImagePullPolicy: pullPolicy,
 		Env: []corev1.EnvVar{
-			{Name: "FIREBOLT_CORE_URL", Value: EngineWebBackendURL},
+			{Name: "FIREBOLT_CORE_URL", Value: engineWebBackendURL(tlsEnabled)},
 		},
 		Ports: []corev1.ContainerPort{
 			{Name: EngineWebPortName, ContainerPort: EngineWebPort, Protocol: corev1.ProtocolTCP},
@@ -1959,9 +2061,10 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 	// the shallower DataMountPath is mounted before the deeper ConfigMountPath
 	// regardless of the order here.
 	authMounts := buildAuthVolumeMounts(instanceInfo.Auth)
+	tlsMounts := buildEngineTLSVolumeMounts(instanceInfo.TLS)
 	userMounts := effectiveEngineVolumeMounts(spec, classInfo)
 
-	out := make([]corev1.VolumeMount, 0, 3+len(authMounts)+len(userMounts))
+	out := make([]corev1.VolumeMount, 0, 3+len(authMounts)+len(tlsMounts)+len(userMounts))
 	out = append(out,
 		corev1.VolumeMount{
 			Name:      DataVolumeName,
@@ -1979,6 +2082,7 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 		},
 	)
 	out = append(out, authMounts...)
+	out = append(out, tlsMounts...)
 	return append(out, userMounts...)
 }
 
@@ -2039,6 +2143,37 @@ func buildAuthVolumeMounts(auth *ResolvedAuthInfo) []corev1.VolumeMount {
 		})
 	}
 	return out
+}
+
+// buildEngineTLSVolumes returns the pod-level Secret volume for the
+// engine-listener TLS certificate. Returns nil when TLS is disabled
+// (tls == nil). A slice (rather than a single corev1.Volume) purely to
+// match buildAuthVolumes' call shape at both call sites.
+func buildEngineTLSVolumes(tls *ResolvedEngineTLSInfo) []corev1.Volume {
+	if tls == nil {
+		return nil
+	}
+	return []corev1.Volume{{
+		Name: computev1alpha1.EngineTLSVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: tls.SecretName},
+		},
+	}}
+}
+
+// buildEngineTLSVolumeMounts returns the engine container's VolumeMount
+// for the volume buildEngineTLSVolumes adds, at the mount path
+// engineTLSCertPath/engineTLSKeyPath point at. Returns nil when TLS is
+// disabled.
+func buildEngineTLSVolumeMounts(tls *ResolvedEngineTLSInfo) []corev1.VolumeMount {
+	if tls == nil {
+		return nil
+	}
+	return []corev1.VolumeMount{{
+		Name:      computev1alpha1.EngineTLSVolumeName,
+		MountPath: EngineTLSMountPath,
+		ReadOnly:  true,
+	}}
 }
 
 // buildEngineContainerEnv returns the env stamped on the rendered
@@ -2397,6 +2532,26 @@ func authHash(auth *ResolvedAuthInfo) string {
 		return contentHash(fmt.Sprintf("%v", auth))
 	}
 	return contentHash(string(canonical))
+}
+
+// tlsHash returns a content-hash of everything TLS-relevant to a rendered
+// engine pod: whether TLS is enabled and, if so, the provisioned
+// certificate's Secret name. Returns "" when TLS is disabled, keeping
+// AnnotationEngineTLSHash absent and the rendered pod byte-identical to
+// an engine with TLS never configured.
+//
+// Unlike authHash there is no separate config-only Spec to hash: TLS
+// rendering (renderEndpointsConfig) is a fixed shape entirely determined
+// by "is TLS enabled", with no other field of TLSListenerSpec reaching
+// config.yaml. The only drift this needs to catch that VolumeMounts
+// equality cannot see is a Secret NAME change behind the identically-
+// named EngineTLSVolumeName volume (same reasoning as authHash's doc
+// comment).
+func tlsHash(tls *ResolvedEngineTLSInfo) string {
+	if tls == nil {
+		return ""
+	}
+	return contentHash(tls.SecretName)
 }
 
 // getEnginePodSecurityContext returns the resolved pod-level security context
@@ -2836,7 +2991,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !sidecarsMatch(podSpec.Containers, effectiveSidecarsWithUI(spec, classInfo)) {
+	if !sidecarsMatch(podSpec.Containers, effectiveSidecarsWithUI(spec, instanceInfo, classInfo)) {
 		return false
 	}
 
@@ -2924,6 +3079,10 @@ func annotationsMatchSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.Firebol
 	}
 
 	if sts.Annotations[AnnotationAuthHash] != authHash(instanceInfo.Auth) {
+		return false
+	}
+
+	if sts.Annotations[AnnotationEngineTLSHash] != tlsHash(instanceInfo.TLS) {
 		return false
 	}
 

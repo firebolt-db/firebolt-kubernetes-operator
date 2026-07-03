@@ -122,8 +122,45 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 	}
 
 	errs = append(errs, ValidateAuth(inst)...)
+	errs = append(errs, ValidateTLS(inst)...)
 
 	return errs
+}
+
+// ValidateTLS mirrors ValidateAuth's exported/defense-in-depth shape, but
+// for spec.tls: re-run by the instance controller (see ensureEngineTLS) in
+// case the webhook is disabled.
+//
+// Only spec.tls.engine is validated here. spec.tls.gateway is reserved,
+// unwired CRD scaffolding — no controller code reads it yet — so
+// validating it now would suggest a feature that does not exist; add its
+// validation alongside whatever phase actually wires up gateway
+// downstream TLS termination.
+func ValidateTLS(inst *FireboltInstance) field.ErrorList {
+	tls := inst.Spec.TLS
+	if tls == nil {
+		return nil
+	}
+	return validateTLSListener(tls.Engine, field.NewPath("spec", "tls", "engine"))
+}
+
+// validateTLSListener requires a cert-manager provisioning policy with a
+// named issuer whenever a TLS listener is enabled: the operator has no
+// bring-your-own-Secret alternative (see TLSListenerSpec's doc comment),
+// so an enabled listener with no CertManager block, or one with an empty
+// issuer name, can never actually be provisioned.
+func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.ErrorList {
+	if listener == nil || !listener.Enabled {
+		return nil
+	}
+	if listener.CertManager == nil {
+		return field.ErrorList{field.Required(base.Child("certManager"),
+			"required when enabled is true: the operator provisions every certificate via cert-manager")}
+	}
+	if listener.CertManager.IssuerRef.Name == "" {
+		return field.ErrorList{field.Required(base.Child("certManager", "issuerRef", "name"), "required")}
+	}
+	return nil
 }
 
 // ValidateAuth mirrors packdb's instance.auth validation rules
