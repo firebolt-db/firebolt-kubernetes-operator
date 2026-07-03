@@ -93,7 +93,7 @@ func TestGetTerminationGracePeriod_AlwaysDefault(t *testing.T) {
 
 func TestBuildStatefulSetDefaultsTGPS(t *testing.T) {
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	got := sts.Spec.Template.Spec.TerminationGracePeriodSeconds
 	if got == nil || *got != int64(DefaultTerminationGracePeriodSeconds) {
 		t.Fatalf("expected default TGPS=%d, got %v", DefaultTerminationGracePeriodSeconds, got)

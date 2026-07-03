@@ -69,6 +69,18 @@ const (
 	// Deployment's resources were applied successfully and its pods
 	// are reporting Ready.
 	InstanceConditionGatewayReady = "GatewayReady"
+
+	// InstanceConditionAuthReady reports whether Instance-wide auth
+	// provisioning (the admin credentials preflight and the JWT signing
+	// keypair) has completed. True with reason "Disabled" when
+	// spec.auth is unset or disabled. Unlike MetadataReady and
+	// GatewayReady, this condition is deliberately NOT one of the
+	// components setInstanceReadyRollup rolls up into
+	// InstanceConditionReady: auth provisioning has no bearing on
+	// whether the metadata service or gateway are usable, and engines
+	// gate their own reconcile on Status.Auth directly rather than on
+	// the top-level Ready condition.
+	InstanceConditionAuthReady = "AuthReady"
 )
 
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
@@ -222,49 +234,360 @@ type GatewaySpec struct {
 	Template *corev1.PodTemplateSpec `json:"template,omitempty"`
 }
 
-// AuthMode defines the authentication mode for the Firebolt Instance.
-// +kubebuilder:validation:Enum=disabled;native;openid
-type AuthMode string
-
-// AuthModeDisabled through AuthModeOpenID enumerate the supported
-// authentication modes.
-const (
-	AuthModeDisabled AuthMode = "disabled"
-	AuthModeNative   AuthMode = "native"
-	AuthModeOpenID   AuthMode = "openid"
-)
-
-// OIDCSpec configures OpenID Connect authentication.
-type OIDCSpec struct {
-	// IssuerURL is the OIDC provider's issuer URL.
+// CertManagerIssuerRef identifies the cert-manager Issuer or ClusterIssuer
+// used to sign a Certificate the operator creates on the user's behalf.
+// The operator never creates the Issuer itself — it must already exist —
+// so a compromised operator cannot mint a new trust root, only leaf
+// certificates under one the cluster administrator already trusts.
+type CertManagerIssuerRef struct {
+	// Name is the name of the Issuer or ClusterIssuer.
 	// +kubebuilder:validation:MinLength=1
-	IssuerURL string `json:"issuerURL"`
+	Name string `json:"name"`
 
-	// ClientID is the OIDC client identifier.
-	// +kubebuilder:validation:MinLength=1
-	ClientID string `json:"clientID"`
-
-	// ClientSecretRef references a Secret containing the OIDC client secret.
+	// Kind is the referenced resource's kind. Issuer is namespaced (must
+	// live in the same namespace as this FireboltInstance); ClusterIssuer
+	// is cluster-scoped.
+	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
+	// +kubebuilder:default=ClusterIssuer
 	// +optional
-	ClientSecretRef *corev1.LocalObjectReference `json:"clientSecretRef,omitempty"`
-
-	// ClaimMappings maps OIDC claims to Firebolt user attributes (e.g. {"username": "email"}).
-	// +optional
-	ClaimMappings map[string]string `json:"claimMappings,omitempty"`
+	Kind string `json:"kind,omitempty"`
 }
 
-// AuthSpec configures authentication for the Firebolt Instance.
-// TODO: the operator does not enforce auth yet. This spec is persisted in
-// the CRD so that it can later be propagated to engine node configuration
-// (e.g. via ConfigMap or environment variables) to enable native or OIDC
-// authentication at the engine level.
-type AuthSpec struct {
-	// Mode is the authentication mode.
-	Mode AuthMode `json:"mode"`
+// CertManagerSpec describes how the operator provisions an X.509 keypair
+// via a cert-manager Certificate. This is the operator's only supported
+// source of auth/TLS key material — there is intentionally no
+// bring-your-own-Secret alternative, so every certificate in an Instance
+// is traceable to one issuer chain the cluster administrator configured.
+type CertManagerSpec struct {
+	// IssuerRef references the cert-manager Issuer or ClusterIssuer that
+	// signs the generated Certificate.
+	IssuerRef CertManagerIssuerRef `json:"issuerRef"`
 
-	// OIDC configures OpenID Connect. Required when mode is "openid".
+	// Algorithm is the private key algorithm.
+	// +kubebuilder:validation:Enum=RSA;ECDSA
+	// +kubebuilder:default=RSA
 	// +optional
-	OIDC *OIDCSpec `json:"oidc,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
+
+	// Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+	// ECDSA curve size (256, 384, 521). Defaults to 2048.
+	// +kubebuilder:default=2048
+	// +optional
+	Size int32 `json:"size,omitempty"`
+}
+
+// PasswordLoginPolicy controls whether password-based login is available
+// to any authenticated user or only to the admin account. Mirrors
+// packdb's instance.auth.password_login; meaningful only once OIDC is
+// also configured (a native-only deployment always allows the admin to
+// log in with a password).
+// +kubebuilder:validation:Enum=admin_only;any_user
+type PasswordLoginPolicy string
+
+// PasswordLoginAdminOnly and PasswordLoginAnyUser enumerate packdb's
+// password-login policies.
+const (
+	PasswordLoginAdminOnly PasswordLoginPolicy = "admin_only"
+	PasswordLoginAnyUser   PasswordLoginPolicy = "any_user"
+)
+
+// AdminSpec configures the Instance admin account. packdb re-syncs this
+// user's name and password from config on every engine startup.
+type AdminSpec struct {
+	// Name is the admin username. Defaults to "firebolt" — packdb's own
+	// default — so omitting it matches engine behavior when auth is
+	// first enabled.
+	// +kubebuilder:default=firebolt
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Password references the Secret key holding the admin password.
+	// Required when auth is enabled: the operator does not generate an
+	// admin password, because a generated credential the user never sees
+	// is not something they can use to log in. The referenced Secret is
+	// mounted into every engine pod and rendered as
+	// instance.auth.admin.password_file — never password_value — so the
+	// plaintext password never appears in the rendered config.yaml or its
+	// ConfigMap.
+	Password corev1.SecretKeySelector `json:"password"`
+}
+
+// SigningKeyPolicy controls how the operator provisions the JWT signing
+// keypair used by the embedded ("_local") authorization server on every
+// engine. Signing keys are entirely operator-generated — the CRD does not
+// accept user-supplied key material — because every engine in an Instance
+// must share byte-identical signing_keys (packdb's SigningKeyManager
+// validates tokens minted by any peer engine), and an operator-generated
+// Secret is the only way to guarantee that across a fleet.
+//
+// Phase 1 provisions exactly one long-lived key with cert-manager
+// auto-renew disabled: packdb reads signing keys only at process startup,
+// so an uncoordinated renewal would make one engine sign with a key its
+// peers can't yet validate. Coordinated rotation is a planned addition to
+// this struct, not yet implemented.
+type SigningKeyPolicy struct {
+	// CertManager configures the cert-manager Certificate used to
+	// generate the signing keypair.
+	CertManager CertManagerSpec `json:"certManager"`
+}
+
+// LocalAuthSpec configures the embedded ("_local") authorization server:
+// packdb's native username/password login plus the JWT signing/validation
+// parameters every engine uses regardless of whether OIDC is also
+// configured. These fields are grouped together here for operator users
+// even though packdb itself spreads them across
+// instance.auth.{password_login,admin} and instance.auth.local.* — the
+// operator maps between the two shapes at render time.
+type LocalAuthSpec struct {
+	// PasswordLogin controls whether password login is available to any
+	// user or only the admin account. Defaults to admin_only (packdb's
+	// own default).
+	// +kubebuilder:default=admin_only
+	// +optional
+	PasswordLogin PasswordLoginPolicy `json:"passwordLogin,omitempty"`
+
+	// Admin configures the Instance admin account. Required when auth is
+	// enabled — packdb rejects a config with auth.enabled=true and no
+	// admin block.
+	Admin AdminSpec `json:"admin"`
+
+	// SigningAlgorithm is the JWT signing algorithm used by the embedded
+	// authorization server. Must be compatible with SigningKeys'
+	// cert-manager key algorithm: the RS* family requires an RSA key, the
+	// ES* family requires ECDSA.
+	// +kubebuilder:validation:Enum=RS256;RS384;RS512;ES256;ES384;ES512
+	// +kubebuilder:default=RS256
+	// +optional
+	SigningAlgorithm string `json:"signingAlgorithm,omitempty"`
+
+	// TokenExpiry is how long issued access tokens remain valid, as a Go
+	// duration string (e.g. "1h"). Defaults to packdb's own default (1h)
+	// when empty.
+	// +optional
+	TokenExpiry string `json:"tokenExpiry,omitempty"`
+
+	// MaxTokenAge bounds how old a token's iat claim may be, independent
+	// of TokenExpiry. Defaults to packdb's own default (1d) when empty.
+	// +optional
+	MaxTokenAge string `json:"maxTokenAge,omitempty"`
+
+	// ClockSkewTolerance is the permitted clock drift when validating
+	// time-based JWT claims. Defaults to packdb's own default (30s) when
+	// empty.
+	// +optional
+	ClockSkewTolerance string `json:"clockSkewTolerance,omitempty"`
+
+	// SigningKeys controls how the operator provisions the signing
+	// keypair. Required when auth is enabled: packdb's own dev-autogen
+	// fallback (used when signing_keys is empty) mints a different key
+	// per engine process, which breaks cross-engine token validation in
+	// any multi-engine deployment — exactly the topology this operator
+	// always creates.
+	// +optional
+	SigningKeys *SigningKeyPolicy `json:"signingKeys,omitempty"`
+}
+
+// OIDCJWTSpec configures the JWT validation parameters shared by every
+// OIDC provider on this Instance. Distinct from LocalAuthSpec's JWT
+// fields: packdb's instance.auth.oidc.jwt has no token_expiry, because an
+// OIDC provider issues its own tokens — the engine only validates them.
+type OIDCJWTSpec struct {
+	// ClockSkewTolerance is the permitted clock drift when validating
+	// time-based claims on OIDC-issued tokens. Defaults to packdb's own
+	// default (30s) when empty.
+	// +optional
+	ClockSkewTolerance string `json:"clockSkewTolerance,omitempty"`
+
+	// MaxTokenAge bounds how old an OIDC token's iat claim may be.
+	// Defaults to packdb's own default (1d) when empty.
+	// +optional
+	MaxTokenAge string `json:"maxTokenAge,omitempty"`
+}
+
+// JITProvisioningSpec controls whether a first-time OIDC login
+// automatically creates a Firebolt user, and which roles that user
+// receives.
+type JITProvisioningSpec struct {
+	// Enabled turns on just-in-time user provisioning for this provider.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// DefaultRoles lists the roles granted to an auto-provisioned user.
+	// Defaults to ["public"] (packdb's own default) when empty.
+	// +optional
+	DefaultRoles []string `json:"defaultRoles,omitempty"`
+}
+
+// OIDCJWKSSpec configures caching of a provider's published JSON Web Key
+// Set.
+type OIDCJWKSSpec struct {
+	// CacheTTL is how long a fetched JWKS document is cached before being
+	// re-fetched, as a Go duration string. Defaults to packdb's own
+	// default (1h) when empty.
+	// +optional
+	CacheTTL string `json:"cacheTTL,omitempty"`
+}
+
+// OIDCDiscoverySpec configures refresh of a provider's OpenID discovery
+// document.
+type OIDCDiscoverySpec struct {
+	// RefreshInterval is how often the engine re-fetches the provider's
+	// /.well-known/openid-configuration document, as a Go duration
+	// string. Defaults to packdb's own default (1d) when empty.
+	// +optional
+	RefreshInterval string `json:"refreshInterval,omitempty"`
+}
+
+// OIDCProviderSpec configures one trusted OIDC identity provider. packdb
+// validates bearer tokens against this provider's published keys — it is
+// a JWT validator, not an OAuth2 client: there is no client ID/secret,
+// redirect URI, or authorization-code flow here, because the engine never
+// initiates a login. An external client (the Firebolt CLI, a BI tool)
+// performs the OIDC flow itself and presents the resulting access token
+// to the engine as a bearer token.
+type OIDCProviderSpec struct {
+	// Name is this provider's machine identifier, used in the
+	// ?auth=<name> connection parameter and as the authorization server
+	// name clients select. Must not start with "_" — that prefix is
+	// reserved by packdb for Firebolt-managed authorization servers (the
+	// embedded server is named "_local").
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[^_].*$`
+	Name string `json:"name"`
+
+	// Title is a human-readable label for this provider, shown in UIs.
+	// Defaults to Name when empty.
+	// +optional
+	Title string `json:"title,omitempty"`
+
+	// DiscoveryURL is the provider's OpenID Connect discovery endpoint
+	// (typically ending in /.well-known/openid-configuration). Must be
+	// an https:// URL — packdb requires TLS for every outbound OIDC
+	// fetch except loopback.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^https://.+`
+	DiscoveryURL string `json:"discoveryURL"`
+
+	// Audience is the expected "aud" claim on tokens from this provider.
+	// Defaults to the Instance's canonical issuer URL when empty
+	// (packdb's own default).
+	// +optional
+	Audience string `json:"audience,omitempty"`
+
+	// UsernameMapping is a Go-template string mapping token claims to the
+	// Firebolt username; claims are interpolated with double-brace markers.
+	// For example, the "email" claim on its own, or the "iss" and "sub"
+	// claims joined with a pipe.
+	// +kubebuilder:validation:MinLength=1
+	UsernameMapping string `json:"usernameMapping"`
+
+	// JITProvisioning controls automatic user creation on first login via
+	// this provider.
+	// +optional
+	JITProvisioning *JITProvisioningSpec `json:"jitProvisioning,omitempty"`
+
+	// JWKS configures caching of this provider's published key set.
+	// +optional
+	JWKS *OIDCJWKSSpec `json:"jwks,omitempty"`
+
+	// Discovery configures refresh of this provider's OpenID discovery
+	// document.
+	// +optional
+	Discovery *OIDCDiscoverySpec `json:"discovery,omitempty"`
+}
+
+// OIDCAuthSpec configures OpenID Connect bearer-token authentication:
+// one or more trusted identity providers whose tokens engines accept
+// alongside (or instead of) the embedded local authorization server.
+type OIDCAuthSpec struct {
+	// JWT configures validation parameters shared by every provider.
+	// +optional
+	JWT *OIDCJWTSpec `json:"jwt,omitempty"`
+
+	// Providers lists the trusted OIDC identity providers. Must be
+	// non-empty when OIDC is configured at all — packdb rejects a
+	// present oidc block with an empty providers list.
+	// +kubebuilder:validation:MinItems=1
+	Providers []OIDCProviderSpec `json:"providers"`
+}
+
+// AuthSpec configures authentication for every engine in this Instance.
+// Auth is an Instance-wide policy, not a per-Engine one: packdb's embedded
+// authorization server on each engine both issues and validates JWTs, so
+// every engine must run with byte-identical instance.auth.* — including
+// the same signing keys — or a token minted by one engine fails
+// validation on another. The operator enforces this by resolving AuthSpec
+// once per Instance and rendering the result into every engine's
+// config.yaml from that single source, never per-engine.
+type AuthSpec struct {
+	// Enabled turns on authentication for every engine in this Instance.
+	// When false, engines run in packdb's unauthenticated mode and every
+	// connection is treated as the admin. Local, OIDC, and
+	// PreferredAuthorizationServer below are only meaningful when Enabled
+	// is true; the validating webhook rejects setting them while Enabled
+	// is false, matching packdb's own config validation (instance.auth's
+	// admin and oidc fields must be absent when instance.auth.enabled is
+	// false).
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// PreferredAuthorizationServer names the authorization server clients
+	// should use by default when a connection doesn't select one
+	// explicitly: either "_local" (the embedded server) or the Name of
+	// one of the OIDC providers below. Advisory only; surfaced to clients
+	// via /.well-known/firebolt. Must be unset when Enabled is false and,
+	// when set, must name a configured server.
+	// +optional
+	PreferredAuthorizationServer string `json:"preferredAuthorizationServer,omitempty"`
+
+	// Local configures the embedded ("_local") authorization server:
+	// native username/password login and JWT signing. Required when
+	// Enabled is true.
+	// +optional
+	Local *LocalAuthSpec `json:"local,omitempty"`
+
+	// OIDC configures OpenID Connect bearer-token authentication against
+	// one or more external identity providers.
+	// +optional
+	OIDC *OIDCAuthSpec `json:"oidc,omitempty"`
+}
+
+// TLSListenerSpec configures TLS termination for one operator-managed
+// listener (the gateway's client-facing listener, or an engine's HTTP/
+// Postgres-wire listeners). As with SigningKeyPolicy, the certificate is
+// always provisioned via cert-manager — there is no bring-your-own-Secret
+// option.
+type TLSListenerSpec struct {
+	// Enabled turns on TLS for this listener.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// CertManager configures the cert-manager Certificate used to
+	// provision this listener's server certificate. Required when
+	// Enabled is true.
+	// +optional
+	CertManager *CertManagerSpec `json:"certManager,omitempty"`
+}
+
+// TLSSpec configures TLS termination for the operator-managed network
+// hops between a client and an engine: the gateway's client-facing
+// listener, and each engine's own listeners (reached directly by
+// in-cluster clients, and by the gateway when it re-encrypts upstream).
+// Engine-to-metadata gRPC and inter-node broadcast TLS are out of scope
+// for this field and are not currently exposed on the CRD.
+type TLSSpec struct {
+	// Gateway configures TLS termination on the Envoy gateway's
+	// client-facing listener.
+	// +optional
+	Gateway *TLSListenerSpec `json:"gateway,omitempty"`
+
+	// Engine configures TLS termination on each engine's HTTP and
+	// Postgres-wire listeners.
+	// +optional
+	Engine *TLSListenerSpec `json:"engine,omitempty"`
 }
 
 // MetricScrapeMode selects how the operator reaches engine pods to scrape
@@ -315,10 +638,15 @@ type FireboltInstanceSpec struct {
 	// Gateway configures the query routing gateway (Envoy proxy).
 	Gateway GatewaySpec `json:"gateway"`
 
-	// Auth configures authentication for engine nodes.
-	// TODO: not enforced yet; will be propagated to engine configuration in a future release.
+	// Auth configures authentication for every engine in this Instance.
+	// See AuthSpec for why this is Instance-wide rather than per-Engine.
 	// +optional
 	Auth *AuthSpec `json:"auth,omitempty"`
+
+	// TLS configures TLS termination on the gateway's client-facing
+	// listener and on each engine's own listeners.
+	// +optional
+	TLS *TLSSpec `json:"tls,omitempty"`
 
 	// MetricScrapeMode selects the transport the operator uses to scrape
 	// engine pod /metrics for the drain probe and autoStop activity
@@ -330,6 +658,34 @@ type FireboltInstanceSpec struct {
 	// +kubebuilder:default=PodIP
 	// +optional
 	MetricScrapeMode MetricScrapeMode `json:"metricScrapeMode,omitempty"`
+}
+
+// SigningKeyStatus records one JWT signing key the operator has
+// provisioned for this Instance.
+type SigningKeyStatus struct {
+	// ID is the key identifier rendered as the JWT "kid" and as
+	// instance.auth.local.signing_keys[].id on every engine.
+	ID string `json:"id"`
+
+	// SecretName is the cert-manager-managed Secret holding this key's
+	// PEM private key (data key "tls.key").
+	SecretName string `json:"secretName"`
+
+	// CreatedAt is when this key was provisioned.
+	CreatedAt metav1.Time `json:"createdAt"`
+}
+
+// AuthStatus reports the observed state of Instance-wide auth
+// provisioning — the crypto material engines need, as opposed to
+// AuthSpec's desired configuration.
+type AuthStatus struct {
+	// SigningKeys lists the currently provisioned JWT signing keys, first
+	// entry active. Phase 1 always has exactly one entry; a later
+	// rotation feature will grow this to multiple entries during a
+	// rollover window. A slice from the start so that addition is
+	// forward-compatible without a status schema change.
+	// +optional
+	SigningKeys []SigningKeyStatus `json:"signingKeys,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.
@@ -354,6 +710,12 @@ type FireboltInstanceStatus struct {
 	// GatewayEndpoint is the resolved gateway Service address.
 	// +optional
 	GatewayEndpoint string `json:"gatewayEndpoint,omitempty"`
+
+	// Auth reports the crypto material the operator has provisioned for
+	// Instance-wide auth (currently: JWT signing keys). Nil when
+	// spec.auth is unset or disabled.
+	// +optional
+	Auth *AuthStatus `json:"auth,omitempty"`
 
 	// Conditions represent the latest available observations of the Instance's state.
 	// +optional

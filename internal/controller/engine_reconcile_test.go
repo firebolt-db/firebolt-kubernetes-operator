@@ -141,7 +141,7 @@ func stableStatus() *computev1alpha1.FireboltEngineStatus {
 // sync whenever stsMatchesSpec grows a new comparison.
 func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
-	sts := buildStatefulSet(spec, engineName, testNamespace, gen, nil)
+	sts := buildStatefulSet(spec, engineName, testNamespace, gen, InstanceInfo{}, nil)
 	sts.Spec.Replicas = &replicas
 	return sts
 }
@@ -152,7 +152,7 @@ func makeSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 func makeEmptyDirSTS(engineName string, gen int, replicas int32) *appsv1.StatefulSet {
 	spec := testSpec()
 	spec.Storage = computev1alpha1.EngineStorageSpec{}
-	sts := buildStatefulSet(spec, engineName, testNamespace, gen, nil)
+	sts := buildStatefulSet(spec, engineName, testNamespace, gen, InstanceInfo{}, nil)
 	sts.Spec.Replicas = &replicas
 	return sts
 }
@@ -177,7 +177,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 	}
 
 	t.Run("absent by default", func(t *testing.T) {
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if findContainer(sts, computev1alpha1.EngineWebContainerName) != nil {
 			t.Errorf("did not expect a %q container by default", computev1alpha1.EngineWebContainerName)
 		}
@@ -189,7 +189,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 	t.Run("injected when enabled", func(t *testing.T) {
 		spec := testSpec()
 		spec.UISidecar = ptr(true)
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 
 		c := findContainer(sts, computev1alpha1.EngineWebContainerName)
 		if c == nil {
@@ -236,7 +236,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 				}
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		c := findContainer(sts, computev1alpha1.EngineWebContainerName)
 		if c == nil {
 			t.Fatalf("expected a %q container when uiSidecar=true", computev1alpha1.EngineWebContainerName)
@@ -253,8 +253,8 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		// and on applyContainerAPIServerDefaults stamping.
 		spec := testSpec()
 		spec.UISidecar = ptr(true)
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-		if !stsMatchesSpec(sts, spec, nil) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec = false for a freshly built UI-sidecar STS (drift)")
 		}
 	})
@@ -266,7 +266,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		// or every reconcile would roll a new generation.
 		spec := testSpec()
 		spec.UISidecar = ptr(true)
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		for i := range sts.Spec.Template.Spec.Containers {
 			c := &sts.Spec.Template.Spec.Containers[i]
 			if c.ReadinessProbe != nil {
@@ -276,7 +276,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 				}
 			}
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec = false after API-server probe defaulting (phantom drift)")
 		}
 	})
@@ -285,10 +285,10 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		off := testSpec()
 		on := testSpec()
 		on.UISidecar = ptr(true)
-		if stsMatchesSpec(buildStatefulSet(off, testEngineName, testNamespace, 0, nil), on, nil) {
+		if stsMatchesSpec(buildStatefulSet(off, testEngineName, testNamespace, 0, InstanceInfo{}, nil), on, InstanceInfo{}, nil) {
 			t.Error("enabling uiSidecar should be detected as drift")
 		}
-		if stsMatchesSpec(buildStatefulSet(on, testEngineName, testNamespace, 0, nil), off, nil) {
+		if stsMatchesSpec(buildStatefulSet(on, testEngineName, testNamespace, 0, InstanceInfo{}, nil), off, InstanceInfo{}, nil) {
 			t.Error("disabling uiSidecar should be detected as drift")
 		}
 	})
@@ -309,7 +309,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 				},
 			})
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 
 		if got := countVolumes(sts, EngineWebWritableVolumeName); got != 1 {
 			t.Fatalf("expected exactly one %q volume, got %d", EngineWebWritableVolumeName, got)
@@ -1315,7 +1315,7 @@ func TestStsMatchesSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stsMatchesSpec(tt.sts, spec, nil)
+			got := stsMatchesSpec(tt.sts, spec, InstanceInfo{}, nil)
 			if got != tt.match {
 				t.Errorf("stsMatchesSpec() = %v, want %v", got, tt.match)
 			}
@@ -1329,7 +1329,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for omitted resources")
 		}
 	})
@@ -1346,7 +1346,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for requests-only resources")
 		}
 	})
@@ -1363,7 +1363,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for limits-only resources")
 		}
 	})
@@ -1382,7 +1382,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		})
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = engineContainerResources(customSpec)
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for partial resource requirements")
 		}
 	})
@@ -1390,7 +1390,7 @@ func TestStsMatchesSpec(t *testing.T) {
 	t.Run("limit drift triggers mismatch", func(t *testing.T) {
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceMemory] = resource.MustParse("16Gi")
-		if stsMatchesSpec(sts, testSpec(), nil) {
+		if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when a resource limit drifts")
 		}
 	})
@@ -1399,7 +1399,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		customSpec := testSpec()
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{}
-		if stsMatchesSpec(sts, customSpec, nil) {
+		if stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when resources are removed")
 		}
 	})
@@ -1419,7 +1419,7 @@ func TestStsMatchesSpec(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("1024Mi"),
 			},
 		}
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for semantically equivalent quantities")
 		}
 	})
@@ -1429,7 +1429,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		setSpecTemplatePod(customSpec, func(p *corev1.PodSpec) { p.ServiceAccountName = "custom-sa" })
 		sts := makeSTS(testEngineName, 0, 3)
 		sts.Spec.Template.Spec.ServiceAccountName = "custom-sa"
-		if !stsMatchesSpec(sts, customSpec, nil) {
+		if !stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching serviceAccountName")
 		}
 	})
@@ -1439,7 +1439,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		// Drop fsGroup to simulate an STS built before the default existed:
 		// the spec resolves to fsGroup=3473, so the comparison must fail.
 		sts.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{}
-		if stsMatchesSpec(sts, testSpec(), nil) {
+		if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod SecurityContext drifts")
 		}
 	})
@@ -1454,7 +1454,7 @@ func TestStsMatchesSpec(t *testing.T) {
 		// STS still has the old (nil) container SC, so a spec change must
 		// not be silently absorbed by an in-place update.
 		sts := makeSTS(testEngineName, 0, 3)
-		if stsMatchesSpec(sts, customSpec, nil) {
+		if stsMatchesSpec(sts, customSpec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec.securityContext is added")
 		}
 	})
@@ -1587,7 +1587,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.NodeAffinity == nil {
 			t.Fatal("expected NodeAffinity to be propagated to pod template")
@@ -1612,7 +1612,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		got := sts.Spec.Template.Spec.Affinity
 		if got == nil || got.PodAntiAffinity == nil {
 			t.Fatal("expected PodAntiAffinity to be propagated to pod template")
@@ -1626,7 +1626,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 	t.Run("nil affinity produces nil pod template affinity", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.Affinity = nil })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.Affinity != nil {
 			t.Fatalf("expected nil Affinity in pod template, got %+v", sts.Spec.Template.Spec.Affinity)
 		}
@@ -1646,22 +1646,22 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// The STS matches spec because we built it from spec.
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching affinity")
 		}
 		// Remove affinity from spec — now the STS is ahead of spec and must be
 		// detected as drifted.
 		specNoAffinity := testSpec()
-		if stsMatchesSpec(sts, specNoAffinity, nil) {
+		if stsMatchesSpec(sts, specNoAffinity, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec affinity removed but STS still has it")
 		}
 	})
 
 	t.Run("adding affinity to spec is detected as drift", func(t *testing.T) {
 		// STS built without affinity.
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// Spec now requires nodeAffinity — STS must be re-rolled.
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
@@ -1679,7 +1679,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			}
 		})
-		if stsMatchesSpec(sts, spec, nil) {
+		if stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when affinity added to spec but STS has none")
 		}
 	})
@@ -1704,7 +1704,7 @@ func TestBuildStatefulSet_Affinity(t *testing.T) {
 				},
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 
 		// Mutate the rendered STS's Affinity in place — must not reach
 		// the spec's Affinity.
@@ -1740,11 +1740,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 				LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{LabelEngine: testEngineName}},
 			}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if len(sts.Spec.Template.Spec.TopologySpreadConstraints) != 1 {
 			t.Fatalf("topologySpreadConstraints not propagated: %+v", sts.Spec.Template.Spec.TopologySpreadConstraints)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching topologySpreadConstraints")
 		}
 	})
@@ -1752,14 +1752,14 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 	t.Run("priorityClassName", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.PriorityClassName = "critical" })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.PriorityClassName != "critical" {
 			t.Fatalf("PriorityClassName = %q, want critical", sts.Spec.Template.Spec.PriorityClassName)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching priorityClassName")
 		}
-		if stsMatchesSpec(sts, testSpec(), nil) {
+		if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: failed to detect drift after priorityClassName removed from spec")
 		}
 	})
@@ -1768,11 +1768,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		spec := testSpec()
 		rc := "gvisor"
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.RuntimeClassName = &rc })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.RuntimeClassName == nil || *sts.Spec.Template.Spec.RuntimeClassName != "gvisor" {
 			t.Fatalf("RuntimeClassName = %+v, want gvisor", sts.Spec.Template.Spec.RuntimeClassName)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching runtimeClassName")
 		}
 	})
@@ -1786,14 +1786,14 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 				Searches:    []string{"svc.cluster.local"},
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.DNSPolicy != corev1.DNSClusterFirstWithHostNet {
 			t.Errorf("DNSPolicy = %q, want ClusterFirstWithHostNet", sts.Spec.Template.Spec.DNSPolicy)
 		}
 		if sts.Spec.Template.Spec.DNSConfig == nil || len(sts.Spec.Template.Spec.DNSConfig.Nameservers) != 1 {
 			t.Errorf("DNSConfig = %+v, want nameservers", sts.Spec.Template.Spec.DNSConfig)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching dnsPolicy/dnsConfig")
 		}
 	})
@@ -1801,11 +1801,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 	t.Run("schedulerName", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.SchedulerName = "custom-scheduler" })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.SchedulerName != "custom-scheduler" {
 			t.Fatalf("SchedulerName = %q, want custom-scheduler", sts.Spec.Template.Spec.SchedulerName)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching schedulerName")
 		}
 	})
@@ -1814,11 +1814,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		spec := testSpec()
 		p := corev1.PreemptNever
 		setSpecTemplatePod(spec, func(s *corev1.PodSpec) { s.PreemptionPolicy = &p })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.PreemptionPolicy == nil || *sts.Spec.Template.Spec.PreemptionPolicy != corev1.PreemptNever {
 			t.Fatalf("PreemptionPolicy = %+v, want Never", sts.Spec.Template.Spec.PreemptionPolicy)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching preemptionPolicy")
 		}
 	})
@@ -1828,11 +1828,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
 			p.ReadinessGates = []corev1.PodReadinessGate{{ConditionType: "example.com/Ready"}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if len(sts.Spec.Template.Spec.ReadinessGates) != 1 {
 			t.Fatalf("ReadinessGates = %+v, want 1", sts.Spec.Template.Spec.ReadinessGates)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching readinessGates")
 		}
 	})
@@ -1842,11 +1842,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
 			p.HostAliases = []corev1.HostAlias{{IP: "10.0.0.1", Hostnames: []string{"db.local"}}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if len(sts.Spec.Template.Spec.HostAliases) != 1 || sts.Spec.Template.Spec.HostAliases[0].IP != "10.0.0.1" {
 			t.Fatalf("HostAliases = %+v, want one entry", sts.Spec.Template.Spec.HostAliases)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching hostAliases")
 		}
 	})
@@ -1854,11 +1854,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 	t.Run("pod OS", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.OS = &corev1.PodOS{Name: corev1.Linux} })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if sts.Spec.Template.Spec.OS == nil || sts.Spec.Template.Spec.OS.Name != corev1.Linux {
 			t.Fatalf("OS = %+v, want linux", sts.Spec.Template.Spec.OS)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching OS")
 		}
 	})
@@ -1870,16 +1870,16 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 				corev1.ResourceMemory: resource.MustParse("128Mi"),
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Overhead[corev1.ResourceMemory]; got.String() != "128Mi" {
 			t.Fatalf("Overhead[memory] = %s, want 128Mi", got.String())
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching overhead")
 		}
 		// Semantic equivalence: 128Mi == 131072Ki via Quantity.Cmp.
 		sts.Spec.Template.Spec.Overhead = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("131072Ki")}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on semantically equivalent overhead quantity")
 		}
 	})
@@ -1889,11 +1889,11 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
 			p.ResourceClaims = []corev1.PodResourceClaim{{Name: "gpu"}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if len(sts.Spec.Template.Spec.ResourceClaims) != 1 || sts.Spec.Template.Spec.ResourceClaims[0].Name != "gpu" {
 			t.Fatalf("ResourceClaims = %+v, want one entry", sts.Spec.Template.Spec.ResourceClaims)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching resourceClaims")
 		}
 	})
@@ -1909,12 +1909,12 @@ func TestBuildStatefulSet_HonorsExtraPodSpecFields(t *testing.T) {
 // engine-g41 STSes piling up before the test timeout).
 func TestStsMatchesSpec_TolerantOfPodSpecAPIServerDefaults(t *testing.T) {
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	// Simulate what the apiserver stamps on every pod spec at create
 	// time when the fields are left empty.
 	sts.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
 	sts.Spec.Template.Spec.SchedulerName = corev1.DefaultSchedulerName
-	if !stsMatchesSpec(sts, spec, nil) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 		t.Fatal("stsMatchesSpec: false drift on apiserver-defaulted DNSPolicy / SchedulerName — would loop the reconciler rolling fresh generations forever")
 	}
 }
@@ -1928,14 +1928,14 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 	t.Run("workingDir", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplateContainer(spec, func(c *corev1.Container) { c.WorkingDir = "/tmp/firebolt" })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Containers[0].WorkingDir; got != "/tmp/firebolt" {
 			t.Fatalf("WorkingDir = %q, want /tmp/firebolt", got)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching workingDir")
 		}
-		if stsMatchesSpec(sts, testSpec(), nil) {
+		if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: failed to detect drift when workingDir removed from spec")
 		}
 	})
@@ -1943,11 +1943,11 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 	t.Run("terminationMessagePath", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplateContainer(spec, func(c *corev1.Container) { c.TerminationMessagePath = "/var/log/term" })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Containers[0].TerminationMessagePath; got != "/var/log/term" {
 			t.Fatalf("TerminationMessagePath = %q, want /var/log/term", got)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching terminationMessagePath")
 		}
 	})
@@ -1957,10 +1957,10 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 		// apiserver-defaulted /dev/termination-log. stsMatchesSpec must
 		// not flag drift.
 		spec := testSpec()
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		sts.Spec.Template.Spec.Containers[0].TerminationMessagePath = "/dev/termination-log"
 		sts.Spec.Template.Spec.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on apiserver-defaulted termination message fields")
 		}
 	})
@@ -1970,11 +1970,11 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 		setSpecTemplateContainer(spec, func(c *corev1.Container) {
 			c.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Containers[0].TerminationMessagePolicy; got != corev1.TerminationMessageFallbackToLogsOnError {
 			t.Fatalf("TerminationMessagePolicy = %q, want FallbackToLogsOnError", got)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching terminationMessagePolicy")
 		}
 	})
@@ -1984,11 +1984,11 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 		setSpecTemplateContainer(spec, func(c *corev1.Container) {
 			c.VolumeDevices = []corev1.VolumeDevice{{Name: "raw-disk", DevicePath: "/dev/xvdf"}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Containers[0].VolumeDevices; len(got) != 1 || got[0].Name != "raw-disk" {
 			t.Fatalf("VolumeDevices = %+v, want one entry", got)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching volumeDevices")
 		}
 	})
@@ -2001,11 +2001,11 @@ func TestBuildStatefulSet_HonorsExtraEngineContainerFields(t *testing.T) {
 				RestartPolicy: corev1.NotRequired,
 			}}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if got := sts.Spec.Template.Spec.Containers[0].ResizePolicy; len(got) != 1 || got[0].ResourceName != corev1.ResourceCPU {
 			t.Fatalf("ResizePolicy = %+v, want one CPU entry", got)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec: false drift on matching resizePolicy")
 		}
 	})
@@ -2015,7 +2015,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 	t.Run("base labels always present", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Labels = nil })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 2, InstanceInfo{}, nil)
 		labels := sts.Spec.Template.Labels
 		if labels[LabelEngine] != testEngineName {
 			t.Errorf("expected %s label = %q, got %q", LabelEngine, testEngineName, labels[LabelEngine])
@@ -2034,7 +2034,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 				"team":        "control-plane",
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, InstanceInfo{}, nil)
 		labels := sts.Spec.Template.Labels
 		// Base labels must be present.
 		if labels[LabelEngine] != testEngineName {
@@ -2064,7 +2064,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 				"custom":        "value",
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5, InstanceInfo{}, nil)
 		labels := sts.Spec.Template.Labels
 		// Reserved labels must be operator-owned.
 		if labels[LabelEngine] != testEngineName {
@@ -2084,26 +2084,26 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Labels = map[string]string{"version": "1.0"}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-		if !stsMatchesSpec(sts, spec, nil) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod labels")
 		}
 		// Remove label from spec — STS is now drifted.
 		specNoLabels := testSpec()
-		if stsMatchesSpec(sts, specNoLabels, nil) {
+		if stsMatchesSpec(sts, specNoLabels, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec pod labels removed but STS still has them")
 		}
 	})
 
 	t.Run("adding pod labels to spec is detected as drift", func(t *testing.T) {
 		// STS built without extra pod labels.
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// Spec now has extra labels — STS must be re-rolled.
 		spec := testSpec()
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Labels = map[string]string{"new-label": "new-value"}
 		})
-		if stsMatchesSpec(sts, spec, nil) {
+		if stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod labels added to spec but STS has none")
 		}
 	})
@@ -2113,13 +2113,13 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Labels = map[string]string{"version": "1.0"}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// Change the label value.
 		specChanged := testSpec()
 		setSpecTemplateMeta(specChanged, func(m *metav1.ObjectMeta) {
 			m.Labels = map[string]string{"version": "2.0"}
 		})
-		if stsMatchesSpec(sts, specChanged, nil) {
+		if stsMatchesSpec(sts, specChanged, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod label value changed")
 		}
 	})
@@ -2129,7 +2129,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 	t.Run("nil pod annotations produce no pod template annotations", func(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Annotations = nil })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// We intentionally render no annotations on the pod template
 		// when the spec contributes none, so existing StatefulSets
 		// stay byte-identical across upgrades that introduce this
@@ -2149,7 +2149,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 			"kubernetes.io/description":   "engine pod",
 		}
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) { m.Annotations = userAnnotations })
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 1, InstanceInfo{}, nil)
 		got := sts.Spec.Template.Annotations
 		for k, want := range userAnnotations {
 			if got[k] != want {
@@ -2173,7 +2173,7 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 				"unrelated":                "value",
 			}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 
 		if got := sts.Annotations[AnnotationMetadataOverride]; got != override {
 			t.Errorf("expected STS-level %s = %q (operator-owned), got %q",
@@ -2193,23 +2193,23 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Annotations = map[string]string{"prometheus.io/scrape": "true"}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
-		if !stsMatchesSpec(sts, spec, nil) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true for matching pod annotations")
 		}
 		specNoAnnotations := testSpec()
-		if stsMatchesSpec(sts, specNoAnnotations, nil) {
+		if stsMatchesSpec(sts, specNoAnnotations, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when spec pod annotations removed but STS still has them")
 		}
 	})
 
 	t.Run("adding pod annotations to spec is detected as drift", func(t *testing.T) {
-		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		spec := testSpec()
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Annotations = map[string]string{"new-annotation": "new-value"}
 		})
-		if stsMatchesSpec(sts, spec, nil) {
+		if stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotations added to spec but STS has none")
 		}
 	})
@@ -2219,12 +2219,12 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Annotations = map[string]string{"version": "1.0"}
 		})
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		specChanged := testSpec()
 		setSpecTemplateMeta(specChanged, func(m *metav1.ObjectMeta) {
 			m.Annotations = map[string]string{"version": "2.0"}
 		})
-		if stsMatchesSpec(sts, specChanged, nil) {
+		if stsMatchesSpec(sts, specChanged, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want false when pod annotation value changed")
 		}
 	})
@@ -2235,9 +2235,9 @@ func TestBuildStatefulSet_PodAnnotations(t *testing.T) {
 		// as identical so we don't churn StatefulSets on no-op
 		// changes.
 		spec := testSpec()
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		sts.Spec.Template.Annotations = map[string]string{}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true when pod template annotations is empty map and spec.template.metadata.annotations is nil")
 		}
 	})
@@ -2306,7 +2306,7 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 	}
 	setSpecTemplateContainer(spec, func(c *corev1.Container) { c.Resources = want })
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	got := sts.Spec.Template.Spec.Containers[0].Resources
 	if !resourceRequirementsEqual(got, want) {
 		t.Fatalf("buildStatefulSet resources = %#v, want %#v", got, want)
@@ -2318,7 +2318,7 @@ func TestBuildStatefulSet_UsesEngineResources(t *testing.T) {
 // future Service named `firebolt-*` could shadow a real config key.
 // DNS is the only service-discovery channel the engine needs.
 func TestBuildStatefulSet_DisablesServiceLinks(t *testing.T) {
-	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	esl := sts.Spec.Template.Spec.EnableServiceLinks
 	if esl == nil || *esl {
 		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
@@ -2737,13 +2737,13 @@ func TestBuildConfigMap_InvalidJSONIgnored(t *testing.T) {
 // remains.
 func TestBuildStatefulSet_DefaultImage(t *testing.T) {
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	got := sts.Spec.Template.Spec.Containers[0].Image
 	want := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
 	if got != want {
 		t.Errorf("container image = %q, want %q (operator default)", got, want)
 	}
-	if !stsMatchesSpec(sts, spec, nil) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 		t.Error("stsMatchesSpec returned false for a freshly built STS")
 	}
 }
@@ -2766,7 +2766,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 		}}
 	})
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 	got := sts.Spec.Template.Spec.InitContainers
 	if len(got) != 1 || got[0].Name != "prep-disk" {
 		t.Fatalf("InitContainers = %+v, want prep-disk", got)
@@ -2774,7 +2774,7 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 	if got[0].VolumeMounts[0].MountPath != DataMountPath {
 		t.Fatalf("volume mount path = %q, want %q", got[0].VolumeMounts[0].MountPath, DataMountPath)
 	}
-	if !stsMatchesSpec(sts, spec, nil) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 		t.Fatal("stsMatchesSpec() want true for matching init containers")
 	}
 
@@ -2786,18 +2786,18 @@ func TestBuildStatefulSet_InitContainers(t *testing.T) {
 				Image: "busybox:1.36",
 			}}
 		})
-		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0, nil)
+		stsWithInit := buildStatefulSet(specWithInit, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		// Simulate what the API server stamps on every container after create.
 		stsWithInit.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = corev1.PullIfNotPresent
 		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePath = "/dev/termination-log"
 		stsWithInit.Spec.Template.Spec.InitContainers[0].TerminationMessagePolicy = corev1.TerminationMessageReadFile
-		if !stsMatchesSpec(stsWithInit, specWithInit, nil) {
+		if !stsMatchesSpec(stsWithInit, specWithInit, InstanceInfo{}, nil) {
 			t.Fatal("stsMatchesSpec() want true when init containers differ only by API defaults")
 		}
 	})
 
 	setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.InitContainers = nil })
-	if stsMatchesSpec(sts, spec, nil) {
+	if stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 		t.Fatal("stsMatchesSpec() want false when init containers removed from spec")
 	}
 }

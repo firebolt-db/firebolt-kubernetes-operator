@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -63,6 +64,15 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	err = computev1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	// Registered so any test's FireboltInstanceReconciler can build a
+	// Certificate's owner reference without a scheme error. The
+	// cert-manager CRD itself is NOT installed below (CRDDirectoryPaths
+	// only covers this operator's own CRDs), so applying a Certificate
+	// against this envtest apiserver still fails server-side — see
+	// ensureSigningCertificate's doc comment in instance_auth.go for why
+	// that path is intentionally left to e2e coverage instead.
+	err = certmanagerv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 

@@ -285,7 +285,7 @@ func TestBuildStatefulSet_MergesClassTemplate(t *testing.T) {
 	))
 	spec := testSpec()
 
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, classInfo)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, classInfo)
 
 	pod := sts.Spec.Template.Spec
 	if pod.ServiceAccountName != "irsa-sa" {
@@ -321,7 +321,7 @@ func TestBuildStatefulSet_MergesClassTemplate(t *testing.T) {
 
 	// stsMatchesSpec must accept its own buildStatefulSet output, otherwise
 	// every reconcile would roll a fresh generation.
-	if !stsMatchesSpec(sts, spec, classInfo) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, classInfo) {
 		t.Error("stsMatchesSpec returned false for a freshly built STS with classInfo")
 	}
 }
@@ -329,12 +329,12 @@ func TestBuildStatefulSet_MergesClassTemplate(t *testing.T) {
 func TestStsMatchesSpec_ClassHashDrift(t *testing.T) {
 	specA := testSpec()
 	classA := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-a"}))
-	sts := buildStatefulSet(specA, testEngineName, testNamespace, 0, classA)
+	sts := buildStatefulSet(specA, testEngineName, testNamespace, 0, InstanceInfo{}, classA)
 
 	// Class spec edited (different SA) → class hash changes. stsMatchesSpec
 	// must report drift even though the engine spec is identical.
 	classB := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-b"}))
-	if stsMatchesSpec(sts, specA, classB) {
+	if stsMatchesSpec(sts, specA, InstanceInfo{}, classB) {
 		t.Error("stsMatchesSpec returned true after class edit; AnnotationEngineClassHash drift not detected")
 	}
 }
@@ -342,11 +342,11 @@ func TestStsMatchesSpec_ClassHashDrift(t *testing.T) {
 func TestStsMatchesSpec_ClassRemovedDrift(t *testing.T) {
 	spec := testSpec()
 	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "sa-x"}))
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, classInfo)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, classInfo)
 
 	// engineClassRef cleared. The annotation is still on the STS but the
 	// expected hash is "" — must surface as drift.
-	if stsMatchesSpec(sts, spec, nil) {
+	if stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 		t.Error("stsMatchesSpec returned true after engineClassRef cleared; drift not detected")
 	}
 }
@@ -437,7 +437,7 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 	}))
 
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, classInfo)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, classInfo)
 	engine := sts.Spec.Template.Spec.Containers[0]
 
 	// Operator env vars must come first; the class entry follows.
@@ -491,7 +491,7 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 		t.Errorf("pod Volumes %v missing class-supplied shared-cache", volNames)
 	}
 
-	if !stsMatchesSpec(sts, spec, classInfo) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, classInfo) {
 		t.Error("stsMatchesSpec returned false for a freshly built STS with merged class fields")
 	}
 }
@@ -507,13 +507,13 @@ func TestBuildStatefulSet_AppendsClassImagePullSecrets(t *testing.T) {
 		},
 	}))
 	spec := testSpec()
-	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, classInfo)
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, classInfo)
 
 	got := sts.Spec.Template.Spec.ImagePullSecrets
 	if len(got) != 2 || got[0].Name != "ghcr-creds" || got[1].Name != "ecr-creds" {
 		t.Errorf("ImagePullSecrets = %+v, want [ghcr-creds, ecr-creds]", got)
 	}
-	if !stsMatchesSpec(sts, spec, classInfo) {
+	if !stsMatchesSpec(sts, spec, InstanceInfo{}, classInfo) {
 		t.Error("stsMatchesSpec returned false for STS with class imagePullSecrets")
 	}
 }
@@ -716,7 +716,7 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 
 	t.Run("buildStatefulSet stamps the default on the engine container", func(t *testing.T) {
 		spec := testSpec()
-		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
 		if len(sts.Spec.Template.Spec.Containers) == 0 {
 			t.Fatal("no containers on built STS")
 		}
@@ -727,7 +727,7 @@ func TestEffectiveEngineContainerSecurityContext_Default(t *testing.T) {
 		if got.RunAsUser == nil || *got.RunAsUser != DefaultEngineWebD {
 			t.Errorf("RunAsUser = %v, want %d", got.RunAsUser, DefaultEngineWebD)
 		}
-		if !stsMatchesSpec(sts, spec, nil) {
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
 			t.Error("stsMatchesSpec returned false for a freshly built STS — drift comparator must also use the default")
 		}
 	})

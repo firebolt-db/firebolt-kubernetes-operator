@@ -53,6 +53,32 @@ const ConfigFileName = "config.yaml"
 type InstanceInfo struct {
 	MetadataEndpoint string
 	InstanceID       string
+
+	// Auth is nil when the referenced FireboltInstance has spec.auth
+	// unset or disabled. When non-nil, Instance-wide auth is confirmed
+	// ready (see resolveInstanceInfo's gating) and carries everything
+	// buildConfigMap and buildStatefulSet need to render instance.auth.*
+	// and mount the corresponding Secrets.
+	Auth *ResolvedAuthInfo
+}
+
+// ResolvedAuthInfo carries the desired auth config plus the concrete,
+// currently-provisioned signing-key Secrets to mount. Kept separate from
+// computev1alpha1.AuthSpec (rather than just embedding it) because engines
+// also need SigningKeys, which lives on the Instance's Status, not its
+// Spec — bundling both here means buildConfigMap and buildStatefulSet
+// only need one field (InstanceInfo.Auth) to render everything.
+type ResolvedAuthInfo struct {
+	Spec *computev1alpha1.AuthSpec
+
+	// SigningKeys is the Instance's currently-provisioned signing keys,
+	// active (JWT-issuing) key first — copied from
+	// FireboltInstance.Status.Auth.SigningKeys. Every engine in the
+	// Instance renders and mounts this exact same set: packdb's embedded
+	// authorization server on each engine both issues and validates
+	// JWTs, so all engines must agree on signing_keys byte-for-byte (see
+	// AuthSpec's doc comment).
+	SigningKeys []computev1alpha1.SigningKeyStatus
 }
 
 // FireboltEngineClassInfo carries the resolved FireboltEngineClass template
@@ -226,7 +252,7 @@ func computeStable(
 	// generation. The remaining ConfigMap inputs (instanceInfo, engineName,
 	// namespace, gen) are effectively immutable once the generation has been
 	// created.
-	if current.CurrentSTS == nil || !stsMatchesSpec(current.CurrentSTS, spec, classInfo) {
+	if current.CurrentSTS == nil || !stsMatchesSpec(current.CurrentSTS, spec, instanceInfo, classInfo) {
 		newGen := status.CurrentGeneration + 1
 		status.CurrentGeneration = newGen
 		status.Phase = computev1alpha1.PhaseCreating
@@ -309,7 +335,7 @@ func computeCreating(
 	gen := status.CurrentGeneration
 
 	// Must be checked before CurrentPodsReady; see "Ordering invariant" above.
-	if current.CurrentSTS != nil && !stsMatchesSpec(current.CurrentSTS, spec, classInfo) {
+	if current.CurrentSTS != nil && !stsMatchesSpec(current.CurrentSTS, spec, instanceInfo, classInfo) {
 		r.DeleteResources = append(r.DeleteResources, current.CurrentSTS)
 		if current.CurrentHeadlessSvc != nil {
 			r.DeleteResources = append(r.DeleteResources, current.CurrentHeadlessSvc)
@@ -455,7 +481,7 @@ func buildGenResources(
 ) {
 	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
 	r.EnsureHeadlessSvc = buildHeadlessService(engineName, engineNamespace, gen)
-	r.EnsureStatefulSet = buildStatefulSet(spec, engineName, engineNamespace, gen, classInfo)
+	r.EnsureStatefulSet = buildStatefulSet(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
 }
 
 func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) *corev1.ConfigMap {
@@ -487,26 +513,37 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	// `DB::Config::ApplicationConfig`). The user contribution
 	// (effectiveCustomEngineConfig: the referenced class's customEngineConfig
 	// deep-merged underneath the engine's own) is merged into this at the
-	// root, so users may add/override keys in any top-level section (auth,
-	// engine, instance, logging) and an engine key wins over the same key on
-	// the class. Operator-authoritative paths are stripped from each user
-	// layer before the merge (see stripProtectedEngineConfigPaths) so they
-	// cannot be overridden — silently, to keep the same spec portable across
-	// operator versions even if the protected set evolves.
+	// root, so users may add/override keys in any top-level section
+	// (engine, instance, logging) and an engine key wins over the same key
+	// on the class. Operator-authoritative paths are stripped from each
+	// user layer before the merge (see stripProtectedEngineConfigPaths) so
+	// they cannot be overridden — silently, to keep the same spec portable
+	// across operator versions even if the protected set evolves.
+	// instance.auth is one such stripped path once spec.auth is enabled
+	// (OperatorOwnedEngineConfigPaths in operatorauthority.go): auth is an
+	// Instance-wide policy resolved once per Instance (see AuthSpec's doc
+	// comment), so a per-engine customEngineConfig override would let one
+	// engine silently diverge from the signing keys every other engine
+	// in the Instance uses.
 	//
 	// instance.id is a Ulid that the engine propagates to all four legacy
 	// identity fields (account_id, account_name, organization_id,
 	// organization_name); InstanceInfo.InstanceID already carries the
 	// FireboltInstance's ULID for this purpose.
+	instanceConfig := map[string]interface{}{
+		"id":   instanceInfo.InstanceID,
+		"type": "multi_engine",
+		"multi_engine": map[string]interface{}{
+			"metadata_endpoint": metadataEndpoint,
+		},
+	}
+	if instanceInfo.Auth != nil {
+		instanceConfig["auth"] = renderAuthConfig(instanceInfo.Auth)
+	}
+
 	coreConfig := map[string]interface{}{
 		"schema_version": EngineConfigSchemaVersion,
-		"instance": map[string]interface{}{
-			"id":   instanceInfo.InstanceID,
-			"type": "multi_engine",
-			"multi_engine": map[string]interface{}{
-				"metadata_endpoint": metadataEndpoint,
-			},
-		},
+		"instance":       instanceConfig,
 		"engine": map[string]interface{}{
 			"id":                       engineName,
 			"nodes":                    nodes,
@@ -537,6 +574,172 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 			ConfigFileName: string(configYAML),
 		},
 	}
+}
+
+// authSigningKeyPrivateKeyPath returns the in-container path to a signing
+// key's PEM private key, given its ID. Must agree with wherever the
+// corresponding Secret volume is mounted in buildStatefulSet — both sides
+// key off the same signing-key ID.
+func authSigningKeyPrivateKeyPath(id string) string {
+	return AuthSigningMountPathBase + "/" + id + "/" + corev1.TLSPrivateKeyKey
+}
+
+// authAdminPasswordPath returns the in-container path to the admin
+// password file, given the Secret key it's stored under. Must agree with
+// wherever the admin Secret volume is mounted in buildStatefulSet.
+func authAdminPasswordPath(secretKey string) string {
+	return AuthAdminMountPath + "/" + secretKey
+}
+
+// renderAuthConfig builds the instance.auth.* section of the rendered
+// config.yaml from the resolved auth info. packdb's config schema is
+// closed (additionalProperties: false) and its own Validate() enforces
+// strict conditional rules (packdb src/PackDB/Auth/AuthConfig.cpp), so
+// this function mirrors those rules exactly:
+//
+//   - admin is always present: ResolvedAuthInfo only exists when auth is
+//     enabled, and packdb requires admin whenever enabled=true.
+//   - oidc is present only when auth.Spec.OIDC is set.
+//   - admin.password_file is the only admin-password field ever rendered
+//     (never password_value/password_env), so the plaintext password
+//     never appears in the ConfigMap.
+//   - preferred_authorization_server is rendered only when set — this
+//     can only be reached with Enabled=true (ResolvedAuthInfo requires
+//     it), matching ValidateAuth's requirement that it be unset while
+//     disabled.
+//   - duration/algorithm/name fields the CRD leaves optional (empty
+//     string in Go) are omitted from the map entirely rather than
+//     rendered as "", so packdb applies its own built-in default instead
+//     of receiving an empty value it would reject.
+func renderAuthConfig(auth *ResolvedAuthInfo) map[string]interface{} {
+	spec := auth.Spec
+	local := spec.Local
+
+	admin := map[string]interface{}{
+		"password_file": authAdminPasswordPath(local.Admin.Password.Key),
+	}
+	setIfNonEmpty(admin, "name", local.Admin.Name)
+
+	localConfig := map[string]interface{}{
+		"signing_keys": renderSigningKeys(auth.SigningKeys),
+	}
+	setIfNonEmpty(localConfig, "signing_algorithm", local.SigningAlgorithm)
+	if jwt := renderLocalJWT(local); len(jwt) > 0 {
+		localConfig["jwt"] = jwt
+	}
+
+	authConfig := map[string]interface{}{
+		"enabled": true,
+		"admin":   admin,
+		"local":   localConfig,
+	}
+	setIfNonEmpty(authConfig, "password_login", string(local.PasswordLogin))
+	setIfNonEmpty(authConfig, "preferred_authorization_server", spec.PreferredAuthorizationServer)
+
+	if spec.OIDC != nil {
+		authConfig["oidc"] = renderOIDCConfig(spec.OIDC)
+	}
+
+	return authConfig
+}
+
+// renderSigningKeys renders instance.auth.local.signing_keys[], active
+// (JWT-issuing) key first — the order SigningKeys is already stored in.
+func renderSigningKeys(keys []computev1alpha1.SigningKeyStatus) []map[string]interface{} {
+	out := make([]map[string]interface{}, len(keys))
+	for i, k := range keys {
+		out[i] = map[string]interface{}{
+			"id":               k.ID,
+			"private_key_path": authSigningKeyPrivateKeyPath(k.ID),
+		}
+	}
+	return out
+}
+
+// renderOIDCConfig builds instance.auth.oidc from the CRD's OIDCAuthSpec.
+// Field-for-field mapping onto packdb's oidc/oidc.providers[] shape (see
+// renderAuthConfig's doc comment for the closed-schema/omit-when-empty
+// rules this also follows).
+func renderOIDCConfig(oidc *computev1alpha1.OIDCAuthSpec) map[string]interface{} {
+	providers := make([]map[string]interface{}, len(oidc.Providers))
+	for i, p := range oidc.Providers {
+		provider := map[string]interface{}{
+			"name":             p.Name,
+			"discovery_url":    p.DiscoveryURL,
+			"username_mapping": p.UsernameMapping,
+		}
+		setIfNonEmpty(provider, "title", p.Title)
+		setIfNonEmpty(provider, "audience", p.Audience)
+
+		if p.JITProvisioning != nil {
+			jit := map[string]interface{}{"enabled": p.JITProvisioning.Enabled}
+			if len(p.JITProvisioning.DefaultRoles) > 0 {
+				jit["default_roles"] = p.JITProvisioning.DefaultRoles
+			}
+			provider["jit_provisioning"] = jit
+		}
+		if p.JWKS != nil {
+			provider["jwks"] = singleFieldConfig("cache_ttl", p.JWKS.CacheTTL)
+		}
+		if p.Discovery != nil {
+			provider["discovery"] = singleFieldConfig("refresh_interval", p.Discovery.RefreshInterval)
+		}
+
+		providers[i] = provider
+	}
+
+	oidcConfig := map[string]interface{}{
+		"providers": providers,
+	}
+	if jwt := renderOIDCJWT(oidc.JWT); len(jwt) > 0 {
+		oidcConfig["jwt"] = jwt
+	}
+	return oidcConfig
+}
+
+// renderLocalJWT renders instance.auth.local.jwt from LocalAuthSpec's
+// three optional duration knobs, omitting any that are empty (see
+// renderAuthConfig's doc comment for why).
+func renderLocalJWT(local *computev1alpha1.LocalAuthSpec) map[string]interface{} {
+	out := map[string]interface{}{}
+	setIfNonEmpty(out, "token_expiry", local.TokenExpiry)
+	setIfNonEmpty(out, "max_token_age", local.MaxTokenAge)
+	setIfNonEmpty(out, "clock_skew_tolerance", local.ClockSkewTolerance)
+	return out
+}
+
+// renderOIDCJWT renders instance.auth.oidc.jwt. Unlike the embedded
+// server's jwt block, packdb's oidc.jwt has no token_expiry — an OIDC
+// provider issues its own tokens, the engine only validates them.
+func renderOIDCJWT(jwt *computev1alpha1.OIDCJWTSpec) map[string]interface{} {
+	if jwt == nil {
+		return nil
+	}
+	out := map[string]interface{}{}
+	setIfNonEmpty(out, "clock_skew_tolerance", jwt.ClockSkewTolerance)
+	setIfNonEmpty(out, "max_token_age", jwt.MaxTokenAge)
+	return out
+}
+
+// setIfNonEmpty sets m[key] = value only when value is non-empty. Used
+// throughout the auth renderers to omit CRD-optional string fields
+// (represented as Go's zero value "") entirely, rather than rendering an
+// empty string packdb's config loader could reject.
+func setIfNonEmpty(m map[string]interface{}, key, value string) {
+	if value != "" {
+		m[key] = value
+	}
+}
+
+// singleFieldConfig returns a one-key map when value is non-empty, or an
+// empty (but non-nil) map when it's empty — used for jwks.cache_ttl and
+// discovery.refresh_interval, each of packdb's single-field sub-blocks.
+// An empty map still renders as `{}` in the resulting YAML, which packdb
+// accepts (every field in these sub-blocks is DEFAULTED).
+func singleFieldConfig(key, value string) map[string]interface{} {
+	out := map[string]interface{}{}
+	setIfNonEmpty(out, key, value)
+	return out
 }
 
 func buildHeadlessService(engineName, namespace string, gen int) *corev1.Service {
@@ -586,7 +789,7 @@ func enginePodAnnotations(spec *computev1alpha1.FireboltEngineSpec) map[string]s
 	return annotations
 }
 
-func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, classInfo *FireboltEngineClassInfo) *appsv1.StatefulSet {
+func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) *appsv1.StatefulSet {
 	name := genResourceName(engineName, gen, "")
 	headlessSvcName := genResourceName(engineName, gen, SuffixHL)
 	coreConfigName := genResourceName(engineName, gen, SuffixConfig)
@@ -606,6 +809,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	if h := customEngineConfigHash(spec, classInfo); h != "" {
 		annotations[AnnotationCustomEngineConfigHash] = h
 	}
+	if h := authHash(instanceInfo.Auth); h != "" {
+		annotations[AnnotationAuthHash] = h
+	}
 	if classInfo != nil {
 		annotations[AnnotationEngineClassHash] = classInfo.Hash
 	}
@@ -620,7 +826,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	podSecurityContext := effectivePodSecurityContext(spec, classInfo)
 	containerSecurityContext := effectiveEngineContainerSecurityContext(spec, classInfo)
 
-	volumeMounts := buildEngineContainerVolumeMounts(spec, classInfo)
+	volumeMounts := buildEngineContainerVolumeMounts(spec, instanceInfo, classInfo)
 	engineEnv := buildEngineContainerEnv(spec, classInfo)
 	// The "data" volume backing /var/lib/firebolt is either a per-pod
 	// PVC (the default; the StatefulSet controller synthesizes the pod
@@ -699,6 +905,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	if extraDataVolume != nil {
 		podVolumes = append(podVolumes, *extraDataVolume)
 	}
+	podVolumes = append(podVolumes, buildAuthVolumes(instanceInfo.Auth)...)
 	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
 
 	// Optional built-in engine web UI sidecar (engine/class uiSidecar: true).
@@ -1743,7 +1950,7 @@ func effectiveEngineContainerSecurityContext(spec *computev1alpha1.FireboltEngin
 // in that order (excluding any that try to redefine an operator-owned
 // name). Shared between buildStatefulSet and the drift comparator so the
 // order and filtering stays consistent across both paths.
-func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
+func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) []corev1.VolumeMount {
 	// ConfigMountPath (config.yaml) sits inside DataMountPath, so the data
 	// volume is listed first: the engine then reads the operator-rendered
 	// config.yaml as a read-only overlay on top of the writable data volume.
@@ -1751,23 +1958,87 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 	// (containerd, CRI-O, Docker) sorts mounts by destination-path depth, so
 	// the shallower DataMountPath is mounted before the deeper ConfigMountPath
 	// regardless of the order here.
-	out := []corev1.VolumeMount{
-		{
+	authMounts := buildAuthVolumeMounts(instanceInfo.Auth)
+	userMounts := effectiveEngineVolumeMounts(spec, classInfo)
+
+	out := make([]corev1.VolumeMount, 0, 3+len(authMounts)+len(userMounts))
+	out = append(out,
+		corev1.VolumeMount{
 			Name:      DataVolumeName,
 			MountPath: DataMountPath,
 		},
-		{
+		corev1.VolumeMount{
 			Name:      "engine-config",
 			MountPath: ConfigMountPath,
 			SubPath:   ConfigFileName,
 			ReadOnly:  true,
 		},
-		{
+		corev1.VolumeMount{
 			Name:      computev1alpha1.EngineRuntimeVolumeName,
 			MountPath: "/run/firebolt",
 		},
+	)
+	out = append(out, authMounts...)
+	return append(out, userMounts...)
+}
+
+// authSigningVolumeName names the Secret volume for one provisioned
+// signing key. Must agree with authSigningKeyPrivateKeyPath's mount-path
+// scheme (both key off the same signing-key ID) and with
+// EngineAuthSigningVolumeNamePrefix (operatorauthority.go), which reserves
+// this name pattern against user-supplied pod templates.
+func authSigningVolumeName(id string) string {
+	return computev1alpha1.EngineAuthSigningVolumeNamePrefix + id
+}
+
+// buildAuthVolumes returns the pod-level Secret volumes for Instance-wide
+// auth: one for the admin password, one per provisioned signing key
+// (active key first, matching auth.SigningKeys' order). Returns nil when
+// auth is disabled (auth == nil).
+func buildAuthVolumes(auth *ResolvedAuthInfo) []corev1.Volume {
+	if auth == nil {
+		return nil
 	}
-	return append(out, effectiveEngineVolumeMounts(spec, classInfo)...)
+	out := make([]corev1.Volume, 0, len(auth.SigningKeys)+1)
+	out = append(out, corev1.Volume{
+		Name: computev1alpha1.EngineAuthAdminVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: auth.Spec.Local.Admin.Password.Name},
+		},
+	})
+	for _, k := range auth.SigningKeys {
+		out = append(out, corev1.Volume{
+			Name: authSigningVolumeName(k.ID),
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: k.SecretName},
+			},
+		})
+	}
+	return out
+}
+
+// buildAuthVolumeMounts returns the engine container's VolumeMounts for
+// the volumes buildAuthVolumes adds, at the exact paths renderAuthConfig
+// points instance.auth.* at (authAdminPasswordPath /
+// authSigningKeyPrivateKeyPath). Returns nil when auth is disabled.
+func buildAuthVolumeMounts(auth *ResolvedAuthInfo) []corev1.VolumeMount {
+	if auth == nil {
+		return nil
+	}
+	out := make([]corev1.VolumeMount, 0, len(auth.SigningKeys)+1)
+	out = append(out, corev1.VolumeMount{
+		Name:      computev1alpha1.EngineAuthAdminVolumeName,
+		MountPath: AuthAdminMountPath,
+		ReadOnly:  true,
+	})
+	for _, k := range auth.SigningKeys {
+		out = append(out, corev1.VolumeMount{
+			Name:      authSigningVolumeName(k.ID),
+			MountPath: AuthSigningMountPathBase + "/" + k.ID,
+			ReadOnly:  true,
+		})
+	}
+	return out
 }
 
 // buildEngineContainerEnv returns the env stamped on the rendered
@@ -2085,6 +2356,49 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 	return contentHash(string(canonical))
 }
 
+// authHash returns a content-hash of everything auth-relevant to a
+// rendered engine pod: the full resolved AuthSpec (native config, JWT
+// durations, the whole OIDC block, preferred_authorization_server, ...)
+// plus each signing key's ID+SecretName (active key first, so a rotation
+// reordering active/retained keys is itself observed as drift). Returns
+// "" when auth is disabled, keeping AnnotationAuthHash absent and the
+// rendered pod byte-identical to an engine with auth never configured.
+//
+// It must hash the full Spec, not just the fields renderAuthConfig maps
+// to Secret-backed paths — packdb only reads config.yaml at startup, so
+// any auth field change (e.g. an OIDC discovery_url, password_login
+// policy, or signing_algorithm) is invisible to every other drift check
+// and needs a new generation to ever take effect. It must ALSO include
+// the resolved signing-key Secret names separately, since those live in
+// Status (not Spec) and Volumes[].VolumeSource.SecretName is not compared
+// anywhere else in the drift-detection path (see AnnotationAuthHash's
+// doc comment) — VolumeMounts equality alone cannot see a Secret NAME
+// change behind an identically-named volume.
+func authHash(auth *ResolvedAuthInfo) string {
+	if auth == nil {
+		return ""
+	}
+	type signingKeyHashInput struct {
+		ID         string `json:"id"`
+		SecretName string `json:"secretName"`
+	}
+	keys := make([]signingKeyHashInput, len(auth.SigningKeys))
+	for i, k := range auth.SigningKeys {
+		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName}
+	}
+	canonical, err := json.Marshal(struct {
+		Spec        *computev1alpha1.AuthSpec `json:"spec"`
+		SigningKeys []signingKeyHashInput     `json:"signingKeys"`
+	}{
+		Spec:        auth.Spec,
+		SigningKeys: keys,
+	})
+	if err != nil {
+		return contentHash(fmt.Sprintf("%v", auth))
+	}
+	return contentHash(string(canonical))
+}
+
 // getEnginePodSecurityContext returns the resolved pod-level security context
 // for engine pods. The operator's default fsGroup (3473) is applied when the
 // user-supplied spec.PodSecurityContext leaves it unset; FSGroupChangePolicy
@@ -2380,14 +2694,14 @@ func overheadEqual(a, b corev1.ResourceList) bool {
 // buildStatefulSet uses (buildEngineContainerEnv,
 // buildEngineContainerVolumeMounts) so the operator-injected entries
 // don't produce false drift on read-back.
-func engineContainerExtraFieldsMatch(c *corev1.Container, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+func engineContainerExtraFieldsMatch(c *corev1.Container, spec *computev1alpha1.FireboltEngineSpec, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) bool {
 	if !reflect.DeepEqual(c.Env, buildEngineContainerEnv(spec, classInfo)) {
 		return false
 	}
 	if !reflect.DeepEqual(c.EnvFrom, effectiveEngineEnvFrom(spec, classInfo)) {
 		return false
 	}
-	if !reflect.DeepEqual(c.VolumeMounts, buildEngineContainerVolumeMounts(spec, classInfo)) {
+	if !reflect.DeepEqual(c.VolumeMounts, buildEngineContainerVolumeMounts(spec, instanceInfo, classInfo)) {
 		return false
 	}
 	if !reflect.DeepEqual(c.Lifecycle, effectiveEngineLifecycle(spec, classInfo)) {
@@ -2484,7 +2798,7 @@ func extraPodSpecFieldsMatch(podSpec *corev1.PodSpec, spec *computev1alpha1.Fire
 // AnnotationEngineClassHash and the merged pod-template fields drive the
 // drift checks, so an in-place edit to the class spec or a flip to a
 // different class produces a clean blue-green roll.
-func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) bool {
+func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) bool {
 	if sts.Spec.Replicas == nil || *sts.Spec.Replicas != spec.Replicas {
 		return false
 	}
@@ -2570,7 +2884,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !engineContainerExtraFieldsMatch(&container, spec, classInfo) {
+	if !engineContainerExtraFieldsMatch(&container, spec, instanceInfo, classInfo) {
 		return false
 	}
 
@@ -2578,6 +2892,24 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
+	if !annotationsMatchSpec(sts, spec, instanceInfo, classInfo) {
+		return false
+	}
+
+	if !storageMatchesSpec(sts, spec, classInfo) {
+		return false
+	}
+
+	return true
+}
+
+// annotationsMatchSpec groups every annotation-based drift comparison
+// stsMatchesSpec performs: the metadata-endpoint override, and the three
+// content hashes (customEngineConfig, auth, engine class) stamped by
+// buildStatefulSet. Extracted out of stsMatchesSpec to keep that
+// function's cyclomatic complexity under the project's gocyclo limit —
+// purely a decomposition, not a behavior change.
+func annotationsMatchSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngineSpec, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) bool {
 	stsOverride := sts.Annotations[AnnotationMetadataOverride]
 	specOverride := ""
 	if spec.MetadataEndpointOverride != nil {
@@ -2591,19 +2923,15 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
+	if sts.Annotations[AnnotationAuthHash] != authHash(instanceInfo.Auth) {
+		return false
+	}
+
 	expectedClassHash := ""
 	if classInfo != nil {
 		expectedClassHash = classInfo.Hash
 	}
-	if sts.Annotations[AnnotationEngineClassHash] != expectedClassHash {
-		return false
-	}
-
-	if !storageMatchesSpec(sts, spec, classInfo) {
-		return false
-	}
-
-	return true
+	return sts.Annotations[AnnotationEngineClassHash] == expectedClassHash
 }
 
 // sidecarsMatch compares the user-owned sidecar containers (those whose

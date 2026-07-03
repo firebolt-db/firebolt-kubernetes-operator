@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -296,6 +297,349 @@ func TestValidateExternalPostgres(t *testing.T) {
 			}
 			if !tc.wantError && err != nil {
 				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// validAdminSpec returns an AdminSpec that satisfies validateLocalAuth on
+// its own, so individual test cases below only need to override the one
+// field under test.
+func validAdminSpec() AdminSpec {
+	return AdminSpec{
+		Password: corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+			Key:                  "password",
+		},
+	}
+}
+
+// validSigningKeys returns a SigningKeyPolicy with an RSA cert-manager
+// key, matching the default (empty-string) SigningAlgorithm of RS256.
+func validSigningKeys() *SigningKeyPolicy {
+	return &SigningKeyPolicy{
+		CertManager: CertManagerSpec{
+			IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+		},
+	}
+}
+
+func TestValidateAuth(t *testing.T) {
+	tests := []struct {
+		name      string
+		auth      *AuthSpec
+		wantError bool
+	}{
+		{
+			name:      "nil auth is valid",
+			auth:      nil,
+			wantError: false,
+		},
+		{
+			name:      "disabled with nothing else set is valid",
+			auth:      &AuthSpec{Enabled: false},
+			wantError: false,
+		},
+		{
+			name: "disabled with local set is rejected",
+			auth: &AuthSpec{
+				Enabled: false,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: true,
+		},
+		{
+			name: "disabled with oidc set is rejected",
+			auth: &AuthSpec{
+				Enabled: false,
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "disabled with preferredAuthorizationServer set is rejected",
+			auth: &AuthSpec{
+				Enabled:                      false,
+				PreferredAuthorizationServer: "_local",
+			},
+			wantError: true,
+		},
+		{
+			name:      "enabled with no local is rejected (admin required)",
+			auth:      &AuthSpec{Enabled: true},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no admin password name is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       AdminSpec{Password: corev1.SecretKeySelector{Key: "password"}},
+					SigningKeys: validSigningKeys(),
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no admin password key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       AdminSpec{Password: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"}}},
+					SigningKeys: validSigningKeys(),
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no signingKeys is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec()},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with fully populated local is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "RS256 (default) with default (RSA) cert-manager key is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "RS256 with ECDSA cert-manager key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "RS256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with RSA cert-manager key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys:      validSigningKeys(), // defaults to RSA
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with ECDSA cert-manager key is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer=_local is valid",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "_local",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer matching a configured oidc provider is valid",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "okta",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer naming an unconfigured server is rejected",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "no-such-provider",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: true,
+		},
+		{
+			name: "local jwt durations in packdb's Go-style+days grammar are valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					SigningKeys:        validSigningKeys(),
+					TokenExpiry:        "1h",
+					MaxTokenAge:        "1d",
+					ClockSkewTolerance: "30s",
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "unparseable local jwt duration is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					TokenExpiry: "1hr", // not a valid Go/packdb duration unit
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc.jwt duration fields validated the same way as local's",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{
+					JWT: &OIDCJWTSpec{ClockSkewTolerance: "not-a-duration"},
+					Providers: []OIDCProviderSpec{
+						{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc provider jwks.cacheTTL and discovery.refreshInterval accept packdb's days unit",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						JWKS:      &OIDCJWKSSpec{CacheTTL: "1d"},
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "1d"},
+					},
+				}},
+			},
+			wantError: false,
+		},
+		{
+			name: "oidc provider discovery.refreshInterval of zero is rejected " +
+				"(packdb's AuthConfig::Validate rejects non-positive refresh_interval)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "0s"},
+					},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc provider discovery.refreshInterval negative is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "-1h"},
+					},
+				}},
+			},
+			wantError: true,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					Auth: tc.auth,
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestParsePackdbDuration pins down the grammar against packdb's actual
+// duration parser (src/Common/Configuration/Unit/Duration.h): Go's
+// time.ParseDuration grammar plus a "d" (days) unit that Go's standard
+// library doesn't support, since every duration default in packdb's own
+// schema (application-config.schema.json) uses "d" for values of a day or
+// more (e.g. instance.auth.local.jwt.max_token_age default "1d").
+func TestParsePackdbDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "plain Go duration passes through", in: "30s", want: 30 * time.Second},
+		{name: "hours", in: "1h", want: time.Hour},
+		{name: "Go multi-component still works", in: "1h30m", want: time.Hour + 30*time.Minute},
+		{name: "single day", in: "1d", want: 24 * time.Hour},
+		{name: "multiple days", in: "7d", want: 7 * 24 * time.Hour},
+		{name: "fractional days", in: "0.5d", want: 12 * time.Hour},
+		{name: "negative days", in: "-1d", want: -24 * time.Hour},
+		{name: "empty string is invalid", in: "", wantErr: true},
+		{name: "bare number with no unit is invalid", in: "5", wantErr: true},
+		{name: "bogus unit is invalid", in: "1hr", wantErr: true},
+		{name: "bare d with no number is invalid", in: "d", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePackdbDuration(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("parsePackdbDuration(%q) = %v, want error", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePackdbDuration(%q): unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("parsePackdbDuration(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

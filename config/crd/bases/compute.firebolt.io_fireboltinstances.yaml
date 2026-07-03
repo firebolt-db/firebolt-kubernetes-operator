@@ -56,54 +56,312 @@ spec:
               Instance.
             properties:
               auth:
-                description: Auth configures authentication for engine nodes.
+                description: |-
+                  Auth configures authentication for every engine in this Instance.
+                  See AuthSpec for why this is Instance-wide rather than per-Engine.
                 properties:
-                  mode:
-                    description: Mode is the authentication mode.
-                    enum:
-                    - disabled
-                    - native
-                    - openid
-                    type: string
-                  oidc:
-                    description: OIDC configures OpenID Connect. Required when mode
-                      is "openid".
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled turns on authentication for every engine in this Instance.
+                      When false, engines run in packdb's unauthenticated mode and every
+                      connection is treated as the admin. Local, OIDC, and
+                      PreferredAuthorizationServer below are only meaningful when Enabled
+                      is true; the validating webhook rejects setting them while Enabled
+                      is false, matching packdb's own config validation (instance.auth's
+                      admin and oidc fields must be absent when instance.auth.enabled is
+                      false).
+                    type: boolean
+                  local:
+                    description: |-
+                      Local configures the embedded ("_local") authorization server:
+                      native username/password login and JWT signing. Required when
+                      Enabled is true.
                     properties:
-                      claimMappings:
-                        additionalProperties:
-                          type: string
-                        description: 'ClaimMappings maps OIDC claims to Firebolt user
-                          attributes (e.g. {"username": "email"}).'
-                        type: object
-                      clientID:
-                        description: ClientID is the OIDC client identifier.
-                        minLength: 1
-                        type: string
-                      clientSecretRef:
-                        description: ClientSecretRef references a Secret containing
-                          the OIDC client secret.
+                      admin:
+                        description: |-
+                          Admin configures the Instance admin account. Required when auth is
+                          enabled — packdb rejects a config with auth.enabled=true and no
+                          admin block.
                         properties:
                           name:
-                            default: ""
+                            default: firebolt
                             description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              Name is the admin username. Defaults to "firebolt" — packdb's own
+                              default — so omitting it matches engine behavior when auth is
+                              first enabled.
                             type: string
+                          password:
+                            description: |-
+                              Password references the Secret key holding the admin password.
+                              Required when auth is enabled: the operator does not generate an
+                              admin password, because a generated credential the user never sees
+                              is not something they can use to log in. The referenced Secret is
+                              mounted into every engine pod and rendered as
+                              instance.auth.admin.password_file — never password_value — so the
+                              plaintext password never appears in the rendered config.yaml or its
+                              ConfigMap.
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        required:
+                        - password
                         type: object
-                        x-kubernetes-map-type: atomic
-                      issuerURL:
-                        description: IssuerURL is the OIDC provider's issuer URL.
-                        minLength: 1
+                      clockSkewTolerance:
+                        description: |-
+                          ClockSkewTolerance is the permitted clock drift when validating
+                          time-based JWT claims. Defaults to packdb's own default (30s) when
+                          empty.
+                        type: string
+                      maxTokenAge:
+                        description: |-
+                          MaxTokenAge bounds how old a token's iat claim may be, independent
+                          of TokenExpiry. Defaults to packdb's own default (1d) when empty.
+                        type: string
+                      passwordLogin:
+                        default: admin_only
+                        description: |-
+                          PasswordLogin controls whether password login is available to any
+                          user or only the admin account. Defaults to admin_only (packdb's
+                          own default).
+                        enum:
+                        - admin_only
+                        - any_user
+                        type: string
+                      signingAlgorithm:
+                        default: RS256
+                        description: |-
+                          SigningAlgorithm is the JWT signing algorithm used by the embedded
+                          authorization server. Must be compatible with SigningKeys'
+                          cert-manager key algorithm: the RS* family requires an RSA key, the
+                          ES* family requires ECDSA.
+                        enum:
+                        - RS256
+                        - RS384
+                        - RS512
+                        - ES256
+                        - ES384
+                        - ES512
+                        type: string
+                      signingKeys:
+                        description: |-
+                          SigningKeys controls how the operator provisions the signing
+                          keypair. Required when auth is enabled: packdb's own dev-autogen
+                          fallback (used when signing_keys is empty) mints a different key
+                          per engine process, which breaks cross-engine token validation in
+                          any multi-engine deployment — exactly the topology this operator
+                          always creates.
+                        properties:
+                          certManager:
+                            description: |-
+                              CertManager configures the cert-manager Certificate used to
+                              generate the signing keypair.
+                            properties:
+                              algorithm:
+                                default: RSA
+                                description: Algorithm is the private key algorithm.
+                                enum:
+                                - RSA
+                                - ECDSA
+                                type: string
+                              issuerRef:
+                                description: |-
+                                  IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                                  signs the generated Certificate.
+                                properties:
+                                  kind:
+                                    default: ClusterIssuer
+                                    description: |-
+                                      Kind is the referenced resource's kind. Issuer is namespaced (must
+                                      live in the same namespace as this FireboltInstance); ClusterIssuer
+                                      is cluster-scoped.
+                                    enum:
+                                    - Issuer
+                                    - ClusterIssuer
+                                    type: string
+                                  name:
+                                    description: Name is the name of the Issuer or
+                                      ClusterIssuer.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              size:
+                                default: 2048
+                                description: |-
+                                  Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                                  ECDSA curve size (256, 384, 521). Defaults to 2048.
+                                format: int32
+                                type: integer
+                            required:
+                            - issuerRef
+                            type: object
+                        required:
+                        - certManager
+                        type: object
+                      tokenExpiry:
+                        description: |-
+                          TokenExpiry is how long issued access tokens remain valid, as a Go
+                          duration string (e.g. "1h"). Defaults to packdb's own default (1h)
+                          when empty.
                         type: string
                     required:
-                    - clientID
-                    - issuerURL
+                    - admin
                     type: object
-                required:
-                - mode
+                  oidc:
+                    description: |-
+                      OIDC configures OpenID Connect bearer-token authentication against
+                      one or more external identity providers.
+                    properties:
+                      jwt:
+                        description: JWT configures validation parameters shared by
+                          every provider.
+                        properties:
+                          clockSkewTolerance:
+                            description: |-
+                              ClockSkewTolerance is the permitted clock drift when validating
+                              time-based claims on OIDC-issued tokens. Defaults to packdb's own
+                              default (30s) when empty.
+                            type: string
+                          maxTokenAge:
+                            description: |-
+                              MaxTokenAge bounds how old an OIDC token's iat claim may be.
+                              Defaults to packdb's own default (1d) when empty.
+                            type: string
+                        type: object
+                      providers:
+                        description: |-
+                          Providers lists the trusted OIDC identity providers. Must be
+                          non-empty when OIDC is configured at all — packdb rejects a
+                          present oidc block with an empty providers list.
+                        items:
+                          description: |-
+                            OIDCProviderSpec configures one trusted OIDC identity provider. packdb
+                            validates bearer tokens against this provider's published keys — it is
+                            a JWT validator, not an OAuth2 client: there is no client ID/secret,
+                            redirect URI, or authorization-code flow here, because the engine never
+                            initiates a login. An external client (the Firebolt CLI, a BI tool)
+                            performs the OIDC flow itself and presents the resulting access token
+                            to the engine as a bearer token.
+                          properties:
+                            audience:
+                              description: |-
+                                Audience is the expected "aud" claim on tokens from this provider.
+                                Defaults to the Instance's canonical issuer URL when empty
+                                (packdb's own default).
+                              type: string
+                            discovery:
+                              description: |-
+                                Discovery configures refresh of this provider's OpenID discovery
+                                document.
+                              properties:
+                                refreshInterval:
+                                  description: |-
+                                    RefreshInterval is how often the engine re-fetches the provider's
+                                    /.well-known/openid-configuration document, as a Go duration
+                                    string. Defaults to packdb's own default (1d) when empty.
+                                  type: string
+                              type: object
+                            discoveryURL:
+                              description: |-
+                                DiscoveryURL is the provider's OpenID Connect discovery endpoint
+                                (typically ending in /.well-known/openid-configuration). Must be
+                                an https:// URL — packdb requires TLS for every outbound OIDC
+                                fetch except loopback.
+                              minLength: 1
+                              pattern: ^https://.+
+                              type: string
+                            jitProvisioning:
+                              description: |-
+                                JITProvisioning controls automatic user creation on first login via
+                                this provider.
+                              properties:
+                                defaultRoles:
+                                  description: |-
+                                    DefaultRoles lists the roles granted to an auto-provisioned user.
+                                    Defaults to ["public"] (packdb's own default) when empty.
+                                  items:
+                                    type: string
+                                  type: array
+                                enabled:
+                                  default: false
+                                  description: Enabled turns on just-in-time user
+                                    provisioning for this provider.
+                                  type: boolean
+                              type: object
+                            jwks:
+                              description: JWKS configures caching of this provider's
+                                published key set.
+                              properties:
+                                cacheTTL:
+                                  description: |-
+                                    CacheTTL is how long a fetched JWKS document is cached before being
+                                    re-fetched, as a Go duration string. Defaults to packdb's own
+                                    default (1h) when empty.
+                                  type: string
+                              type: object
+                            name:
+                              description: |-
+                                Name is this provider's machine identifier, used in the
+                                ?auth=<name> connection parameter and as the authorization server
+                                name clients select. Must not start with "_" — that prefix is
+                                reserved by packdb for Firebolt-managed authorization servers (the
+                                embedded server is named "_local").
+                              minLength: 1
+                              pattern: ^[^_].*$
+                              type: string
+                            title:
+                              description: |-
+                                Title is a human-readable label for this provider, shown in UIs.
+                                Defaults to Name when empty.
+                              type: string
+                            usernameMapping:
+                              description: |-
+                                UsernameMapping is a Go-template string mapping token claims to the
+                                Firebolt username; claims are interpolated with double-brace markers.
+                                For example, the "email" claim on its own, or the "iss" and "sub"
+                                claims joined with a pipe.
+                              minLength: 1
+                              type: string
+                          required:
+                          - discoveryURL
+                          - name
+                          - usernameMapping
+                          type: object
+                        minItems: 1
+                        type: array
+                    required:
+                    - providers
+                    type: object
+                  preferredAuthorizationServer:
+                    description: |-
+                      PreferredAuthorizationServer names the authorization server clients
+                      should use by default when a connection doesn't select one
+                      explicitly: either "_local" (the embedded server) or the Name of
+                      one of the OIDC providers below. Advisory only; surfaced to clients
+                      via /.well-known/firebolt. Must be unset when Enabled is false and,
+                      when set, must name a configured server.
+                    type: string
                 type: object
               gateway:
                 description: Gateway configures the query routing gateway (Envoy proxy).
@@ -17320,6 +17578,122 @@ spec:
                 - PodIP
                 - ApiserverProxy
                 type: string
+              tls:
+                description: |-
+                  TLS configures TLS termination on the gateway's client-facing
+                  listener and on each engine's own listeners.
+                properties:
+                  engine:
+                    description: |-
+                      Engine configures TLS termination on each engine's HTTP and
+                      Postgres-wire listeners.
+                    properties:
+                      certManager:
+                        description: |-
+                          CertManager configures the cert-manager Certificate used to
+                          provision this listener's server certificate. Required when
+                          Enabled is true.
+                        properties:
+                          algorithm:
+                            default: RSA
+                            description: Algorithm is the private key algorithm.
+                            enum:
+                            - RSA
+                            - ECDSA
+                            type: string
+                          issuerRef:
+                            description: |-
+                              IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                              signs the generated Certificate.
+                            properties:
+                              kind:
+                                default: ClusterIssuer
+                                description: |-
+                                  Kind is the referenced resource's kind. Issuer is namespaced (must
+                                  live in the same namespace as this FireboltInstance); ClusterIssuer
+                                  is cluster-scoped.
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
+                              name:
+                                description: Name is the name of the Issuer or ClusterIssuer.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          size:
+                            default: 2048
+                            description: |-
+                              Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                              ECDSA curve size (256, 384, 521). Defaults to 2048.
+                            format: int32
+                            type: integer
+                        required:
+                        - issuerRef
+                        type: object
+                      enabled:
+                        default: false
+                        description: Enabled turns on TLS for this listener.
+                        type: boolean
+                    type: object
+                  gateway:
+                    description: |-
+                      Gateway configures TLS termination on the Envoy gateway's
+                      client-facing listener.
+                    properties:
+                      certManager:
+                        description: |-
+                          CertManager configures the cert-manager Certificate used to
+                          provision this listener's server certificate. Required when
+                          Enabled is true.
+                        properties:
+                          algorithm:
+                            default: RSA
+                            description: Algorithm is the private key algorithm.
+                            enum:
+                            - RSA
+                            - ECDSA
+                            type: string
+                          issuerRef:
+                            description: |-
+                              IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                              signs the generated Certificate.
+                            properties:
+                              kind:
+                                default: ClusterIssuer
+                                description: |-
+                                  Kind is the referenced resource's kind. Issuer is namespaced (must
+                                  live in the same namespace as this FireboltInstance); ClusterIssuer
+                                  is cluster-scoped.
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
+                              name:
+                                description: Name is the name of the Issuer or ClusterIssuer.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          size:
+                            default: 2048
+                            description: |-
+                              Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                              ECDSA curve size (256, 384, 521). Defaults to 2048.
+                            format: int32
+                            type: integer
+                        required:
+                        - issuerRef
+                        type: object
+                      enabled:
+                        default: false
+                        description: Enabled turns on TLS for this listener.
+                        type: boolean
+                    type: object
+                type: object
             required:
             - gateway
             - metadata
@@ -17328,6 +17702,45 @@ spec:
             description: FireboltInstanceStatus defines the observed state of a Firebolt
               Instance.
             properties:
+              auth:
+                description: |-
+                  Auth reports the crypto material the operator has provisioned for
+                  Instance-wide auth (currently: JWT signing keys). Nil when
+                  spec.auth is unset or disabled.
+                properties:
+                  signingKeys:
+                    description: |-
+                      SigningKeys lists the currently provisioned JWT signing keys, first
+                      entry active. Phase 1 always has exactly one entry; a later
+                      rotation feature will grow this to multiple entries during a
+                      rollover window. A slice from the start so that addition is
+                      forward-compatible without a status schema change.
+                    items:
+                      description: |-
+                        SigningKeyStatus records one JWT signing key the operator has
+                        provisioned for this Instance.
+                      properties:
+                        createdAt:
+                          description: CreatedAt is when this key was provisioned.
+                          format: date-time
+                          type: string
+                        id:
+                          description: |-
+                            ID is the key identifier rendered as the JWT "kid" and as
+                            instance.auth.local.signing_keys[].id on every engine.
+                          type: string
+                        secretName:
+                          description: |-
+                            SecretName is the cert-manager-managed Secret holding this key's
+                            PEM private key (data key "tls.key").
+                          type: string
+                      required:
+                      - createdAt
+                      - id
+                      - secretName
+                      type: object
+                    type: array
+                type: object
               conditions:
                 description: Conditions represent the latest available observations
                   of the Instance's state.

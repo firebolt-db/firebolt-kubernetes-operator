@@ -129,6 +129,17 @@ const (
 	// EngineRuntimeVolumeName is the emptyDir volume mounted at
 	// /run/firebolt for the engine's unix domain socket.
 	EngineRuntimeVolumeName = "runtime"
+	// EngineAuthAdminVolumeName is the projected Secret volume carrying
+	// the Instance admin password, present only when spec.auth is
+	// enabled. Mounted at AuthAdminMountPath on the engine container.
+	EngineAuthAdminVolumeName = "auth-admin"
+	// EngineAuthSigningVolumeNamePrefix names each provisioned signing
+	// key's Secret volume: EngineAuthSigningVolumeNamePrefix + key ID
+	// (e.g. "auth-signing-signing-1"), present only when spec.auth is
+	// enabled. One volume per key so a future rotation feature can mount
+	// more than one at once without a name collision. Mounted at
+	// AuthSigningMountPathBase + "/" + <key ID> on the engine container.
+	EngineAuthSigningVolumeNamePrefix = "auth-signing-"
 	// GatewayConfigVolumeName carries the operator-rendered Envoy
 	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy
 	// container.
@@ -151,10 +162,23 @@ const (
 // operatorOwnedEngineVolumeNames are the volume names the operator
 // renders on the engine StatefulSet's pod template. User templates may
 // not declare volumes or volumeMounts with these names.
+//
+// The signing-key entry is a literal name, not a prefix match: Phase 1
+// provisions exactly one, fixed-ID signing key
+// (internal/controller.AuthSigningKeyID = "signing-1"), so
+// EngineAuthSigningVolumeNamePrefix + "signing-1" is the only signing
+// volume that can ever appear on a Phase-1 engine pod. A later
+// operator-owned key-rotation phase will mount a dynamic, growing/
+// shrinking set of signing-key volumes — at that point this exact-match
+// list stops being sufficient and isReservedKey's callers (in
+// particular ValidatePodTemplate) will need a prefix check against
+// EngineAuthSigningVolumeNamePrefix instead of an enumerated literal.
 var operatorOwnedEngineVolumeNames = []string{
 	EngineConfigVolumeName,
 	EngineDataVolumeName,
 	EngineRuntimeVolumeName,
+	EngineAuthAdminVolumeName,
+	EngineAuthSigningVolumeNamePrefix + "signing-1",
 }
 
 // operatorOwnedGatewayVolumeNames are the volume names the operator
@@ -202,7 +226,7 @@ type EngineConfigOwnedSection struct {
 // chase the protected set in their CRs to keep them applying cleanly.
 var OperatorOwnedEngineConfigPaths = []EngineConfigOwnedSection{
 	{Section: "", Keys: []string{"schema_version"}},
-	{Section: "instance", Keys: []string{"id", "type", "multi_engine"}},
+	{Section: "instance", Keys: []string{"id", "type", "multi_engine", "auth"}},
 	{Section: "engine", Keys: []string{"id", "nodes", "termination_grace_period"}},
 }
 

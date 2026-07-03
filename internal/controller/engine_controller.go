@@ -131,6 +131,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengineclasses/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
@@ -1122,8 +1123,12 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
-// spec.instanceRef and returns its metadata endpoint and instance ID.
-// Reconciliation is blocked until the instance exists and has both fields populated.
+// spec.instanceRef and returns its metadata endpoint, instance ID, and (when
+// auth is enabled) the resolved auth config. Reconciliation is blocked until
+// the instance exists, has both the endpoint and ID populated, and — when
+// spec.auth.enabled — has finished provisioning auth (see the Auth gating
+// below), so an engine pod is never scheduled with a volumeMount pointing at
+// a Secret that doesn't exist yet.
 func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (InstanceInfo, error) {
 	inst := &computev1alpha1.FireboltInstance{}
 	key := types.NamespacedName{Name: engine.Spec.InstanceRef, Namespace: engine.Namespace}
@@ -1141,10 +1146,47 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no instance ID yet", inst.Name)
 	}
 
-	return InstanceInfo{
+	info := InstanceInfo{
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
 		InstanceID:       inst.Spec.ID,
-	}, nil
+	}
+
+	if inst.Spec.Auth != nil && inst.Spec.Auth.Enabled {
+		// Gate on the instance controller's own combined readiness signal
+		// (admin password Secret exists + signing key issued —
+		// InstanceConditionAuthReady, set in instance_auth.go's
+		// ensureAuth) rather than re-deriving readiness here. The
+		// Status.Auth nil/empty check is defense-in-depth against a
+		// stale/racy condition rather than the primary gate.
+		ready := apimeta.IsStatusConditionTrue(inst.Status.Conditions, computev1alpha1.InstanceConditionAuthReady)
+		if !ready || inst.Status.Auth == nil || len(inst.Status.Auth.SigningKeys) == 0 {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has auth enabled but it is not ready yet", inst.Name)
+		}
+
+		// Re-verify every Secret this engine's pod is about to mount
+		// exists right now, mirroring checkExternalPostgresSecret's
+		// reasoning: AuthReady only proves these Secrets existed as of
+		// the instance controller's last reconcile. Without this,
+		// a Secret deleted in the gap would surface only as a pod stuck
+		// in ContainerCreating, with the root cause invisible on the
+		// FireboltEngine CR.
+		admin := inst.Spec.Auth.Local.Admin.Password
+		if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret"); err != nil {
+			return InstanceInfo{}, err
+		}
+		for _, k := range inst.Status.Auth.SigningKeys {
+			if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret"); err != nil {
+				return InstanceInfo{}, err
+			}
+		}
+
+		info.Auth = &ResolvedAuthInfo{
+			Spec:        inst.Spec.Auth,
+			SigningKeys: inst.Status.Auth.SigningKeys,
+		}
+	}
+
+	return info, nil
 }
 
 func genResourceName(engineName string, gen int, suffix string) string {

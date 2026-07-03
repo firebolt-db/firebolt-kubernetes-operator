@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -105,6 +106,7 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
@@ -196,6 +198,15 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, r.failWithCondition(ctx, instance,
 			computev1alpha1.InstanceConditionGatewayReady, reasonTemplateRejected,
 			gwTplErrs.ToAggregate())
+	}
+
+	// Step 0: Ensure Instance-wide auth (admin credentials preflight +
+	// JWT signing keypair). See ensureAuth's doc comment for why a
+	// failure here is logged rather than blocking Steps 1-4: neither
+	// PostgreSQL, metadata, nor the gateway read spec.auth, and engines
+	// gate their own reconcile on Status.Auth independently.
+	if err := r.ensureAuth(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure auth")
 	}
 
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
@@ -302,6 +313,13 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 
 	deleteList := func(list client.ObjectList, kind string) {
 		if err := r.List(ctx, list, client.InNamespace(ns), matchLabels); err != nil {
+			if apimeta.IsNoMatchError(err) {
+				// The kind's CRD isn't installed on this cluster (e.g.
+				// cert-manager's Certificate against envtest, which has
+				// no cert-manager CRDs) — nothing of that kind could
+				// exist, so there is nothing to clean up.
+				return
+			}
 			log.Error(err, "Failed to list resources for cleanup", "kind", kind)
 			errs = append(errs, err)
 			return
@@ -320,6 +338,18 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&appsv1.DeploymentList{}, "Deployment")
 	deleteList(&corev1.ServiceList{}, "Service")
 	deleteList(&corev1.ConfigMapList{}, "ConfigMap")
+	// Certificate MUST be deleted before Secret: cert-manager's
+	// Certificate controller recreates its target Secret whenever that
+	// Secret goes missing while the Certificate still exists (cert-manager
+	// does not owner-reference the Secret to the Certificate unless
+	// --enable-certificate-owner-ref is set, which this operator does not
+	// require). Sweeping the Secret first would leave a window — between
+	// this sweep and the Certificate's later, asynchronous owner-reference
+	// GC — in which cert-manager recreates the signing-key Secret, now
+	// orphaned and carrying LabelInstance for an instance that no longer
+	// exists. Deleting the Certificate first stops that reconciliation
+	// before the Secret sweep runs.
+	deleteList(&certmanagerv1.CertificateList{}, "Certificate")
 	deleteList(&corev1.SecretList{}, "Secret")
 	deleteList(&corev1.PersistentVolumeClaimList{}, "PersistentVolumeClaim")
 	deleteList(&policyv1.PodDisruptionBudgetList{}, "PodDisruptionBudget")
@@ -354,6 +384,8 @@ func extractItems(list client.ObjectList) []client.Object {
 		return boxItems[corev1.Service, *corev1.Service](l.Items)
 	case *corev1.ConfigMapList:
 		return boxItems[corev1.ConfigMap, *corev1.ConfigMap](l.Items)
+	case *certmanagerv1.CertificateList:
+		return boxItems[certmanagerv1.Certificate, *certmanagerv1.Certificate](l.Items)
 	case *corev1.SecretList:
 		return boxItems[corev1.Secret, *corev1.Secret](l.Items)
 	case *corev1.PersistentVolumeClaimList:

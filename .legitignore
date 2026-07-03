@@ -17,3 +17,15 @@
 # "PASSWORD" appears in it. Value-based suppression so the rule stays
 # silent even after history rewrites.
 value_74C1494275B3EC5601DEB210A6ACA034
+
+# FB-896 auth test fixtures. These are fake credential values hard-coded in
+# unit tests (never real secrets): the literal admin-password Secret key name
+# "password" (instance_auth_test.go, fireboltinstance_webhook_test.go), and the
+# fake admin-Secret names "admin-creds" and "a-different-secret" used to assert
+# Secret-ref plumbing and drift detection. Legit's high-entropy/generic-password
+# rules flag them by proximity to "Password"/"Admin" field names. Value-based
+# suppression (inline `// legit:ignore-secrets` is not honored by this
+# integration — the operator's only working suppression is this file).
+value_536FF1BE56D281A30D1704BBA91C043C
+value_A6AE22CADAC3B0BEE06B0684CFA2B2F8
+value_ABC139F439D41936CB2EB99E927041D9

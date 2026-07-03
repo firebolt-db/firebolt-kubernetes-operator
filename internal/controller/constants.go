@@ -68,6 +68,17 @@ const (
 	// independently.
 	AnnotationCustomEngineConfigHash = "firebolt.io/custom-engine-config-hash"
 
+	// AnnotationAuthHash records a content-hash of the auth-relevant
+	// fields from InstanceInfo.Auth (enabled/disabled, admin Secret
+	// name+key, each signing key's ID+SecretName). stsMatchesSpec
+	// compares against this to detect auth drift — e.g. auth just got
+	// enabled, or the admin/signing Secret a volume points at changed
+	// name — because that drift lives in corev1.Volume.VolumeSource
+	// (SecretName), a field VolumeMounts equality does not observe: two
+	// Volumes named identically but pointing at different Secrets
+	// produce byte-identical VolumeMounts.
+	AnnotationAuthHash = "firebolt.io/auth-hash"
+
 	// AnnotationConfigHash carries a content-hash of the rendered config
 	// for the gateway and metadata Deployments. It is set on the pod
 	// template and serves two purposes: (1) any config change propagates
@@ -107,6 +118,10 @@ const (
 	SuffixMetadataPostgresCreds = "-metadata-postgres-creds" //nolint:gosec // resource name suffix, not a credential
 	// SuffixGateway is appended to form gateway Deployment/Service names.
 	SuffixGateway = "-gateway"
+	// SuffixAuthSigning is appended to form the name of the cert-manager
+	// Certificate (and its target Secret) holding the JWT signing
+	// keypair every engine in the Instance shares.
+	SuffixAuthSigning = "-auth-signing"
 
 	// MetadataServicePort is the gRPC port the metadata service listens on.
 	MetadataServicePort = 7000
@@ -168,6 +183,18 @@ const (
 	// the --data-dir passed to the engine binary: the writable state root that
 	// holds persistent_data, diagnostic_data, and scratch.
 	DataMountPath = "/var/lib/firebolt"
+
+	// AuthSigningMountPathBase is the directory under which each
+	// provisioned JWT signing key is mounted, one subdirectory per key ID
+	// (AuthSigningMountPathBase + "/" + kid + "/tls.key"), so
+	// instance.auth.local.signing_keys[].private_key_path can address
+	// any one of them individually — needed once a future rotation
+	// feature mounts more than one key at a time.
+	AuthSigningMountPathBase = "/secrets/auth/signing"
+	// AuthAdminMountPath is the directory the admin password Secret is
+	// mounted at. The configured spec.auth.local.admin.password.key
+	// names the file within it.
+	AuthAdminMountPath = "/secrets/auth/admin"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
 	// VolumeClaimTemplates and the corresponding container VolumeMount.
 	DataVolumeName = "data"
