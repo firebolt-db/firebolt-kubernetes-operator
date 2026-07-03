@@ -139,6 +139,14 @@ const (
 	// "ca.crt" as the default key). Not a corev1-exported constant;
 	// cert-manager does not export one either.
 	engineTLSCASecretKey = "ca.crt"
+
+	// gatewayTLSMountPath is the directory the gateway's downstream
+	// (client-facing) TLS Secret is mounted at on the Envoy container,
+	// present only once gateway TLS is enabled and ready (see
+	// gatewayDownstreamTLSReady). Referenced as the client-facing
+	// listener's tls_certificates filenames in
+	// buildListenerDownstreamTLSTransportSocket.
+	gatewayTLSMountPath = "/etc/envoy/tls/gateway"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -311,6 +319,49 @@ func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstan
                     suffix: ".%s.svc.cluster.local"
 `,
 		gatewayEngineCAMountPath, engineTLSCASecretKey, instance.Namespace)
+}
+
+// gatewayDownstreamTLSReady reports whether the gateway's client-facing
+// listener should terminate TLS: spec.tls.gateway is enabled AND the
+// instance controller has finished provisioning the certificate
+// (Status.GatewayTLS populated by ensureGatewayTLS in instance_tls.go).
+// Gating on Status (not just Spec) mirrors engineUpstreamTLSReady:
+// rendering certificate_chain/private_key file paths before the
+// corresponding Secret is mounted would reference files that don't exist
+// yet.
+func gatewayDownstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS != nil
+}
+
+// buildListenerDownstreamTLSTransportSocket returns the client-facing
+// listener's filter_chain transport_socket YAML block (indented to nest
+// as a sibling of "filters:" within that filter_chain entry — see
+// buildEnvoyConfigYAML's %s placeholder), or "" when gateway TLS is not
+// ready.
+//
+// Trailing newline is required, not cosmetic, for the same reason as
+// buildDFPUpstreamTLSTransportSocket: an empty string here must render
+// byte-identical to the pre-TLS config so instances that never touch
+// spec.tls.gateway see no config-hash change — and therefore no gateway
+// rollout — when this feature ships.
+func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !gatewayDownstreamTLSReady(instance) {
+		return ""
+	}
+	return fmt.Sprintf(`          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: %s/%s
+                    private_key:
+                      filename: %s/%s
+`,
+		gatewayTLSMountPath, corev1.TLSCertKey,
+		gatewayTLSMountPath, corev1.TLSPrivateKeyKey)
 }
 
 func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
@@ -585,7 +636,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
-    - name: stats_listener
+%s    - name: stats_listener
       address:
         socket_address:
           address: 0.0.0.0
@@ -780,18 +831,19 @@ admin:
       address: 127.0.0.1
       port_value: %d
 `,
-		gatewayPerConnectionBufferLimitBytes,         // listener: per_connection_buffer_limit_bytes
-		gatewayContainerPort,                         // listener: port_value
-		instance.Namespace,                           // Lua: :authority rewrite
-		instance.Spec.Gateway.MetricsPort,            // stats_listener: port_value
-		buildDFPUpstreamTLSTransportSocket(instance), // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
-		gatewayPerConnectionBufferLimitBytes,         // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
-		gatewayMaxConnectionsPerEngine,               // circuit_breakers: max_connections
-		gatewayMaxPendingRequestsPerEngine,           // circuit_breakers: max_pending_requests
-		gatewayMaxRequestsPerEngine,                  // circuit_breakers: max_requests
-		gatewayMaxRetriesPerEngine,                   // circuit_breakers: max_retries
-		gatewayAdminPort,                             // admin_stats endpoint: port_value
-		gatewayAdminPort,                             // admin: port_value
+		gatewayPerConnectionBufferLimitBytes,                // listener: per_connection_buffer_limit_bytes
+		gatewayContainerPort,                                // listener: port_value
+		instance.Namespace,                                  // Lua: :authority rewrite
+		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
+		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
+		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
+		gatewayPerConnectionBufferLimitBytes,                // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayMaxConnectionsPerEngine,                      // circuit_breakers: max_connections
+		gatewayMaxPendingRequestsPerEngine,                  // circuit_breakers: max_pending_requests
+		gatewayMaxRequestsPerEngine,                         // circuit_breakers: max_requests
+		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
+		gatewayAdminPort,                                    // admin_stats endpoint: port_value
+		gatewayAdminPort,                                    // admin: port_value
 	)
 }
 
@@ -1030,6 +1082,21 @@ exec 3<&- 3>&-
 sleep 8
 `, gatewayAdminPort)
 
+	// The kubelet's probe scheme must track the listener's own transport:
+	// once gateway TLS is enabled and ready, the client-facing 8080
+	// listener (and the envoy.filters.http.health_check filter riding on
+	// it, which is what /healthz answers — see preStopScript's doc
+	// comment) speaks TLS only. A plaintext HTTPGet probe against a TLS
+	// socket fails every time, which would leave the gateway forever
+	// un-Ready. The kubelet's httpGet probe does not verify the server
+	// certificate for URISchemeHTTPS, so this flip needs no CA-trust
+	// material on the probe side. Mirrors buildEngineWebSidecar's
+	// backend-scheme switch in Phase 2.
+	probeScheme := corev1.URISchemeHTTP
+	if gatewayDownstreamTLSReady(instance) {
+		probeScheme = corev1.URISchemeHTTPS
+	}
+
 	envoy := corev1.Container{
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
@@ -1048,7 +1115,7 @@ sleep 8
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http"), Scheme: probeScheme},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       15,
@@ -1056,7 +1123,7 @@ sleep 8
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http"), Scheme: probeScheme},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       2,
@@ -1115,10 +1182,30 @@ sleep 8
 			},
 		})
 	}
+	// Present only once gateway TLS is enabled and ready — see
+	// gatewayDownstreamTLSReady's matching gate. Mounting the whole
+	// Secret (not just tls.crt/tls.key via Items) is fine: envoy.yaml
+	// only ever points at the tls.crt/tls.key paths, and there is nothing
+	// sensitive about any other key an issuer might add (e.g. ca.crt,
+	// which the gateway doesn't need for its own downstream cert here).
+	if gatewayDownstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayTLSVolumeName,
+			MountPath: gatewayTLSMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayTLSVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.GatewayTLS.SecretName},
+			},
+		})
+	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
-		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName, computev1alpha1.GatewayEngineCAVolumeName)
+		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
+		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {

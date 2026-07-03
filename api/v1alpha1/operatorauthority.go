@@ -159,6 +159,11 @@ const (
 	// gateway->engine traffic (see buildEnvoyConfigYAML's
 	// dynamic_forward_proxy transport_socket).
 	GatewayEngineCAVolumeName = "engine-ca"
+	// GatewayTLSVolumeName carries the gateway's downstream (client-facing)
+	// TLS server certificate, present only when spec.tls.gateway is
+	// enabled. Mounted read-only on the Envoy container; referenced by the
+	// listener's DownstreamTlsContext in buildEnvoyConfigYAML.
+	GatewayTLSVolumeName = "tls-gateway"
 	// MetadataConfigVolumeName carries the operator-rendered Pensieve
 	// XML config. Mounted at /configs on the metadata container.
 	MetadataConfigVolumeName = "config"
@@ -200,6 +205,7 @@ var operatorOwnedGatewayVolumeNames = []string{
 	GatewayConfigVolumeName,
 	GatewayTmpVolumeName,
 	GatewayEngineCAVolumeName,
+	GatewayTLSVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator

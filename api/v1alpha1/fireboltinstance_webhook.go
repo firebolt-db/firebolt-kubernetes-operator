@@ -128,20 +128,17 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 }
 
 // ValidateTLS mirrors ValidateAuth's exported/defense-in-depth shape, but
-// for spec.tls: re-run by the instance controller (see ensureEngineTLS) in
-// case the webhook is disabled.
-//
-// Only spec.tls.engine is validated here. spec.tls.gateway is reserved,
-// unwired CRD scaffolding — no controller code reads it yet — so
-// validating it now would suggest a feature that does not exist; add its
-// validation alongside whatever phase actually wires up gateway
-// downstream TLS termination.
+// for spec.tls: re-run by the instance controller (see ensureEngineTLS,
+// ensureGatewayTLS) in case the webhook is disabled.
 func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 	tls := inst.Spec.TLS
 	if tls == nil {
 		return nil
 	}
-	return validateTLSListener(tls.Engine, field.NewPath("spec", "tls", "engine"))
+	var errs field.ErrorList
+	errs = append(errs, validateTLSListener(tls.Engine, field.NewPath("spec", "tls", "engine"))...)
+	errs = append(errs, validateTLSListener(tls.Gateway, field.NewPath("spec", "tls", "gateway"))...)
+	return errs
 }
 
 // validateTLSListener requires a cert-manager provisioning policy with a

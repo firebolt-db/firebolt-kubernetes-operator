@@ -218,6 +218,14 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		log.Error(err, "Failed to ensure engine TLS")
 	}
 
+	// Step 0.6: Ensure the gateway's downstream (client-facing) TLS
+	// certificate. Same failure-isolation and before-Step-4 ordering
+	// reasoning as Step 0.5: buildEnvoyConfigYAML and
+	// effectiveGatewayPodTemplate both read Status.GatewayTLS.
+	if err := r.ensureGatewayTLS(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure gateway TLS")
+	}
+
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
 	// Postgres and metadata are not separate phases: the metadata service
 	// retries its DB connection internally for up to ~60s on startup, which

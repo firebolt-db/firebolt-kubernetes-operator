@@ -45,6 +45,25 @@ import (
 // shrink.
 const engineTLSCertDuration = 100 * 365 * 24 * time.Hour
 
+// defaultCertManagerIssuerKind is the cert-manager IssuerRef.Kind every
+// Certificate-building function in this package falls back to when the
+// user leaves CertManagerSpec.IssuerRef.Kind unset: a namespaced Issuer
+// is the exception, not the norm, for an org-wide signing/TLS root, so
+// ClusterIssuer is the more useful default.
+const defaultCertManagerIssuerKind = "ClusterIssuer"
+
+// resolveCertManagerIssuerKind returns kind unchanged when the user set
+// it, or defaultCertManagerIssuerKind otherwise. Shared by every
+// build*Certificate function (buildSigningCertificate, in instance_auth.go,
+// plus the two below) so the "ClusterIssuer" default lives in exactly one
+// place.
+func resolveCertManagerIssuerKind(kind string) string {
+	if kind == "" {
+		return defaultCertManagerIssuerKind
+	}
+	return kind
+}
+
 func engineTLSCertificateName(instanceName string) string {
 	return instanceName + SuffixEngineTLS
 }
@@ -207,10 +226,7 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 		algorithm = certmanagerv1.ECDSAKeyAlgorithm
 	}
 
-	issuerKind := policy.IssuerRef.Kind
-	if issuerKind == "" {
-		issuerKind = "ClusterIssuer"
-	}
+	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
 
 	return &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -237,6 +253,194 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 				Kind: issuerKind,
 			},
 			Duration: &metav1.Duration{Duration: engineTLSCertDuration},
+			PrivateKey: &certmanagerv1.CertificatePrivateKey{
+				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				Encoding:       certmanagerv1.PKCS8,
+				Algorithm:      algorithm,
+				Size:           int(policy.Size),
+			},
+		},
+	}
+}
+
+// gatewayTLSCertDuration mirrors engineTLSCertDuration's reasoning: even
+// though Envoy is not packdb (it may reload a filename-referenced TLS
+// certificate on change rather than only at process startup), the
+// operator has not verified that behavior against the exact Envoy version
+// it ships, so cert-manager auto-renewal stays disabled here for the same
+// "do not silently swap crypto material a running process hasn't been
+// told about" reason. Coordinated rotation is a planned addition, not
+// something to lean on an unverified hot-reload assumption for today.
+const gatewayTLSCertDuration = 100 * 365 * 24 * time.Hour
+
+func gatewayTLSCertificateName(instanceName string) string {
+	return instanceName + SuffixGatewayTLS
+}
+
+// gatewayServiceDNSNames returns every in-cluster DNS form of the
+// gateway's ClusterIP Service (see ensureGatewayService) that the
+// operator can always compute without any user input: the bare name, the
+// namespace-qualified name, and both full-FQDN suffixes. Covering all
+// four means clients in the same namespace, clients in another namespace,
+// and clients using the full FQDN all match a SAN on the certificate
+// without needing to be told which form to use.
+func gatewayServiceDNSNames(instance *computev1alpha1.FireboltInstance) []string {
+	name := instance.Name + SuffixGateway
+	return []string{
+		name,
+		name + "." + instance.Namespace,
+		name + "." + instance.Namespace + ".svc",
+		name + "." + instance.Namespace + ".svc.cluster.local",
+	}
+}
+
+// gatewayTLSDNSNames returns the full SAN list for the gateway's
+// downstream TLS certificate: the in-cluster Service names the operator
+// always knows, plus any externally-visible names the user supplied via
+// spec.tls.gateway.dnsNames (see TLSListenerSpec.DNSNames's doc comment
+// for why the operator cannot derive those on its own).
+func gatewayTLSDNSNames(instance *computev1alpha1.FireboltInstance) []string {
+	names := gatewayServiceDNSNames(instance)
+	return append(names, instance.Spec.TLS.Gateway.DNSNames...)
+}
+
+// ensureGatewayTLS provisions the gateway's downstream (client-facing)
+// TLS server certificate via cert-manager, recording the result in
+// instance.Status.GatewayTLS once ready. Mirrors ensureEngineTLS's shape
+// and failure-isolation reasoning; must run before ensureGatewayResources
+// in Reconcile since buildEnvoyConfigYAML and effectiveGatewayPodTemplate
+// both read Status.GatewayTLS.
+func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	tls := instance.Spec.TLS
+	if tls == nil || tls.Gateway == nil || !tls.Gateway.Enabled {
+		instance.Status.GatewayTLS = nil
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionTrue,
+			"Disabled", "spec.tls.gateway is unset or disabled")
+		return nil
+	}
+
+	// Defense-in-depth against a bypassed validating webhook, mirroring
+	// ensureEngineTLS's re-check of ValidateTLS.
+	if errs := computev1alpha1.ValidateTLS(instance); len(errs) > 0 {
+		err := errs.ToAggregate()
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
+			"TLSSpecInvalid", err.Error())
+		return err
+	}
+
+	ready, err := r.ensureGatewayTLSCertificate(ctx, instance)
+	if err != nil {
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
+			"CertificateEnsureFailed", err.Error())
+		return err
+	}
+	if !ready {
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
+			"CertificatePending", "waiting for cert-manager to issue the gateway TLS certificate")
+		return nil
+	}
+
+	setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionTrue,
+		"Ready", "gateway TLS certificate is provisioned")
+	return nil
+}
+
+// gatewayTLSSecretReady reports whether secret carries what the gateway's
+// downstream listener needs to terminate TLS: tls.crt and tls.key.
+//
+// Deliberately NOT the same three-key check as engineTLSSecretReady: that
+// check additionally requires ca.crt because the gateway uses the engine
+// TLS Secret to AUTHENTICATE A PEER (validating engine certificates when
+// re-encrypting upstream). Here the gateway only PRESENTS this
+// certificate to inbound clients; it never validates anything against it.
+// Requiring ca.crt here would wedge every gateway TLS rollout in
+// CertificatePending forever on any issuer that does not populate ca.crt
+// (e.g. some ACME configurations) — a false failure with no corresponding
+// hazard to guard against.
+func gatewayTLSSecretReady(secret *corev1.Secret) bool {
+	return len(secret.Data[corev1.TLSCertKey]) > 0 &&
+		len(secret.Data[corev1.TLSPrivateKeyKey]) > 0
+}
+
+// ensureGatewayTLSCertificate applies the desired gateway-TLS Certificate
+// and, once cert-manager has issued it, records the resulting Secret in
+// instance.Status.GatewayTLS. Returns ready=true only once
+// gatewayTLSSecretReady is satisfied.
+//
+// Not covered by the envtest suite for the same reason as
+// ensureEngineTLSCertificate: envtest has no cert-manager CRDs installed.
+// buildGatewayTLSCertificate and gatewayTLSSecretReady carry the
+// unit-tested surface for this function's logic.
+func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	desired := buildGatewayTLSCertificate(instance)
+	desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return false, err
+	}
+	if err := applySSA(ctx, r.Client, desired); err != nil {
+		return false, fmt.Errorf("applying gateway TLS certificate: %w", err)
+	}
+
+	secretName := desired.Spec.SecretName
+	var secret corev1.Secret
+	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: secretName}, &secret)
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("getting gateway TLS secret %s/%s: %w", instance.Namespace, secretName, err)
+	}
+	if !gatewayTLSSecretReady(&secret) {
+		return false, nil
+	}
+
+	createdAt := metav1.Now()
+	if instance.Status.GatewayTLS != nil {
+		createdAt = instance.Status.GatewayTLS.CreatedAt
+	}
+	instance.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{
+		SecretName: secretName,
+		CreatedAt:  createdAt,
+	}
+	return true, nil
+}
+
+// buildGatewayTLSCertificate returns the desired cert-manager Certificate
+// used to provision the gateway's downstream TLS server certificate. Kept
+// as a pure function so its shape is unit-testable without envtest (see
+// ensureGatewayTLSCertificate's doc comment).
+//
+// DNSNames comes from gatewayTLSDNSNames: the in-cluster Service names
+// plus any user-supplied external names. No CommonName is set, mirroring
+// buildEngineTLSCertificate.
+func buildGatewayTLSCertificate(instance *computev1alpha1.FireboltInstance) *certmanagerv1.Certificate {
+	policy := instance.Spec.TLS.Gateway.CertManager
+	name := gatewayTLSCertificateName(instance.Name)
+	labels := instanceLabels(instance.Name, "gateway-tls")
+
+	algorithm := certmanagerv1.RSAKeyAlgorithm
+	if policy.Algorithm == "ECDSA" {
+		algorithm = certmanagerv1.ECDSAKeyAlgorithm
+	}
+
+	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
+
+	return &certmanagerv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: instance.Namespace,
+			Labels:    labels,
+		},
+		Spec: certmanagerv1.CertificateSpec{
+			SecretName: name,
+			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
+				Labels: labels,
+			},
+			DNSNames:  gatewayTLSDNSNames(instance),
+			Usages:    []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
+			IssuerRef: cmmeta.IssuerReference{Name: policy.IssuerRef.Name, Kind: issuerKind},
+			Duration:  &metav1.Duration{Duration: gatewayTLSCertDuration},
 			PrivateKey: &certmanagerv1.CertificatePrivateKey{
 				RotationPolicy: certmanagerv1.RotationPolicyNever,
 				Encoding:       certmanagerv1.PKCS8,

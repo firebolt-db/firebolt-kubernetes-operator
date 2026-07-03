@@ -14865,6 +14865,13 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "dnsNames": {
+                  "description": "DNSNames lists additional Subject Alternative Names to include on\nthe provisioned certificate, beyond whatever names the operator\nderives automatically.\n\nOnly meaningful for spec.tls.gateway: the gateway's in-cluster\nService DNS names are always included automatically, but the\ngateway has no operator-managed external entrypoint (no\nIngress/LoadBalancer hostname visible to the operator \u2014 see\nTLSSpec's doc comment), so any name a client outside the cluster\nwill actually present at the TLS handshake \u2014 a custom domain, an\nexternal load balancer's hostname \u2014 must be listed here\nexplicitly, mirroring the sibling firebolt-instance-helm chart's\ntls.gateway.certManager.dnsNames.\n\nIgnored for spec.tls.engine: its SANs are fully derived from the\nnamespace (see engineTLSWildcardDNSName) and cannot be extended,\nsince every engine's routing Service already matches the\nnamespace-wide wildcard.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
                 "enabled": {
                   "default": false,
                   "description": "Enabled turns on TLS for this listener.",
@@ -14925,6 +14932,13 @@
                   ],
                   "type": "object",
                   "additionalProperties": false
+                },
+                "dnsNames": {
+                  "description": "DNSNames lists additional Subject Alternative Names to include on\nthe provisioned certificate, beyond whatever names the operator\nderives automatically.\n\nOnly meaningful for spec.tls.gateway: the gateway's in-cluster\nService DNS names are always included automatically, but the\ngateway has no operator-managed external entrypoint (no\nIngress/LoadBalancer hostname visible to the operator \u2014 see\nTLSSpec's doc comment), so any name a client outside the cluster\nwill actually present at the TLS handshake \u2014 a custom domain, an\nexternal load balancer's hostname \u2014 must be listed here\nexplicitly, mirroring the sibling firebolt-instance-helm chart's\ntls.gateway.certManager.dnsNames.\n\nIgnored for spec.tls.engine: its SANs are fully derived from the\nnamespace (see engineTLSWildcardDNSName) and cannot be extended,\nsince every engine's routing Service already matches the\nnamespace-wide wildcard.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
                 "enabled": {
                   "default": false,
@@ -15069,6 +15083,26 @@
         "gatewayReady": {
           "description": "GatewayReady indicates whether the gateway is healthy.",
           "type": "boolean"
+        },
+        "gatewayTLS": {
+          "description": "GatewayTLS reports the crypto material the operator has provisioned\nfor the gateway's downstream (client-facing) TLS listener. Nil when\nspec.tls.gateway is unset or disabled.",
+          "properties": {
+            "createdAt": {
+              "description": "CreatedAt is when this certificate was provisioned.",
+              "format": "date-time",
+              "type": "string"
+            },
+            "secretName": {
+              "description": "SecretName is the cert-manager-managed Secret holding the gateway's\nserver certificate (data keys \"tls.crt\" and \"tls.key\"). Unlike\nEngineTLSStatus, no \"ca.crt\" is required: the gateway presents this\ncertificate to clients but never uses it to authenticate a peer, so\nno CA-backed-issuer requirement applies here.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "createdAt",
+            "secretName"
+          ],
+          "type": "object",
+          "additionalProperties": false
         },
         "metadataEndpoint": {
           "description": "MetadataEndpoint is the resolved Service address.\nThe Engine reconciler uses this to write engine ConfigMaps.",

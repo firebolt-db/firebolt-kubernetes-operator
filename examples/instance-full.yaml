@@ -104,12 +104,20 @@ spec:
             enabled: true
             defaultRoles: [public]
 
-  # TLS certs are also cert-manager-only. tls.engine is live: enabling it
-  # replaces every engine's plaintext http-query listener with TLS-only on
-  # the same port, and the gateway automatically re-encrypts its upstream
-  # connection to engines using the same certificate's CA. tls.gateway
-  # (downstream client->gateway termination) is reserved CRD scaffolding
-  # only — no controller code reads it yet, so setting it has no effect.
+  # TLS certs are also cert-manager-only.
+  #
+  # tls.engine: enabling it replaces every engine's plaintext http-query
+  # listener with TLS-only on the same port, and the gateway automatically
+  # re-encrypts its upstream connection to engines using the same
+  # certificate's CA.
+  #
+  # tls.gateway: enabling it terminates TLS on the gateway's client-facing
+  # listener. The certificate always covers the gateway's in-cluster
+  # Service DNS names automatically; dnsNames below is only needed for
+  # names a client outside the cluster will present at the handshake (a
+  # custom domain, an external load balancer's hostname) — the gateway has
+  # no operator-managed external entrypoint, so the operator cannot infer
+  # those on its own. Omit dnsNames entirely for in-cluster-only access.
   tls:
     engine:
       enabled: true
@@ -117,3 +125,11 @@ spec:
         issuerRef:
           name: internal-ca
           kind: ClusterIssuer
+    gateway:
+      enabled: true
+      certManager:
+        issuerRef:
+          name: internal-ca
+          kind: ClusterIssuer
+      dnsNames:
+        - firebolt.example.com

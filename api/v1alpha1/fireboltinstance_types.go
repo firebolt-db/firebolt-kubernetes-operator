@@ -89,6 +89,16 @@ const (
 	// InstanceConditionAuthReady: engines and the gateway each gate their
 	// own reconcile on Status.EngineTLS directly.
 	InstanceConditionEngineTLSReady = "EngineTLSReady"
+
+	// InstanceConditionGatewayTLSReady reports whether the gateway's
+	// client-facing (downstream) TLS server certificate (spec.tls.gateway)
+	// has been provisioned. True with reason "Disabled" when
+	// spec.tls.gateway is unset or disabled. Deliberately not rolled up
+	// into InstanceConditionReady, mirroring InstanceConditionEngineTLSReady:
+	// the gateway gates its own listener TLS on Status.GatewayTLS directly,
+	// distinct from InstanceConditionGatewayReady (the Deployment's own
+	// rollout health).
+	InstanceConditionGatewayTLSReady = "GatewayTLSReady"
 )
 
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
@@ -578,6 +588,27 @@ type TLSListenerSpec struct {
 	// Enabled is true.
 	// +optional
 	CertManager *CertManagerSpec `json:"certManager,omitempty"`
+
+	// DNSNames lists additional Subject Alternative Names to include on
+	// the provisioned certificate, beyond whatever names the operator
+	// derives automatically.
+	//
+	// Only meaningful for spec.tls.gateway: the gateway's in-cluster
+	// Service DNS names are always included automatically, but the
+	// gateway has no operator-managed external entrypoint (no
+	// Ingress/LoadBalancer hostname visible to the operator — see
+	// TLSSpec's doc comment), so any name a client outside the cluster
+	// will actually present at the TLS handshake — a custom domain, an
+	// external load balancer's hostname — must be listed here
+	// explicitly, mirroring the sibling firebolt-instance-helm chart's
+	// tls.gateway.certManager.dnsNames.
+	//
+	// Ignored for spec.tls.engine: its SANs are fully derived from the
+	// namespace (see engineTLSWildcardDNSName) and cannot be extended,
+	// since every engine's routing Service already matches the
+	// namespace-wide wildcard.
+	// +optional
+	DNSNames []string `json:"dnsNames,omitempty"`
 }
 
 // TLSSpec configures TLS termination for the operator-managed network
@@ -586,6 +617,11 @@ type TLSListenerSpec struct {
 // in-cluster clients, and by the gateway when it re-encrypts upstream).
 // Engine-to-metadata gRPC and inter-node broadcast TLS are out of scope
 // for this field and are not currently exposed on the CRD.
+//
+// The gateway's Service is ClusterIP with no operator-managed external
+// entrypoint (no Ingress/LoadBalancer the operator creates or observes);
+// fronting it with one, and pointing that entrypoint's DNS name at
+// TLSListenerSpec.DNSNames, is an operator decision outside this CRD.
 type TLSSpec struct {
 	// Gateway configures TLS termination on the Envoy gateway's
 	// client-facing listener.
@@ -713,6 +749,21 @@ type EngineTLSStatus struct {
 	CreatedAt metav1.Time `json:"createdAt"`
 }
 
+// GatewayTLSStatus reports the observed state of gateway downstream
+// (client-facing) TLS provisioning — the crypto material the gateway's
+// listener needs, as opposed to TLSListenerSpec's desired configuration.
+type GatewayTLSStatus struct {
+	// SecretName is the cert-manager-managed Secret holding the gateway's
+	// server certificate (data keys "tls.crt" and "tls.key"). Unlike
+	// EngineTLSStatus, no "ca.crt" is required: the gateway presents this
+	// certificate to clients but never uses it to authenticate a peer, so
+	// no CA-backed-issuer requirement applies here.
+	SecretName string `json:"secretName"`
+
+	// CreatedAt is when this certificate was provisioned.
+	CreatedAt metav1.Time `json:"createdAt"`
+}
+
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.
 type FireboltInstanceStatus struct {
 	// Phase is the current lifecycle phase of the Instance.
@@ -747,6 +798,12 @@ type FireboltInstanceStatus struct {
 	// disabled.
 	// +optional
 	EngineTLS *EngineTLSStatus `json:"engineTLS,omitempty"`
+
+	// GatewayTLS reports the crypto material the operator has provisioned
+	// for the gateway's downstream (client-facing) TLS listener. Nil when
+	// spec.tls.gateway is unset or disabled.
+	// +optional
+	GatewayTLS *GatewayTLSStatus `json:"gatewayTLS,omitempty"`
 
 	// Conditions represent the latest available observations of the Instance's state.
 	// +optional

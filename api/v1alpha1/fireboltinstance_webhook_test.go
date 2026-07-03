@@ -639,9 +639,28 @@ func TestValidateTLS(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name: "gateway is not yet validated (unwired scaffolding)",
+			name:      "gateway disabled with nothing else set is valid",
+			tls:       &TLSSpec{Gateway: &TLSListenerSpec{Enabled: false}},
+			wantError: false,
+		},
+		{
+			name:      "gateway enabled with no certManager is rejected",
+			tls:       &TLSSpec{Gateway: &TLSListenerSpec{Enabled: true}},
+			wantError: true,
+		},
+		{
+			name: "gateway enabled with certManager but no issuer name is rejected",
 			tls: &TLSSpec{Gateway: &TLSListenerSpec{
-				Enabled: true,
+				Enabled:     true,
+				CertManager: &CertManagerSpec{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "gateway enabled with issuer name is valid even without explicit dnsNames",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
 			}},
 			wantError: false,
 		},

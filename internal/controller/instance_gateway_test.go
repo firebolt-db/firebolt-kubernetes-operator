@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
@@ -402,6 +403,222 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 	if matcher["suffix"] != wantSuffix {
 		t.Errorf("matcher.suffix = %v, want %v (must be a suffix match, not exact — see doc comment)", matcher["suffix"], wantSuffix)
 	}
+}
+
+// TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsConfigured
+// covers the case a real "full TLS" deployment actually runs: engine TLS
+// (upstream, on the dynamic_forward_proxy cluster) and gateway TLS
+// (downstream, on the client-facing listener) enabled at once. Each is
+// covered in isolation by the tests above; this locks down that the two
+// %s placeholders — positioned at different points in the same
+// fmt.Sprintf template — don't clobber each other or drift out of
+// positional alignment with the rest of the argument list when someone
+// edits the template later. Mirrors the auth-and-engine-tls combined case
+// in TestBuildConfigMap_ConformsToPackdbSchema on the engine-config side.
+func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine:  &computev1alpha1.TLSListenerSpec{Enabled: true},
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+
+	dfp := dfpCluster(t, parsed)
+	upstreamTS, ok := dfp["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing transport_socket with both TLS features ready; keys = %v", keysOf(dfp))
+	}
+	if upstreamTS["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("upstream transport_socket.name = %v, want envoy.transport_sockets.tls", upstreamTS["name"])
+	}
+
+	fc := listenerFilterChain(t, parsed)
+	downstreamTS, ok := fc["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("client-facing listener missing transport_socket with both TLS features ready; keys = %v", keysOf(fc))
+	}
+	if downstreamTS["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("downstream transport_socket.name = %v, want envoy.transport_sockets.tls", downstreamTS["name"])
+	}
+
+	// Cross-check that each transport_socket points at ITS OWN secret's
+	// files, not the other one's — the clearest sign a positional-arg
+	// mixup would produce.
+	upstreamTyped := upstreamTS["typed_config"].(map[string]any)
+	upstreamCA := upstreamTyped["common_tls_context"].(map[string]any)["validation_context"].(map[string]any)["trusted_ca"].(map[string]any)
+	wantUpstreamCA := gatewayEngineCAMountPath + "/" + engineTLSCASecretKey
+	if upstreamCA["filename"] != wantUpstreamCA {
+		t.Errorf("upstream trusted_ca.filename = %v, want %v", upstreamCA["filename"], wantUpstreamCA)
+	}
+
+	downstreamTyped := downstreamTS["typed_config"].(map[string]any)
+	downstreamCert := downstreamTyped["common_tls_context"].(map[string]any)["tls_certificates"].([]any)[0].(map[string]any)
+	wantDownstreamChain := gatewayTLSMountPath + "/" + string(corev1.TLSCertKey)
+	if downstreamCert["certificate_chain"].(map[string]any)["filename"] != wantDownstreamChain {
+		t.Errorf("downstream certificate_chain.filename = %v, want %v",
+			downstreamCert["certificate_chain"].(map[string]any)["filename"], wantDownstreamChain)
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket guards
+// that the client-facing listener stays plaintext (no transport_socket
+// key on its filter_chain) when spec.tls.gateway is unset — the status
+// quo this feature must not silently change for existing instances.
+func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	fc := listenerFilterChain(t, parsed)
+	if _, present := fc["transport_socket"]; present {
+		t.Errorf("client-facing listener has transport_socket with gateway TLS disabled: %v", fc["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles
+// mirrors TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles:
+// the transport_socket %s-placeholder substitution must not leave a stray
+// blank line when gateway TLS is disabled, or contentHash(envoyYAML) —
+// and therefore AnnotationConfigHash — changes for every existing
+// non-TLS instance the moment this feature ships, forcing a gateway
+// rollout nobody asked for.
+func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles(t *testing.T) {
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}
+	first := buildEnvoyConfigYAML(inst)
+	if strings.Contains(first, "host_selection_retry_max_attempts: 5\n\n") {
+		t.Error("emitted config has a blank line after 'host_selection_retry_max_attempts: 5'; " +
+			"buildListenerDownstreamTLSTransportSocket's empty-string case must not leave a stray newline")
+	}
+	if !strings.Contains(first, "host_selection_retry_max_attempts: 5\n    - name: stats_listener") {
+		t.Error("emitted config does not have stats_listener immediately following the retry policy " +
+			"with no intervening blank line; got:\n" + first)
+	}
+	if second := buildEnvoyConfigYAML(inst); first != second {
+		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_NoTransportSocket
+// pins down that buildListenerDownstreamTLSTransportSocket gates on
+// Status.GatewayTLS (readiness), not just Spec.TLS.Gateway.Enabled: a
+// transport_socket referencing an unmounted certificate file would break
+// every client connection until the volume catches up.
+func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		// Status.GatewayTLS deliberately left nil: certificate not yet issued.
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	fc := listenerFilterChain(t, parsed)
+	if _, present := fc["transport_socket"]; present {
+		t.Errorf("client-facing listener has transport_socket before GatewayTLS is ready: %v", fc["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured pins
+// down the downstream TLS shape once gateway TLS is ready: a
+// DownstreamTlsContext presenting the mounted certificate/key pair.
+func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+	fc := listenerFilterChain(t, parsed)
+	ts, ok := fc["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("client-facing listener missing transport_socket once GatewayTLS is ready; keys = %v", keysOf(fc))
+	}
+	if ts["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("transport_socket.name = %v, want envoy.transport_sockets.tls", ts["name"])
+	}
+	typedConfig, ok := ts["typed_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport_socket.typed_config missing or wrong type: %T", ts["typed_config"])
+	}
+	if wantType := "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext"; typedConfig["@type"] != wantType {
+		t.Errorf("typed_config[@type] = %v, want %v", typedConfig["@type"], wantType)
+	}
+	commonTLS, ok := typedConfig["common_tls_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
+	}
+	certs, ok := commonTLS["tls_certificates"].([]any)
+	if !ok || len(certs) != 1 {
+		t.Fatalf("common_tls_context.tls_certificates = %v, want a 1-element array", commonTLS["tls_certificates"])
+	}
+	cert, ok := certs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0] = %v, want an object", certs[0])
+	}
+	chain, ok := cert["certificate_chain"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0].certificate_chain missing or wrong type: %T", cert["certificate_chain"])
+	}
+	wantChain := gatewayTLSMountPath + "/" + string(corev1.TLSCertKey)
+	if chain["filename"] != wantChain {
+		t.Errorf("certificate_chain.filename = %v, want %v", chain["filename"], wantChain)
+	}
+	key, ok := cert["private_key"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0].private_key missing or wrong type: %T", cert["private_key"])
+	}
+	wantKey := gatewayTLSMountPath + "/" + string(corev1.TLSPrivateKeyKey)
+	if key["filename"] != wantKey {
+		t.Errorf("private_key.filename = %v, want %v", key["filename"], wantKey)
+	}
+}
+
+// listenerFilterChain returns the first filter_chain of the client-facing
+// "listener" (as opposed to the metrics-only "stats_listener", which
+// callers here never need).
+func listenerFilterChain(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	const listenerName = "listener"
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	for _, l := range listeners {
+		lm, _ := l.(map[string]any)
+		if name, _ := lm["name"].(string); name == listenerName {
+			chains := lm["filter_chains"].([]any)
+			return chains[0].(map[string]any)
+		}
+	}
+	t.Fatalf("listener %q not found in emitted config", listenerName)
+	return nil
 }
 
 // dfpCluster returns the parsed dynamic_forward_proxy cluster (the

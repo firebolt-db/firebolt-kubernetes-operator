@@ -266,10 +266,7 @@ func buildSigningCertificate(instance *computev1alpha1.FireboltInstance) *certma
 		algorithm = certmanagerv1.ECDSAKeyAlgorithm
 	}
 
-	issuerKind := policy.IssuerRef.Kind
-	if issuerKind == "" {
-		issuerKind = "ClusterIssuer"
-	}
+	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
 
 	return &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{

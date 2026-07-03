@@ -177,3 +177,93 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 		}
 	})
 }
+
+// TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme pins
+// down two things that must change together once gateway TLS is enabled
+// AND ready: the tls-gateway volume/mount pointing at
+// instance.Status.GatewayTLS's Secret, and the kubelet liveness/readiness
+// probe scheme flipping from HTTP to HTTPS. A probe still speaking HTTP
+// against a TLS-only listener would fail every probe and leave the
+// gateway forever un-Ready — the direct analog of
+// TestBuildStatefulSet_TLSEnabled_WebSidecarBackendSwitchesToHTTPS from
+// Phase 2's engine web-UI sidecar.
+func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T) {
+	baseLabels := map[string]string{"firebolt.io/instance": "fb"}
+	findVol := func(pt corev1.PodTemplateSpec, name string) *corev1.Volume {
+		for i := range pt.Spec.Volumes {
+			if pt.Spec.Volumes[i].Name == name {
+				return &pt.Spec.Volumes[i]
+			}
+		}
+		return nil
+	}
+	findMount := func(pt corev1.PodTemplateSpec, name string) *corev1.VolumeMount {
+		for i := range pt.Spec.Containers[0].VolumeMounts {
+			if pt.Spec.Containers[0].VolumeMounts[i].Name == name {
+				return &pt.Spec.Containers[0].VolumeMounts[i]
+			}
+		}
+		return nil
+	}
+	probeSchemes := func(pt corev1.PodTemplateSpec) (liveness, readiness corev1.URIScheme) {
+		c := pt.Spec.Containers[0]
+		return c.LivenessProbe.HTTPGet.Scheme, c.ReadinessProbe.HTTPGet.Scheme
+	}
+
+	t.Run("absent and HTTP when gateway TLS is disabled", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"}}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		if v := findVol(pt, computev1alpha1.GatewayTLSVolumeName); v != nil {
+			t.Errorf("unexpected gateway-TLS volume with TLS disabled: %+v", v)
+		}
+		if m := findMount(pt, computev1alpha1.GatewayTLSVolumeName); m != nil {
+			t.Errorf("unexpected gateway-TLS mount with TLS disabled: %+v", m)
+		}
+		live, ready := probeSchemes(pt)
+		if live != corev1.URISchemeHTTP || ready != corev1.URISchemeHTTP {
+			t.Errorf("probe schemes = (liveness=%s, readiness=%s), want HTTP/HTTP with TLS disabled", live, ready)
+		}
+	})
+
+	t.Run("absent and HTTP when gateway TLS is enabled but not yet ready", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+		}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		if v := findVol(pt, computev1alpha1.GatewayTLSVolumeName); v != nil {
+			t.Errorf("unexpected gateway-TLS volume before GatewayTLS is ready: %+v", v)
+		}
+		live, ready := probeSchemes(pt)
+		if live != corev1.URISchemeHTTP || ready != corev1.URISchemeHTTP {
+			t.Errorf("probe schemes = (liveness=%s, readiness=%s), want HTTP/HTTP before GatewayTLS is ready", live, ready)
+		}
+	})
+
+	t.Run("wired and HTTPS once ready", func(t *testing.T) {
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "fb-gateway-tls"},
+			},
+		}
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		v := findVol(pt, computev1alpha1.GatewayTLSVolumeName)
+		if v == nil || v.Secret == nil || v.Secret.SecretName != "fb-gateway-tls" {
+			t.Errorf("gateway-TLS volume = %+v, want Secret.SecretName=fb-gateway-tls", v)
+		}
+		m := findMount(pt, computev1alpha1.GatewayTLSVolumeName)
+		if m == nil || m.MountPath != gatewayTLSMountPath || !m.ReadOnly {
+			t.Errorf("gateway-TLS mount = %+v, want MountPath=%s ReadOnly=true", m, gatewayTLSMountPath)
+		}
+		live, ready := probeSchemes(pt)
+		if live != corev1.URISchemeHTTPS || ready != corev1.URISchemeHTTPS {
+			t.Errorf("probe schemes = (liveness=%s, readiness=%s), want HTTPS/HTTPS once GatewayTLS is ready", live, ready)
+		}
+	})
+}

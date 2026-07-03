@@ -133,6 +133,10 @@ const (
 	// Certificate (and its target Secret) holding the TLS server
 	// certificate every engine in the Instance shares.
 	SuffixEngineTLS = "-engine-tls"
+	// SuffixGatewayTLS is appended to form the name of the cert-manager
+	// Certificate (and its target Secret) holding the gateway's
+	// downstream (client-facing) TLS server certificate.
+	SuffixGatewayTLS = "-gateway-tls"
 
 	// MetadataServicePort is the gRPC port the metadata service listens on.
 	MetadataServicePort = 7000
