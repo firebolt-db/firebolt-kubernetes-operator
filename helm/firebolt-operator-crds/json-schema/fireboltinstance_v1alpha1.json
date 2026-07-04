@@ -146,6 +146,14 @@
                       ],
                       "type": "object",
                       "additionalProperties": false
+                    },
+                    "retainDuration": {
+                      "description": "RetainDuration bounds how long a demoted key is kept in\nsigning_keys[] as validation-only after it stops signing new\ntokens, before the operator drops it from every engine's rendered\nconfig and deletes its Certificate/Secret. Must be at least\ninstance.auth.local.maxTokenAge (packdb default: 1 day) plus\nhowever long a full engine fleet rollout realistically takes: a\ntoken signed in the last instant the old key was active must fully\nexpire before the key that could validate it disappears.\n\nRequired whenever RotationInterval is set; rejected otherwise (see\nValidateAuth).",
+                      "type": "string"
+                    },
+                    "rotationInterval": {
+                      "description": "RotationInterval, when set, enables operator-owned periodic\nrotation: measured from the active key's CreatedAt, once this much\ntime has passed the operator mints a new key and promotes it via a\ntwo-phase rollout that never opens a validation gap (see\nAuthStatus's doc comment). Omit to keep a single, permanent,\nnon-rotating key, matching this operator's original behavior.\n\nRetainDuration must also be set whenever this is set.",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -14967,8 +14975,12 @@
         "auth": {
           "description": "Auth reports the crypto material the operator has provisioned for\nInstance-wide auth (currently: JWT signing keys). Nil when\nspec.auth is unset or disabled.",
           "properties": {
+            "signingKeyGeneration": {
+              "description": "SigningKeyGeneration is a monotonically increasing counter the\noperator uses to mint each new signing key's ID (kid) as\n\"signing-<N>\", guaranteeing a fresh key never reuses an ID even\nafter an earlier key has been fully removed from SigningKeys (at\nwhich point nothing in this status would otherwise remember it was\never used). Never decreases.",
+              "type": "integer"
+            },
             "signingKeys": {
-              "description": "SigningKeys lists the currently provisioned JWT signing keys, first\nentry active. Phase 1 always has exactly one entry; a later\nrotation feature will grow this to multiple entries during a\nrollover window. A slice from the start so that addition is\nforward-compatible without a status schema change.",
+              "description": "SigningKeys lists every JWT signing key the operator is currently\nprovisioning or retaining for this Instance \u2014 exactly one with\nPhase=Active, and, only while a rotation is in flight, one or more\nadditional ValidationOnly/Removing keys. See SigningKeyPolicy's\nRotationInterval/RetainDuration for what drives a rotation, and\nSigningKeyPhase for the states a key passes through:\n\n  1. A new key is created ValidationOnly (not yet used to sign)\n     until every engine's ObservedAuthHash confirms it has rolled\n     out signing_keys[] including the new key \u2014 only then is it\n     safe to promote, because promoting any earlier would let a\n     rolled engine sign tokens a not-yet-rolled engine cannot yet\n     validate.\n  2. Promotion flips the new key to Active and demotes the previous\n     Active key to ValidationOnly (DemotedAt set), so tokens it\n     already signed keep validating everywhere. Every engine still\n     signs with the demoted key until it rolls onto this promoted\n     config \u2014 this is not instantaneous, so the retain window\n     cannot start counting yet.\n  3. Once every engine's ObservedAuthHash confirms it has actually\n     rolled onto the promoted config \u2014 meaning no engine anywhere\n     can still be signing with the demoted key \u2014 RetireEligibleAt\n     is stamped. This step exists specifically so RetainDuration\n     measures from \"provably stopped signing,\" not from \"decided to\n     stop signing\": anchoring at DemotedAt instead would let the\n     retain window elapse while a slow-rolling engine is still\n     minting tokens with the demoted key, silently reopening the\n     exact validation gap this whole rotation design exists to\n     avoid.\n  4. Once RetireEligibleAt+RetainDuration has elapsed, the demoted\n     key moves to Removing \u2014 dropped from render immediately, but\n     its Certificate/Secret are kept until every engine's\n     ObservedAuthHash confirms the removal has rolled out too.\n  5. Only then is the Removing key's Certificate deleted and its\n     entry dropped from this list.\n\nA slice from the start (predating rotation) so this growth during a\nrollover window needed no status schema change.",
               "items": {
                 "description": "SigningKeyStatus records one JWT signing key the operator has\nprovisioned for this Instance.",
                 "properties": {
@@ -14977,8 +14989,27 @@
                     "format": "date-time",
                     "type": "string"
                   },
+                  "demotedAt": {
+                    "description": "DemotedAt is when this key was demoted from Active, unset for a key\nthat either still is Active or has never been Active (newly minted,\nnot yet promoted) \u2014 used only to tell those two ValidationOnly\nsub-states apart. Deliberately NOT what RetainDuration counts from:\nengines keep signing with this key until they actually roll onto\nthe promoted config, which happens after this moment, so anchoring\nthe retain window here would let it elapse before every engine has\neven stopped using this key. See RetireEligibleAt.",
+                    "format": "date-time",
+                    "type": "string"
+                  },
                   "id": {
                     "description": "ID is the key identifier rendered as the JWT \"kid\" and as\ninstance.auth.local.signing_keys[].id on every engine.",
+                    "type": "string"
+                  },
+                  "phase": {
+                    "description": "Phase is this key's current role \u2014 see SigningKeyPhase. Unset\n(empty string) is treated as Active for compatibility with\nInstances that provisioned their one signing key before this field\nexisted; the controller normalizes it to Active explicitly on the\nnext reconcile.",
+                    "enum": [
+                      "Active",
+                      "ValidationOnly",
+                      "Removing"
+                    ],
+                    "type": "string"
+                  },
+                  "retireEligibleAt": {
+                    "description": "RetireEligibleAt is when every engine's ObservedAuthHash first\nconfirmed it had rolled onto the config produced by this key's\ndemotion \u2014 i.e. the earliest instant at which no engine anywhere\ncould still be signing new tokens with this key. Unset until that\nconfirmation happens. RetainDuration counts from here, not from\nDemotedAt: a token signed in the last instant before an engine\nrolls is only guaranteed to have expired by\nRetireEligibleAt+RetainDuration, not by DemotedAt+RetainDuration,\nsince rolling out the promotion itself takes real time.",
+                    "format": "date-time",
                     "type": "string"
                   },
                   "secretName": {

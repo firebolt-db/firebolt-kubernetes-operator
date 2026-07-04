@@ -262,8 +262,11 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 		errs = append(errs, field.Required(base.Child("signingKeys"),
 			"required when spec.auth.enabled is true: every engine in a multi-engine Instance must share "+
 				"identical signing keys, which packdb's own dev-autogen fallback cannot guarantee"))
-	} else if err := validateSigningAlgorithmCompatibility(local, base); err != nil {
-		errs = append(errs, err)
+	} else {
+		if err := validateSigningAlgorithmCompatibility(local, base); err != nil {
+			errs = append(errs, err)
+		}
+		errs = append(errs, validateSigningKeyRotation(local, base.Child("signingKeys"))...)
 	}
 
 	if err := validateDurationField(base.Child("tokenExpiry"), local.TokenExpiry); err != nil {
@@ -406,6 +409,53 @@ func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Pat
 	default:
 		return nil
 	}
+}
+
+// packdbDefaultMaxTokenAge is packdb's own built-in default for
+// instance.auth.local.max_token_age (LocalAuthSpec.MaxTokenAge's doc
+// comment), used by validateSigningKeyRotation as the floor for
+// RetainDuration when MaxTokenAge is left unset.
+const packdbDefaultMaxTokenAge = 24 * time.Hour
+
+// validateSigningKeyRotation enforces that SigningKeyPolicy's
+// RotationInterval and RetainDuration are always set together (base is
+// already scoped to "signingKeys" by the caller), and that RetainDuration
+// leaves at least MaxTokenAge of margin: a token signed in the instant a
+// key is demoted remains valid until it ages out, so pruning that key
+// any sooner would leave a still-valid token nothing can validate it
+// against.
+func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.ErrorList {
+	policy := local.SigningKeys
+	rotation := policy.RotationInterval
+	retain := policy.RetainDuration
+
+	switch {
+	case rotation == nil && retain == nil:
+		return nil
+	case rotation != nil && retain == nil:
+		return field.ErrorList{field.Required(base.Child("retainDuration"),
+			"required when signingKeys.rotationInterval is set")}
+	case rotation == nil && retain != nil:
+		return field.ErrorList{field.Forbidden(base.Child("retainDuration"),
+			"must not be set when signingKeys.rotationInterval is unset")}
+	}
+
+	maxTokenAge := packdbDefaultMaxTokenAge
+	if local.MaxTokenAge != "" {
+		// An invalid MaxTokenAge string is already reported separately by
+		// validateDurationField; skip the cross-check here rather than
+		// compare against an unparseable value.
+		if d, err := parsePackdbDuration(local.MaxTokenAge); err == nil {
+			maxTokenAge = d
+		}
+	}
+	if retain.Duration < maxTokenAge {
+		return field.ErrorList{field.Invalid(base.Child("retainDuration"), retain.Duration.String(),
+			fmt.Sprintf("must be at least maxTokenAge (%s): a token signed the instant a key is demoted "+
+				"remains valid until it ages out, so the operator must not prune that key any sooner — "+
+				"add extra margin on top of this minimum for a full engine fleet rollout to complete", maxTokenAge))}
+	}
+	return nil
 }
 
 // validatePreferredAuthorizationServer mirrors packdb's rule that a set

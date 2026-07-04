@@ -502,6 +502,25 @@ type FireboltEngineStatus struct {
 	// +optional
 	AutoStopReason string `json:"autoStopReason,omitempty"`
 
+	// ObservedAuthHash is the auth content-hash (see the internal
+	// authHash function) that this engine's current, stable generation
+	// was last confirmed to match — copied from the running
+	// StatefulSet's own drift-detection annotation once a reconcile finds
+	// no drift. Empty when auth is disabled or no generation has
+	// stabilized yet.
+	//
+	// This exists so the instance controller can tell, for its own
+	// signing-key rotation state machine, whether every engine in an
+	// Instance has actually rolled onto a given signing-keys set —
+	// without the instance controller needing to read engine
+	// StatefulSets directly or recompute engine-side rendering rules
+	// itself. It is intentionally the same hash already used to decide
+	// whether an engine needs a new generation (see stsMatchesSpec /
+	// annotationsMatchSpec), just surfaced here as this engine's own
+	// observed value of it.
+	// +optional
+	ObservedAuthHash string `json:"observedAuthHash,omitempty"`
+
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

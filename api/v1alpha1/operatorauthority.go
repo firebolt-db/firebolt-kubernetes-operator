@@ -136,8 +136,9 @@ const (
 	// EngineAuthSigningVolumeNamePrefix names each provisioned signing
 	// key's Secret volume: EngineAuthSigningVolumeNamePrefix + key ID
 	// (e.g. "auth-signing-signing-1"), present only when spec.auth is
-	// enabled. One volume per key so a future rotation feature can mount
-	// more than one at once without a name collision. Mounted at
+	// enabled. One volume per key so a rotation in flight can mount the
+	// Active key and the one other key it is promoting or retiring at
+	// once, without a name collision. Mounted at
 	// AuthSigningMountPathBase + "/" + <key ID> on the engine container.
 	EngineAuthSigningVolumeNamePrefix = "auth-signing-"
 	// EngineTLSVolumeName is the projected Secret volume carrying the
@@ -180,22 +181,17 @@ const (
 // renders on the engine StatefulSet's pod template. User templates may
 // not declare volumes or volumeMounts with these names.
 //
-// The signing-key entry is a literal name, not a prefix match: Phase 1
-// provisions exactly one, fixed-ID signing key
-// (internal/controller.AuthSigningKeyID = "signing-1"), so
-// EngineAuthSigningVolumeNamePrefix + "signing-1" is the only signing
-// volume that can ever appear on a Phase-1 engine pod. A later
-// operator-owned key-rotation phase will mount a dynamic, growing/
-// shrinking set of signing-key volumes — at that point this exact-match
-// list stops being sufficient and isReservedKey's callers (in
-// particular ValidatePodTemplate) will need a prefix check against
-// EngineAuthSigningVolumeNamePrefix instead of an enumerated literal.
+// Signing-key volumes are deliberately absent from this list: rotation
+// mounts a dynamic, growing/shrinking set of "auth-signing-<kid>" volumes
+// (one per currently-tracked key), so no static enumeration of every
+// possible kid could ever be complete. isReservedVolumeMountName covers
+// them instead, via a prefix check against
+// EngineAuthSigningVolumeNamePrefix — see its doc comment.
 var operatorOwnedEngineVolumeNames = []string{
 	EngineConfigVolumeName,
 	EngineDataVolumeName,
 	EngineRuntimeVolumeName,
 	EngineAuthAdminVolumeName,
-	EngineAuthSigningVolumeNamePrefix + "signing-1",
 	EngineTLSVolumeName,
 }
 
@@ -800,7 +796,7 @@ func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rul
 	}
 	if allowed.VolumeMounts {
 		for mi := range c.VolumeMounts {
-			if !isReservedKey(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
+			if !isReservedVolumeMountName(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
 				continue
 			}
 			errs = append(errs, field.Forbidden(base.Child("volumeMounts").Index(mi).Child("name"),
@@ -864,4 +860,19 @@ func isReservedKey(name string, reserved []string) bool {
 		}
 	}
 	return false
+}
+
+// isReservedVolumeMountName reports whether name is a container
+// volumeMount name the operator owns: either an exact match against
+// reserved, or a name starting with EngineAuthSigningVolumeNamePrefix.
+// The prefix check exists only for that one case: signing-key rotation
+// can mount any number of dynamically-numbered "auth-signing-<kid>"
+// volumes (one per currently-tracked key), so no static enumeration of
+// every possible kid — the way every other reserved name is a single
+// fixed string — could ever be complete.
+func isReservedVolumeMountName(name string, reserved []string) bool {
+	if strings.HasPrefix(name, EngineAuthSigningVolumeNamePrefix) {
+		return true
+	}
+	return isReservedKey(name, reserved)
 }

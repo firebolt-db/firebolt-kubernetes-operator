@@ -1174,7 +1174,15 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret"); err != nil {
 			return InstanceInfo{}, err
 		}
-		for _, k := range inst.Status.Auth.SigningKeys {
+		// Filtered through signingKeysForRender (Active + at most one
+		// other, Removing excluded) rather than the raw status list: a
+		// Removing key's Secret is deleted once every engine has
+		// confirmed it no longer needs it (see deleteSigningKey), and
+		// this engine's pod will never mount it either way — checking its
+		// existence here would only produce a spurious failure during
+		// that window.
+		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
+		for _, k := range renderKeys {
 			if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret"); err != nil {
 				return InstanceInfo{}, err
 			}
@@ -1182,7 +1190,7 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 
 		info.Auth = &ResolvedAuthInfo{
 			Spec:        inst.Spec.Auth,
-			SigningKeys: inst.Status.Auth.SigningKeys,
+			SigningKeys: renderKeys,
 		}
 	}
 

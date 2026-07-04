@@ -330,23 +330,53 @@ type AdminSpec struct {
 	Password corev1.SecretKeySelector `json:"password"`
 }
 
-// SigningKeyPolicy controls how the operator provisions the JWT signing
-// keypair used by the embedded ("_local") authorization server on every
-// engine. Signing keys are entirely operator-generated — the CRD does not
-// accept user-supplied key material — because every engine in an Instance
-// must share byte-identical signing_keys (packdb's SigningKeyManager
-// validates tokens minted by any peer engine), and an operator-generated
-// Secret is the only way to guarantee that across a fleet.
+// SigningKeyPolicy controls how the operator provisions and rotates the
+// JWT signing keypair used by the embedded ("_local") authorization
+// server on every engine. Signing keys are entirely operator-generated —
+// the CRD does not accept user-supplied key material — because every
+// engine in an Instance must share byte-identical signing_keys (packdb's
+// SigningKeyManager validates tokens minted by any peer engine, looked up
+// by kid, so every key any engine could have signed with must be present
+// on every other engine), and an operator-generated Secret is the only
+// way to guarantee that across a fleet.
 //
-// Phase 1 provisions exactly one long-lived key with cert-manager
-// auto-renew disabled: packdb reads signing keys only at process startup,
-// so an uncoordinated renewal would make one engine sign with a key its
-// peers can't yet validate. Coordinated rotation is a planned addition to
-// this struct, not yet implemented.
+// Every Certificate this policy produces has cert-manager auto-renew
+// disabled: packdb reads signing keys only at process startup, so an
+// uncoordinated renewal would make one engine sign with a key its peers
+// can't yet validate. When RotationInterval is set, the operator performs
+// its own coordinated rotation instead (see AuthStatus's doc comment for
+// the two-phase promote/retire sequence), which is exactly the
+// coordination an uncoordinated cert-manager renewal would be unable to
+// provide.
 type SigningKeyPolicy struct {
 	// CertManager configures the cert-manager Certificate used to
 	// generate the signing keypair.
 	CertManager CertManagerSpec `json:"certManager"`
+
+	// RotationInterval, when set, enables operator-owned periodic
+	// rotation: measured from the active key's CreatedAt, once this much
+	// time has passed the operator mints a new key and promotes it via a
+	// two-phase rollout that never opens a validation gap (see
+	// AuthStatus's doc comment). Omit to keep a single, permanent,
+	// non-rotating key, matching this operator's original behavior.
+	//
+	// RetainDuration must also be set whenever this is set.
+	// +optional
+	RotationInterval *metav1.Duration `json:"rotationInterval,omitempty"`
+
+	// RetainDuration bounds how long a demoted key is kept in
+	// signing_keys[] as validation-only after it stops signing new
+	// tokens, before the operator drops it from every engine's rendered
+	// config and deletes its Certificate/Secret. Must be at least
+	// instance.auth.local.maxTokenAge (packdb default: 1 day) plus
+	// however long a full engine fleet rollout realistically takes: a
+	// token signed in the last instant the old key was active must fully
+	// expire before the key that could validate it disappears.
+	//
+	// Required whenever RotationInterval is set; rejected otherwise (see
+	// ValidateAuth).
+	// +optional
+	RetainDuration *metav1.Duration `json:"retainDuration,omitempty"`
 }
 
 // LocalAuthSpec configures the embedded ("_local") authorization server:
@@ -704,6 +734,35 @@ type FireboltInstanceSpec struct {
 	MetricScrapeMode MetricScrapeMode `json:"metricScrapeMode,omitempty"`
 }
 
+// SigningKeyPhase is a signing key's current role in Instance-wide JWT
+// signing and validation. Every "which key is active" or "which keys are
+// still valid" decision reads this field, not a key's position within
+// AuthStatus.SigningKeys — position carries no meaning, precisely so a
+// multi-step, requeue-tolerant rotation pipeline never depends on the
+// operator writing the slice back in a particular order.
+// +kubebuilder:validation:Enum=Active;ValidationOnly;Removing
+type SigningKeyPhase string
+
+const (
+	// SigningKeyActive is the key packdb's embedded server currently
+	// signs new tokens with. Exactly one key is Active at a time.
+	SigningKeyActive SigningKeyPhase = "Active"
+	// SigningKeyValidationOnly is a retained key still rendered into
+	// signing_keys[] so packdb continues to validate tokens signed with
+	// it, but not used to sign new ones. A key passes through this phase
+	// twice in one rotation: briefly right after creation (before every
+	// engine has it and it is safe to promote), and again after being
+	// demoted from Active (until RetainDuration elapses).
+	SigningKeyValidationOnly SigningKeyPhase = "ValidationOnly"
+	// SigningKeyRemoving marks a key that must no longer be rendered or
+	// mounted on any engine, but whose Certificate/Secret the operator
+	// has not yet deleted — it is waiting for every engine to confirm
+	// (via ObservedAuthHash) it has rolled onto a signing_keys[] that no
+	// longer includes this key, so a slow engine can never be left
+	// referencing a private_key_path that has vanished out from under it.
+	SigningKeyRemoving SigningKeyPhase = "Removing"
+)
+
 // SigningKeyStatus records one JWT signing key the operator has
 // provisioned for this Instance.
 type SigningKeyStatus struct {
@@ -717,19 +776,92 @@ type SigningKeyStatus struct {
 
 	// CreatedAt is when this key was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
+
+	// Phase is this key's current role — see SigningKeyPhase. Unset
+	// (empty string) is treated as Active for compatibility with
+	// Instances that provisioned their one signing key before this field
+	// existed; the controller normalizes it to Active explicitly on the
+	// next reconcile.
+	// +optional
+	Phase SigningKeyPhase `json:"phase,omitempty"`
+
+	// DemotedAt is when this key was demoted from Active, unset for a key
+	// that either still is Active or has never been Active (newly minted,
+	// not yet promoted) — used only to tell those two ValidationOnly
+	// sub-states apart. Deliberately NOT what RetainDuration counts from:
+	// engines keep signing with this key until they actually roll onto
+	// the promoted config, which happens after this moment, so anchoring
+	// the retain window here would let it elapse before every engine has
+	// even stopped using this key. See RetireEligibleAt.
+	// +optional
+	DemotedAt *metav1.Time `json:"demotedAt,omitempty"`
+
+	// RetireEligibleAt is when every engine's ObservedAuthHash first
+	// confirmed it had rolled onto the config produced by this key's
+	// demotion — i.e. the earliest instant at which no engine anywhere
+	// could still be signing new tokens with this key. Unset until that
+	// confirmation happens. RetainDuration counts from here, not from
+	// DemotedAt: a token signed in the last instant before an engine
+	// rolls is only guaranteed to have expired by
+	// RetireEligibleAt+RetainDuration, not by DemotedAt+RetainDuration,
+	// since rolling out the promotion itself takes real time.
+	// +optional
+	RetireEligibleAt *metav1.Time `json:"retireEligibleAt,omitempty"`
 }
 
 // AuthStatus reports the observed state of Instance-wide auth
 // provisioning — the crypto material engines need, as opposed to
 // AuthSpec's desired configuration.
 type AuthStatus struct {
-	// SigningKeys lists the currently provisioned JWT signing keys, first
-	// entry active. Phase 1 always has exactly one entry; a later
-	// rotation feature will grow this to multiple entries during a
-	// rollover window. A slice from the start so that addition is
-	// forward-compatible without a status schema change.
+	// SigningKeys lists every JWT signing key the operator is currently
+	// provisioning or retaining for this Instance — exactly one with
+	// Phase=Active, and, only while a rotation is in flight, one or more
+	// additional ValidationOnly/Removing keys. See SigningKeyPolicy's
+	// RotationInterval/RetainDuration for what drives a rotation, and
+	// SigningKeyPhase for the states a key passes through:
+	//
+	//   1. A new key is created ValidationOnly (not yet used to sign)
+	//      until every engine's ObservedAuthHash confirms it has rolled
+	//      out signing_keys[] including the new key — only then is it
+	//      safe to promote, because promoting any earlier would let a
+	//      rolled engine sign tokens a not-yet-rolled engine cannot yet
+	//      validate.
+	//   2. Promotion flips the new key to Active and demotes the previous
+	//      Active key to ValidationOnly (DemotedAt set), so tokens it
+	//      already signed keep validating everywhere. Every engine still
+	//      signs with the demoted key until it rolls onto this promoted
+	//      config — this is not instantaneous, so the retain window
+	//      cannot start counting yet.
+	//   3. Once every engine's ObservedAuthHash confirms it has actually
+	//      rolled onto the promoted config — meaning no engine anywhere
+	//      can still be signing with the demoted key — RetireEligibleAt
+	//      is stamped. This step exists specifically so RetainDuration
+	//      measures from "provably stopped signing," not from "decided to
+	//      stop signing": anchoring at DemotedAt instead would let the
+	//      retain window elapse while a slow-rolling engine is still
+	//      minting tokens with the demoted key, silently reopening the
+	//      exact validation gap this whole rotation design exists to
+	//      avoid.
+	//   4. Once RetireEligibleAt+RetainDuration has elapsed, the demoted
+	//      key moves to Removing — dropped from render immediately, but
+	//      its Certificate/Secret are kept until every engine's
+	//      ObservedAuthHash confirms the removal has rolled out too.
+	//   5. Only then is the Removing key's Certificate deleted and its
+	//      entry dropped from this list.
+	//
+	// A slice from the start (predating rotation) so this growth during a
+	// rollover window needed no status schema change.
 	// +optional
 	SigningKeys []SigningKeyStatus `json:"signingKeys,omitempty"`
+
+	// SigningKeyGeneration is a monotonically increasing counter the
+	// operator uses to mint each new signing key's ID (kid) as
+	// "signing-<N>", guaranteeing a fresh key never reuses an ID even
+	// after an earlier key has been fully removed from SigningKeys (at
+	// which point nothing in this status would otherwise remember it was
+	// ever used). Never decreases.
+	// +optional
+	SigningKeyGeneration int `json:"signingKeyGeneration,omitempty"`
 }
 
 // EngineTLSStatus reports the observed state of engine-listener TLS

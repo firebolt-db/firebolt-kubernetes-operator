@@ -94,6 +94,15 @@ spec:
             kind: ClusterIssuer
           algorithm: RSA
           size: 2048
+        # Optional: operator-owned rotation. Omit both fields to keep a
+        # single, permanent, non-rotating key (the default). When set,
+        # the operator mints a new key every rotationInterval and rolls
+        # it out via a two-phase promotion that never opens a validation
+        # gap; retainDuration must be at least maxTokenAge (packdb
+        # default: 1d) so a token signed the instant a key is demoted has
+        # fully expired before that key is removed.
+        rotationInterval: 720h # 30 days
+        retainDuration: 24h
     oidc:
       providers:
         - name: okta

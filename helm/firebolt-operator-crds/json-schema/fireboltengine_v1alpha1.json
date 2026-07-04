@@ -7560,6 +7560,10 @@
           "format": "date-time",
           "type": "string"
         },
+        "observedAuthHash": {
+          "description": "ObservedAuthHash is the auth content-hash (see the internal\nauthHash function) that this engine's current, stable generation\nwas last confirmed to match \u2014 copied from the running\nStatefulSet's own drift-detection annotation once a reconcile finds\nno drift. Empty when auth is disabled or no generation has\nstabilized yet.\n\nThis exists so the instance controller can tell, for its own\nsigning-key rotation state machine, whether every engine in an\nInstance has actually rolled onto a given signing-keys set \u2014\nwithout the instance controller needing to read engine\nStatefulSets directly or recompute engine-side rendering rules\nitself. It is intentionally the same hash already used to decide\nwhether an engine needs a new generation (see stsMatchesSpec /\nannotationsMatchSpec), just surfaced here as this engine's own\nobserved value of it.",
+          "type": "string"
+        },
         "observedGeneration": {
           "description": "ObservedGeneration is the metadata.generation that was last fully reconciled to stable.",
           "format": "int64",

@@ -1181,6 +1181,97 @@ func TestComputeEngineReconcile_S5_ConfigMapMissing(t *testing.T) {
 	}
 }
 
+// --- ObservedAuthHash stamping ---
+
+// TestComputeEngineReconcile_StableStampsObservedAuthHash pins down the
+// signing-key-rotation convergence signal: once computeStable confirms
+// the running StatefulSet matches spec (no drift, including no
+// AnnotationAuthHash drift), it must copy that exact annotation value
+// onto Status.ObservedAuthHash. The instance controller's rotation state
+// machine (enginesConvergedOn, instance_auth.go) has no other way to
+// learn that an engine has actually rolled onto a given signing-keys
+// state.
+func TestComputeEngineReconcile_StableStampsObservedAuthHash(t *testing.T) {
+	spec := testSpec()
+	auth := &computev1alpha1.AuthSpec{
+		Enabled: true,
+		Local: &computev1alpha1.LocalAuthSpec{
+			Admin: computev1alpha1.AdminSpec{
+				Password: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+					Key:                  "password",
+				},
+			},
+		},
+	}
+	instanceInfo := InstanceInfo{
+		MetadataEndpoint: testMetadataEndpoint,
+		InstanceID:       testInstanceID,
+		Auth: &ResolvedAuthInfo{
+			Spec: auth,
+			SigningKeys: []computev1alpha1.SigningKeyStatus{
+				{ID: "signing-1", SecretName: "inst-auth-signing", Phase: computev1alpha1.SigningKeyActive},
+			},
+		},
+	}
+	wantHash := authHash(instanceInfo.Auth)
+	if wantHash == "" {
+		t.Fatal("authHash(instanceInfo.Auth) = \"\", want non-empty for auth enabled")
+	}
+
+	sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, instanceInfo, nil)
+	replicas := int32(3)
+	sts.Spec.Replicas = &replicas
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              sts,
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, instanceInfo, nil),
+		CurrentPodsReady:        true,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, instanceInfo, nil)
+
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Fatalf("expected phase Stable (no drift), got %s", result.Status.Phase)
+	}
+	if result.Status.ObservedAuthHash != wantHash {
+		t.Errorf("ObservedAuthHash = %q, want %q (authHash(instanceInfo.Auth))", result.Status.ObservedAuthHash, wantHash)
+	}
+}
+
+// TestComputeEngineReconcile_StableAuthDisabledObservedAuthHashEmpty pins
+// down the counterpart: an engine with auth disabled must never carry a
+// stale non-empty ObservedAuthHash forward, since authHash(nil) == "" is
+// exactly what enginesConvergedOn compares against for such an Instance.
+func TestComputeEngineReconcile_StableAuthDisabledObservedAuthHashEmpty(t *testing.T) {
+	spec := testSpec()
+	status := stableStatus()
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 0, 3),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, testInstanceInfo(), nil),
+		CurrentPodsReady:        true,
+		CurrentPodTotal:         3,
+		CurrentPodReady:         3,
+		ClusterService:          makeClusterSvc(testEngineName, 0),
+		ClusterServiceTargetGen: 0,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+
+	if result.Status.Phase != computev1alpha1.PhaseStable {
+		t.Fatalf("expected phase Stable (no drift), got %s", result.Status.Phase)
+	}
+	if result.Status.ObservedAuthHash != "" {
+		t.Errorf("ObservedAuthHash = %q, want empty (auth disabled)", result.Status.ObservedAuthHash)
+	}
+}
+
 // --- Cleaning nil DrainingGeneration guard ---
 
 func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {

@@ -20,13 +20,16 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -89,7 +92,7 @@ func TestBuildSigningCertificate_DefaultsToRSAPKCS8NeverRotate(t *testing.T) {
 		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: validAuthSpecForController()},
 	}
 
-	cert := buildSigningCertificate(instance)
+	cert := buildSigningCertificate(instance, AuthSigningKeyID)
 
 	wantName := "inst" + SuffixAuthSigning
 	if cert.Name != wantName {
@@ -161,7 +164,7 @@ func TestBuildSigningCertificate_CommonNameBoundedForLongNames(t *testing.T) {
 		Spec: computev1alpha1.FireboltInstanceSpec{Auth: validAuthSpecForController()},
 	}
 
-	cert := buildSigningCertificate(instance)
+	cert := buildSigningCertificate(instance, AuthSigningKeyID)
 
 	if len(cert.Spec.CommonName) > 64 {
 		t.Fatalf("Spec.CommonName = %q (%d chars), want <=64", cert.Spec.CommonName, len(cert.Spec.CommonName))
@@ -189,7 +192,7 @@ func TestBuildSigningCertificate_ECDSAAndExplicitIssuerKind(t *testing.T) {
 		},
 	}
 
-	cert := buildSigningCertificate(instance)
+	cert := buildSigningCertificate(instance, AuthSigningKeyID)
 
 	if cert.Spec.PrivateKey.Algorithm != certmanagerv1.ECDSAKeyAlgorithm {
 		t.Errorf("Algorithm = %q, want ECDSA", cert.Spec.PrivateKey.Algorithm)
@@ -207,25 +210,24 @@ func TestBuildSigningCertificate_ECDSAAndExplicitIssuerKind(t *testing.T) {
 	}
 }
 
-// TestAuthSigningVolumeName_MatchesReservedEngineVolumeName guards against
-// AuthSigningKeyID and operatorauthority.go's reserved engine volume name
-// silently diverging. api/v1alpha1 cannot import internal/controller (that
-// would be a cycle), so operatorOwnedEngineVolumeNames reserves the Phase-1
-// signing volume as a literal — EngineAuthSigningVolumeNamePrefix +
-// "signing-1" — rather than computing it from AuthSigningKeyID. If
-// AuthSigningKeyID ever changes without updating that literal, a user's pod
-// template could declare a volumeMount with the real (now unreserved) auth
-// signing volume name and collide with the operator's own mount undetected.
-func TestAuthSigningVolumeName_MatchesReservedEngineVolumeName(t *testing.T) {
-	got := authSigningVolumeName(AuthSigningKeyID)
-	reserved := computev1alpha1.FireboltEngineClassPodTemplateRules.ReservedPrimaryVolumeMountNames
-	for _, name := range reserved {
-		if name == got {
-			return
+// TestAuthSigningVolumeName_ReservedViaPrefix guards against
+// authSigningVolumeName's naming scheme and
+// EngineAuthSigningVolumeNamePrefix silently diverging. Rotation can
+// mount a volume for any kid the operator has ever minted, so
+// api/v1alpha1's isReservedVolumeMountName reserves all of them via a
+// prefix check rather than an enumerated literal (api/v1alpha1 cannot
+// import internal/controller to compute one, and no static enumeration
+// of every possible kid could be complete anyway). This pins down that
+// authSigningVolumeName's output always starts with that exact prefix,
+// for both the first key and a hypothetical later-rotation key.
+func TestAuthSigningVolumeName_ReservedViaPrefix(t *testing.T) {
+	for _, kid := range []string{AuthSigningKeyID, "signing-42"} {
+		got := authSigningVolumeName(kid)
+		if !strings.HasPrefix(got, computev1alpha1.EngineAuthSigningVolumeNamePrefix) {
+			t.Errorf("authSigningVolumeName(%q) = %q, want prefix %q",
+				kid, got, computev1alpha1.EngineAuthSigningVolumeNamePrefix)
 		}
 	}
-	t.Errorf("authSigningVolumeName(AuthSigningKeyID) = %q not present in reserved engine volume names %v; "+
-		"update the literal in api/v1alpha1/operatorauthority.go's operatorOwnedEngineVolumeNames", got, reserved)
 }
 
 func TestCheckAdminPasswordSecret(t *testing.T) {
@@ -382,5 +384,538 @@ func TestEnsureAuth_MissingAdminSecretFailsBeforeTouchingSigningKeys(t *testing.
 	// ensureSigningCertificate's doc comment), so Status.Auth must stay nil.
 	if instance.Status.Auth != nil {
 		t.Errorf("Status.Auth = %+v, want nil: signing-key provisioning must not have been reached", instance.Status.Auth)
+	}
+}
+
+// --- Signing-key rotation: pure helper functions ---
+
+func TestNormalizeSigningKeyPhases_BackfillsEmptyToActive(t *testing.T) {
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-1", Phase: ""},
+		{ID: "signing-2", Phase: computev1alpha1.SigningKeyValidationOnly},
+	}
+	normalizeSigningKeyPhases(keys)
+	if keys[0].Phase != computev1alpha1.SigningKeyActive {
+		t.Errorf("keys[0].Phase = %q, want Active (backfilled from empty, matching a pre-rotation Instance)", keys[0].Phase)
+	}
+	if keys[1].Phase != computev1alpha1.SigningKeyValidationOnly {
+		t.Errorf("keys[1].Phase = %q, want unchanged ValidationOnly", keys[1].Phase)
+	}
+}
+
+func TestActiveAndOtherSigningKey(t *testing.T) {
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-2", Phase: computev1alpha1.SigningKeyValidationOnly},
+		{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive},
+	}
+	if active := activeSigningKey(keys); active == nil || active.ID != "signing-1" {
+		t.Fatalf("activeSigningKey(keys) = %+v, want signing-1", active)
+	}
+	if other := otherSigningKey(keys); other == nil || other.ID != "signing-2" {
+		t.Fatalf("otherSigningKey(keys) = %+v, want signing-2", other)
+	}
+	if activeSigningKey(nil) != nil {
+		t.Error("activeSigningKey(nil) should be nil: a brand-new Instance has no key yet")
+	}
+	soleActive := []computev1alpha1.SigningKeyStatus{{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive}}
+	if otherSigningKey(soleActive) != nil {
+		t.Error("otherSigningKey should be nil when only an Active key exists (no rotation in flight)")
+	}
+}
+
+func TestSigningKeysForRender(t *testing.T) {
+	tests := []struct {
+		name string
+		keys []computev1alpha1.SigningKeyStatus
+		want []string
+	}{
+		{
+			name: "active only",
+			keys: []computev1alpha1.SigningKeyStatus{{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive}},
+			want: []string{"signing-1"},
+		},
+		{
+			name: "active first regardless of slice order, validation-only included",
+			keys: []computev1alpha1.SigningKeyStatus{
+				{ID: "signing-2", Phase: computev1alpha1.SigningKeyValidationOnly},
+				{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive},
+			},
+			want: []string{"signing-1", "signing-2"},
+		},
+		{
+			name: "removing key excluded from render",
+			keys: []computev1alpha1.SigningKeyStatus{
+				{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive},
+				{ID: "signing-2", Phase: computev1alpha1.SigningKeyRemoving},
+			},
+			want: []string{"signing-1"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := signingKeysForRender(tc.keys)
+			if len(got) != len(tc.want) {
+				t.Fatalf("signingKeysForRender = %+v, want %d entries matching IDs %v", got, len(tc.want), tc.want)
+			}
+			for i, id := range tc.want {
+				if got[i].ID != id {
+					t.Errorf("got[%d].ID = %q, want %q", i, got[i].ID, id)
+				}
+			}
+		})
+	}
+}
+
+func TestPromoteSigningKey_FlipsPhasesAndSetsDemotedAt(t *testing.T) {
+	active := &computev1alpha1.SigningKeyStatus{ID: "signing-1", Phase: computev1alpha1.SigningKeyActive}
+	other := &computev1alpha1.SigningKeyStatus{ID: "signing-2", Phase: computev1alpha1.SigningKeyValidationOnly}
+
+	promoteSigningKey(active, other)
+
+	if other.Phase != computev1alpha1.SigningKeyActive {
+		t.Errorf("other.Phase = %q, want Active", other.Phase)
+	}
+	if active.Phase != computev1alpha1.SigningKeyValidationOnly {
+		t.Errorf("active.Phase = %q, want ValidationOnly", active.Phase)
+	}
+	if active.DemotedAt == nil {
+		t.Error("active.DemotedAt not set after demotion")
+	}
+	if active.RetireEligibleAt != nil {
+		t.Error("active.RetireEligibleAt must stay unset at promotion time: engines haven't rolled onto " +
+			"the promoted config yet, so the retain window must not start counting until " +
+			"stepSigningKeyRotation separately confirms that rollout")
+	}
+}
+
+func TestRemoveSigningKey_DropsMatchingID(t *testing.T) {
+	keys := []computev1alpha1.SigningKeyStatus{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	got := removeSigningKey(keys, "b")
+	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "c" {
+		t.Errorf("removeSigningKey(keys, \"b\") = %+v, want [a c]", got)
+	}
+}
+
+func TestAuthStatusGeneration(t *testing.T) {
+	instance := &computev1alpha1.FireboltInstance{}
+	if g := authStatusGeneration(instance); g != 0 {
+		t.Errorf("authStatusGeneration(nil Status.Auth) = %d, want 0", g)
+	}
+	instance.Status.Auth = &computev1alpha1.AuthStatus{SigningKeyGeneration: 3}
+	if g := authStatusGeneration(instance); g != 3 {
+		t.Errorf("authStatusGeneration = %d, want 3", g)
+	}
+}
+
+func TestSigningKeyID_GenerationOneMatchesAuthSigningKeyID(t *testing.T) {
+	if signingKeyID(1) != AuthSigningKeyID {
+		t.Errorf("signingKeyID(1) = %q, want AuthSigningKeyID (%q)", signingKeyID(1), AuthSigningKeyID)
+	}
+	if signingKeyID(2) == signingKeyID(1) {
+		t.Error("signingKeyID must produce a distinct ID per generation")
+	}
+}
+
+func TestSigningCertificateName_Generation1KeepsLegacyName(t *testing.T) {
+	legacy := "inst" + SuffixAuthSigning
+	if got := signingCertificateName("inst", AuthSigningKeyID); got != legacy {
+		t.Errorf("signingCertificateName(inst, AuthSigningKeyID) = %q, want %q: an Instance that never rotates "+
+			"must keep its pre-rotation Certificate name across an operator upgrade", got, legacy)
+	}
+	if got, want := signingCertificateName("inst", "signing-2"), legacy+"-signing-2"; got != want {
+		t.Errorf("signingCertificateName(inst, signing-2) = %q, want %q", got, want)
+	}
+}
+
+// --- Signing-key rotation: enginesConvergedOn ---
+
+// engineWithHash builds a minimal FireboltEngine carrying the given
+// ObservedAuthHash and instance-membership label, for tests that need to
+// simulate an engine at a particular point in its own rollout.
+func engineWithHash(name, instanceLabel, hash string) *computev1alpha1.FireboltEngine {
+	return &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: "ns-1",
+			Labels: map[string]string{LabelInstance: instanceLabel},
+		},
+		Status: computev1alpha1.FireboltEngineStatus{ObservedAuthHash: hash},
+	}
+}
+
+func TestEnginesConvergedOn(t *testing.T) {
+	sch := authTestScheme(t)
+	auth := validAuthSpecForController()
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-1", SecretName: "inst" + SuffixAuthSigning, Phase: computev1alpha1.SigningKeyActive},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
+	}
+	expected := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(keys)})
+	if expected == "" {
+		t.Fatal("expected hash is empty; test fixture is wrong")
+	}
+
+	t.Run("no engines is vacuously converged", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
+		if err != nil || !ok {
+			t.Fatalf("enginesConvergedOn = (%v, %v), want (true, nil)", ok, err)
+		}
+	})
+
+	t.Run("all engines matching hash converges", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			engineWithHash("e1", "inst", expected),
+			engineWithHash("e2", "inst", expected),
+		).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
+		if err != nil || !ok {
+			t.Fatalf("enginesConvergedOn = (%v, %v), want (true, nil)", ok, err)
+		}
+	})
+
+	t.Run("one lagging engine blocks convergence", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			engineWithHash("e1", "inst", expected),
+			engineWithHash("e2", "inst", "stale-hash"),
+		).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
+		if err != nil || ok {
+			t.Fatalf("enginesConvergedOn = (%v, %v), want (false, nil)", ok, err)
+		}
+	})
+
+	t.Run("engine belonging to a different instance is ignored", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			engineWithHash("e1", "other-inst", "irrelevant-hash"),
+		).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
+		if err != nil || !ok {
+			t.Fatalf("enginesConvergedOn = (%v, %v), want (true, nil): an unrelated Instance's engine must not block", ok, err)
+		}
+	})
+}
+
+// --- Signing-key rotation: full lifecycle via ensureSigningKeys/stepSigningKeyRotation ---
+
+// signingKeySecretFor returns a Secret matching what cert-manager would
+// eventually write for the Certificate buildSigningCertificate(instance,
+// kid) describes: a real cert-manager controller isn't running against
+// the fake client in these tests, so tests seed this directly to simulate
+// "cert-manager has already issued this key" wherever the state machine
+// needs to observe readiness.
+func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string) *corev1.Secret {
+	name := signingCertificateName(instance.Name, kid)
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace},
+		Data:       map[string][]byte{corev1.TLSPrivateKeyKey: []byte("fake-pem-" + kid)},
+	}
+}
+
+func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: validAuthSpecForController()},
+	}
+
+	ready, err := r.ensureSigningKeys(context.Background(), instance)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ready {
+		t.Fatal("expected ready=false before cert-manager has issued the Secret")
+	}
+	if instance.Status.Auth == nil || len(instance.Status.Auth.SigningKeys) != 1 {
+		t.Fatalf("Status.Auth.SigningKeys = %+v, want exactly one key tracked (Certificate applied, Secret pending)",
+			instance.Status.Auth)
+	}
+	key := instance.Status.Auth.SigningKeys[0]
+	if key.ID != AuthSigningKeyID || key.Phase != computev1alpha1.SigningKeyActive {
+		t.Errorf("key = %+v, want ID=%q Phase=Active", key, AuthSigningKeyID)
+	}
+	if !key.CreatedAt.IsZero() {
+		t.Error("CreatedAt must stay unset until the Secret is actually observed ready")
+	}
+
+	// Simulate cert-manager finishing issuance, then reconcile again.
+	if err := cli.Create(context.Background(), signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
+		t.Fatalf("seeding signing key secret: %v", err)
+	}
+	ready, err = r.ensureSigningKeys(context.Background(), instance)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ready {
+		t.Fatal("expected ready=true once the Secret carries a private key")
+	}
+	if instance.Status.Auth.SigningKeys[0].CreatedAt.IsZero() {
+		t.Error("CreatedAt must be set once the key is observed ready")
+	}
+}
+
+// TestEnsureSigningKeys_FullRotationLifecycle drives the entire rotation
+// state machine — mint, promote, retain, remove — across simulated
+// reconciles, using an Instance with no engines (so every convergence
+// check is vacuously true) to isolate the state machine's own timing
+// logic from enginesConvergedOn, which TestEnginesConvergedOn covers
+// separately.
+func TestEnsureSigningKeys_FullRotationLifecycle(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+	ctx := context.Background()
+
+	auth := validAuthSpecForController()
+	rotationInterval := metav1.Duration{Duration: time.Hour}
+	retainDuration := metav1.Duration{Duration: time.Hour}
+	auth.Local.SigningKeys.RotationInterval = &rotationInterval
+	auth.Local.SigningKeys.RetainDuration = &retainDuration
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			Auth: &computev1alpha1.AuthStatus{
+				SigningKeyGeneration: 1,
+				SigningKeys: []computev1alpha1.SigningKeyStatus{{
+					ID:         AuthSigningKeyID,
+					SecretName: signingCertificateName("inst", AuthSigningKeyID),
+					// Already well past rotationInterval, so a rotation is due
+					// from the very first reconcile.
+					CreatedAt: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
+					Phase:     computev1alpha1.SigningKeyActive,
+				}},
+			},
+		},
+	}
+	if err := cli.Create(ctx, signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
+		t.Fatalf("seeding initial signing key secret: %v", err)
+	}
+
+	// Step 1: rotation is due, but signing-2's Secret does not exist yet —
+	// mintNextSigningKey must apply the Certificate without appending an
+	// unready key to Status.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 1: unexpected error: %v", err)
+	}
+	if got := len(instance.Status.Auth.SigningKeys); got != 1 {
+		t.Fatalf("step 1: SigningKeys has %d entries, want 1 (new key must not be tracked before its Secret is ready)", got)
+	}
+
+	// Step 2: seed signing-2's Secret (cert-manager "finishes issuing"),
+	// reconcile again — the pending mint must now succeed and append it
+	// ValidationOnly.
+	if err := cli.Create(ctx, signingKeySecretFor(instance, "signing-2")); err != nil {
+		t.Fatalf("seeding signing-2 secret: %v", err)
+	}
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 2: unexpected error: %v", err)
+	}
+	keys := instance.Status.Auth.SigningKeys
+	if len(keys) != 2 {
+		t.Fatalf("step 2: SigningKeys = %+v, want 2 entries", keys)
+	}
+	other := otherSigningKey(keys)
+	if other == nil || other.ID != "signing-2" || other.Phase != computev1alpha1.SigningKeyValidationOnly || other.DemotedAt != nil {
+		t.Fatalf("step 2: other = %+v, want signing-2/ValidationOnly/DemotedAt=nil", other)
+	}
+	if instance.Status.Auth.SigningKeyGeneration != 2 {
+		t.Errorf("step 2: SigningKeyGeneration = %d, want 2", instance.Status.Auth.SigningKeyGeneration)
+	}
+
+	// Step 3: no engines exist, so convergence is vacuous — the next
+	// reconcile must promote signing-2 to Active and demote signing-1.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 3: unexpected error: %v", err)
+	}
+	keys = instance.Status.Auth.SigningKeys
+	active := activeSigningKey(keys)
+	other = otherSigningKey(keys)
+	if active == nil || active.ID != "signing-2" {
+		t.Fatalf("step 3: active = %+v, want signing-2", active)
+	}
+	if other == nil || other.ID != AuthSigningKeyID || other.Phase != computev1alpha1.SigningKeyValidationOnly || other.DemotedAt == nil {
+		t.Fatalf("step 3: other = %+v, want %s/ValidationOnly with DemotedAt set", other, AuthSigningKeyID)
+	}
+
+	// Step 4: no engines exist, so convergence on the just-promoted config
+	// is also vacuous — the next reconcile must confirm the promotion
+	// rolled out and stamp RetireEligibleAt, WITHOUT yet touching Phase:
+	// the retain window has not started counting before this point, and
+	// this is the step that starts it. If the retain window instead
+	// started at DemotedAt (the promotion decision, not its confirmed
+	// rollout), a slow-rolling engine could still be signing with this
+	// key after the window already began — see RetireEligibleAt's doc
+	// comment for why that would silently reopen the exact validation gap
+	// this whole rotation design exists to close.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 4: unexpected error: %v", err)
+	}
+	other = otherSigningKey(instance.Status.Auth.SigningKeys)
+	if other == nil || other.Phase != computev1alpha1.SigningKeyValidationOnly || other.RetireEligibleAt == nil {
+		t.Fatalf("step 4: other = %+v, want ValidationOnly with RetireEligibleAt now set", other)
+	}
+
+	// Step 5: RetainDuration (1h) has not elapsed since RetireEligibleAt
+	// (just now) — nothing should change yet.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 5: unexpected error: %v", err)
+	}
+	if other := otherSigningKey(instance.Status.Auth.SigningKeys); other == nil || other.Phase != computev1alpha1.SigningKeyValidationOnly {
+		t.Fatalf("step 5: other = %+v, want still ValidationOnly (RetainDuration not yet elapsed)", other)
+	}
+
+	// Step 6: backdate RetireEligibleAt past RetainDuration (simulating
+	// time passing, without sleeping in the test) — the demoted key must
+	// move to Removing, dropped from render but not yet deleted.
+	for i := range instance.Status.Auth.SigningKeys {
+		if instance.Status.Auth.SigningKeys[i].ID == AuthSigningKeyID {
+			past := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+			instance.Status.Auth.SigningKeys[i].RetireEligibleAt = &past
+		}
+	}
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 6: unexpected error: %v", err)
+	}
+	other = otherSigningKey(instance.Status.Auth.SigningKeys)
+	if other == nil || other.Phase != computev1alpha1.SigningKeyRemoving {
+		t.Fatalf("step 6: other = %+v, want Phase=Removing", other)
+	}
+	if rendered := signingKeysForRender(instance.Status.Auth.SigningKeys); len(rendered) != 1 {
+		t.Errorf("step 6: signingKeysForRender = %+v, want only the Active key (Removing excluded)", rendered)
+	}
+
+	// Step 7: still vacuously converged (no engines) — the Removing key's
+	// Certificate/Secret must be deleted and its entry dropped entirely.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("step 7: unexpected error: %v", err)
+	}
+	keys = instance.Status.Auth.SigningKeys
+	if len(keys) != 1 || keys[0].ID != "signing-2" {
+		t.Fatalf("step 7: SigningKeys = %+v, want exactly [signing-2] (old key fully removed)", keys)
+	}
+
+	oldSecretName := signingCertificateName("inst", AuthSigningKeyID)
+	var secret corev1.Secret
+	err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: oldSecretName}, &secret)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("old signing key Secret %q still exists (err=%v), want deleted", oldSecretName, err)
+	}
+	var cert certmanagerv1.Certificate
+	err = cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: oldSecretName}, &cert)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("old signing Certificate %q still exists (err=%v), want deleted", oldSecretName, err)
+	}
+}
+
+// TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible is
+// the composition test for this feature's entire safety property: a real
+// engine that hasn't rolled yet must concretely block both convergence
+// gates (promote, and retire-eligible), not just cause
+// enginesConvergedOn to return false in isolation. TestEnginesConvergedOn
+// already covers that function directly; every other rotation-lifecycle
+// test above runs with zero engines (vacuous convergence) specifically to
+// isolate the state machine's own timing from this gate — so this test
+// is the one place that exercises them together, in a shape close to
+// what an actual slow-rolling engine looks like.
+func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *testing.T) {
+	sch := authTestScheme(t)
+	auth := validAuthSpecForController()
+	rotationInterval := metav1.Duration{Duration: time.Hour}
+	retainDuration := metav1.Duration{Duration: time.Hour}
+	auth.Local.SigningKeys.RotationInterval = &rotationInterval
+	auth.Local.SigningKeys.RetainDuration = &retainDuration
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			Auth: &computev1alpha1.AuthStatus{
+				SigningKeyGeneration: 2,
+				SigningKeys: []computev1alpha1.SigningKeyStatus{
+					{ID: AuthSigningKeyID, SecretName: signingCertificateName("inst", AuthSigningKeyID),
+						Phase: computev1alpha1.SigningKeyActive},
+					{ID: "signing-2", SecretName: signingCertificateName("inst", "signing-2"),
+						Phase: computev1alpha1.SigningKeyValidationOnly},
+				},
+			},
+		},
+	}
+	ctx := context.Background()
+	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&computev1alpha1.FireboltEngine{}).WithObjects(
+		signingKeySecretFor(instance, AuthSigningKeyID),
+		signingKeySecretFor(instance, "signing-2"),
+	).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys)})
+	engine := engineWithHash("e1", "inst", "stale-hash-from-a-previous-generation")
+	if err := cli.Create(ctx, engine); err != nil {
+		t.Fatalf("seeding lagging engine: %v", err)
+	}
+
+	// The engine has not rolled onto [active=signing-1, vo=signing-2] yet
+	// — promotion must not happen.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("unexpected error while engine is lagging: %v", err)
+	}
+	if other := otherSigningKey(instance.Status.Auth.SigningKeys); other == nil || other.DemotedAt != nil {
+		t.Fatalf("promotion happened despite a lagging engine: other = %+v", other)
+	}
+
+	// The engine catches up (its own reconcile stamps ObservedAuthHash to
+	// match what it actually rendered) — promotion may now proceed.
+	engine.Status.ObservedAuthHash = preHash
+	if err := cli.Status().Update(ctx, engine); err != nil {
+		t.Fatalf("updating engine hash: %v", err)
+	}
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("unexpected error after engine catches up: %v", err)
+	}
+	active := activeSigningKey(instance.Status.Auth.SigningKeys)
+	other := otherSigningKey(instance.Status.Auth.SigningKeys)
+	if active == nil || active.ID != "signing-2" || other == nil || other.DemotedAt == nil {
+		t.Fatalf("promotion did not happen once the engine converged: active=%+v other=%+v", active, other)
+	}
+	if other.RetireEligibleAt != nil {
+		t.Fatalf("RetireEligibleAt set before confirming the promotion itself rolled out: other = %+v", other)
+	}
+
+	// Promotion flips the expected hash (order-sensitive: active is now
+	// signing-2). The engine is still on its pre-promotion hash, so it is
+	// lagging again relative to this new target — retire-eligibility must
+	// not be granted yet.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("unexpected error while engine lags the promotion rollout: %v", err)
+	}
+	if other := otherSigningKey(instance.Status.Auth.SigningKeys); other == nil || other.RetireEligibleAt != nil {
+		t.Fatalf("RetireEligibleAt set despite the engine not having rolled onto the promoted config: other = %+v", other)
+	}
+
+	// The engine rolls onto the promoted config too — only now is it safe
+	// to start the retain-duration countdown.
+	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys)})
+	if postHash == preHash {
+		t.Fatal("pre- and post-promotion hashes must differ (active-first ordering flipped); test fixture is wrong")
+	}
+	engine.Status.ObservedAuthHash = postHash
+	if err := cli.Status().Update(ctx, engine); err != nil {
+		t.Fatalf("updating engine hash: %v", err)
+	}
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("unexpected error after engine converges on the promotion: %v", err)
+	}
+	if other := otherSigningKey(instance.Status.Auth.SigningKeys); other == nil || other.RetireEligibleAt == nil {
+		t.Fatalf("RetireEligibleAt not set once the engine converged on the promoted config: other = %+v", other)
 	}
 }

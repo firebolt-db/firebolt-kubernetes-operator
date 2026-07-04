@@ -315,6 +315,12 @@ func computeStable(
 
 	status.Phase = terminalPhase(spec)
 	status.ObservedGeneration = metadataGeneration
+	// current.CurrentSTS is non-nil here: the branch above already
+	// returned early when it was nil or drifted from spec, so reaching
+	// this point means the running StatefulSet's own AnnotationAuthHash
+	// is exactly the value stsMatchesSpec just confirmed matches
+	// authHash(instanceInfo.Auth) — safe to copy onto Status verbatim.
+	status.ObservedAuthHash = current.CurrentSTS.Annotations[AnnotationAuthHash]
 	r.RequeueAfter = 30 * time.Second
 }
 
@@ -726,6 +732,10 @@ func renderAuthConfig(auth *ResolvedAuthInfo) map[string]interface{} {
 
 // renderSigningKeys renders instance.auth.local.signing_keys[], active
 // (JWT-issuing) key first — the order SigningKeys is already stored in.
+// That ordering, and excluding any key the operator has already decided
+// to remove, is signingKeysForRender's job (instance_auth.go), applied
+// once at resolveInstanceInfo (engine_controller.go) before keys ever
+// reaches here — this function trusts its input completely.
 func renderSigningKeys(keys []computev1alpha1.SigningKeyStatus) []map[string]interface{} {
 	out := make([]map[string]interface{}, len(keys))
 	for i, k := range keys {
@@ -2498,6 +2508,15 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 // reordering active/retained keys is itself observed as drift). Returns
 // "" when auth is disabled, keeping AnnotationAuthHash absent and the
 // rendered pod byte-identical to an engine with auth never configured.
+//
+// auth.SigningKeys is expected to already be filtered/ordered by
+// signingKeysForRender (instance_auth.go) — true whenever it came from
+// ResolvedAuthInfo via resolveInstanceInfo. This same hash, once stable
+// on an engine's StatefulSet, is copied onto FireboltEngineStatus as
+// ObservedAuthHash (see computeStable), which is exactly what lets the
+// instance controller's rotation state machine (enginesConvergedOn)
+// confirm every engine has actually rolled onto a given signing-keys
+// state before advancing to the next one.
 //
 // It must hash the full Spec, not just the fields renderAuthConfig maps
 // to Secret-backed paths — packdb only reads config.yaml at startup, so

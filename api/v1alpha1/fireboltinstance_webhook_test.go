@@ -577,6 +577,80 @@ func TestValidateAuth(t *testing.T) {
 			},
 			wantError: true,
 		},
+		{
+			name: "rotationInterval without retainDuration is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration without rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:    validSigningKeys().CertManager,
+						RetainDuration: &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration shorter than the default 1-day maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration shorter than an explicit maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					MaxTokenAge: "2d",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // < 2d
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "rotationInterval with retainDuration at least maxTokenAge is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: false,
+		},
 	}
 
 	v := &FireboltInstanceCustomValidator{}
