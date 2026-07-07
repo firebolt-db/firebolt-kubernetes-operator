@@ -55,14 +55,10 @@ type EngineSpec struct {
 	// customEngineConfig), so the builder guards on empty and omits the storage
 	// block entirely when unset rather than emitting an incomplete one.
 	Bucket string
-	// StorageType is the object-storage backend selector (e.g. "s3", "gcs",
-	// "minio") — customEngineConfig.storage.type. Every documented engine
-	// manifest sets it; without it the storage config is incomplete.
+	// StorageType is the managed-table storage backend selector (e.g. "s3",
+	// "gcs", "abs") — customEngineConfig.storage.managed_table_storage. Every
+	// documented engine manifest sets it; without it the storage config is incomplete.
 	StorageType string
-	// APIScheme is the object-storage scheme paired with Bucket (e.g. "s3://",
-	// "gs://"). Caller-controlled so the plugin is not tied to one cloud. Only
-	// used when Bucket is set.
-	APIScheme string
 	// HostPath, when set, backs the engine's data volume with a node hostPath
 	// at this path. Empty means no storage override is emitted — the operator's
 	// default (emptyDir) or the referenced class applies.
@@ -221,17 +217,15 @@ func buildFireboltEngine(namespace string, spec *EngineSpec) (*v1alpha1.Firebolt
 	// bucket is given; it may instead be inherited from the referenced
 	// FireboltEngineClass (its customEngineConfig deep-merges beneath the
 	// engine's), so --bucket is optional. The block needs a backend type plus the
-	// scheme and bucket name; type and scheme are caller-controlled (StorageType /
-	// APIScheme) so the plugin isn't tied to S3 — GCS/Azure work too. The builder
-	// guards on empty bucket so an unset bucket omits the block rather than
-	// emitting an incomplete one.
+	// bucket name; the backend is caller-controlled (StorageType) so the plugin
+	// isn't tied to S3 — GCS/ABS work too. The builder guards on empty bucket so
+	// an unset bucket omits the block rather than emitting an incomplete one.
 	var customConfig *apiextensionsv1.JSON
 	if spec.Bucket != "" {
 		raw, err := json.Marshal(map[string]any{
 			"storage": map[string]any{
-				"type":        spec.StorageType,
-				"api_scheme":  spec.APIScheme,
-				"bucket_name": spec.Bucket,
+				"managed_table_storage":     spec.StorageType,
+				"managed_table_bucket_name": spec.Bucket,
 			},
 		})
 		if err != nil {
@@ -297,7 +291,7 @@ func engineTemplate(spec *EngineSpec) *corev1.PodTemplateSpec {
 }
 
 // EngineClassProvidesStorage reports whether the named FireboltEngineClass
-// carries object-storage config (customEngineConfig.storage.bucket_name). A
+// carries object-storage config (customEngineConfig.storage.managed_table_bucket_name). A
 // referencing engine that sets no --bucket inherits the class's config, so this
 // lets `engine create` tell whether the effective config will actually have a
 // bucket rather than only checking that some class was named.
@@ -314,21 +308,21 @@ func (c *Client) EngineClassProvidesStorage(ctx context.Context, name string) (b
 }
 
 // customConfigHasBucket reports whether a customEngineConfig payload sets a
-// non-empty storage.bucket_name — the field the engine needs for managed object
-// storage, written the same way by --bucket and by a class.
+// non-empty storage.managed_table_bucket_name — the field the engine needs for
+// managed object storage, written the same way by --bucket and by a class.
 func customConfigHasBucket(raw *apiextensionsv1.JSON) bool {
 	if raw == nil || len(raw.Raw) == 0 {
 		return false
 	}
 	var cfg struct {
 		Storage struct {
-			BucketName string `json:"bucket_name"`
+			ManagedTableBucketName string `json:"managed_table_bucket_name"`
 		} `json:"storage"`
 	}
 	if err := json.Unmarshal(raw.Raw, &cfg); err != nil {
 		return false
 	}
-	return cfg.Storage.BucketName != ""
+	return cfg.Storage.ManagedTableBucketName != ""
 }
 
 // readyFromConditions reports the Ready condition's truth, or nil if absent.
