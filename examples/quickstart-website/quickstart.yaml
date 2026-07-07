@@ -30,8 +30,8 @@ metadata:
   name: firebolt
 ---
 # floci: zero-auth S3-compatible emulator. Requests are still SigV4-signed but
-# the credentials are not validated, so `type: minio` (which makes the engine
-# use dummy credentials internally) needs no Secret or AWS env vars.
+# the credentials are not validated, so the engine only needs any
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env (set on the engine container).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -191,11 +191,11 @@ spec:
   replicas: 1
   customEngineConfig:
     storage:
-      type: minio
-      api_scheme: "s3://"
-      bucket_name: my-engine-bucket
-      minio:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-engine-bucket
+      aws:
         endpoint: http://floci.firebolt.svc.cluster.local:4566
+        path_style_addressing: true # non-AWS S3-compatible store; ignored for AWS S3
   # Per-engine pod overrides live under spec.template. The operator owns the
   # container named "engine"; put per-pod tuning (resources, env, image, ...)
   # here.
@@ -203,6 +203,12 @@ spec:
     spec:
       containers:
         - name: engine
+          # floci is zero-auth, but the engine still signs S3 requests — supply any creds via env.
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: firebolt
+            - name: AWS_SECRET_ACCESS_KEY
+              value: firebolt
           resources:
             requests:
               cpu: "2"

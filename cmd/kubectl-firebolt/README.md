@@ -35,7 +35,7 @@ kubectl firebolt engine list -n my-ns --instance my-instance -o wide
 kubectl firebolt engine create my-engine -n my-ns \
   --instance my-instance \
   [--bucket my-bucket] [--type <engine-class>] [--replicas 2] [--image <repo>:<tag>] \
-  [--storage-type gcs] [--api-scheme gs://] [--host-path /mnt/nvme] [--timeout 5m]
+  [--storage-type gcs] [--host-path /mnt/nvme] [--timeout 5m]
 kubectl firebolt engine port-forward my-engine -n my-ns --local-port 8123
 kubectl firebolt engine delete my-engine -n my-ns
 
@@ -53,7 +53,7 @@ omitted falls through to the operator's defaults or the referenced
 `FireboltEngineClass`. Flag rules:
 
 - `--instance` — always required.
-- `--bucket` — optional. When given, the plugin writes `customEngineConfig.storage` from `--bucket` plus `--storage-type` (backend selector — `s3` default; `gcs`, `minio`, …) and `--api-scheme` (`s3://` default; `gs://` for GCS) — not tied to S3. Object storage may instead be supplied by the referenced `FireboltEngineClass` (its `customEngineConfig` is inherited). When `--bucket` is omitted, `create` resolves the effective config — it fetches the `--type` class and checks whether *it* sets `customEngineConfig.storage.bucket_name` — and warns only if neither side provides a bucket (naming a class that doesn't configure storage still warns). The operator doesn't require storage, so this is a non-blocking warning. (Under `--print-commands` it falls back to the flag-only heuristic, since it doesn't touch the cluster.)
+- `--bucket` — optional. When given, the plugin writes `customEngineConfig.storage` from `--bucket` plus `--storage-type` (managed-table backend — `s3` default; `gcs`, `abs`), setting `managed_table_storage` and `managed_table_bucket_name`. Object storage may instead be supplied by the referenced `FireboltEngineClass` (its `customEngineConfig` is inherited). When `--bucket` is omitted, `create` resolves the effective config — it fetches the `--type` class and checks whether *it* sets `customEngineConfig.storage.managed_table_bucket_name` — and warns only if neither side provides a bucket (naming a class that doesn't configure storage still warns). The operator doesn't require storage, so this is a non-blocking warning. (Under `--print-commands` it falls back to the flag-only heuristic, since it doesn't touch the cluster.)
 - `--replicas` — defaults to `1`. `--replicas 0` is scale-to-zero: the operator parks the engine in the terminal `Stopped` phase (`Ready=False` by design), so `create` skips the readiness wait instead of blocking until it times out.
 - `--type` — a FireboltEngineClass to reference by name (`engineClassRef`). Optional; omit for no class reference. There is no default class — when omitted, the operator's built-in defaults apply (no class is merged).
 - `--image` — optional; omit to use the operator's embedded default image, pass to override.

@@ -26,12 +26,12 @@ spec:
   replicas: 1
   customEngineConfig:
     storage:
-      type: minio
-      api_scheme: "s3://"
-      bucket_name: my-engine-bucket
-      minio:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-engine-bucket
+      aws:
         # Same-namespace short name; floci must run in this engine's namespace.
         endpoint: http://floci:4566
+        path_style_addressing: true # non-AWS S3-compatible store; ignored for AWS S3
   # Per-engine pod overrides live under spec.template. The
   # operator owns container name "engine"; place per-pod tuning
   # (resources, env, volume mounts, affinity, ...) here.
@@ -39,6 +39,12 @@ spec:
     spec:
       containers:
         - name: engine
+          # floci is zero-auth, but the engine still signs S3 requests — supply any creds via env.
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: firebolt
+            - name: AWS_SECRET_ACCESS_KEY
+              value: firebolt
           resources:
             requests:
               cpu: "1"

@@ -29,6 +29,8 @@
   "/engine/object-storage/azure-blob-storage/",
   "/engine/object-storage/google-cloud-storage",
   "/engine/object-storage/google-cloud-storage/",
+  "/engine/object-storage/s3-compatible",
+  "/engine/object-storage/s3-compatible/",
   "/engine/overview",
   "/engine/overview/",
   "/engineclass",

@@ -47,6 +47,7 @@
                 "group": "Object storage",
                 "pages": [
                   "engine/object-storage/amazon-s3",
+                  "engine/object-storage/s3-compatible",
                   "engine/object-storage/google-cloud-storage",
                   "engine/object-storage/azure-blob-storage"
                 ]
