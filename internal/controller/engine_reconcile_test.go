@@ -1272,6 +1272,58 @@ func TestComputeEngineReconcile_StableAuthDisabledObservedAuthHashEmpty(t *testi
 	}
 }
 
+// TestAuthHash_StableAcrossRotationPolicyChange guards against
+// SigningKeyPolicy.RotationInterval/RetainDuration leaking into authHash:
+// neither field is ever read by renderAuthConfig/renderSigningKeys (only
+// the resolved Status.Auth.SigningKeys ID+SecretName pairs are, and those
+// are hashed separately), so turning rotation on/off or retuning it must
+// not change the hash — doing so would flip every engine's
+// AnnotationAuthHash and force a full-fleet rollout to a byte-identical
+// config.yaml, exactly the spurious-rollout class this hash exists to
+// prevent.
+func TestAuthHash_StableAcrossRotationPolicyChange(t *testing.T) {
+	auth := &computev1alpha1.AuthSpec{
+		Enabled: true,
+		Local: &computev1alpha1.LocalAuthSpec{
+			Admin: computev1alpha1.AdminSpec{
+				Password: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+					Key:                  "password",
+				},
+			},
+			SigningKeys: &computev1alpha1.SigningKeyPolicy{
+				CertManager: computev1alpha1.CertManagerSpec{
+					IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+				},
+			},
+		},
+	}
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-1", SecretName: "inst-auth-signing", Phase: computev1alpha1.SigningKeyActive},
+	}
+	before := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys})
+
+	rotated := auth.DeepCopy()
+	rotationInterval := metav1.Duration{Duration: 720 * time.Hour}
+	retainDuration := metav1.Duration{Duration: 48 * time.Hour}
+	rotated.Local.SigningKeys.RotationInterval = &rotationInterval
+	rotated.Local.SigningKeys.RetainDuration = &retainDuration
+	after := authHash(&ResolvedAuthInfo{Spec: rotated, SigningKeys: keys})
+
+	if before != after {
+		t.Errorf("authHash changed after only enabling rotation: before=%q after=%q", before, after)
+	}
+
+	// Sanity check the opposite direction: authHash must still be
+	// sensitive to a field that IS rendered, so this isn't testing a hash
+	// that's simply broken (always stable).
+	rotated.Local.SigningAlgorithm = "ES256"
+	changedRendered := authHash(&ResolvedAuthInfo{Spec: rotated, SigningKeys: keys})
+	if changedRendered == after {
+		t.Error("authHash did not change after signingAlgorithm changed; test fixture or authHash itself is broken")
+	}
+}
+
 // --- Cleaning nil DrainingGeneration guard ---
 
 func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {

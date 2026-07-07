@@ -2544,13 +2544,41 @@ func authHash(auth *ResolvedAuthInfo) string {
 		Spec        *computev1alpha1.AuthSpec `json:"spec"`
 		SigningKeys []signingKeyHashInput     `json:"signingKeys"`
 	}{
-		Spec:        auth.Spec,
+		Spec:        authHashRelevantSpec(auth.Spec),
 		SigningKeys: keys,
 	})
 	if err != nil {
 		return contentHash(fmt.Sprintf("%v", auth))
 	}
 	return contentHash(string(canonical))
+}
+
+// authHashRelevantSpec strips SigningKeyPolicy's RotationInterval and
+// RetainDuration out of a shallow copy of spec before authHash marshals
+// it. Those two fields are pure instance-controller rotation-scheduling
+// knobs — renderAuthConfig/renderSigningKeys never read them, only the
+// resolved Status.Auth.SigningKeys (already hashed above as ID+SecretName
+// pairs). Leaving them in the hash would force a full engine-fleet
+// rollout to a byte-identical config.yaml every time rotation is turned
+// on/off or retuned — exactly the spurious-rollout class this hash exists
+// to prevent, not cause. Returns spec unchanged when there is nothing to
+// strip, so the common (non-rotating) case allocates nothing extra.
+func authHashRelevantSpec(spec *computev1alpha1.AuthSpec) *computev1alpha1.AuthSpec {
+	if spec == nil || spec.Local == nil || spec.Local.SigningKeys == nil {
+		return spec
+	}
+	policy := spec.Local.SigningKeys
+	if policy.RotationInterval == nil && policy.RetainDuration == nil {
+		return spec
+	}
+	strippedPolicy := *policy
+	strippedPolicy.RotationInterval = nil
+	strippedPolicy.RetainDuration = nil
+	local := *spec.Local
+	local.SigningKeys = &strippedPolicy
+	out := *spec
+	out.Local = &local
+	return &out
 }
 
 // tlsHash returns a content-hash of everything TLS-relevant to a rendered
