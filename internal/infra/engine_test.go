@@ -17,7 +17,6 @@ func sampleSpec() *EngineSpec {
 		Image:       "registry.example.com/engine:v1.2.3",
 		Bucket:      "my-test-bucket",
 		StorageType: "s3",
-		APIScheme:   "s3://",
 		HostPath:    "/mnt/data/my-engine",
 		EngineType:  "my-engine-class",
 	}
@@ -108,7 +107,7 @@ func TestCreateScriptIsApplyThenWaitNoPerEngineClass(t *testing.T) {
 		"registry.example.com/engine:v1.2.3",
 		"engineClassRef: my-engine-class",
 		"replicas: 4",
-		"bucket_name: my-test-bucket",
+		"managed_table_bucket_name: my-test-bucket",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script missing %q:\n%s", want, script)
@@ -222,9 +221,9 @@ func TestCreateWithZeroReplicasSkipsReadyWait(t *testing.T) {
 	}
 }
 
-func TestStorageConfigSetsTypeSchemeAndBucket(t *testing.T) {
+func TestStorageConfigSetsBackendAndBucket(t *testing.T) {
 	raw := string(buildEngine(t).Spec.CustomEngineConfig.Raw)
-	for _, want := range []string{`"type":"s3"`, `"api_scheme":"s3://"`, `"bucket_name":"my-test-bucket"`} {
+	for _, want := range []string{`"managed_table_storage":"s3"`, `"managed_table_bucket_name":"my-test-bucket"`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("storage config missing %s, got %s", want, raw)
 		}
@@ -249,14 +248,13 @@ func TestBuildEngineOmitsStorageWhenBucketEmpty(t *testing.T) {
 func TestStorageBackendIsConfigurableNotHardcodedToS3(t *testing.T) {
 	spec := sampleSpec()
 	spec.StorageType = "gcs" // GCS, not S3
-	spec.APIScheme = "gs://"
 	e, err := buildFireboltEngine("test-ns", spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := string(e.Spec.CustomEngineConfig.Raw)
-	if !strings.Contains(raw, `"type":"gcs"`) || !strings.Contains(raw, `"api_scheme":"gs://"`) {
-		t.Errorf("type/scheme must follow flags, got %s", raw)
+	if !strings.Contains(raw, `"managed_table_storage":"gcs"`) {
+		t.Errorf("backend must follow flags, got %s", raw)
 	}
 	if strings.Contains(raw, "s3") {
 		t.Errorf("must not hardcode s3, got %s", raw)
@@ -314,9 +312,9 @@ func TestCustomConfigHasBucket(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{"with bucket", `{"storage":{"type":"s3","bucket_name":"my-bucket"}}`, true},
-		{"storage but empty bucket", `{"storage":{"type":"s3","bucket_name":""}}`, false},
-		{"storage without bucket", `{"storage":{"type":"s3"}}`, false},
+		{"with bucket", `{"storage":{"managed_table_storage":"s3","managed_table_bucket_name":"my-bucket"}}`, true},
+		{"storage but empty bucket", `{"storage":{"managed_table_storage":"s3","managed_table_bucket_name":""}}`, false},
+		{"storage without bucket", `{"storage":{"managed_table_storage":"s3"}}`, false},
 		{"no storage section", `{"logging":{"level":"debug"}}`, false},
 		{"empty object", `{}`, false},
 	}

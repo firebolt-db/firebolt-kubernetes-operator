@@ -230,7 +230,6 @@ func newEngineCreateCmd() *cobra.Command {
 		engineType  string
 		image       string
 		bucket      string
-		apiScheme   string
 		storageType string
 		hostPath    string
 		timeout     string
@@ -252,7 +251,6 @@ func newEngineCreateCmd() *cobra.Command {
 				Replicas:     replicas,
 				Image:        image,
 				Bucket:       bucket,
-				APIScheme:    apiScheme,
 				StorageType:  storageType,
 				HostPath:     hostPath,
 				EngineType:   engineType,
@@ -298,8 +296,8 @@ func newEngineCreateCmd() *cobra.Command {
 	f.StringVar(&image, "image", "", "Container image in repository:tag form; omit to use the operator's default image")
 	f.StringVar(&bucket, "bucket", "",
 		"Object-storage bucket for managed storage; omit to inherit it from the FireboltEngineClass (--type)")
-	f.StringVar(&storageType, "storage-type", "s3", "Object-storage backend type (e.g. s3, gcs, minio); applies to --bucket")
-	f.StringVar(&apiScheme, "api-scheme", "s3://", "Object-storage scheme for --bucket (e.g. s3://, gs:// for GCS)")
+	f.StringVar(&storageType, "storage-type", "s3",
+		"Managed-table storage backend for --bucket: s3 (default), gcs, or abs")
 	f.StringVar(&hostPath, "host-path", "",
 		"Back the engine data volume with a node hostPath at this path; omit for the operator default (emptyDir)")
 	f.StringVar(&timeout, "timeout", infra.DefaultReadyTimeout,
