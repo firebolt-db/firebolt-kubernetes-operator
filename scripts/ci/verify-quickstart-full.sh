@@ -79,13 +79,17 @@ BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" CLASS="$ENGINE_CLASS_NAME" yq 
   (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.limits.cpu) = "250m" |
   (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.requests.memory) = "2Gi" |
   (select(.kind == "FireboltEngine").spec.template.spec.containers[0].resources.limits.memory) = "2Gi" |
+  (select(.kind == "FireboltEngine").spec.template.spec.containers[0].env) = [
+    {"name": "AWS_ACCESS_KEY_ID", "value": "firebolt"},
+    {"name": "AWS_SECRET_ACCESS_KEY", "value": "firebolt"}
+  ] |
   (select(.kind == "FireboltEngine").spec.customEngineConfig) = {
     "storage": {
-      "type": "minio",
-      "api_scheme": "s3://",
-      "bucket_name": env(BUCKET),
-      "minio": {
-        "endpoint": env(ENDPOINT)
+      "managed_table_storage": "s3",
+      "managed_table_bucket_name": env(BUCKET),
+      "aws": {
+        "endpoint": env(ENDPOINT),
+        "path_style_addressing": true
       }
     }
   }
