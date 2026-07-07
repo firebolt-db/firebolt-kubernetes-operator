@@ -24,19 +24,17 @@ kubectl apply -n "$NAMESPACE" -f "${REPO_ROOT}/examples/instance-basic.yaml"
 
 # Inject the top-level `storage:` block via spec.customEngineConfig so the
 # rendered config.yaml steers tablet I/O at floci instead of the local fs.
-# `type: minio` is what flips the engine's S3 client into MinIO-compat mode
-# and hardcodes the access/secret to firebolt/firebolt internally — floci is
-# zero-auth so those baked-in credentials sign requests just fine. There is
-# no tmp_bucket field in the YAML schema; managed and tmp tablets share
-# bucket_name.
+# managed_table_storage: s3 + aws.endpoint points the engine at floci; floci is
+# zero-auth, so the AWS_* creds from examples/engine-basic.yaml (preserved here,
+# since this patch only replaces customEngineConfig) sign requests fine.
 BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" yq eval '
   (select(.kind == "FireboltEngine").spec.customEngineConfig) = {
     "storage": {
-      "type": "minio",
-      "api_scheme": "s3://",
-      "bucket_name": env(BUCKET),
-      "minio": {
-        "endpoint": env(ENDPOINT)
+      "managed_table_storage": "s3",
+      "managed_table_bucket_name": env(BUCKET),
+      "aws": {
+        "endpoint": env(ENDPOINT),
+        "path_style_addressing": true
       }
     }
   }

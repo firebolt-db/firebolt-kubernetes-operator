@@ -352,6 +352,10 @@ func CreateEngineWithResources(ctx context.Context, instanceName, name string, r
 					Containers: []corev1.Container{{
 						Name:      computev1alpha1.EngineContainerName,
 						Resources: resources,
+						Env: []corev1.EnvVar{
+							{Name: "AWS_ACCESS_KEY_ID", Value: "firebolt"},
+							{Name: "AWS_SECRET_ACCESS_KEY", Value: "firebolt"},
+						},
 					}},
 				},
 			},
@@ -384,6 +388,10 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name: computev1alpha1.EngineContainerName,
+						Env: []corev1.EnvVar{
+							{Name: "AWS_ACCESS_KEY_ID", Value: "firebolt"},
+							{Name: "AWS_SECRET_ACCESS_KEY", Value: "firebolt"},
+						},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -497,26 +505,25 @@ func DeleteFireboltEngineClass(ctx context.Context, name string) error {
 }
 
 // engineStorageConfig returns a customEngineConfig JSON blob that points
-// the engine's top-level `storage:` block at the given MinIO-compatible
+// the engine's top-level `storage:` block at the given S3-compatible
 // endpoint and bucket. Required when the engine runs in dedicated-pensieve
 // mode — the engine refuses to start with managed storage on a local fs,
-// and `storage.bucket_name` maps internally to the
+// and `storage.managed_table_bucket_name` maps internally to the
 // `firebolt.managed_storage.bucket_name_override` signal that toggles it
 // into object-storage mode (engine
 // src/Core/Application/Configuration/StorageConfig.cpp).
 //
-// `type: minio` also flips `firebolt.aws.use_minio=true` internally, which
-// hardcodes the S3 access/secret to `firebolt/firebolt`. Floci is zero-auth
-// (it accepts any SigV4-signed request) so those baked-in credentials work
-// against it without any env-var plumbing on the engine pod.
+// Floci is zero-auth (it accepts any SigV4-signed request), but the engine still
+// signs its requests, so the engine pod must carry AWS_ACCESS_KEY_ID /
+// AWS_SECRET_ACCESS_KEY env (any value); the caller sets these on the engine spec.
 func engineStorageConfig(bucket, endpoint string) *apiextensionsv1.JSON {
 	raw := fmt.Sprintf(`{
   "storage": {
-    "type": "minio",
-    "api_scheme": "s3://",
-    "bucket_name": %q,
-    "minio": {
-      "endpoint": %q
+    "managed_table_storage": "s3",
+    "managed_table_bucket_name": %q,
+    "aws": {
+      "endpoint": %q,
+      "path_style_addressing": true
     }
   }
 }`, bucket, endpoint)
