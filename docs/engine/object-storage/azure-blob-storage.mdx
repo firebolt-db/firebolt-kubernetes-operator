@@ -96,7 +96,7 @@ az identity federated-credential create \
 
 Point the engine at the container through `spec.customEngineConfig.storage` and run its pods under the ServiceAccount that carries the Azure identity.
 
-The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the container name (`bucket_name`). For Azure Blob Storage, set `type` to `abs`. The default scheme for `abs` is `azure://`.
+The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`managed_table_storage`) and the container name (`managed_table_bucket_name`). For Azure Blob Storage, set `managed_table_storage` to `abs`.
 
 The following manifest creates the ServiceAccount and a `FireboltEngine` that references it. The engine runs the operator's default image, so no `FireboltEngineClass` is required. Replace the managed identity client ID and container name with your values, and reference an existing `Ready` instance through `instanceRef`. The `azure.workload.identity/use` pod label is required for Workload ID to inject credentials.
 
@@ -121,9 +121,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: abs
-      api_scheme: "azure://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: abs
+      managed_table_bucket_name: firebolt-engine-demo-data
       azure:
         storage_account_name: fireboltenginedemo
   template:
@@ -211,9 +210,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: abs
-      api_scheme: "azure://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: abs
+      managed_table_bucket_name: firebolt-engine-demo-data
       azure:
         storage_account_name: fireboltenginedemo
         intermediary_service_principal_client_id: 35f11db5-082b-46e8-9f2f-5466d8630003

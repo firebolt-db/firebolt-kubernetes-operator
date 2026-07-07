@@ -4,6 +4,10 @@ description: Configure Amazon S3 as the backing object storage for Firebolt Oper
 sidebarTitle: Amazon S3
 ---
 
+<Warning>
+  **Breaking change.** Managed-table storage now uses `managed_table_storage` and `managed_table_bucket_name` with a per-cloud `storage.aws` / `gcp` / `azure` block. The former keys — `type`, `api_scheme`, `bucket_name`, and the `minio` / `azurite` types — are removed and are rejected by the engine at startup. This schema requires a recent engine image; keep the operator and engine on matching versions.
+</Warning>
+
 Every `FireboltEngine` requires object storage for managed tablet data. The Firebolt Operator does not support local filesystem storage mode, so an engine does not start until you point it at object storage. On a production cluster, that backing store is an Amazon S3 bucket.
 
 With S3 as the backing store for table data, durability does not depend on the per-pod data volumes mounted to each engine node. Even a complete loss of those volumes does not cause data loss, because the authoritative copy of managed table data lives in the bucket.
@@ -119,7 +123,7 @@ Create an IAM role with the following IAM policy. It grants the engine permissio
 
 Point the engine at the bucket through `spec.customEngineConfig.storage` and run its pods under the ServiceAccount that carries the IAM role.
 
-The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Amazon S3, set `type` to `s3`.
+The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`managed_table_storage`) and the bucket name (`managed_table_bucket_name`). For Amazon S3, set `managed_table_storage` to `s3`.
 
 The following manifest creates the ServiceAccount and a `FireboltEngine` that references it. The engine runs the operator's default image, so no `FireboltEngineClass` is required. Replace the IAM role ARN and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
 
@@ -144,9 +148,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: s3
-      api_scheme: "s3://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: s3
+      managed_table_bucket_name: firebolt-engine-demo-data
   template:
     spec:
       containers:
@@ -179,9 +182,8 @@ spec:
   serviceAccountName: my-engine
   customEngineConfig:
     storage:
-      type: s3
-      api_scheme: "s3://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: s3
+      managed_table_bucket_name: firebolt-engine-demo-data
   template:
     spec:
       containers:
@@ -250,9 +252,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: s3
-      api_scheme: "s3://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: s3
+      managed_table_bucket_name: firebolt-engine-demo-data
       aws:
         intermediary_access_role: arn:aws:iam::<account-id>:role/firebolt-intermediary
 ```

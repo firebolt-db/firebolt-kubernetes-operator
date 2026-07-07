@@ -33,11 +33,11 @@ spec:
   replicas: 1
   customEngineConfig:
     storage:
-      type: minio
-      api_scheme: "s3://"
-      bucket_name: my-engine-bucket
-      minio:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-engine-bucket
+      aws:
         endpoint: http://floci:4566
+        path_style_addressing: true # non-AWS S3-compatible store; ignored for AWS S3
   template:
     spec:
       containers:
@@ -48,6 +48,12 @@ spec:
           # pod replacement. Pinned digests can drop back to IfNotPresent.
           image: ghcr.io/firebolt-db/firebolt:dev-feature-x
           imagePullPolicy: Always
+          # floci is zero-auth, but the engine still signs S3 requests — supply any creds via env.
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: firebolt
+            - name: AWS_SECRET_ACCESS_KEY
+              value: firebolt
           resources:
             requests:
               cpu: "1"

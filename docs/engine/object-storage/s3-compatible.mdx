@@ -1,0 +1,85 @@
+---
+title: S3-compatible storage
+description: Configure a non-AWS S3-compatible object store (Nebius, CoreWeave, MinIO, …) as the backing object storage for Firebolt Operator engines.
+sidebarTitle: S3-compatible
+---
+
+<Warning>
+  **Breaking change.** Managed-table storage now uses `managed_table_storage` and `managed_table_bucket_name` with a per-cloud `storage.aws` / `gcp` / `azure` block. The former keys — `type`, `api_scheme`, `bucket_name`, and the `minio` / `azurite` types — are removed and are rejected by the engine at startup. This schema requires a recent engine image; keep the operator and engine on matching versions.
+</Warning>
+
+Every `FireboltEngine` requires object storage for managed tablet data. Besides Amazon S3, the engine can use any **S3-compatible** object store — for example [Nebius](https://nebius.com/) Object Storage, [CoreWeave](https://www.coreweave.com/) Object Storage, or a self-hosted [MinIO](https://min.io/). You point the engine at the store's endpoint and supply credentials through the pod environment.
+
+## How it differs from Amazon S3
+
+For Amazon S3 you set only `managed_table_storage` and `managed_table_bucket_name`, and credentials come from the pod's AWS identity (IRSA / Pod Identity — see [Amazon S3](./amazon-s3)). For an S3-compatible store you additionally set, under `storage.aws`:
+
+- `endpoint` — the store's S3 API endpoint (`https://…`).
+- `path_style_addressing` — the addressing style. **This applies only to a custom (non-AWS) endpoint; it is ignored for Amazon S3.** Set it to match your provider:
+  - `true` (path-style, `endpoint/bucket/key`) — the default. Used by MinIO, Nebius, and most emulators.
+  - `false` (virtual-hosted, `bucket.endpoint/key`) — required by providers that support virtual-hosted addressing only, such as CoreWeave.
+- `verify_ssl` — set to `false` only for a store with a self-signed certificate or plain HTTP (for example a local emulator).
+
+Credentials are read from the AWS SDK environment chain, so set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (and `AWS_REGION` if your store requires a specific signing region) on the engine container — typically from a Kubernetes `Secret`.
+
+## Nebius Object Storage
+
+Nebius exposes an S3 API at `https://storage.<region>.nebius.cloud` and supports path-style addressing (the default).
+
+Create a `Secret` from a Nebius static access key:
+
+```bash
+kubectl -n firebolt create secret generic nebius-s3-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=<nebius-access-key-id> \
+  --from-literal=AWS_SECRET_ACCESS_KEY=<nebius-secret>
+```
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  replicas: 1
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-firebolt-bucket
+      aws:
+        endpoint: https://storage.us-central1.nebius.cloud
+        path_style_addressing: true # non-AWS S3-compatible store; ignored for AWS S3
+  template:
+    spec:
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: nebius-s3-credentials # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+```
+
+## CoreWeave Object Storage
+
+CoreWeave Object Storage supports virtual-hosted addressing only, so set `path_style_addressing: false`. Use the endpoint for your CoreWeave Object Storage account, and create a `Secret` (`coreweave-s3-credentials`) the same way as above.
+
+```yaml
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-firebolt-bucket
+      aws:
+        endpoint: https://<coreweave-object-storage-endpoint>
+        path_style_addressing: false # CoreWeave supports virtual-hosted addressing only
+  template:
+    spec:
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: coreweave-s3-credentials
+```
+
+## Verify
+
+Apply the manifest, wait for the engine to reach `Ready`, then run a small write/read (for example `CREATE TABLE` + `INSERT` + `SELECT`). Confirm objects appear under your bucket with the provider's CLI (`aws s3 ls s3://my-firebolt-bucket --endpoint-url <endpoint>`). See the [Quickstart](../../quickstart) for connecting to the engine.

@@ -12,15 +12,15 @@
 #
 #   customEngineConfig:
 #     storage:
-#       type: minio                 # S3-compatible / emulator mode
-#       api_scheme: "s3://"
-#       bucket_name: my-engine-bucket
-#       minio:
+#       managed_table_storage: s3   # S3-compatible store via a custom endpoint
+#       managed_table_bucket_name: my-engine-bucket
+#       aws:
 #         endpoint: http://floci.firebolt.svc.cluster.local:4566
+#         path_style_addressing: true
 #
 # floci is zero-auth: requests are still SigV4-signed but the credentials are
-# not validated. `type: minio` makes the engine hardcode dummy credentials
-# internally, so no Secret or AWS env vars are needed.
+# not validated. Set any AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY on the engine
+# container (the AWS SDK env chain); floci accepts them.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

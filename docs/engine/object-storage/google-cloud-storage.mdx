@@ -68,7 +68,7 @@ gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
 
 Point the engine at the bucket through `spec.customEngineConfig.storage` and run its pods under the ServiceAccount that carries the Google identity.
 
-The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`type`), the storage scheme (`api_scheme`), and the bucket name (`bucket_name`). For Google Cloud Storage, set `type` to `gcs`. The default scheme for `gcs` is `gs://`.
+The engine merges `customEngineConfig` into its rendered configuration, so the `storage` block sets the storage backend (`managed_table_storage`) and the bucket name (`managed_table_bucket_name`). For Google Cloud Storage, set `managed_table_storage` to `gcs`.
 
 The following manifest creates the ServiceAccount and a `FireboltEngine` that references it. The engine runs the operator's default image, so no `FireboltEngineClass` is required. Replace the service account email and bucket name with your values, and reference an existing `Ready` instance through `instanceRef`.
 
@@ -93,9 +93,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: gcs
-      api_scheme: "gs://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: gcs
+      managed_table_bucket_name: firebolt-engine-demo-data
   template:
     spec:
       containers:
@@ -173,9 +172,8 @@ spec:
   replicas: 2
   customEngineConfig:
     storage:
-      type: gcs
-      api_scheme: "gs://"
-      bucket_name: firebolt-engine-demo-data
+      managed_table_storage: gcs
+      managed_table_bucket_name: firebolt-engine-demo-data
       gcp:
         intermediary_service_account_id: projects/my-project/serviceAccounts/firebolt-intermediary@my-project.iam.gserviceaccount.com
 ```
