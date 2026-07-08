@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,7 +288,7 @@ func CreateEngine(ctx context.Context, instanceName, name string, replicas int) 
 // FireboltInstance with a specific rollout strategy. The engine container
 // image flows from the operator's embedded default.
 func CreateEngineWithRollout(ctx context.Context, instanceName, name string, replicas int, rollout string) error {
-	return createEngine(ctx, instanceName, name, replicas, rollout, nil)
+	return createEngine(ctx, instanceName, name, replicas, rollout, nil, nil)
 }
 
 // CreateEngineWithClass creates a FireboltEngine that references a
@@ -296,7 +297,32 @@ func CreateEngineWithRollout(ctx context.Context, instanceName, name string, rep
 // for the engine to resolve it. Image override and shared pod-spec
 // defaults flow from the class template.
 func CreateEngineWithClass(ctx context.Context, instanceName, name string, replicas int, classRef string) error {
-	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef)
+	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef, nil)
+}
+
+// CreateEngineWithDrainCheck creates a FireboltEngine like CreateEngine but
+// with the query-liveness drain check ON (the suite default is off because
+// most specs don't provision the ApiserverProxy scrape path the in-process
+// operator needs to reach pod metrics from the host). The instance MUST be
+// created with metricScrapeMode=ApiserverProxy (SetupTestInstanceWithScrapeMode),
+// otherwise the drain probe fails closed and every rollout wedges in draining.
+func CreateEngineWithDrainCheck(ctx context.Context, instanceName, name string, replicas int) error {
+	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
+		func(engine *computev1alpha1.FireboltEngine) {
+			enabled := true
+			engine.Spec.DrainCheckEnabled = &enabled
+		})
+}
+
+// CreateEngineWithAutoStop creates a FireboltEngine like CreateEngine but
+// with the given autoStop policy. Same ApiserverProxy requirement as
+// CreateEngineWithDrainCheck: the autoStop idleness scrape uses the same
+// pod-metrics transport as the drain check.
+func CreateEngineWithAutoStop(ctx context.Context, instanceName, name string, replicas int, autoStop *computev1alpha1.AutoStopSpec) error {
+	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
+		func(engine *computev1alpha1.FireboltEngine) {
+			engine.Spec.AutoStop = autoStop
+		})
 }
 
 // CreateBareEngineWithClassRef creates the minimum-viable
@@ -368,7 +394,10 @@ func CreateEngineWithResources(ctx context.Context, instanceName, name string, r
 	return cl.Create(ctx, engine)
 }
 
-func createEngine(ctx context.Context, instanceName, name string, replicas int, rollout string, classRef *string) error {
+// createEngine builds the suite's standard FireboltEngine and applies the
+// optional mutate hook right before the API write, so variant creators can
+// flip individual fields without duplicating the whole literal.
+func createEngine(ctx context.Context, instanceName, name string, replicas int, rollout string, classRef *string, mutate func(*computev1alpha1.FireboltEngine)) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -410,6 +439,10 @@ func createEngine(ctx context.Context, instanceName, name string, replicas int, 
 			Rollout:            computev1alpha1.RolloutStrategy(rollout),
 			CustomEngineConfig: engineStorageConfig(flociBucket, flociEndpoint),
 		},
+	}
+
+	if mutate != nil {
+		mutate(engine)
 	}
 
 	return cl.Create(ctx, engine)
@@ -1395,6 +1428,52 @@ func RunQuery(ctx context.Context, podName, engineName, query string) (string, e
 	return execCurlQuery(ctx, podName, url, query)
 }
 
+// RunQueryAgainstPodIP executes a SQL query against a specific engine pod's
+// IP, bypassing the cluster Service. Used by the drain spec to keep load on
+// the OLD generation after the Service selector has flipped to the new one —
+// exactly the traffic the drain check exists to protect.
+func RunQueryAgainstPodIP(ctx context.Context, podName, podIP, query string) (string, error) {
+	url := fmt.Sprintf("http://%s/?query_label=e2e-test&output_format=JSON_Compact",
+		net.JoinHostPort(podIP, "3473"))
+	return execCurlQuery(ctx, podName, url, query)
+}
+
+// EnginePodsForGeneration lists the pods of one engine generation.
+func EnginePodsForGeneration(ctx context.Context, engineName string, gen int) ([]corev1.Pod, error) {
+	pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("firebolt.io/engine=%s,firebolt.io/generation=%d", engineName, gen),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pods.Items, nil
+}
+
+// GetEngine fetches the FireboltEngine CR from testNamespace.
+func GetEngine(ctx context.Context, name string) (*computev1alpha1.FireboltEngine, error) {
+	cl, err := getCRDClient()
+	if err != nil {
+		return nil, err
+	}
+	engine := &computev1alpha1.FireboltEngine{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, engine); err != nil {
+		return nil, err
+	}
+	return engine, nil
+}
+
+// AnnotateEngine sets one annotation on the engine CR (retrying on
+// conflict). Used by the autoStop spec to stamp the gateway wake-up
+// annotation the way a real gateway would.
+func AnnotateEngine(ctx context.Context, name, key, value string) error {
+	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
+		if engine.Annotations == nil {
+			engine.Annotations = map[string]string{}
+		}
+		engine.Annotations[key] = value
+	})
+}
+
 // QueryResponse represents the JSON response from fb
 type QueryResponse struct {
 	Data [][]interface{} `json:"data"`
@@ -1619,6 +1698,14 @@ func (o *ClassOperator) Stop() {
 // CreateInstance creates a FireboltInstance CR with the given metadata images.
 // The gateway (Envoy proxy) image is set from the test suite's envoyImage/envoyTag.
 func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string) error {
+	return createInstance(ctx, name, metadataImage, metadataTag, "")
+}
+
+// createInstance builds the suite's standard FireboltInstance. scrapeMode
+// sets spec.metricScrapeMode when non-empty; the in-process operators run on
+// the host, where kind pod IPs are unreachable, so specs that exercise the
+// drain check or autoStop scrape must use MetricScrapeModeApiserverProxy.
+func createInstance(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -1641,7 +1728,8 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltInstanceSpec{
-			ID: ulid.MustNew(ulid.Now(), rand.Reader).String(),
+			ID:               ulid.MustNew(ulid.Now(), rand.Reader).String(),
+			MetricScrapeMode: scrapeMode,
 			Metadata: computev1alpha1.MetadataSpec{
 				Replicas: &replicas,
 				Template: &corev1.PodTemplateSpec{
@@ -1763,11 +1851,24 @@ type TestInstanceLifecycle struct {
 // handle that TeardownTestInstance consumes. Engine-operator options (e.g.
 // WithGC) are forwarded to the engine operator it starts.
 func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+	return setupTestInstance(ctx, name, "", opts...)
+}
+
+// SetupTestInstanceWithScrapeMode is SetupTestInstance with an explicit
+// spec.metricScrapeMode on the FireboltInstance. Specs whose engines enable
+// the drain check or autoStop must pass MetricScrapeModeApiserverProxy: the
+// in-process operator scrapes pod metrics from the host, where kind pod IPs
+// (the PodIP default) are unreachable.
+func SetupTestInstanceWithScrapeMode(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+	return setupTestInstance(ctx, name, scrapeMode, opts...)
+}
+
+func setupTestInstance(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
 	instanceOp, err := StartInstanceOperator(name)
 	if err != nil {
 		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
 	}
-	if err := CreateInstance(ctx, name, metadataImage, metadataTag); err != nil {
+	if err := createInstance(ctx, name, metadataImage, metadataTag, scrapeMode); err != nil {
 		instanceOp.Stop()
 		return nil, fmt.Errorf("create instance %s: %w", name, err)
 	}
