@@ -17,7 +17,7 @@ proxy (DFP) to resolve the per-engine headless Service at request time.
 
 ### Instance gateway (recommended)
 
-The recommended entry point is the instance gateway. The Envoy proxy routes requests based on the `X-Firebolt-Engine` header and handles retries during blue-green transitions.
+The recommended entry point is the instance gateway. The Envoy proxy routes requests based on the target engine name and handles retries during blue-green transitions. Pass the engine with the `X-Firebolt-Engine` header (raw HTTP clients) or the `engine` query parameter (the bundled `firebolt` CLI).
 
 ```text
 POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
@@ -25,6 +25,17 @@ Headers:
   X-Firebolt-Engine: my-engine
   Content-Type: text/plain
 Body: <SQL>
+```
+
+With the Firebolt CLI from an engine pod:
+
+```bash
+firebolt client \
+  --endpoint http://<instance-name>-gateway \
+  --insecure \
+  --set engine=my-engine \
+  -c "SELECT 42" \
+  --no-interactive
 ```
 
 ### Per-engine service

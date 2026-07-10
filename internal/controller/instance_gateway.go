@@ -195,8 +195,10 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // buildEnvoyConfigYAML generates the Envoy static config for the gateway.
 //
 // Routing model:
-//   - The gateway requires an X-Firebolt-Engine header on every request.
-//   - The Lua filter validates the header value matches an RFC 1123 DNS label
+//   - The gateway requires a target engine on every request, supplied either
+//     as the X-Firebolt-Engine header (curl and other raw HTTP clients) or as
+//     the engine= query parameter (the bundled firebolt CLI).
+//   - The Lua filter validates the engine name matches an RFC 1123 DNS label
 //     (so it cannot inject a path into :authority, cross namespaces, etc.),
 //     rewrites :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
 //   - The dynamic_forward_proxy cluster resolves that hostname at request time.
@@ -286,8 +288,18 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             return true
                           end
 
+                          local function engine_from_path(path)
+                            if path == nil then return nil end
+                            local engine = string.match(path, "[?&]engine=([^&]*)")
+                            if engine == nil or engine == "" then return nil end
+                            return engine
+                          end
+
                           function envoy_on_request(handle)
                             local engine = handle:headers():get("x-firebolt-engine")
+                            if not is_valid_engine(engine) then
+                              engine = engine_from_path(handle:headers():get(":path"))
+                            end
                             if not is_valid_engine(engine) then
                               handle:respond({[":status"] = "400"}, "invalid or missing X-Firebolt-Engine header")
                               return

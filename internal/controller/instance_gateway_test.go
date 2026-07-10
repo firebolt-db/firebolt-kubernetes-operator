@@ -328,6 +328,21 @@ func keysOf(m map[string]any) []string {
 	return ks
 }
 
+func TestBuildEnvoyConfigYAMLEngineFromQueryParam(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	for _, want := range []string{
+		"engine_from_path",
+		"[?&]engine=([^&]*)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("emitted config missing %q; gateway must accept engine= query param for the firebolt CLI", want)
+		}
+	}
+}
+
 // TestBuildEnvoyConfigYAMLStableAcrossInstances ensures two different
 // namespaces produce configs that differ only in the namespace-derived
 // authority rewrite, not in any other structural way.
