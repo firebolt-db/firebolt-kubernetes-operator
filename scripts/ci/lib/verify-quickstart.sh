@@ -91,9 +91,9 @@ wait_engine_ready() {
 }
 
 # Run a query through the instance gateway and assert the result contains an
-# expected substring. This mirrors the curl example in docs/quickstart.mdx:
-# the gateway Service is <instance>-gateway in the same namespace, and the
-# target engine is selected via the X-Firebolt-Engine header.
+# expected substring. This mirrors the firebolt client example in
+# docs/quickstart.mdx: exec into an engine pod and use the bundled CLI with
+# --endpoint <instance>-gateway and --set engine=<engine>.
 #
 # Usage:
 #   run_query <namespace> <instance> <engine> [query] [expected] [attempts] [sleep]
@@ -112,19 +112,24 @@ run_query() {
   local gateway="${instance}-gateway"
   echo "Running query against ${gateway} (engine=${engine}) in namespace ${namespace}: ${query}"
 
+  local engine_pod
+  engine_pod=$(kubectl get pod -n "${namespace}" -l "firebolt.io/engine=${engine}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [[ -z "${engine_pod}" ]]; then
+    echo "No engine pod found with label firebolt.io/engine=${engine} in namespace ${namespace}"
+    dump_namespace_debug "${namespace}"
+    return 1
+  fi
+
   local output=""
   for i in $(seq 1 "${attempts}"); do
-    # Unique pod name per attempt: --rm deletes the pod on a clean attach, but
-    # an attempt that errors out can leave the pod behind and collide on retry.
-    local pod
-    pod="query-$(date +%s)-${RANDOM}"
-    if output=$(kubectl run "${pod}" --rm -i --restart=Never \
-        --image=curlimages/curl -n "${namespace}" -- \
-        curl --silent --show-error --fail-with-body \
-        "http://${gateway}/query" \
-        -H "X-Firebolt-Engine: ${engine}" \
-        -H "Content-Type: text/plain" \
-        --data-binary "${query}" 2>/dev/null); then
+    if output=$(kubectl exec "${engine_pod}" -n "${namespace}" -c engine -- \
+        firebolt client \
+          --endpoint "http://${gateway}" \
+          --insecure \
+          --set "engine=${engine}" \
+          -c "${query}" \
+          --no-interactive 2>/dev/null); then
       if printf '%s' "${output}" | grep -q "${expected}"; then
         echo "Query succeeded after ${i} attempt(s); result contains '${expected}':"
         printf '%s\n' "${output}"

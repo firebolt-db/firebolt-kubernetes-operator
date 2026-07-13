@@ -159,6 +159,65 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 				"all engine endpoints should be considered healthy by Envoy active health checks")
 		})
 
+		It("should consume and validate the engine query parameter before forwarding", func() {
+			assertSuccessfulQuery := func(rawQuery, headerEngine string) {
+				GinkgoHelper()
+				status, body, err := gatewayQueryResponse(clientPod, instanceName, rawQuery, headerEngine)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).To(Equal(http.StatusOK), "response body: %s", body)
+
+				result, err := ParseQueryResult(body)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(LightQueryValidator(result)).To(BeTrue(), "gateway query should return 42")
+			}
+			assertRejectedQuery := func(rawQuery, headerEngine string) {
+				GinkgoHelper()
+				status, body, err := gatewayQueryResponse(clientPod, instanceName, rawQuery, headerEngine)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).To(Equal(http.StatusBadRequest), "response body: %s", body)
+			}
+
+			By("Routing with the query parameter while preserving downstream query settings")
+			assertSuccessfulQuery(
+				fmt.Sprintf("engine=%s&query_label=e2e-gateway-param&output_format=JSON_Compact", engineName),
+				"",
+			)
+
+			By("URL-decoding the engine name before validation")
+			encodedEngine := strings.ReplaceAll(engineName, "-", "%2D")
+			assertSuccessfulQuery(
+				fmt.Sprintf("engine=%s&output_format=JSON_Compact", encodedEngine),
+				"",
+			)
+
+			By("Accepting matching header and query selectors")
+			assertSuccessfulQuery(
+				fmt.Sprintf("engine=%s&output_format=JSON_Compact", engineName),
+				engineName,
+			)
+
+			By("Rejecting conflicting header and query selectors")
+			assertRejectedQuery(
+				fmt.Sprintf("engine=%s&output_format=JSON_Compact", engineName),
+				"different-engine",
+			)
+
+			By("Rejecting duplicate engine query parameters")
+			assertRejectedQuery(
+				fmt.Sprintf("engine=%s&engine=%s&output_format=JSON_Compact", engineName, engineName),
+				"",
+			)
+
+			By("Rejecting an encoded namespace traversal attempt")
+			assertRejectedQuery("engine=other%2Enamespace&output_format=JSON_Compact", "")
+
+			By("Rejecting an invalid header instead of falling back to the query selector")
+			assertRejectedQuery(
+				fmt.Sprintf("engine=%s&output_format=JSON_Compact", engineName),
+				"invalid.header",
+			)
+		})
+
 		It("should eject a terminating pod within one health check interval and clear the flag once a replacement is healthy", func() {
 			if !drainEjectionEnabled {
 				Skip("drain ejection requires engine to serve /health/ready on port 3473 " +
@@ -223,6 +282,50 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 		})
 	})
 })
+
+// gatewayQueryResponse sends a query through the instance gateway and returns
+// both the HTTP status and body. Unlike execCurlQuery, it deliberately does not
+// use curl --fail because routing-validation tests need to inspect 400 responses.
+func gatewayQueryResponse(clientPod, instanceName, rawQuery, headerEngine string) (int, string, error) {
+	const statusMarker = "\n__HTTP_STATUS__:"
+
+	serviceName := instanceName + controller.SuffixGateway
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?%s", serviceName, testNamespace, rawQuery)
+	curlArgs := []string{
+		"-sS",
+		"--connect-timeout", "2",
+		"--max-time", "15",
+		"-w", statusMarker + "%{http_code}",
+		"-X", "POST",
+		"-H", "Content-Type: text/plain",
+	}
+	if headerEngine != "" {
+		curlArgs = append(curlArgs, "-H", "X-Firebolt-Engine: "+headerEngine)
+	}
+	curlArgs = append(curlArgs, "-d", LightQuery, url)
+
+	args := kubectlArgs("exec", clientPod, "-n", testNamespace, "--", "curl")
+	args = append(args, curlArgs...)
+
+	var stdout, stderr strings.Builder
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return 0, "", fmt.Errorf("curl gateway query: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	output := stdout.String()
+	markerIndex := strings.LastIndex(output, statusMarker)
+	if markerIndex < 0 {
+		return 0, "", fmt.Errorf("curl gateway response missing status marker: %q", output)
+	}
+	status, err := strconv.Atoi(strings.TrimSpace(output[markerIndex+len(statusMarker):]))
+	if err != nil {
+		return 0, "", fmt.Errorf("parse gateway response status: %w", err)
+	}
+	return status, output[:markerIndex], nil
+}
 
 // startEnvoyAdminPortForward starts a kubectl port-forward to the Envoy admin
 // API (port 9901) on the given gateway pod and waits until the local port is

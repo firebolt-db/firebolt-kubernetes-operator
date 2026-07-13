@@ -328,6 +328,27 @@ func keysOf(m map[string]any) []string {
 	return ks
 }
 
+func TestBuildEnvoyConfigYAMLEngineFromQueryParam(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+
+	for _, want := range []string{
+		"extract_engine_from_path",
+		`string.find(path, "?", 1, true)`,
+		`url_decode(raw_key)`,
+		`engine = url_decode(raw_value)`,
+		`engine_count > 1`,
+		`query_engine ~= nil and query_engine ~= header_engine`,
+		`headers:replace(":path", stripped_path)`,
+		`headers:replace("x-firebolt-engine", engine)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("emitted config missing %q; gateway must securely consume and strip the firebolt CLI engine query parameter", want)
+		}
+	}
+}
+
 // TestBuildEnvoyConfigYAMLStableAcrossInstances ensures two different
 // namespaces produce configs that differ only in the namespace-derived
 // authority rewrite, not in any other structural way.

@@ -44,7 +44,7 @@ wait_instance_ready "$NAMESPACE" "$INSTANCE_NAME"
 wait_engine_ready "$NAMESPACE" "$ENGINE_NAME"
 
 # Prove the engine is actually serving queries through the gateway, not just
-# reporting Ready. Mirrors the curl example in docs/quickstart.mdx.
+# reporting Ready. Mirrors the firebolt client example in docs/quickstart.mdx.
 run_query "$NAMESPACE" "$INSTANCE_NAME" "$ENGINE_NAME"
 
 echo "✅ verify-quickstart basic passed (namespace=${NAMESPACE})"

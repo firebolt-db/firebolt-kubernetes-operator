@@ -44,7 +44,7 @@ wait_instance_ready "$NAMESPACE" "$INSTANCE_NAME" 90 10
 wait_engine_ready "$NAMESPACE" "$ENGINE_NAME" 90 10
 
 # Prove the engine is actually serving queries through the gateway, not just
-# reporting Ready. This is the same curl example the docs tell users to run.
+# reporting Ready. This is the same firebolt client example the docs tell users to run.
 run_query "$NAMESPACE" "$INSTANCE_NAME" "$ENGINE_NAME"
 
 echo "✅ verify-quickstart website passed"

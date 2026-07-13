@@ -157,15 +157,20 @@ See the [FireboltEngine CRD reference](./crd-reference/engine-crd-reference) for
 
 ## Run a query
 
-Once the engine is ready, run a query through the instance gateway:
+Once the engine is ready, run a query through the instance gateway with the Firebolt CLI bundled in the engine image:
 
 ```bash
-kubectl run query --rm -i --image=curlimages/curl --restart=Never -n firebolt -- \
-  curl --silent "http://quickstart-gateway/query" \
-    -H "X-Firebolt-Engine: my-engine" \
-    -H "Content-Type: text/plain" \
-    --data-binary "SELECT 42"
+ENGINE_POD=$(kubectl get pod -n firebolt -l firebolt.io/engine=my-engine -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n firebolt "$ENGINE_POD" -c engine -- \
+  firebolt client \
+    --endpoint http://quickstart-gateway \
+    --insecure \
+    --set engine=my-engine \
+    -c "SELECT 42" \
+    --no-interactive
 ```
+
+`--endpoint` targets the instance gateway Service. `--set engine=<name>` selects the engine to route to (the same value you would pass in the `X-Firebolt-Engine` header). `--no-interactive` prints the result and exits, which suits non-TTY `kubectl exec` sessions.
 
 You should see the query result in the output.
 
