@@ -6,13 +6,13 @@ sidebarTitle: Gateway query routing
 
 ## Gateway query routing
 
-The Envoy gateway proxy acts as the entry point for client queries and is the only entry point on which the Firebolt Operator promises zero downtime across engine lifecycle events. It uses a Lua filter to pick the target engine from the `X-Firebolt-Engine` request header and a dynamic forward proxy (DFP) to resolve the per-engine headless Service at request time.
+The Envoy Gateway proxy acts as the entry point for client queries and is the only entry point on which the Firebolt Operator promises zero downtime across Engine lifecycle events. It uses a Lua filter to pick the target Engine from the `X-Firebolt-Engine` request header or the `engine` query parameter and a dynamic forward proxy (DFP) to resolve the per-Engine headless Service at request time.
 
 ### Configuration
 
 The gateway ConfigMap (`{instance}-gateway-config`) is a **pure function of the FireboltInstance**. It does not depend on the set of engines. The Firebolt Operator does not regenerate it on engine create/delete/scale/blue-green events, so those events never trigger a gateway rollout. The configuration contains:
 
-- A Lua HTTP filter that validates the target engine name (from the `X-Firebolt-Engine` request header or the `engine` query parameter) as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 chars, no leading or trailing hyphen, no dots) and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`.
+- A Lua HTTP filter that URL-decodes and validates the target Engine name as a single RFC 1123 DNS label (lowercase alphanumerics and hyphens, ≤63 characters, no leading or trailing hyphen, and no dots), removes the routing-only `engine` query parameter before forwarding the request, and rewrites `:authority` to `{engine}-service.{namespace}.svc.cluster.local:3473`. It rejects malformed encoding, duplicate query parameters, invalid headers, and requests where the header and query parameter select different Engines.
 - A dynamic forward proxy in **sub-cluster mode** (`sub_clusters_config`, *not* `dns_cache_config`). Each authority synthesizes a full STRICT_DNS sub-cluster on first use, so all A-records of the headless engine Service become individual upstream hosts with normal load-balancing, outlier-detection and `previous_hosts` retry semantics. DNS-cache mode would have collapsed the headless Service back into a single sticky IP per cluster and made `previous_hosts` a no-op.
 - `max_requests_per_connection: 1` on the DFP cluster: every query gets a fresh TCP connect and therefore a fresh DNS lookup. This collapses the stale-IP window after a selector flip to a single TCP handshake instead of the STRICT_DNS refresh interval.
 - Active HTTP health checks on `/health/ready` every `1s` with `healthy_threshold: 1` / `unhealthy_threshold: 1`. The engine flips this endpoint to 503 immediately on SIGTERM, so Envoy ejects a draining pod from the load-balanced set within one probe interval, independently of DNS.

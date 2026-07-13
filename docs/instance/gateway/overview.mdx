@@ -7,8 +7,9 @@ sidebarTitle: Overview
 ## Overview
 
 The Firebolt Operator Gateway is based on [Envoy Proxy](https://www.envoyproxy.io/) and responsible for query routing.
-It uses a Lua filter to pick the target engine from the `X-Firebolt-Engine` request header and a dynamic forward
-proxy (DFP) to resolve the per-engine headless Service at request time.
+It uses a Lua filter to pick the target Engine from the `X-Firebolt-Engine` request header or the `engine` query
+parameter and a dynamic forward proxy (DFP) to resolve the per-Engine headless Service at request time. The Gateway
+removes the routing-only query parameter before forwarding the request to the Engine.
 
 - [Gateway query routing](./gateway-query-routing) describes Envoy routing, retries, graceful shutdown, and why the Firebolt Operator does not gate on EndpointSlice updates.
 - [Gateway sizing](./gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.

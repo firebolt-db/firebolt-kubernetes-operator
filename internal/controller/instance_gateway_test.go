@@ -334,11 +334,17 @@ func TestBuildEnvoyConfigYAMLEngineFromQueryParam(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"engine_from_path",
-		"[?&]engine=([^&]*)",
+		"extract_engine_from_path",
+		`string.find(path, "?", 1, true)`,
+		`url_decode(raw_key)`,
+		`engine = url_decode(raw_value)`,
+		`engine_count > 1`,
+		`query_engine ~= nil and query_engine ~= header_engine`,
+		`headers:replace(":path", stripped_path)`,
+		`headers:replace("x-firebolt-engine", engine)`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("emitted config missing %q; gateway must accept engine= query param for the firebolt CLI", want)
+			t.Errorf("emitted config missing %q; gateway must securely consume and strip the firebolt CLI engine query parameter", want)
 		}
 	}
 }
