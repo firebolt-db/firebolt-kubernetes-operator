@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.2.1...firebolt-operator-v0.3.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **storage:** the generated config requires a post-FB-1684 engine (packdb #23716). The operator ships version-matched with the engine, so this is the release boundary rather than an in-place break.
+
+### Features
+
+* **storage:** emit FB-1684 managed-table storage schema in kubectl-firebolt and the builder (FB-1684) ([2c031e9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2c031e985e65b2ee4fa66c5c7826a086cce6a60a))
+
+
+### Dependencies
+
+* **deps:** bump golang.org/x/net from 0.53.0 to 0.55.0 ([#43](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/43)) ([bb7ca12](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/bb7ca1238b09bf9c2406fbafc34de56d090deeee))
+* **deps:** bump packdb engine/metadata to 5.0.1-0.20260709071413.53735f172429 ([41d5fba](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/41d5fbad51a81ccf7a46ddcd4f08279fe7ef126a))
+* **deps:** bump packdb engine/metadata to 5.0.1-0.20260713060957.513515666721 ([#49](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/49)) ([64e14f3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/64e14f34ba9ee05e7c8c16c02f9de5bf3e059d69))
+* **deps:** bump the ginkgo-gomega group across 1 directory with 2 updates ([#41](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/41)) ([6c9b2c8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c9b2c881124fe4a5d29d8850c268304ee7b12e7))
+
 ## [0.2.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.2.0...firebolt-operator-v0.2.1) (2026-06-24)
 
 
