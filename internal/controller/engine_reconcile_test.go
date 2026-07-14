@@ -26,6 +26,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -250,6 +251,7 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		}
 	})
 
+
 	t.Run("toggling is detected as drift", func(t *testing.T) {
 		off := testSpec()
 		on := testSpec()
@@ -289,6 +291,43 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestContainersEqualAfterDefaults_ProbeDefaulting pins the probe branch of
+// applyContainerAPIServerDefaults: a user-supplied sidecar whose probe omits
+// API-server-defaulted fields (successThreshold, timeouts, HTTPGet scheme)
+// must compare equal to its stored read-back, or every reconcile would roll
+// a new blue-green generation. A genuine probe difference must still drift.
+func TestContainersEqualAfterDefaults_ProbeDefaulting(t *testing.T) {
+	desired := corev1.Container{
+		Name:  "metrics",
+		Image: "metrics:v1",
+		ReadinessProbe: &corev1.Probe{
+			PeriodSeconds: 5,
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromInt(8080)},
+			},
+		},
+	}
+
+	stored := *desired.DeepCopy()
+	// What the API server stamps at create time (SetDefaults_Probe +
+	// SetDefaults_HTTPGetAction) on the fields the user left empty.
+	stored.ReadinessProbe.TimeoutSeconds = 1
+	stored.ReadinessProbe.SuccessThreshold = 1
+	stored.ReadinessProbe.FailureThreshold = 3
+	stored.ReadinessProbe.HTTPGet.Path = "/"
+	stored.ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+
+	if !containersEqualAfterDefaults([]corev1.Container{stored}, []corev1.Container{desired}) {
+		t.Error("API-server probe defaulting reads back as drift (phantom drift)")
+	}
+
+	changed := *desired.DeepCopy()
+	changed.ReadinessProbe.PeriodSeconds = 30
+	if containersEqualAfterDefaults([]corev1.Container{stored}, []corev1.Container{changed}) {
+		t.Error("a real probe change must be detected as drift")
+	}
 }
 
 // storageBackendCase parameterizes a reconciler test across the engine

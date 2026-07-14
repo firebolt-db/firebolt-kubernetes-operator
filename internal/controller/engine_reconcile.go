@@ -2114,6 +2114,57 @@ func applyContainerAPIServerDefaults(c *corev1.Container) {
 	if c.ImagePullPolicy == "" {
 		c.ImagePullPolicy = resolveContainerImagePullPolicy(c.Image, "")
 	}
+	applyProbeAPIServerDefaults(c.LivenessProbe)
+	applyProbeAPIServerDefaults(c.ReadinessProbe)
+	applyProbeAPIServerDefaults(c.StartupProbe)
+	if c.Lifecycle != nil {
+		applyHandlerHTTPGetAPIServerDefaults(c.Lifecycle.PostStart)
+		applyHandlerHTTPGetAPIServerDefaults(c.Lifecycle.PreStop)
+	}
+}
+
+// applyProbeAPIServerDefaults stamps the probe fields the API server fills in
+// at create time (SetDefaults_Probe + SetDefaults_HTTPGetAction), so a probe
+// that omits them does not read back from the API as spurious drift.
+func applyProbeAPIServerDefaults(p *corev1.Probe) {
+	if p == nil {
+		return
+	}
+	if p.TimeoutSeconds == 0 {
+		p.TimeoutSeconds = 1
+	}
+	if p.PeriodSeconds == 0 {
+		p.PeriodSeconds = 10
+	}
+	if p.SuccessThreshold == 0 {
+		p.SuccessThreshold = 1
+	}
+	if p.FailureThreshold == 0 {
+		p.FailureThreshold = 3
+	}
+	applyHTTPGetAPIServerDefaults(p.HTTPGet)
+}
+
+// applyHandlerHTTPGetAPIServerDefaults stamps the HTTPGet defaults on a
+// lifecycle handler (SetDefaults_HTTPGetAction applies to those too).
+func applyHandlerHTTPGetAPIServerDefaults(h *corev1.LifecycleHandler) {
+	if h == nil {
+		return
+	}
+	applyHTTPGetAPIServerDefaults(h.HTTPGet)
+}
+
+// applyHTTPGetAPIServerDefaults mirrors SetDefaults_HTTPGetAction.
+func applyHTTPGetAPIServerDefaults(g *corev1.HTTPGetAction) {
+	if g == nil {
+		return
+	}
+	if g.Path == "" {
+		g.Path = "/"
+	}
+	if g.Scheme == "" {
+		g.Scheme = corev1.URISchemeHTTP
+	}
 }
 
 // normalizeContainer returns a deep copy of c with API-server-applied
