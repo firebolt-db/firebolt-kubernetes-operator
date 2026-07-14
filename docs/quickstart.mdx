@@ -41,9 +41,11 @@ firebolt-control-plane  Ready    control-plane   30s   v1.35.0
 Install the CRDs and operator with Helm:
 
 ```bash
-helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
-helm upgrade --skip-crds --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator
+helm upgrade --install firebolt-crds oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator-crds
+helm upgrade --skip-crds --install firebolt-operator oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator
 ```
+
+The `oci.firebolt.io` host is Firebolt's [Scarf](https://scarf.sh) gateway. It records anonymous download statistics and redirects to GitHub Container Registry. To bypass the gateway, use `oci://ghcr.io/firebolt-db/helm-charts` instead.
 
 For more installation options, see [Installation](./installation).
 
