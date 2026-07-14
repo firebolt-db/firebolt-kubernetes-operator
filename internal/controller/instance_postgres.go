@@ -252,7 +252,7 @@ func buildPostgresStatefulSet(instance *computev1alpha1.FireboltInstance) *appsv
 					Containers: []corev1.Container{{
 						Name:            "postgresql",
 						Image:           PostgresImage,
-						ImagePullPolicy: corev1.PullIfNotPresent,
+						ImagePullPolicy: resolveContainerImagePullPolicy(PostgresImage, ""),
 						Ports: []corev1.ContainerPort{
 							{Name: "tcp-postgresql", ContainerPort: PostgresPort, Protocol: corev1.ProtocolTCP},
 						},

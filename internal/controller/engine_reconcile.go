@@ -709,7 +709,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	// reserves the container name; operatorOwnedPodVolumeNames reserves the
 	// volume), so a user template can never collide with them and injection
 	// is unconditional once the feature resolves to enabled.
-	sidecars := effectiveSidecarsWithUI(spec, classInfo, pullPolicy)
+	sidecars := effectiveSidecarsWithUI(spec, classInfo)
 	if effectiveUISidecarEnabled(spec, classInfo) {
 		podVolumes = append(podVolumes, buildEngineWebWritableVolume())
 	}
@@ -1400,24 +1400,43 @@ func effectivePodAnnotations(spec *computev1alpha1.FireboltEngineSpec, classInfo
 // image, or vice versa).
 func effectiveEngineImage(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) (image string, pullPolicy corev1.PullPolicy) {
 	image = resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
-	pullPolicy = resolveImagePullPolicy(nil)
-	if c := classEngineContainer(classInfo); c != nil {
-		if c.Image != "" {
-			image = c.Image
-		}
-		if c.ImagePullPolicy != "" {
-			pullPolicy = c.ImagePullPolicy
-		}
+	if c := classEngineContainer(classInfo); c != nil && c.Image != "" {
+		image = c.Image
 	}
-	if c := engineSpecContainer(spec); c != nil {
-		if c.Image != "" {
-			image = c.Image
-		}
-		if c.ImagePullPolicy != "" {
-			pullPolicy = c.ImagePullPolicy
-		}
+	if c := engineSpecContainer(spec); c != nil && c.Image != "" {
+		image = c.Image
+	}
+	pullPolicy = engineExplicitPullPolicy(spec, classInfo)
+	if pullPolicy == "" {
+		pullPolicy = resolveWorkloadImagePullPolicy(image)
 	}
 	return image, pullPolicy
+}
+
+// engineExplicitPullPolicy returns the pull policy explicitly set on the
+// "engine" container (engine spec.template first, then class template), or
+// "" when neither sets one so callers can apply their own default.
+func engineExplicitPullPolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.PullPolicy {
+	if c := engineSpecContainer(spec); c != nil && c.ImagePullPolicy != "" {
+		return c.ImagePullPolicy
+	}
+	if c := classEngineContainer(classInfo); c != nil && c.ImagePullPolicy != "" {
+		return c.ImagePullPolicy
+	}
+	return ""
+}
+
+// effectiveEngineWebPullPolicy resolves the injected UI sidecar's image pull
+// policy: engine-if-set → class-if-set → the Kubernetes tag-based default
+// for the sidecar image. DefaultEngineWebImage is tracked at the mutable
+// :latest alias, so that default resolves to Always: caching it under
+// IfNotPresent would pin every node to whatever :latest it cached first and
+// UI image fixes would never reach existing clusters.
+func effectiveEngineWebPullPolicy(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) corev1.PullPolicy {
+	if p := engineExplicitPullPolicy(spec, classInfo); p != "" {
+		return p
+	}
+	return resolveContainerImagePullPolicy(DefaultEngineWebImage, "")
 }
 
 // effectiveSidecars merges sidecar containers (every container whose
@@ -1458,14 +1477,12 @@ func appendSidecars(dst []corev1.Container, src []corev1.Container) []corev1.Con
 // buildStatefulSet and stsMatchesSpec MUST resolve the sidecar set through
 // this one helper, or the injected UI container would read back from the API
 // as perpetual drift and roll a new blue-green generation on every reconcile.
-// pullPolicy is the engine's effective image pull policy, applied to the
-// injected UI container. No collision guard is needed: EngineWebContainerName
-// is reserved by the validating webhook, so a user container can never share
-// the name.
-func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo, pullPolicy corev1.PullPolicy) []corev1.Container {
+// No collision guard is needed: EngineWebContainerName is reserved by the
+// validating webhook, so a user container can never share the name.
+func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Container {
 	sidecars := effectiveSidecars(spec, classInfo)
 	if effectiveUISidecarEnabled(spec, classInfo) {
-		sidecars = append(sidecars, buildEngineWebSidecar(pullPolicy))
+		sidecars = append(sidecars, buildEngineWebSidecar(effectiveEngineWebPullPolicy(spec, classInfo)))
 	}
 	return sidecars
 }
@@ -1478,7 +1495,8 @@ func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo
 // hardened securityContext (read-only root FS, drop ALL, runs as the engine
 // UID/GID) and nginx's writable paths backed by an emptyDir. API-server
 // defaults are stamped so a read-back of the rendered StatefulSet does not
-// look like drift (see containersEqualAfterDefaults).
+// look like drift (see containersEqualAfterDefaults). pullPolicy comes from
+// effectiveEngineWebPullPolicy.
 func buildEngineWebSidecar(pullPolicy corev1.PullPolicy) corev1.Container {
 	runAsUser := DefaultEngineWebD
 	runAsGroup := DefaultEngineGID
@@ -2435,7 +2453,7 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 		return false
 	}
 
-	if !sidecarsMatch(podSpec.Containers, effectiveSidecarsWithUI(spec, classInfo, expectedPullPolicy)) {
+	if !sidecarsMatch(podSpec.Containers, effectiveSidecarsWithUI(spec, classInfo)) {
 		return false
 	}
 

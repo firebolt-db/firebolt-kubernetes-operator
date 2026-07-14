@@ -297,7 +297,7 @@ func effectiveMetadataPodTemplate(
 	userPrimary, userSidecars := splitUserContainers(userPodSpec.Containers, computev1alpha1.MetadataContainerName)
 
 	image := metadataImageFromUser(userPrimary)
-	pullPolicy := metadataImagePullPolicyFromUser(userPrimary)
+	pullPolicy := metadataImagePullPolicy(userPrimary, image)
 
 	metadataUID := MetadataUID
 	configMapName := metadataConfigMapName(instance.Name)
@@ -433,17 +433,15 @@ func metadataImageFromUser(primary *corev1.Container) string {
 	return resolveImageRef(nil, DefaultMetadataRepository, DefaultMetadataTag)
 }
 
-// metadataImagePullPolicyFromUser returns the user-supplied pull
-// policy on the metadata primary container, falling back to the
-// operator's default-resolution rule.
-func metadataImagePullPolicyFromUser(primary *corev1.Container) corev1.PullPolicy {
+// metadataImagePullPolicy returns the user-supplied pull policy on the
+// metadata primary container, falling back to the workload default rule for
+// the resolved image (the Kubernetes tag-based default, with "dev" treated
+// like ":latest" — see resolveWorkloadImagePullPolicy).
+func metadataImagePullPolicy(primary *corev1.Container, image string) corev1.PullPolicy {
 	if primary != nil && primary.ImagePullPolicy != "" {
 		return primary.ImagePullPolicy
 	}
-	if primary != nil && primary.Image != "" {
-		return resolveContainerImagePullPolicy(primary.Image, "")
-	}
-	return resolveImagePullPolicy(nil)
+	return resolveWorkloadImagePullPolicy(image)
 }
 
 // metadataPodSecurityContext composes the pod-level securityContext

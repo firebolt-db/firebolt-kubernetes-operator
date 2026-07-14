@@ -85,27 +85,27 @@ func TestResolveImageRef(t *testing.T) {
 	}
 }
 
-// TestResolveImagePullPolicy checks that the helper preserves the user's
-// explicit pull policy and falls back to IfNotPresent only when no value is
-// supplied. The kubebuilder default makes the empty branch unreachable in
-// production (the API server defaults `pullPolicy` on admission), but unit
-// tests that build specs directly rely on the fallback.
-func TestResolveImagePullPolicy(t *testing.T) {
+// TestResolveWorkloadImagePullPolicy checks the default pull policy rule for
+// the engine and metadata images: the Kubernetes tag-based default, with the
+// mutable "dev" alias treated like ":latest".
+func TestResolveWorkloadImagePullPolicy(t *testing.T) {
 	tests := []struct {
-		name string
-		spec *computev1alpha1.ImageSpec
-		want corev1.PullPolicy
+		name  string
+		image string
+		want  corev1.PullPolicy
 	}{
-		{"nil spec", nil, corev1.PullIfNotPresent},
-		{"empty spec", &computev1alpha1.ImageSpec{}, corev1.PullIfNotPresent},
-		{"explicit Always", &computev1alpha1.ImageSpec{PullPolicy: corev1.PullAlways}, corev1.PullAlways},
-		{"explicit Never", &computev1alpha1.ImageSpec{PullPolicy: corev1.PullNever}, corev1.PullNever},
+		{"dev tag", "ghcr.io/firebolt-db/engine:dev", corev1.PullAlways},
+		{"latest tag", "ghcr.io/firebolt-db/engine:latest", corev1.PullAlways},
+		{"no tag", "ghcr.io/firebolt-db/engine", corev1.PullAlways},
+		{"pinned tag", "ghcr.io/firebolt-db/engine:release-5.0.1", corev1.PullIfNotPresent},
+		{"dev-prefixed tag is not dev", "ghcr.io/firebolt-db/engine:dev-uptest", corev1.PullIfNotPresent},
+		{"digest", "ghcr.io/firebolt-db/engine@sha256:0000000000000000000000000000000000000000000000000000000000000000", corev1.PullIfNotPresent},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveImagePullPolicy(tc.spec)
+			got := resolveWorkloadImagePullPolicy(tc.image)
 			if got != tc.want {
-				t.Errorf("resolveImagePullPolicy() = %q, want %q", got, tc.want)
+				t.Errorf("resolveWorkloadImagePullPolicy(%q) = %q, want %q", tc.image, got, tc.want)
 			}
 		})
 	}

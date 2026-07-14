@@ -917,7 +917,7 @@ func effectiveGatewayPodTemplate(
 	userPrimary, userSidecars := splitUserContainers(userPodSpec.Containers, computev1alpha1.GatewayContainerName)
 
 	image := envoyImageFromUser(userPrimary)
-	pullPolicy := envoyImagePullPolicyFromUser(userPrimary)
+	pullPolicy := envoyImagePullPolicy(userPrimary, image)
 
 	var gracePeriod int64 = 15
 	var runAsUser int64 = 101 // Envoy default UID
@@ -1063,17 +1063,15 @@ func envoyImageFromUser(primary *corev1.Container) string {
 	return resolveImageRef(nil, DefaultEnvoyRepository, DefaultEnvoyTag)
 }
 
-// envoyImagePullPolicyFromUser returns the user-supplied pull policy
-// on the gateway primary container, falling back to the operator's
-// default-resolution rule (Always for :latest, IfNotPresent otherwise).
-func envoyImagePullPolicyFromUser(primary *corev1.Container) corev1.PullPolicy {
+// envoyImagePullPolicy returns the user-supplied pull policy on the
+// gateway primary container, falling back to the Kubernetes tag-based
+// default for the resolved image (Always for :latest, IfNotPresent
+// otherwise).
+func envoyImagePullPolicy(primary *corev1.Container, image string) corev1.PullPolicy {
 	if primary != nil && primary.ImagePullPolicy != "" {
 		return primary.ImagePullPolicy
 	}
-	if primary != nil && primary.Image != "" {
-		return resolveContainerImagePullPolicy(primary.Image, "")
-	}
-	return resolveImagePullPolicy(nil)
+	return resolveContainerImagePullPolicy(image, "")
 }
 
 // appendUserVolumes appends user-supplied volumes to the

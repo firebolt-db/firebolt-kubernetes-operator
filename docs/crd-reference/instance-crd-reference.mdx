@@ -24,12 +24,12 @@ and [Instance reconciliation](../instance/instance-reconciliation#component-pod-
 | `spec.metadata.postgres.database` | Yes* | - | Database name |
 | `spec.metadata.postgres.credentialsSecretRef.name` | Yes* | - | Secret with `username` and `password` keys |
 | `spec.metadata.replicas` | No | `1` | Number of metadata service pods (only `1` is currently supported). |
-| `spec.metadata.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered metadata container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.metadata.template.spec.containers[name=="metadata"].image`. |
+| `spec.metadata.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered metadata container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.metadata.template.spec.containers[name=="metadata"].image`. When `imagePullPolicy` is unset, the Kubernetes tag rule applies, with the mutable `dev` tag treated like `latest`. |
 | `spec.metadata.engineRegistration` | No | `false` | Register Engine objects in the metadata service for SQL-level RBAC. |
 | `spec.gateway` | **Yes** | - | Envoy gateway proxy configuration (can be empty `{}` for defaults) |
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods. See [Gateway sizing](../instance/gateway/gateway-sizing). |
 | `spec.gateway.metricsPort` | No | `9090` | Container port exposing Envoy's Prometheus metrics endpoint. The Firebolt Operator stamps a corresponding `metrics` port on the container. |
-| `spec.gateway.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered Envoy container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.gateway.template.spec.containers[name=="envoy"].image`. |
+| `spec.gateway.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered Envoy container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.gateway.template.spec.containers[name=="envoy"].image`. When `imagePullPolicy` is unset, the Kubernetes tag rule applies. |
 | `spec.auth` | No | disabled | Authentication configuration. Not enforced yet. Reserved for future engine-level auth. |
 | `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
 | `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |

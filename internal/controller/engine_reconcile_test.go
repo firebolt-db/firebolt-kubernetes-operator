@@ -200,6 +200,11 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		if len(c.Ports) != 1 || c.Ports[0].ContainerPort != EngineWebPort || c.Ports[0].Name != EngineWebPortName {
 			t.Errorf("engine-web ports = %+v, want one %q port %d", c.Ports, EngineWebPortName, EngineWebPort)
 		}
+		// The sidecar image is the mutable :latest alias, so the default pull
+		// policy must be Always or nodes would pin the first :latest they cached.
+		if c.ImagePullPolicy != corev1.PullAlways {
+			t.Errorf("engine-web pull policy = %q, want %q by default", c.ImagePullPolicy, corev1.PullAlways)
+		}
 		if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
 			t.Error("engine-web should run with a read-only root filesystem")
 		}
@@ -209,6 +214,26 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		// The engine container must remain present and first.
 		if sts.Spec.Template.Spec.Containers[0].Name != computev1alpha1.EngineContainerName {
 			t.Errorf("engine container should stay first, got %q", sts.Spec.Template.Spec.Containers[0].Name)
+		}
+	})
+
+	t.Run("explicit engine pull policy overrides the Always default", func(t *testing.T) {
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) {
+			for i := range p.Containers {
+				if p.Containers[i].Name == computev1alpha1.EngineContainerName {
+					p.Containers[i].ImagePullPolicy = corev1.PullIfNotPresent
+				}
+			}
+		})
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		c := findContainer(sts, computev1alpha1.EngineWebContainerName)
+		if c == nil {
+			t.Fatalf("expected a %q container when uiSidecar=true", computev1alpha1.EngineWebContainerName)
+		}
+		if c.ImagePullPolicy != corev1.PullIfNotPresent {
+			t.Errorf("engine-web pull policy = %q, want the engine's explicit %q", c.ImagePullPolicy, corev1.PullIfNotPresent)
 		}
 	})
 
@@ -1172,7 +1197,9 @@ func TestStsMatchesSpec(t *testing.T) {
 			s.Spec.Template.Spec.Containers[0].Image = "other/engine:tag"
 		}), false},
 		{"pull policy mismatch", mutate(func(s *appsv1.StatefulSet) {
-			s.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullAlways
+			// PullNever differs from the effective default under both build
+			// variants (dev resolves to Always, latest to IfNotPresent).
+			s.Spec.Template.Spec.Containers[0].ImagePullPolicy = corev1.PullNever
 		}), false},
 		{"resource mismatch", mutate(func(s *appsv1.StatefulSet) {
 			s.Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("4")

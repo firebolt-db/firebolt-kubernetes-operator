@@ -248,15 +248,17 @@ func resolveImageRef(spec *computev1alpha1.ImageSpec, defaultRepo, defaultTag st
 	return repo + ":" + tag
 }
 
-// resolveImagePullPolicy returns the pull policy from the user-supplied
-// ImageSpec when set, or IfNotPresent otherwise. The API server defaults
-// pullPolicy to IfNotPresent on admission, so this fallback only matters for
-// unit tests that build specs directly without going through the API server.
-func resolveImagePullPolicy(spec *computev1alpha1.ImageSpec) corev1.PullPolicy {
-	if spec != nil && spec.PullPolicy != "" {
-		return spec.PullPolicy
+// resolveWorkloadImagePullPolicy returns the default pull policy for the
+// engine and metadata images: the Kubernetes tag-based rule (see
+// resolveContainerImagePullPolicy), with the "dev" tag additionally treated
+// like ":latest". The engine and metadata GHCR packages publish "dev" as a
+// mutable alias tracking the development branch, so caching it under
+// IfNotPresent would pin every node to whatever build it pulled first.
+func resolveWorkloadImagePullPolicy(image string) corev1.PullPolicy {
+	if containerImageDefaultTag(image) == "dev" {
+		return corev1.PullAlways
 	}
-	return corev1.PullIfNotPresent
+	return resolveContainerImagePullPolicy(image, "")
 }
 
 // containerImageDefaultTag returns the effective tag used for pull-policy
