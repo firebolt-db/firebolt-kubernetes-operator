@@ -111,6 +111,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           show-progress: "false"
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -421,8 +422,26 @@ jobs:
             COMMITTED=false
           else
             git commit -m "chore(deps): set chart appVersion to ${APP_VERSION_TAG}"
-            git push "https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+            PUSH_URL="https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             COMMITTED=true
+
+            for attempt in 1 2 3; do
+              if git push "$PUSH_URL" HEAD:main; then
+                break
+              fi
+
+              if [ "$attempt" -eq 3 ]; then
+                echo "Failed to push chart appVersion commit after ${attempt} attempts." 1>&2
+                exit 1
+              fi
+
+              git fetch "$PUSH_URL" main
+              if ! git rebase FETCH_HEAD; then
+                git rebase --abort || true
+                echo "Failed to rebase chart appVersion commit onto latest main." 1>&2
+                exit 1
+              fi
+            done
           fi
 
           {
