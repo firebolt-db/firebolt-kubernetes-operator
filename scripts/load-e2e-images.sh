@@ -97,6 +97,7 @@ declare -a IMAGES=(
     "${POSTGRES_IMAGE}|pull"
     "${ENVOY_IMAGE}:${ENVOY_TAG}|pull"
     "${CURL_IMAGE}|pull"
+    "${ENGINE_WEB_IMAGE}:${ENGINE_WEB_TAG}|pull"
 )
 
 # Translate a Docker image reference (possibly without explicit registry
