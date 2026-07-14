@@ -69,76 +69,9 @@ spec:
                 cpu: 100m
                 memory: 256Mi
 
-  # Auth is Instance-wide: every engine in this Instance renders the same
-  # instance.auth.* config and shares the same JWT signing key, because
-  # packdb's embedded authorization server on each engine both issues and
-  # validates tokens. Signing keys and TLS certs are always provisioned
-  # via cert-manager; there is no bring-your-own-Secret option.
-  auth:
-    enabled: true
-    # Clients that don't pick an authorization server explicitly default
-    # to this one. Must be "_local" or one of oidc.providers[].name.
-    preferredAuthorizationServer: okta
-    local:
-      passwordLogin: admin_only
-      admin:
-        name: firebolt
-        password:
-          name: firebolt-admin-credentials
-          key: password
-      signingAlgorithm: RS256
-      signingKeys:
-        certManager:
-          issuerRef:
-            name: internal-ca
-            kind: ClusterIssuer
-          algorithm: RSA
-          size: 2048
-        # Optional: operator-owned rotation. Omit both fields to keep a
-        # single, permanent, non-rotating key (the default). When set,
-        # the operator mints a new key every rotationInterval and rolls
-        # it out via a two-phase promotion that never opens a validation
-        # gap; retainDuration must be at least maxTokenAge (packdb
-        # default: 1d) so a token signed the instant a key is demoted has
-        # fully expired before that key is removed.
-        rotationInterval: 720h # 30 days
-        retainDuration: 24h
-    oidc:
-      providers:
-        - name: okta
-          title: Okta
-          discoveryURL: https://company.okta.com/oauth2/default/.well-known/openid-configuration
-          usernameMapping: "{{ email }}"
-          jitProvisioning:
-            enabled: true
-            defaultRoles: [public]
-
-  # TLS certs are also cert-manager-only.
-  #
-  # tls.engine: enabling it replaces every engine's plaintext http-query
-  # listener with TLS-only on the same port, and the gateway automatically
-  # re-encrypts its upstream connection to engines using the same
-  # certificate's CA.
-  #
-  # tls.gateway: enabling it terminates TLS on the gateway's client-facing
-  # listener. The certificate always covers the gateway's in-cluster
-  # Service DNS names automatically; dnsNames below is only needed for
-  # names a client outside the cluster will present at the handshake (a
-  # custom domain, an external load balancer's hostname) — the gateway has
-  # no operator-managed external entrypoint, so the operator cannot infer
-  # those on its own. Omit dnsNames entirely for in-cluster-only access.
-  tls:
-    engine:
-      enabled: true
-      certManager:
-        issuerRef:
-          name: internal-ca
-          kind: ClusterIssuer
-    gateway:
-      enabled: true
-      certManager:
-        issuerRef:
-          name: internal-ca
-          kind: ClusterIssuer
-      dnsNames:
-        - firebolt.example.com
+  # Authentication (native + OIDC) and TLS are Instance-wide, opt-in, and
+  # cert-manager-backed. They are omitted here so this example deploys on a
+  # bare cluster with no external prerequisites (it is the config the CI
+  # quickstart smoke test applies). For a fully worked auth + TLS example —
+  # including the required cert-manager issuer and admin-password Secret —
+  # see examples/instance-auth-tls.yaml.
