@@ -171,6 +171,13 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 		if v == nil || v.Secret == nil || v.Secret.SecretName != "fb-engine-tls" {
 			t.Errorf("engine-CA volume = %+v, want Secret.SecretName=fb-engine-tls", v)
 		}
+		// Least-privilege: only ca.crt is projected, so the engine listener's
+		// private key (tls.key) never lands in the gateway pod.
+		if v != nil && v.Secret != nil {
+			if len(v.Secret.Items) != 1 || v.Secret.Items[0].Key != engineTLSCASecretKey || v.Secret.Items[0].Path != engineTLSCASecretKey {
+				t.Errorf("engine-CA volume Items = %+v, want exactly [{Key:%s Path:%s}]", v.Secret.Items, engineTLSCASecretKey, engineTLSCASecretKey)
+			}
+		}
 		m := findMount(pt, computev1alpha1.GatewayEngineCAVolumeName)
 		if m == nil || m.MountPath != gatewayEngineCAMountPath || !m.ReadOnly {
 			t.Errorf("engine-CA mount = %+v, want MountPath=%s ReadOnly=true", m, gatewayEngineCAMountPath)

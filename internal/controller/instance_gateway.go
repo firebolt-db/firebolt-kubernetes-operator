@@ -1166,9 +1166,11 @@ sleep 8
 		},
 	}
 	// Present only once engine TLS is enabled and ready — see
-	// buildDFPUpstreamTLSTransportSocket's matching gate. Mounting the
-	// whole Secret (not just ca.crt via Items) is fine: the gateway never
-	// reads tls.key, and envoy.yaml only ever points at the ca.crt path.
+	// buildDFPUpstreamTLSTransportSocket's matching gate. Projected down to
+	// just ca.crt via Items: the gateway only validates engine server certs
+	// against this CA (envoy.yaml points solely at the ca.crt path), so the
+	// engine listener's private key (tls.key) must never land in the gateway
+	// pod's filesystem where a gateway compromise could exfiltrate it.
 	if engineUpstreamTLSReady(instance) {
 		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
 			Name:      computev1alpha1.GatewayEngineCAVolumeName,
@@ -1178,7 +1180,12 @@ sleep 8
 		operatorVolumes = append(operatorVolumes, corev1.Volume{
 			Name: computev1alpha1.GatewayEngineCAVolumeName,
 			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.EngineTLS.SecretName},
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: instance.Status.EngineTLS.SecretName,
+					Items: []corev1.KeyToPath{
+						{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+					},
+				},
 			},
 		})
 	}
