@@ -184,6 +184,42 @@ for i in $(seq 1 "$attempts"); do
   sleep 5
 done
 
+# Drive the SPA in a real (containerized) browser: load the workspace, run a
+# query from the SQL editor, assert the results grid renders. This is the
+# only layer that catches client-side regressions — JavaScript that fails
+# before any request is made is invisible to the request replay above.
+# The Playwright image tag and npm package version MUST match so the
+# preinstalled browsers are reused (no download at run time).
+PLAYWRIGHT_VERSION="${PLAYWRIGHT_VERSION:-1.49.1}"
+PLAYWRIGHT_IMAGE="mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
+UI_SMOKE_PORT="${UI_SMOKE_PORT:-19100}"
+
+echo "Running the browser workspace smoke (${PLAYWRIGHT_IMAGE}) via port-forward on :${UI_SMOKE_PORT}..."
+kubectl port-forward -n "$NAMESPACE" "pod/${engine_pod}" "${UI_SMOKE_PORT}:${UI_PORT}" >/dev/null 2>&1 &
+pf_pid=$!
+trap 'kill "${pf_pid}" 2>/dev/null || true' EXIT
+for i in $(seq 1 10); do
+  curl -sf -o /dev/null "http://localhost:${UI_SMOKE_PORT}/" && break
+  if [[ "$i" == "10" ]]; then
+    echo "Port-forward to ${engine_pod}:${UI_PORT} never became reachable"
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
+  sleep 2
+done
+
+if ! docker run --rm --network host \
+    -v "${SCRIPT_DIR}/ui-workspace-smoke.mjs:/smoke.mjs:ro" \
+    -e "UI_BASE_URL=http://localhost:${UI_SMOKE_PORT}" \
+    "${PLAYWRIGHT_IMAGE}" \
+    bash -c "mkdir -p /tmp/smoke && cd /tmp/smoke && cp /smoke.mjs . \
+      && npm i --silent --no-audit --no-fund playwright@${PLAYWRIGHT_VERSION} >/dev/null 2>&1 \
+      && node smoke.mjs"; then
+  echo "Browser workspace smoke failed"
+  dump_namespace_debug "$NAMESPACE"
+  exit 1
+fi
+
 echo "✅ verify-ui-sidecar passed (namespace=${NAMESPACE})"
 echo "Cleaning up namespace ${NAMESPACE}..."
 kubectl delete namespace "$NAMESPACE" --wait=false
