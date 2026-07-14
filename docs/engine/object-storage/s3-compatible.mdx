@@ -4,10 +4,6 @@ description: Configure a non-AWS S3-compatible object store (Nebius, CoreWeave, 
 sidebarTitle: S3-compatible
 ---
 
-<Warning>
-  **Breaking change.** Managed-table storage now uses `managed_table_storage` and `managed_table_bucket_name` with a per-cloud `storage.aws` / `gcp` / `azure` block. The former keys — `type`, `api_scheme`, `bucket_name`, and the `minio` / `azurite` types — are removed and are rejected by the engine at startup. This schema requires a recent engine image; keep the operator and engine on matching versions.
-</Warning>
-
 Every `FireboltEngine` requires object storage for managed tablet data. Besides Amazon S3, the engine can use any **S3-compatible** object store — for example [Nebius](https://nebius.com/) Object Storage, [CoreWeave](https://www.coreweave.com/) Object Storage, or a self-hosted [MinIO](https://min.io/). You point the engine at the store's endpoint and supply credentials through the pod environment.
 
 ## How it differs from Amazon S3
