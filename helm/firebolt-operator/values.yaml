@@ -209,6 +209,15 @@ logging:
 # -- Priority class name for the operator pod.
 priorityClassName: ""
 
+telemetry:
+  # -- Send a once-daily anonymous aggregate usage event to Scarf. The event
+  # contains operator/engine versions, Kubernetes minor, OS/architecture, and
+  # bucketed instance/engine/replica counts. It contains no names, stable
+  # identifiers, query data, schemas, or configuration. The source IP is visible
+  # to Scarf for company inference but is not stored. Set false to disable;
+  # DO_NOT_TRACK and SCARF_NO_ANALYTICS are also honored.
+  enabled: true
+
 # -- Additional CLI arguments passed to the operator binary.
 additionalArgs: []
 
