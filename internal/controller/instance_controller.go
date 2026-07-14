@@ -574,15 +574,26 @@ func setInstanceCondition(
 // setInstanceReadyRollup recomputes InstanceConditionReady from the
 // per-component conditions. Ready is True iff every required component
 // condition is present AND True; otherwise False with the Reason/Message
-// of the FIRST not-True component in pipeline order (Metadata →
-// Gateway). Propagating the first blocker's Reason makes
+// of the FIRST not-True component in pipeline order (Metadata → Gateway →
+// EngineTLS → GatewayTLS). Propagating the first blocker's Reason makes
 // `kubectl describe fireboltinstance` surface the actual root cause on
 // the headline condition, so users do not have to scan every condition
 // to find the one that is False.
+//
+// EngineTLSReady and GatewayTLSReady are part of the roll-up (they report
+// True with reason "Disabled" when their feature is off, so they never
+// block a non-TLS instance): when TLS is requested the Instance must not
+// advertise Ready until the certificate is issued, or it would report
+// Ready while the gateway is still serving/​re-encrypting in plaintext
+// during cert provisioning. There is no deadlock — cert-manager issues
+// the certificates independently, and engines gate their own reconcile on
+// Status.EngineTLS directly rather than on this top-level condition.
 func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	components := []string{
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
+		computev1alpha1.InstanceConditionEngineTLSReady,
+		computev1alpha1.InstanceConditionGatewayTLSReady,
 	}
 	for _, c := range components {
 		cond := apimeta.FindStatusCondition(instance.Status.Conditions, c)
@@ -601,12 +612,12 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	}
 	setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
 		metav1.ConditionTrue, "AllComponentsReady",
-		"metadata and gateway are ready")
+		"metadata, gateway, and TLS certificates are ready")
 }
 
 // computePhase derives the instance Phase from InstanceConditionReady,
 // which is itself the roll-up of the per-component conditions
-// (Postgres, Metadata, Gateway) computed by setInstanceReadyRollup.
+// (Metadata, Gateway, EngineTLS, GatewayTLS) computed by setInstanceReadyRollup.
 // The invariant is:
 //
 //	Phase == Ready  ⇔  InstanceConditionReady.Status == True

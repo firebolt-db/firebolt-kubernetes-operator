@@ -85,19 +85,22 @@ const (
 	// InstanceConditionEngineTLSReady reports whether the engine-listener
 	// TLS server certificate (spec.tls.engine) has been provisioned. True
 	// with reason "Disabled" when spec.tls.engine is unset or disabled.
-	// Deliberately not rolled up into InstanceConditionReady, mirroring
-	// InstanceConditionAuthReady: engines and the gateway each gate their
-	// own reconcile on Status.EngineTLS directly.
+	// Rolled up into InstanceConditionReady (see setInstanceReadyRollup):
+	// when engine TLS is requested the Instance must not report Ready until
+	// the certificate is issued, so it never advertises a secure posture it
+	// has not yet reached (the gateway would otherwise re-encrypt to engines
+	// in plaintext during provisioning). Engines still gate their own
+	// reconcile on Status.EngineTLS directly, not on this top-level condition.
 	InstanceConditionEngineTLSReady = "EngineTLSReady"
 
 	// InstanceConditionGatewayTLSReady reports whether the gateway's
 	// client-facing (downstream) TLS server certificate (spec.tls.gateway)
 	// has been provisioned. True with reason "Disabled" when
-	// spec.tls.gateway is unset or disabled. Deliberately not rolled up
-	// into InstanceConditionReady, mirroring InstanceConditionEngineTLSReady:
-	// the gateway gates its own listener TLS on Status.GatewayTLS directly,
-	// distinct from InstanceConditionGatewayReady (the Deployment's own
-	// rollout health).
+	// spec.tls.gateway is unset or disabled. Rolled up into
+	// InstanceConditionReady (see setInstanceReadyRollup): when gateway TLS
+	// is requested the Instance must not report Ready while the client-facing
+	// listener would still be serving plaintext during provisioning. Distinct
+	// from InstanceConditionGatewayReady (the Deployment's own rollout health).
 	InstanceConditionGatewayTLSReady = "GatewayTLSReady"
 )
 
