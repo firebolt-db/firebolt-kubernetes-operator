@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.0...firebolt-operator-v0.3.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **controller:** follow Kubernetes tag-based image pull-policy defaults (FB-2172) ([00900e5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/00900e509ae4ba4d20ae898b57021a7d92facee5))
+
 ## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.2.1...firebolt-operator-v0.3.0) (2026-07-13)
 
 
