@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.1...firebolt-operator-v0.3.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **ci:** harden sync-chart-appversion against main push races (FB-2030) ([6ae5003](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6ae5003d826a623eef22981adfeecc9945f85be7))
+* **controller:** add readiness probe to the engine-web UI sidecar (FB-2175) ([805e789](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/805e789fd8a78d4196f19e0494accffc6334d0fb))
+* **controller:** normalize probe API-server defaults in container drift comparison (FB-2175) ([93cbdc5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/93cbdc569615ff3524c3e5c5ee799bba94720527))
+
 ## [0.3.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.0...firebolt-operator-v0.3.1) (2026-07-14)
 
 
