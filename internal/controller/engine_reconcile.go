@@ -1497,6 +1497,12 @@ func effectiveSidecarsWithUI(spec *computev1alpha1.FireboltEngineSpec, classInfo
 // defaults are stamped so a read-back of the rendered StatefulSet does not
 // look like drift (see containersEqualAfterDefaults). pullPolicy comes from
 // effectiveEngineWebPullPolicy.
+//
+// The readiness probe makes pod Ready mean "the UI is actually serving":
+// without it a sidecar counts ready the instant its process starts, so a
+// sidecar that crashes right after startup opens a transient all-ready
+// window that the blue-green promotion gate (checkPodsReady, a single-shot
+// snapshot) can observe and promote on.
 func buildEngineWebSidecar(pullPolicy corev1.PullPolicy) corev1.Container {
 	runAsUser := DefaultEngineWebD
 	runAsGroup := DefaultEngineGID
@@ -1509,6 +1515,18 @@ func buildEngineWebSidecar(pullPolicy corev1.PullPolicy) corev1.Container {
 		},
 		Ports: []corev1.ContainerPort{
 			{Name: EngineWebPortName, ContainerPort: EngineWebPort, Protocol: corev1.ProtocolTCP},
+		},
+		ReadinessProbe: &corev1.Probe{
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       3,
+			TimeoutSeconds:      2,
+			FailureThreshold:    3,
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path: "/",
+					Port: intstr.FromInt(int(EngineWebPort)),
+				},
+			},
 		},
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{

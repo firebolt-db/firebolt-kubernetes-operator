@@ -209,6 +209,14 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
 			t.Error("engine-web should run with a read-only root filesystem")
 		}
+		// The readiness probe is what keeps a crash-looping sidecar from
+		// opening a transient all-ready window the promotion gate can catch.
+		if c.ReadinessProbe == nil || c.ReadinessProbe.HTTPGet == nil {
+			t.Fatal("engine-web must carry an HTTP readiness probe")
+		}
+		if got := c.ReadinessProbe.HTTPGet.Port.IntValue(); got != int(EngineWebPort) {
+			t.Errorf("engine-web readiness probe port = %d, want %d", got, EngineWebPort)
+		}
 		if countVolumes(sts, EngineWebWritableVolumeName) != 1 {
 			t.Errorf("expected exactly one %q volume when uiSidecar=true", EngineWebWritableVolumeName)
 		}
@@ -251,6 +259,27 @@ func TestBuildStatefulSetUISidecar(t *testing.T) {
 		}
 	})
 
+	t.Run("no drift against an API-server-defaulted read-back", func(t *testing.T) {
+		// Simulate what the API server stamps onto the stored StatefulSet
+		// (probe successThreshold/timeout/period, HTTPGet scheme, ...): the
+		// read-back must still compare equal to the freshly rendered spec,
+		// or every reconcile would roll a new generation.
+		spec := testSpec()
+		spec.UISidecar = ptr(true)
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, nil)
+		for i := range sts.Spec.Template.Spec.Containers {
+			c := &sts.Spec.Template.Spec.Containers[i]
+			if c.ReadinessProbe != nil {
+				c.ReadinessProbe.SuccessThreshold = 1
+				if c.ReadinessProbe.HTTPGet != nil {
+					c.ReadinessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+				}
+			}
+		}
+		if !stsMatchesSpec(sts, spec, nil) {
+			t.Error("stsMatchesSpec = false after API-server probe defaulting (phantom drift)")
+		}
+	})
 
 	t.Run("toggling is detected as drift", func(t *testing.T) {
 		off := testSpec()
