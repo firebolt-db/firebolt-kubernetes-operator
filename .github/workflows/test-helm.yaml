@@ -162,6 +162,12 @@ jobs:
       - name: Run helm-test target
         run: make helm-test
 
+      # Only place in CI that starts the operator-injected engine-web
+      # container against the real (mutable :latest) UI image, so a UI image
+      # regression against the injected pod spec surfaces here.
+      - name: Verify engine web UI sidecar
+        run: make helm-test-ui KIND_CLUSTER="${KIND_CLUSTER}"
+
       - name: Verify website quickstart bundle
         run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"
 

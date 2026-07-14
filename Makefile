@@ -256,6 +256,17 @@ helm-test-website: ## Verify the all-in-one website quickstart bundle (examples/
 	fi
 	./scripts/ci/verify-quickstart-website.sh
 
+.PHONY: helm-test-ui
+HELM_TEST_UI_NS ?= helm-verify-ui
+helm-test-ui: ## Verify the engine web UI sidecar (uiSidecar: true) serves on a chart-installed operator (kind).
+	@ctx="$$( $(KUBECTL) config current-context 2>/dev/null || true )"; \
+	if [ "$$ctx" != "$(HELM_TEST_CONTEXT)" ]; then \
+		echo "Refusing to run helm-test-ui on kube context '$$ctx' (expected '$(HELM_TEST_CONTEXT)')." >&2; \
+		echo "Switch context or override HELM_TEST_CONTEXT / KIND_CLUSTER explicitly." >&2; \
+		exit 1; \
+	fi
+	./scripts/ci/verify-ui-sidecar.sh "$(HELM_TEST_UI_NS)"
+
 .PHONY: helm-test-crds
 HELM_TEST_CRDS_NS ?= helm-verify-crds
 helm-test-crds: ## Verify the CRD chart installs within Helm's 1 MiB release-Secret cap (kind).
