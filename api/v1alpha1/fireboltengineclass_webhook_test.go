@@ -396,6 +396,45 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			},
 			wantField: "spec.template.metadata.finalizers",
 		},
+		// A user-supplied sidecar or init container must not be able to mount the
+		// operator-rendered auth/TLS Secret volumes and read admin credentials or
+		// signing keys off disk (the pod-template model never grants that).
+		{
+			name: "sidecar mounting the auth-admin Secret volume is rejected",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{
+					{Name: EngineAuthAdminVolumeName, MountPath: "/exfil"},
+				}
+			},
+			wantField: "spec.template.spec.containers[1].volumeMounts[0].name",
+		},
+		{
+			name: "sidecar mounting a signing-key Secret volume (prefix match) is rejected",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{
+					{Name: EngineAuthSigningVolumeNamePrefix + "signing-1", MountPath: "/exfil"},
+				}
+			},
+			wantField: "spec.template.spec.containers[1].volumeMounts[0].name",
+		},
+		{
+			name: "sidecar mounting the engine TLS Secret volume is rejected",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{
+					{Name: EngineTLSVolumeName, MountPath: "/exfil"},
+				}
+			},
+			wantField: "spec.template.spec.containers[1].volumeMounts[0].name",
+		},
+		{
+			name: "init container mounting the auth-admin Secret volume is rejected",
+			mutate: func(ec *FireboltEngineClass) {
+				ec.Spec.Template.Spec.InitContainers[0].VolumeMounts = []corev1.VolumeMount{
+					{Name: EngineAuthAdminVolumeName, MountPath: "/exfil"},
+				}
+			},
+			wantField: "spec.template.spec.initContainers[0].volumeMounts[0].name",
+		},
 	}
 
 	v := &FireboltEngineClassCustomValidator{}
@@ -416,9 +455,11 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 
 // TestFireboltEngineClassValidator_SidecarsUnconstrained pins down that sidecar
 // containers can carry whatever the user wants — image, command, ports,
-// env, probes. Sidecar freedom is a deliberate design choice;
-// regressing it would silently turn the FireboltEngineClass into a strict
-// pod-spec allowlist.
+// env, probes, and volumeMounts to their OWN (non-reserved) volumes. Sidecar
+// freedom is a deliberate design choice; regressing it would silently turn the
+// FireboltEngineClass into a strict pod-spec allowlist. The one exception is
+// operator-owned volume names (covered by TestFireboltEngineClassValidator_
+// RejectsOwnedFields): a sidecar may not mount the auth/TLS Secret volumes.
 func TestFireboltEngineClassValidator_SidecarsUnconstrained(t *testing.T) {
 	v := &FireboltEngineClassCustomValidator{}
 	ec := validFireboltEngineClass()
@@ -435,6 +476,9 @@ func TestFireboltEngineClassValidator_SidecarsUnconstrained(t *testing.T) {
 		{Name: EnginePodIndexEnvKey, Value: "ignored-on-sidecar"},
 		{Name: "ANY_OTHER", Value: "ok"},
 	}
+	// A volumeMount to the sidecar's own, non-reserved volume stays allowed —
+	// only operator-owned volume names are rejected.
+	sidecar.VolumeMounts = []corev1.VolumeMount{{Name: "my-scratch", MountPath: "/scratch"}}
 	if _, err := v.ValidateCreate(context.Background(), ec); err != nil {
 		t.Fatalf("ValidateCreate: sidecar mutations triggered error: %v", err)
 	}
