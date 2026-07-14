@@ -4,8 +4,10 @@ set -euo pipefail
 # Verify the built-in engine web UI sidecar end to end on a chart-installed
 # operator: deploy an instance and an engine with `uiSidecar: true`, then
 # assert that the injected `engine-web` container becomes Ready, still runs
-# under the hardened securityContext (readOnlyRootFilesystem), and actually
-# serves both the SPA index and the runtime /config.js over HTTP.
+# under the hardened securityContext (readOnlyRootFilesystem), serves the SPA
+# index and the runtime /config.js, and honors the workspace's actual request
+# contract (bundle assets, the SPA's startup queries, and a SQL-editor-shaped
+# query through the /query proxy).
 #
 # The sidecar image is tracked at the mutable `:latest` alias, so this check
 # doubles as a canary for UI image regressions against the operator's
@@ -122,6 +124,63 @@ for i in $(seq 1 "$attempts"); do
     exit 1
   fi
   echo "  attempt ${i}/${attempts}: UI not answering yet (sleep 5s)"
+  sleep 5
+done
+
+# Replay the Web UI workspace's request contract, mirroring what the SPA
+# actually sends at runtime (derived from the webui lite build's request
+# paths). Serving 200s on / and /config.js is not enough: the workspace has
+# broken in the past on startup queries the engine stopped supporting while
+# the index still served fine. Requests, in SPA order:
+#   1. a hashed bundle chunk referenced by index.html (asset serving);
+#   2. the databases-list startup query (information_schema.catalogs) with
+#      the SPA's headers;
+#   3. a workspace query in the exact shape the SQL editor sends
+#      (?output_format=JSON_Compact&database=<defaultDatabase>, JSON body,
+#      bearer token header), asserting the result payload comes back.
+default_database=$(printf '%s' "$output" | sed -n 's/.*defaultDatabase: "\([^"]*\)".*/\1/p')
+default_database="${default_database:-firebolt}"
+chunk=$(kubectl run "ui-chunk" -n "$NAMESPACE" --rm -i --restart=Never \
+  --image="${CURL_IMAGE}" --quiet -- sh -c \
+  "curl -sf http://${pod_ip}:${UI_PORT}/" 2>/dev/null \
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1)
+if [[ -z "$chunk" ]]; then
+  echo "index.html references no hashed bundle chunk (assets/index-*.js)"
+  dump_namespace_debug "$NAMESPACE"
+  exit 1
+fi
+
+echo "Replaying the workspace request contract (chunk=${chunk}, database=${default_database})..."
+attempts=3
+for i in $(seq 1 "$attempts"); do
+  if output=$(kubectl run "ui-contract-$i" -n "$NAMESPACE" --rm -i --restart=Never \
+      --image="${CURL_IMAGE}" --quiet -- sh -c "
+      set -e
+      base=http://${pod_ip}:${UI_PORT}
+      echo '-- SPA bundle chunk'
+      curl -sf -o /dev/null \"\${base}/${chunk}\"
+      echo '-- startup query: databases list (information_schema.catalogs)'
+      curl -sf -o /dev/null -X POST \"\${base}/query?output_format=JSON_Compact\" \
+        -H 'Content-Type: application/json' -H 'Firebolt-Machine-Query: 1' \
+        -d 'SELECT catalog_name, description, catalog_owner, created, last_altered FROM information_schema.catalogs order by LOWER(catalog_name);'
+      echo '-- workspace query execution (SQL editor shape)'
+      curl -sf -X POST \"\${base}/query?output_format=JSON_Compact&database=${default_database}\" \
+        -H 'Content-Type: application/json' -H 'Authorization: Bearer lite' \
+        -d 'SELECT 42;'" 2>/dev/null); then
+    if printf '%s' "$output" | grep -q '"data"' && printf '%s' "$output" | grep -q '42'; then
+      echo "Workspace request contract satisfied; SELECT 42 returned data:"
+      printf '%s\n' "$output" | tail -3
+      break
+    fi
+    echo "  attempt ${i}/${attempts}: workspace query answered without expected data:"
+    printf '%s\n' "$output"
+  fi
+  if [[ "$i" == "$attempts" ]]; then
+    echo "Workspace request contract failed against ${pod_ip}:${UI_PORT}"
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
+  echo "  attempt ${i}/${attempts}: contract replay not passing yet (sleep 5s)"
   sleep 5
 done
 
