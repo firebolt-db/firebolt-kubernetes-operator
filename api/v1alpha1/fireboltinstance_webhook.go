@@ -269,12 +269,19 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 		errs = append(errs, validateSigningKeyRotation(local, base.Child("signingKeys"))...)
 	}
 
-	if err := validateDurationField(base.Child("tokenExpiry"), local.TokenExpiry); err != nil {
+	// tokenExpiry and maxTokenAge must be positive, not merely parseable: a
+	// zero/negative token lifetime is meaningless to packdb, and a negative
+	// maxTokenAge would additionally corrupt validateSigningKeyRotation's
+	// retain-duration floor (a "-1d" would lower it below any real token's
+	// lifetime, defeating the rotation-safety check).
+	if err := validatePositiveDurationField(base.Child("tokenExpiry"), local.TokenExpiry); err != nil {
 		errs = append(errs, err)
 	}
-	if err := validateDurationField(base.Child("maxTokenAge"), local.MaxTokenAge); err != nil {
+	if err := validatePositiveDurationField(base.Child("maxTokenAge"), local.MaxTokenAge); err != nil {
 		errs = append(errs, err)
 	}
+	// clockSkewTolerance stays parseable-only: zero (no tolerance) is a
+	// legitimate value, and it does not feed the rotation floor.
 	if err := validateDurationField(base.Child("clockSkewTolerance"), local.ClockSkewTolerance); err != nil {
 		errs = append(errs, err)
 	}
@@ -296,7 +303,7 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path) field.ErrorList {
 		if err := validateDurationField(jwtPath.Child("clockSkewTolerance"), oidc.JWT.ClockSkewTolerance); err != nil {
 			errs = append(errs, err)
 		}
-		if err := validateDurationField(jwtPath.Child("maxTokenAge"), oidc.JWT.MaxTokenAge); err != nil {
+		if err := validatePositiveDurationField(jwtPath.Child("maxTokenAge"), oidc.JWT.MaxTokenAge); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -366,8 +373,13 @@ func validateDurationField(path *field.Path, value string) *field.Error {
 }
 
 // validatePositiveDurationField is validateDurationField plus a positivity
-// check, for the one duration field (oidc.providers[].discovery.refreshInterval)
-// packdb itself rejects when non-positive.
+// check (the value must parse AND be > 0). Used for the duration fields where
+// a zero/negative value is either meaningless or unsafe:
+// oidc.providers[].discovery.refreshInterval (packdb itself rejects it
+// non-positive — the discovery-refresh task would never run), and the
+// token-lifetime fields tokenExpiry / maxTokenAge (a non-positive value is
+// nonsensical to packdb and, for maxTokenAge, would corrupt
+// validateSigningKeyRotation's retain-duration floor).
 func validatePositiveDurationField(path *field.Path, value string) *field.Error {
 	if value == "" {
 		return nil
@@ -442,10 +454,12 @@ func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.Er
 
 	maxTokenAge := packdbDefaultMaxTokenAge
 	if local.MaxTokenAge != "" {
-		// An invalid MaxTokenAge string is already reported separately by
-		// validateDurationField; skip the cross-check here rather than
-		// compare against an unparseable value.
-		if d, err := parsePackdbDuration(local.MaxTokenAge); err == nil {
+		// A MaxTokenAge that is unparseable OR non-positive is already
+		// reported separately by validatePositiveDurationField; ignore it
+		// here (falling back to the packdb default floor) rather than let a
+		// bad value — most dangerously a negative duration — lower the
+		// retain-duration floor below a real token's lifetime.
+		if d, err := parsePackdbDuration(local.MaxTokenAge); err == nil && d > 0 {
 			maxTokenAge = d
 		}
 	}

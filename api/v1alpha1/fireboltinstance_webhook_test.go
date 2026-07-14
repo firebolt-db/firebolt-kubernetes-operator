@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 )
 
@@ -651,6 +652,44 @@ func TestValidateAuth(t *testing.T) {
 			},
 			wantError: false,
 		},
+		{
+			name: "negative local maxTokenAge is rejected (a negative floor would defeat the rotation retain-duration check)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					MaxTokenAge: "-1d",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "zero local tokenExpiry is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					TokenExpiry: "0s",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "negative oidc.jwt maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{
+					JWT: &OIDCJWTSpec{MaxTokenAge: "-1h"},
+					Providers: []OIDCProviderSpec{
+						{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					},
+				},
+			},
+			wantError: true,
+		},
 	}
 
 	v := &FireboltInstanceCustomValidator{}
@@ -1124,4 +1163,31 @@ func indexOf(haystack, needle string) int {
 
 func resourceMustParse(s string) resource.Quantity {
 	return resource.MustParse(s)
+}
+
+// TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor is a
+// direct regression for the negative-duration finding: even if a non-positive
+// MaxTokenAge reached validateSigningKeyRotation (it is now rejected upstream
+// by validatePositiveDurationField, but this cross-check must not depend on
+// that), the retain-duration floor must fall back to packdbDefaultMaxTokenAge
+// rather than adopt the bad value — otherwise a "-1d" floor would approve a
+// retainDuration far shorter than a real token's lifetime.
+func TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor(t *testing.T) {
+	base := field.NewPath("spec", "auth", "local", "signingKeys")
+	for _, mta := range []string{"-1d", "0s"} {
+		local := &LocalAuthSpec{
+			Admin:       validAdminSpec(),
+			MaxTokenAge: mta,
+			SigningKeys: &SigningKeyPolicy{
+				CertManager:      validSigningKeys().CertManager,
+				RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+				// 1h < the 24h default floor: must be rejected because the bad
+				// MaxTokenAge is ignored, not treated as the (negative/zero) floor.
+				RetainDuration: &metav1.Duration{Duration: time.Hour},
+			},
+		}
+		if errs := validateSigningKeyRotation(local, base); len(errs) == 0 {
+			t.Errorf("maxTokenAge=%q: expected retainDuration rejected against the default floor, got no error", mta)
+		}
+	}
 }
