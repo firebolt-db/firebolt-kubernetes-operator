@@ -85,7 +85,10 @@ func TestEffectiveServiceAccountName(t *testing.T) {
 // does not cover.
 func TestEffectiveEngineImage(t *testing.T) {
 	defaultImage := resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
-	defaultPullPolicy := resolveImagePullPolicy(nil)
+	// Variant-dependent: the "dev" build variant embeds the mutable :dev
+	// engine tag (→ Always), the "latest" variant a pinned release tag
+	// (→ IfNotPresent).
+	defaultPullPolicy := resolveWorkloadImagePullPolicy(defaultImage)
 
 	classEngine := func(image string, pullPolicy corev1.PullPolicy) *FireboltEngineClassInfo {
 		return newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
@@ -134,11 +137,25 @@ func TestEffectiveEngineImage(t *testing.T) {
 			wantPullPolicy: corev1.PullNever,
 		},
 		{
-			name:           "engine image override without a class falls back to the default pull policy",
+			name:           "pinned engine image override without a policy defaults to IfNotPresent",
 			spec:           engineSpec("engine/img:v9", ""),
 			classInfo:      nil,
 			wantImage:      "engine/img:v9",
-			wantPullPolicy: defaultPullPolicy,
+			wantPullPolicy: corev1.PullIfNotPresent,
+		},
+		{
+			name:           "dev engine image override without a policy defaults to Always",
+			spec:           engineSpec("engine/img:dev", ""),
+			classInfo:      nil,
+			wantImage:      "engine/img:dev",
+			wantPullPolicy: corev1.PullAlways,
+		},
+		{
+			name:           "latest engine image override without a policy defaults to Always",
+			spec:           engineSpec("engine/img:latest", ""),
+			classInfo:      nil,
+			wantImage:      "engine/img:latest",
+			wantPullPolicy: corev1.PullAlways,
 		},
 		{
 			name:           "engine pull-policy-only override inherits the class image",
