@@ -140,10 +140,12 @@ done
 #      bearer token header), asserting the result payload comes back.
 default_database=$(printf '%s' "$output" | sed -n 's/.*defaultDatabase: "\([^"]*\)".*/\1/p')
 default_database="${default_database:-firebolt}"
+# `|| true` keeps a no-match grep (exit 1, fatal under `set -euo pipefail`)
+# from killing the script before the empty-chunk check below can report it.
 chunk=$(kubectl run "ui-chunk" -n "$NAMESPACE" --rm -i --restart=Never \
   --image="${CURL_IMAGE}" --quiet -- sh -c \
   "curl -sf http://${pod_ip}:${UI_PORT}/" 2>/dev/null \
-  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1)
+  | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 || true)
 if [[ -z "$chunk" ]]; then
   echo "index.html references no hashed bundle chunk (assets/index-*.js)"
   dump_namespace_debug "$NAMESPACE"

@@ -55,38 +55,39 @@ await runButton
 console.log("Workspace rendered (run button visible).");
 
 // Type a query into the CodeMirror editor, replacing any template content.
+// The selected value and alias are unique to this run, so the success
+// assertion below cannot be satisfied by results or errors left on screen
+// by an earlier template/startup query — only by THIS query's rendered
+// result.
+const marker = `ui_smoke_${Date.now()}`;
+const markerValue = String(Math.floor(Date.now() / 1000));
 const editor = page.locator(".cm-content").first();
 await editor.click({ timeout: TIMEOUT_MS });
 await page.keyboard.press("ControlOrMeta+a");
-await page.keyboard.type("SELECT 42 AS ui_smoke;");
+await page.keyboard.type(`SELECT ${markerValue} AS ${marker};`);
 await runButton.first().click();
-console.log("Query submitted from the SQL editor.");
+console.log(`Query submitted from the SQL editor (marker column ${marker}).`);
 
-// Either the results grid renders with our value, or the workspace surfaced
-// a query error — both are deterministic outcomes; anything else times out.
-const outcome = await Promise.race([
-  page
+// Wait only for this query's own result (grid containing the unique marker
+// column). A visible query-error-message is NOT treated as an immediate
+// failure signal — one can legitimately linger from an earlier query while
+// ours is in flight — it is collected as a diagnostic on timeout instead.
+try {
+  await page
     .locator('[data-testid="datagrid"]')
-    .filter({ hasText: "42" })
+    .filter({ hasText: marker })
     .first()
-    .waitFor({ state: "visible", timeout: TIMEOUT_MS })
-    .then(() => "results"),
-  page
-    .locator('[data-testid="query-error-message"]')
-    .first()
-    .waitFor({ state: "visible", timeout: TIMEOUT_MS })
-    .then(() => "query-error"),
-]).catch(() => "timeout");
-
-if (outcome !== "results") {
-  const errText =
-    outcome === "query-error"
-      ? await page.locator('[data-testid="query-error-message"]').first().innerText()
-      : "(no results and no error rendered)";
-  fail(`query did not produce results (outcome=${outcome}): ${errText}; ` +
+    .waitFor({ state: "visible", timeout: TIMEOUT_MS });
+} catch {
+  const errLocator = page.locator('[data-testid="query-error-message"]').first();
+  const errText = (await errLocator.isVisible().catch(() => false))
+    ? await errLocator.innerText()
+    : "(no query error rendered)";
+  fail(`results grid never showed the marker column ${marker}; ` +
+    `last visible query error: ${errText}; ` +
     `page errors: ${JSON.stringify(pageErrors)}; failed requests: ${JSON.stringify(failedRequests)}`);
 }
-console.log("Results grid rendered the query result.");
+console.log("Results grid rendered this query's result (marker column found).");
 
 if (pageErrors.length > 0) {
   fail(`uncaught page errors during the session: ${JSON.stringify(pageErrors)}`);
