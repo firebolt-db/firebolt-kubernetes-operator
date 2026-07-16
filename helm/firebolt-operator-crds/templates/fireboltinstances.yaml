@@ -8125,8 +8125,8 @@ spec:
                       certManager:
                         description: |-
                           CertManager configures the cert-manager Certificate used to
-                          provision this listener's server certificate. Required when
-                          Enabled is true.
+                          provision this listener's server certificate. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
                         properties:
                           algorithm:
                             default: ECDSA
@@ -8196,6 +8196,30 @@ spec:
                         default: false
                         description: Enabled turns on TLS for this listener.
                         type: boolean
+                      secretRef:
+                        description: |-
+                          SecretRef supplies a pre-existing Kubernetes Secret holding this
+                          listener's certificate material instead of provisioning one via
+                          cert-manager — for a certificate issued by a CA the cluster has no
+                          cert-manager integration with. The Secret must carry "tls.crt" and
+                          "tls.key" (the standard kubernetes.io/tls keys); an engine listener
+                          additionally requires "ca.crt", since the gateway validates engine
+                          certificates against it when re-encrypting upstream (see
+                          EngineTLSStatus). The operator only reads this Secret; it never
+                          creates, mutates, or garbage-collects it. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                     type: object
                   gateway:
                     description: |-
@@ -8205,8 +8229,8 @@ spec:
                       certManager:
                         description: |-
                           CertManager configures the cert-manager Certificate used to
-                          provision this listener's server certificate. Required when
-                          Enabled is true.
+                          provision this listener's server certificate. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
                         properties:
                           algorithm:
                             default: ECDSA
@@ -8276,6 +8300,30 @@ spec:
                         default: false
                         description: Enabled turns on TLS for this listener.
                         type: boolean
+                      secretRef:
+                        description: |-
+                          SecretRef supplies a pre-existing Kubernetes Secret holding this
+                          listener's certificate material instead of provisioning one via
+                          cert-manager — for a certificate issued by a CA the cluster has no
+                          cert-manager integration with. The Secret must carry "tls.crt" and
+                          "tls.key" (the standard kubernetes.io/tls keys); an engine listener
+                          additionally requires "ca.crt", since the gateway validates engine
+                          certificates against it when re-encrypting upstream (see
+                          EngineTLSStatus). The operator only reads this Secret; it never
+                          creates, mutates, or garbage-collects it. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                     type: object
                 type: object
             required:

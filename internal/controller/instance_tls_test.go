@@ -261,6 +261,121 @@ func TestEnsureEngineTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 	}
 }
 
+// TestEnsureEngineTLS_SecretRefConsumesUserSecret exercises the
+// bring-your-own-Secret path: the operator provisions no cert-manager
+// Certificate, waits until the referenced Secret carries all three keys
+// (tls.crt, tls.key, ca.crt — the engine listener requires the CA for the
+// gateway's upstream validation), then records it in Status.EngineTLS.
+func TestEnsureEngineTLS_SecretRefConsumesUserSecret(t *testing.T) {
+	sch := authTestScheme(t)
+	byoSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "byo-engine-tls", Namespace: "ns-1"},
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       []byte("cert"),
+			corev1.TLSPrivateKeyKey: []byte("key"),
+			// ca.crt deliberately absent at first.
+		},
+	}
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(byoSecret).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{
+					Enabled:   true,
+					SecretRef: &corev1.LocalObjectReference{Name: "byo-engine-tls"},
+				},
+			},
+		},
+	}
+
+	// Missing ca.crt: not ready, status untouched, reason SecretPending.
+	if err := r.ensureEngineTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureEngineTLS (missing ca.crt): %v", err)
+	}
+	if instance.Status.EngineTLS != nil {
+		t.Errorf("Status.EngineTLS = %+v, want nil while ca.crt missing", instance.Status.EngineTLS)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionFalse || cond.Reason != "SecretPending" {
+		t.Errorf("EngineTLSReady = %+v, want False/SecretPending", cond)
+	}
+
+	// The operator must not have created a cert-manager Certificate.
+	var certs certmanagerv1.CertificateList
+	if err := cli.List(context.Background(), &certs); err != nil {
+		t.Fatalf("listing certificates: %v", err)
+	}
+	if len(certs.Items) != 0 {
+		t.Errorf("BYO path created %d cert-manager Certificate(s), want 0", len(certs.Items))
+	}
+
+	// User completes the Secret with ca.crt: now ready.
+	byoSecret.Data[engineTLSCASecretKey] = []byte("ca")
+	if err := cli.Update(context.Background(), byoSecret); err != nil {
+		t.Fatalf("updating byo secret: %v", err)
+	}
+	if err := r.ensureEngineTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureEngineTLS (complete): %v", err)
+	}
+	if instance.Status.EngineTLS == nil || instance.Status.EngineTLS.SecretName != "byo-engine-tls" {
+		t.Errorf("Status.EngineTLS = %+v, want SecretName byo-engine-tls", instance.Status.EngineTLS)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionTrue || cond.Reason != "Ready" {
+		t.Errorf("EngineTLSReady = %+v, want True/Ready", cond)
+	}
+}
+
+// TestEnsureGatewayTLS_SecretRefConsumesUserSecret is the gateway counterpart:
+// a client-facing listener only presents its cert, so tls.crt + tls.key
+// suffice (no ca.crt), and again no Certificate is provisioned.
+func TestEnsureGatewayTLS_SecretRefConsumesUserSecret(t *testing.T) {
+	sch := authTestScheme(t)
+	byoSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "byo-gw-tls", Namespace: "ns-1"},
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       []byte("cert"),
+			corev1.TLSPrivateKeyKey: []byte("key"),
+		},
+	}
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(byoSecret).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:   true,
+					SecretRef: &corev1.LocalObjectReference{Name: "byo-gw-tls"},
+				},
+			},
+		},
+	}
+
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS: %v", err)
+	}
+	if instance.Status.GatewayTLS == nil || instance.Status.GatewayTLS.SecretName != "byo-gw-tls" {
+		t.Errorf("Status.GatewayTLS = %+v, want SecretName byo-gw-tls", instance.Status.GatewayTLS)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionTrue || cond.Reason != "Ready" {
+		t.Errorf("GatewayTLSReady = %+v, want True/Ready", cond)
+	}
+
+	var certs certmanagerv1.CertificateList
+	if err := cli.List(context.Background(), &certs); err != nil {
+		t.Fatalf("listing certificates: %v", err)
+	}
+	if len(certs.Items) != 0 {
+		t.Errorf("BYO path created %d cert-manager Certificate(s), want 0", len(certs.Items))
+	}
+}
+
 // validGatewayTLSSpecForController returns a TLSSpec that satisfies
 // ValidateTLS on its own, mirroring validEngineTLSSpecForController.
 func validGatewayTLSSpecForController() *computev1alpha1.TLSSpec {

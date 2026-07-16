@@ -113,8 +113,12 @@ func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instan
 		return err
 	}
 	if !ready {
-		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
-			"CertificatePending", "waiting for cert-manager to issue the engine TLS certificate")
+		reason, msg := "CertificatePending", "waiting for cert-manager to issue the engine TLS certificate"
+		if tls.Engine.SecretRef != nil {
+			reason = "SecretPending"
+			msg = "waiting for the referenced engine TLS secret to exist and carry tls.crt, tls.key, and ca.crt"
+		}
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse, reason, msg)
 		return nil
 	}
 
@@ -156,20 +160,29 @@ func engineTLSSecretReady(secret *corev1.Secret) bool {
 // buildEngineTLSCertificate and engineTLSSecretReady carry the
 // unit-tested surface for this function's logic.
 func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
-	desired := buildEngineTLSCertificate(instance)
-	desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+	var secretName string
+	if ref := instance.Spec.TLS.Engine.SecretRef; ref != nil {
+		// Bring-your-own-Secret: the operator provisions nothing and owns
+		// nothing here, it only consumes the user-supplied cert material.
+		// The engineTLSSecretReady check below still applies (tls.crt,
+		// tls.key, and ca.crt must all be present).
+		secretName = ref.Name
+	} else {
+		desired := buildEngineTLSCertificate(instance)
+		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
 
-	// GC note: same as ensureSigningCertificate — OwnerReference +
-	// Kubernetes' garbage collector, not the manual label-based sweep in
-	// reconcileDelete.
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return false, err
-	}
-	if err := applySSA(ctx, r.Client, desired); err != nil {
-		return false, fmt.Errorf("applying engine TLS certificate: %w", err)
+		// GC note: same as ensureSigningCertificate — OwnerReference +
+		// Kubernetes' garbage collector, not the manual label-based sweep in
+		// reconcileDelete.
+		if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+			return false, err
+		}
+		if err := applySSA(ctx, r.Client, desired); err != nil {
+			return false, fmt.Errorf("applying engine TLS certificate: %w", err)
+		}
+		secretName = desired.Spec.SecretName
 	}
 
-	secretName := desired.Spec.SecretName
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: secretName}, &secret)
 	if errors.IsNotFound(err) {
@@ -335,8 +348,12 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, insta
 		return err
 	}
 	if !ready {
-		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
-			"CertificatePending", "waiting for cert-manager to issue the gateway TLS certificate")
+		reason, msg := "CertificatePending", "waiting for cert-manager to issue the gateway TLS certificate"
+		if tls.Gateway.SecretRef != nil {
+			reason = "SecretPending"
+			msg = "waiting for the referenced gateway TLS secret to exist and carry tls.crt and tls.key"
+		}
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse, reason, msg)
 		return nil
 	}
 
@@ -372,17 +389,24 @@ func gatewayTLSSecretReady(secret *corev1.Secret) bool {
 // buildGatewayTLSCertificate and gatewayTLSSecretReady carry the
 // unit-tested surface for this function's logic.
 func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
-	desired := buildGatewayTLSCertificate(instance)
-	desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+	var secretName string
+	if ref := instance.Spec.TLS.Gateway.SecretRef; ref != nil {
+		// Bring-your-own-Secret: operator-consumed, not operator-owned. The
+		// gatewayTLSSecretReady check below still applies (tls.crt + tls.key).
+		secretName = ref.Name
+	} else {
+		desired := buildGatewayTLSCertificate(instance)
+		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
 
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return false, err
-	}
-	if err := applySSA(ctx, r.Client, desired); err != nil {
-		return false, fmt.Errorf("applying gateway TLS certificate: %w", err)
+		if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+			return false, err
+		}
+		if err := applySSA(ctx, r.Client, desired); err != nil {
+			return false, fmt.Errorf("applying gateway TLS certificate: %w", err)
+		}
+		secretName = desired.Spec.SecretName
 	}
 
-	secretName := desired.Spec.SecretName
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: secretName}, &secret)
 	if errors.IsNotFound(err) {

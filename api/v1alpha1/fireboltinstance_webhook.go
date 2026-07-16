@@ -141,19 +141,34 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 	return errs
 }
 
-// validateTLSListener requires a cert-manager provisioning policy with a
-// named issuer whenever a TLS listener is enabled: the operator has no
-// bring-your-own-Secret alternative (see TLSListenerSpec's doc comment),
-// so an enabled listener with no CertManager block, or one with an empty
-// issuer name, can never actually be provisioned.
+// validateTLSListener requires exactly one certificate source whenever a
+// TLS listener is enabled: CertManager (the operator provisions a
+// cert-manager Certificate) or SecretRef (a user-supplied Secret — see
+// TLSListenerSpec's doc comment). A cert-manager source additionally needs
+// a named issuer and a valid algorithm/size; a SecretRef needs a name.
 func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.ErrorList {
 	if listener == nil || !listener.Enabled {
 		return nil
 	}
-	if listener.CertManager == nil {
+
+	hasCertManager := listener.CertManager != nil
+	hasSecretRef := listener.SecretRef != nil
+	switch {
+	case hasCertManager && hasSecretRef:
+		return field.ErrorList{field.Forbidden(base.Child("secretRef"),
+			"must not be set together with certManager: provide exactly one certificate source")}
+	case !hasCertManager && !hasSecretRef:
 		return field.ErrorList{field.Required(base.Child("certManager"),
-			"required when enabled is true: the operator provisions every certificate via cert-manager")}
+			"required when enabled is true: provide certManager (operator provisions via cert-manager) or secretRef (bring your own Secret)")}
 	}
+
+	if hasSecretRef {
+		if listener.SecretRef.Name == "" {
+			return field.ErrorList{field.Required(base.Child("secretRef", "name"), "required")}
+		}
+		return nil
+	}
+
 	var errs field.ErrorList
 	if listener.CertManager.IssuerRef.Name == "" {
 		errs = append(errs, field.Required(base.Child("certManager", "issuerRef", "name"), "required"))

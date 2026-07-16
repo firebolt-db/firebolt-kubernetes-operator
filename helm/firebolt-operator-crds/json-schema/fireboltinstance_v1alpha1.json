@@ -14825,7 +14825,7 @@
               "description": "Engine configures TLS termination on each engine's HTTP and\nPostgres-wire listeners.",
               "properties": {
                 "certManager": {
-                  "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Required when\nEnabled is true.",
+                  "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
                   "properties": {
                     "algorithm": {
                       "default": "ECDSA",
@@ -14884,6 +14884,19 @@
                   "default": false,
                   "description": "Enabled turns on TLS for this listener.",
                   "type": "boolean"
+                },
+                "secretRef": {
+                  "description": "SecretRef supplies a pre-existing Kubernetes Secret holding this\nlistener's certificate material instead of provisioning one via\ncert-manager \u2014 for a certificate issued by a CA the cluster has no\ncert-manager integration with. The Secret must carry \"tls.crt\" and\n\"tls.key\" (the standard kubernetes.io/tls keys); an engine listener\nadditionally requires \"ca.crt\", since the gateway validates engine\ncertificates against it when re-encrypting upstream (see\nEngineTLSStatus). The operator only reads this Secret; it never\ncreates, mutates, or garbage-collects it. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
+                  "properties": {
+                    "name": {
+                      "default": "",
+                      "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "x-kubernetes-map-type": "atomic",
+                  "additionalProperties": false
                 }
               },
               "type": "object",
@@ -14893,7 +14906,7 @@
               "description": "Gateway configures TLS termination on the Envoy gateway's\nclient-facing listener.",
               "properties": {
                 "certManager": {
-                  "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Required when\nEnabled is true.",
+                  "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
                   "properties": {
                     "algorithm": {
                       "default": "ECDSA",
@@ -14952,6 +14965,19 @@
                   "default": false,
                   "description": "Enabled turns on TLS for this listener.",
                   "type": "boolean"
+                },
+                "secretRef": {
+                  "description": "SecretRef supplies a pre-existing Kubernetes Secret holding this\nlistener's certificate material instead of provisioning one via\ncert-manager \u2014 for a certificate issued by a CA the cluster has no\ncert-manager integration with. The Secret must carry \"tls.crt\" and\n\"tls.key\" (the standard kubernetes.io/tls keys); an engine listener\nadditionally requires \"ca.crt\", since the gateway validates engine\ncertificates against it when re-encrypting upstream (see\nEngineTLSStatus). The operator only reads this Secret; it never\ncreates, mutates, or garbage-collects it. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
+                  "properties": {
+                    "name": {
+                      "default": "",
+                      "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "x-kubernetes-map-type": "atomic",
+                  "additionalProperties": false
                 }
               },
               "type": "object",

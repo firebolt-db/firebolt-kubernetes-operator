@@ -814,6 +814,31 @@ func TestValidateTLS(t *testing.T) {
 			wantError: false,
 		},
 		{
+			name: "engine enabled with secretRef is valid",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: "my-engine-tls"},
+			}},
+			wantError: false,
+		},
+		{
+			name: "engine enabled with both certManager and secretRef is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				SecretRef:   &corev1.LocalObjectReference{Name: "my-engine-tls"},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with secretRef but empty name is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{},
+			}},
+			wantError: true,
+		},
+		{
 			name:      "gateway disabled with nothing else set is valid",
 			tls:       &TLSSpec{Gateway: &TLSListenerSpec{Enabled: false}},
 			wantError: false,

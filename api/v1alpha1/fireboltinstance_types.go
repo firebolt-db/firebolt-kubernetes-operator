@@ -275,10 +275,11 @@ type CertManagerIssuerRef struct {
 }
 
 // CertManagerSpec describes how the operator provisions an X.509 keypair
-// via a cert-manager Certificate. This is the operator's only supported
-// source of auth/TLS key material — there is intentionally no
-// bring-your-own-Secret alternative, so every certificate in an Instance
-// is traceable to one issuer chain the cluster administrator configured.
+// via a cert-manager Certificate. It is the only supported source of JWT
+// signing-key material (see SigningKeyPolicy) — there is intentionally no
+// bring-your-own-Secret alternative there, so every signing key is
+// traceable to one issuer chain the cluster administrator configured. TLS
+// listeners may instead bring their own Secret via TLSListenerSpec.SecretRef.
 type CertManagerSpec struct {
 	// IssuerRef references the cert-manager Issuer or ClusterIssuer that
 	// signs the generated Certificate.
@@ -610,9 +611,12 @@ type AuthSpec struct {
 
 // TLSListenerSpec configures TLS termination for one operator-managed
 // listener (the gateway's client-facing listener, or an engine's HTTP/
-// Postgres-wire listeners). As with SigningKeyPolicy, the certificate is
-// always provisioned via cert-manager — there is no bring-your-own-Secret
-// option.
+// Postgres-wire listeners). When Enabled, provide exactly one certificate
+// source: CertManager (the operator provisions a cert-manager Certificate)
+// or SecretRef (bring your own Secret). Unlike SigningKeyPolicy — where
+// cert-manager is the only supported source — a TLS listener accepts a
+// pre-issued Secret so certificates from a CA the cluster has no
+// cert-manager integration with can still be used.
 type TLSListenerSpec struct {
 	// Enabled turns on TLS for this listener.
 	// +kubebuilder:default=false
@@ -620,10 +624,23 @@ type TLSListenerSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// CertManager configures the cert-manager Certificate used to
-	// provision this listener's server certificate. Required when
-	// Enabled is true.
+	// provision this listener's server certificate. Provide exactly one of
+	// CertManager or SecretRef when Enabled is true.
 	// +optional
 	CertManager *CertManagerSpec `json:"certManager,omitempty"`
+
+	// SecretRef supplies a pre-existing Kubernetes Secret holding this
+	// listener's certificate material instead of provisioning one via
+	// cert-manager — for a certificate issued by a CA the cluster has no
+	// cert-manager integration with. The Secret must carry "tls.crt" and
+	// "tls.key" (the standard kubernetes.io/tls keys); an engine listener
+	// additionally requires "ca.crt", since the gateway validates engine
+	// certificates against it when re-encrypting upstream (see
+	// EngineTLSStatus). The operator only reads this Secret; it never
+	// creates, mutates, or garbage-collects it. Provide exactly one of
+	// CertManager or SecretRef when Enabled is true.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 
 	// DNSNames lists additional Subject Alternative Names to include on
 	// the provisioned certificate, beyond whatever names the operator

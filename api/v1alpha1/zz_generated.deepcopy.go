@@ -1107,6 +1107,11 @@ func (in *TLSListenerSpec) DeepCopyInto(out *TLSListenerSpec) {
 		*out = new(CertManagerSpec)
 		**out = **in
 	}
+	if in.SecretRef != nil {
+		in, out := &in.SecretRef, &out.SecretRef
+		*out = new(v1.LocalObjectReference)
+		**out = **in
+	}
 	if in.DNSNames != nil {
 		in, out := &in.DNSNames, &out.DNSNames
 		*out = make([]string, len(*in))
