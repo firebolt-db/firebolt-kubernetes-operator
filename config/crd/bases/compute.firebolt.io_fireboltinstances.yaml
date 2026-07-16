@@ -148,12 +148,13 @@ spec:
                         - any_user
                         type: string
                       signingAlgorithm:
-                        default: RS256
+                        default: ES384
                         description: |-
                           SigningAlgorithm is the JWT signing algorithm used by the embedded
                           authorization server. Must be compatible with SigningKeys'
                           cert-manager key algorithm: the RS* family requires an RSA key, the
-                          ES* family requires ECDSA.
+                          ES* family requires ECDSA. Defaults to ES384, matching the ECDSA
+                          signing-key default.
                         enum:
                         - RS256
                         - RS384
@@ -177,7 +178,7 @@ spec:
                               generate the signing keypair.
                             properties:
                               algorithm:
-                                default: RSA
+                                default: ECDSA
                                 description: Algorithm is the private key algorithm.
                                 enum:
                                 - RSA
@@ -207,10 +208,12 @@ spec:
                                 - name
                                 type: object
                               size:
-                                default: 2048
+                                default: 384
                                 description: |-
                                   Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
-                                  ECDSA curve size (256, 384, 521). Defaults to 2048.
+                                  ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                                  matching the ECDSA algorithm default). The algorithm/size combination
+                                  is validated at admission (see validateCertManagerKey).
                                 format: int32
                                 type: integer
                             required:
@@ -17620,7 +17623,7 @@ spec:
                           Enabled is true.
                         properties:
                           algorithm:
-                            default: RSA
+                            default: ECDSA
                             description: Algorithm is the private key algorithm.
                             enum:
                             - RSA
@@ -17649,10 +17652,12 @@ spec:
                             - name
                             type: object
                           size:
-                            default: 2048
+                            default: 384
                             description: |-
                               Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
-                              ECDSA curve size (256, 384, 521). Defaults to 2048.
+                              ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                              matching the ECDSA algorithm default). The algorithm/size combination
+                              is validated at admission (see validateCertManagerKey).
                             format: int32
                             type: integer
                         required:
@@ -17698,7 +17703,7 @@ spec:
                           Enabled is true.
                         properties:
                           algorithm:
-                            default: RSA
+                            default: ECDSA
                             description: Algorithm is the private key algorithm.
                             enum:
                             - RSA
@@ -17727,10 +17732,12 @@ spec:
                             - name
                             type: object
                           size:
-                            default: 2048
+                            default: 384
                             description: |-
                               Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
-                              ECDSA curve size (256, 384, 521). Defaults to 2048.
+                              ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                              matching the ECDSA algorithm default). The algorithm/size combination
+                              is validated at admission (see validateCertManagerKey).
                             format: int32
                             type: integer
                         required:

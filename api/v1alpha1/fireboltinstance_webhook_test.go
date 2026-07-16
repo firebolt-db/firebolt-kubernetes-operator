@@ -315,8 +315,10 @@ func validAdminSpec() AdminSpec {
 	}
 }
 
-// validSigningKeys returns a SigningKeyPolicy with an RSA cert-manager
-// key, matching the default (empty-string) SigningAlgorithm of RS256.
+// validSigningKeys returns a SigningKeyPolicy whose cert-manager key leaves
+// Algorithm/Size empty, so validation treats them as the CRD defaults
+// (ECDSA / P-384) — compatible with the default (empty-string)
+// SigningAlgorithm of ES384.
 func validSigningKeys() *SigningKeyPolicy {
 	return &SigningKeyPolicy{
 		CertManager: CertManagerSpec{
@@ -411,7 +413,7 @@ func TestValidateAuth(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name: "RS256 (default) with default (RSA) cert-manager key is valid",
+			name: "ES384 (default) with default (ECDSA) cert-manager key is valid",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
@@ -442,7 +444,13 @@ func TestValidateAuth(t *testing.T) {
 				Local: &LocalAuthSpec{
 					Admin:            validAdminSpec(),
 					SigningAlgorithm: "ES256",
-					SigningKeys:      validSigningKeys(), // defaults to RSA
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "RSA",
+							Size:      2048, // valid RSA size, so only the algorithm mismatch trips
+						},
+					},
 				},
 			},
 			wantError: true,
@@ -458,6 +466,60 @@ func TestValidateAuth(t *testing.T) {
 						CertManager: CertManagerSpec{
 							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
 							Algorithm: "ECDSA",
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "RSA signing key with an ECDSA-shaped size is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "RS256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "RSA",
+							Size:      384, // below the 2048-bit RSA floor
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ECDSA signing key with an RSA-shaped size is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES384",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      2048, // not a valid ECDSA curve size
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ECDSA signing key with curve size 384 is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES384",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      384,
 						},
 					},
 				},

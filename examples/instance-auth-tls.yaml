@@ -53,14 +53,14 @@ spec:
         password:
           name: firebolt-admin-credentials
           key: password
-      signingAlgorithm: RS256
+      signingAlgorithm: ES384
       signingKeys:
         certManager:
           issuerRef:
             name: internal-ca
             kind: ClusterIssuer
-          algorithm: RSA
-          size: 2048
+          algorithm: ECDSA
+          size: 384
         # Optional: operator-owned rotation. Omit both fields to keep a
         # single, permanent, non-rotating key (the default). When set,
         # the operator mints a new key every rotationInterval and rolls

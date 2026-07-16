@@ -83,8 +83,8 @@
                   "type": "string"
                 },
                 "signingAlgorithm": {
-                  "default": "RS256",
-                  "description": "SigningAlgorithm is the JWT signing algorithm used by the embedded\nauthorization server. Must be compatible with SigningKeys'\ncert-manager key algorithm: the RS* family requires an RSA key, the\nES* family requires ECDSA.",
+                  "default": "ES384",
+                  "description": "SigningAlgorithm is the JWT signing algorithm used by the embedded\nauthorization server. Must be compatible with SigningKeys'\ncert-manager key algorithm: the RS* family requires an RSA key, the\nES* family requires ECDSA. Defaults to ES384, matching the ECDSA\nsigning-key default.",
                   "enum": [
                     "RS256",
                     "RS384",
@@ -102,7 +102,7 @@
                       "description": "CertManager configures the cert-manager Certificate used to\ngenerate the signing keypair.",
                       "properties": {
                         "algorithm": {
-                          "default": "RSA",
+                          "default": "ECDSA",
                           "description": "Algorithm is the private key algorithm.",
                           "enum": [
                             "RSA",
@@ -135,8 +135,8 @@
                           "additionalProperties": false
                         },
                         "size": {
-                          "default": 2048,
-                          "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 2048.",
+                          "default": 384,
+                          "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,\nmatching the ECDSA algorithm default). The algorithm/size combination\nis validated at admission (see validateCertManagerKey).",
                           "format": "int32",
                           "type": "integer"
                         }
@@ -14828,7 +14828,7 @@
                   "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Required when\nEnabled is true.",
                   "properties": {
                     "algorithm": {
-                      "default": "RSA",
+                      "default": "ECDSA",
                       "description": "Algorithm is the private key algorithm.",
                       "enum": [
                         "RSA",
@@ -14861,8 +14861,8 @@
                       "additionalProperties": false
                     },
                     "size": {
-                      "default": 2048,
-                      "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 2048.",
+                      "default": 384,
+                      "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,\nmatching the ECDSA algorithm default). The algorithm/size combination\nis validated at admission (see validateCertManagerKey).",
                       "format": "int32",
                       "type": "integer"
                     }
@@ -14896,7 +14896,7 @@
                   "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Required when\nEnabled is true.",
                   "properties": {
                     "algorithm": {
-                      "default": "RSA",
+                      "default": "ECDSA",
                       "description": "Algorithm is the private key algorithm.",
                       "enum": [
                         "RSA",
@@ -14929,8 +14929,8 @@
                       "additionalProperties": false
                     },
                     "size": {
-                      "default": 2048,
-                      "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 2048.",
+                      "default": 384,
+                      "description": "Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or\nECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,\nmatching the ECDSA algorithm default). The algorithm/size combination\nis validated at admission (see validateCertManagerKey).",
                       "format": "int32",
                       "type": "integer"
                     }

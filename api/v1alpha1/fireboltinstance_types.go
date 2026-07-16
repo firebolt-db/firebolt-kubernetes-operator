@@ -286,13 +286,15 @@ type CertManagerSpec struct {
 
 	// Algorithm is the private key algorithm.
 	// +kubebuilder:validation:Enum=RSA;ECDSA
-	// +kubebuilder:default=RSA
+	// +kubebuilder:default=ECDSA
 	// +optional
 	Algorithm string `json:"algorithm,omitempty"`
 
 	// Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
-	// ECDSA curve size (256, 384, 521). Defaults to 2048.
-	// +kubebuilder:default=2048
+	// ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+	// matching the ECDSA algorithm default). The algorithm/size combination
+	// is validated at admission (see validateCertManagerKey).
+	// +kubebuilder:default=384
 	// +optional
 	Size int32 `json:"size,omitempty"`
 }
@@ -405,9 +407,10 @@ type LocalAuthSpec struct {
 	// SigningAlgorithm is the JWT signing algorithm used by the embedded
 	// authorization server. Must be compatible with SigningKeys'
 	// cert-manager key algorithm: the RS* family requires an RSA key, the
-	// ES* family requires ECDSA.
+	// ES* family requires ECDSA. Defaults to ES384, matching the ECDSA
+	// signing-key default.
 	// +kubebuilder:validation:Enum=RS256;RS384;RS512;ES256;ES384;ES512
-	// +kubebuilder:default=RS256
+	// +kubebuilder:default=ES384
 	// +optional
 	SigningAlgorithm string `json:"signingAlgorithm,omitempty"`
 

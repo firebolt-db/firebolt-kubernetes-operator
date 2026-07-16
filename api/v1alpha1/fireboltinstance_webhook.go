@@ -154,10 +154,14 @@ func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.Erro
 		return field.ErrorList{field.Required(base.Child("certManager"),
 			"required when enabled is true: the operator provisions every certificate via cert-manager")}
 	}
+	var errs field.ErrorList
 	if listener.CertManager.IssuerRef.Name == "" {
-		return field.ErrorList{field.Required(base.Child("certManager", "issuerRef", "name"), "required")}
+		errs = append(errs, field.Required(base.Child("certManager", "issuerRef", "name"), "required"))
 	}
-	return nil
+	if err := validateCertManagerKey(listener.CertManager, base.Child("certManager")); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
 }
 
 // ValidateAuth mirrors packdb's instance.auth validation rules
@@ -264,6 +268,9 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 				"identical signing keys, which packdb's own dev-autogen fallback cannot guarantee"))
 	} else {
 		if err := validateSigningAlgorithmCompatibility(local, base); err != nil {
+			errs = append(errs, err)
+		}
+		if err := validateCertManagerKey(&local.SigningKeys.CertManager, base.Child("signingKeys", "certManager")); err != nil {
 			errs = append(errs, err)
 		}
 		errs = append(errs, validateSigningKeyRotation(local, base.Child("signingKeys"))...)
@@ -403,11 +410,11 @@ func validatePositiveDurationField(path *field.Path, value string) *field.Error 
 func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Path) *field.Error {
 	alg := local.SigningAlgorithm
 	if alg == "" {
-		alg = "RS256" // matches the CRD default
+		alg = "ES384" // matches the CRD default
 	}
 	keyAlg := local.SigningKeys.CertManager.Algorithm
 	if keyAlg == "" {
-		keyAlg = "RSA" // matches the CRD default
+		keyAlg = "ECDSA" // matches the CRD default
 	}
 
 	wantsRSA := strings.HasPrefix(alg, "RS")
@@ -421,6 +428,41 @@ func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Pat
 	default:
 		return nil
 	}
+}
+
+// validateCertManagerKey rejects an algorithm/size combination cert-manager
+// would reject when it mints the Certificate: an RSA modulus outside
+// 2048..8192 bits, or an ECDSA size that is not one of the P-256/384/521 curve
+// sizes. The CRD applies the algorithm and size defaults independently, so this
+// also guards a partial override — e.g. algorithm=RSA left with the ECDSA-shaped
+// default size (384), or size=2048 left with the ECDSA algorithm default — that
+// would otherwise pass admission and fail much later at cert-manager. Empty
+// fields are treated as the CRD defaults so the controller's defense-in-depth
+// re-run behaves identically on an object that bypassed defaulting.
+func validateCertManagerKey(cm *CertManagerSpec, base *field.Path) *field.Error {
+	if cm == nil {
+		return nil
+	}
+	alg := cm.Algorithm
+	if alg == "" {
+		alg = "ECDSA" // matches the CRD default
+	}
+	size := cm.Size
+	if size == 0 {
+		size = 384 // matches the CRD default
+	}
+	sizePath := base.Child("size")
+	switch alg {
+	case "RSA":
+		if size < 2048 || size > 8192 {
+			return field.Invalid(sizePath, size, "RSA key size must be between 2048 and 8192 bits")
+		}
+	case "ECDSA":
+		if size != 256 && size != 384 && size != 521 {
+			return field.Invalid(sizePath, size, "ECDSA key size must be one of 256, 384, or 521")
+		}
+	}
+	return nil
 }
 
 // packdbDefaultMaxTokenAge is packdb's own built-in default for
