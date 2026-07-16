@@ -18,8 +18,10 @@ package controller
 
 import (
 	"context"
+	"slices"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,12 +32,57 @@ import (
 	enginemetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
+// TestBuildGenEngineTLSCertificate_SANs covers FB-896 #1: the per-generation
+// engine cert must carry SANs that packdb's HTTPS startup verification and the
+// gateway can actually match — the per-gen pod wildcard (full .svc.cluster.local
+// suffix), the routing Service, and localhost — which the old instance-wide
+// namespace wildcard could not.
+func TestBuildGenEngineTLSCertificate_SANs(t *testing.T) {
+	tls := &computev1alpha1.CertManagerSpec{
+		IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+		Algorithm: "ECDSA",
+		Size:      384,
+	}
+	cert := buildGenEngineTLSCertificate(testEngineName, testNamespace, 0, &ResolvedEngineTLSInfo{
+		SecretName: "test-instance-engine-tls", CertManager: tls,
+	})
+
+	genHeadless := genResourceName(testEngineName, 0, SuffixHL)
+	wantSANs := []string{
+		"*." + genHeadless + "." + testNamespace + ".svc.cluster.local",
+		testEngineName + SuffixService + "." + testNamespace + ".svc.cluster.local",
+		"localhost",
+	}
+	if !slices.Equal(cert.Spec.DNSNames, wantSANs) {
+		t.Errorf("DNSNames = %v, want %v", cert.Spec.DNSNames, wantSANs)
+	}
+	if want := genResourceName(testEngineName, 0, SuffixEngineTLS); cert.Spec.SecretName != want {
+		t.Errorf("SecretName = %q, want per-generation %q", cert.Spec.SecretName, want)
+	}
+	if cert.Spec.PrivateKey.RotationPolicy != certmanagerv1.RotationPolicyNever {
+		t.Errorf("RotationPolicy = %v, want Never", cert.Spec.PrivateKey.RotationPolicy)
+	}
+	if cert.Spec.PrivateKey.Algorithm != certmanagerv1.ECDSAKeyAlgorithm || cert.Spec.PrivateKey.Size != 384 {
+		t.Errorf("private key = %v/%d, want ECDSA/384", cert.Spec.PrivateKey.Algorithm, cert.Spec.PrivateKey.Size)
+	}
+	if len(cert.Spec.Usages) != 1 || cert.Spec.Usages[0] != certmanagerv1.UsageServerAuth {
+		t.Errorf("Usages = %v, want [server auth]", cert.Spec.Usages)
+	}
+}
+
 // testInstanceInfoWithTLS returns testInstanceInfo() with TLS populated,
 // satisfying every field renderEndpointsConfig/buildEngineTLSVolumes
 // reads.
 func testInstanceInfoWithTLS() InstanceInfo {
 	info := testInstanceInfo()
-	info.TLS = &ResolvedEngineTLSInfo{SecretName: "test-instance-engine-tls"}
+	info.TLS = &ResolvedEngineTLSInfo{
+		SecretName: "test-instance-engine-tls",
+		CertManager: &computev1alpha1.CertManagerSpec{
+			IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+			Algorithm: "ECDSA",
+			Size:      384,
+		},
+	}
 	return info
 }
 
@@ -66,7 +113,9 @@ func TestBuildConfigMap_TLSEnabled_RendersExpectedShape(t *testing.T) {
 		t.Errorf("listeners[0].port = %v, want %d", listener["port"], EngineHTTPQueryPort)
 	}
 	tlsCfg := nestedMap(t, listener, "tls")
-	wantCertPath := EngineTLSMountPath + "/" + corev1.TLSCertKey
+	// certificate_file is the startup-assembled leaf+CA bundle, not the raw
+	// mounted tls.crt (FB-896 #2); private_key_file stays the mounted key.
+	wantCertPath := EngineTLSBundlePath
 	wantKeyPath := EngineTLSMountPath + "/" + corev1.TLSPrivateKeyKey
 	if tlsCfg["certificate_file"] != wantCertPath {
 		t.Errorf("tls.certificate_file = %v, want %v", tlsCfg["certificate_file"], wantCertPath)
@@ -139,9 +188,13 @@ func TestBuildStatefulSet_TLSEnabled_VolumesAndMountsWired(t *testing.T) {
 	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, testInstanceInfoWithTLS(), nil)
 	pod := sts.Spec.Template.Spec
 
+	// The engine pod serves its PER-GENERATION certificate (FB-896 #1), not the
+	// instance CA anchor Secret — so the mounted Secret name is derived from the
+	// generation, not Status.EngineTLS.SecretName.
+	wantSecret := genResourceName(testEngineName, 0, SuffixEngineTLS)
 	vol := findVolume(t, pod.Volumes, computev1alpha1.EngineTLSVolumeName)
-	if vol.Secret == nil || vol.Secret.SecretName != "test-instance-engine-tls" {
-		t.Errorf("TLS volume Secret = %+v, want SecretName=test-instance-engine-tls", vol.Secret)
+	if vol.Secret == nil || vol.Secret.SecretName != wantSecret {
+		t.Errorf("TLS volume Secret = %+v, want SecretName=%s", vol.Secret, wantSecret)
 	}
 
 	container := findEngineContainer(t, pod.Containers)

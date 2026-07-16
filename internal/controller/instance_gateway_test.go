@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -24,10 +25,140 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// TestGatewayTLSSecretVersions covers FB-896 finding #5: a bring-your-own
+// gateway cert rotated in place (same Secret name, new bytes) must change the
+// gateway config hash so the Deployment rolls and Envoy reloads the cert.
+func TestGatewayTLSSecretVersions(t *testing.T) {
+	sch := authTestScheme(t)
+
+	t.Run("no gateway TLS returns empty", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"}}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("gatewayTLSSecretVersions = %q, want empty when the gateway mounts no TLS Secret", got)
+		}
+	})
+
+	t.Run("gateway TLS secret RV is included and changes on in-place rotation", func(t *testing.T) {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "gw-tls", Namespace: "ns-1"},
+			Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
+		}
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(secret).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Status:     computev1alpha1.FireboltInstanceStatus{GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}},
+		}
+		before, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if before == "" {
+			t.Fatal("gatewayTLSSecretVersions returned empty for a configured gateway TLS secret")
+		}
+
+		var live corev1.Secret
+		if err := cli.Get(context.Background(), types.NamespacedName{Namespace: "ns-1", Name: "gw-tls"}, &live); err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		live.Data[corev1.TLSCertKey] = []byte("rotated-cert")
+		if err := cli.Update(context.Background(), &live); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		after, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if after == before {
+			t.Error("gatewayTLSSecretVersions did not change after in-place secret rotation; the gateway Deployment would never roll")
+		}
+	})
+}
+
+// TestEngineFleetTLSState covers FB-896 finding #3: the gateway may only switch
+// its upstream protocol based on the engine fleet's OBSERVED serving state, not
+// on certificate existence. allOnTLS gates the enable ramp (switch to TLS only
+// when every engine has rolled onto it); anyOnTLS gates the disable drain (keep
+// TLS while any engine still serves it).
+func TestEngineFleetTLSState(t *testing.T) {
+	sch := authTestScheme(t)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+		},
+	}
+	onHash := tlsHash(&ResolvedEngineTLSInfo{SecretName: "inst-engine-tls"})
+	newEngine := func(name, ref, observed string) *computev1alpha1.FireboltEngine {
+		return &computev1alpha1.FireboltEngine{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1"},
+			Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: ref},
+			Status:     computev1alpha1.FireboltEngineStatus{ObservedEngineTLSHash: observed},
+		}
+	}
+	cases := []struct {
+		name             string
+		engines          []*computev1alpha1.FireboltEngine
+		wantAll, wantAny bool
+	}{
+		{"no engines is vacuously converged", nil, true, false},
+		{"all engines on TLS", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", onHash), newEngine("e2", "inst", onHash)}, true, true},
+		{"mixed fleet (mid-rollout)", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", onHash), newEngine("e2", "inst", "")}, false, true},
+		{"all engines plaintext (drained)", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", ""), newEngine("e2", "inst", "")}, false, false},
+		{"another instance's engine is ignored", []*computev1alpha1.FireboltEngine{newEngine("e1", "other-inst", onHash)}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := fake.NewClientBuilder().WithScheme(sch)
+			for _, e := range tc.engines {
+				b = b.WithObjects(e)
+			}
+			r := &FireboltInstanceReconciler{Client: b.Build(), Scheme: sch}
+			allOn, anyOn, err := r.engineFleetTLSState(context.Background(), instance)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if allOn != tc.wantAll || anyOn != tc.wantAny {
+				t.Errorf("engineFleetTLSState = (all=%v, any=%v), want (all=%v, any=%v)", allOn, anyOn, tc.wantAll, tc.wantAny)
+			}
+		})
+	}
+}
+
+// TestEngineUpstreamTLSReady confirms the gateway render gates purely on the
+// pre-computed Reencrypting signal, not on certificate existence alone.
+func TestEngineUpstreamTLSReady(t *testing.T) {
+	cases := []struct {
+		name string
+		tls  *computev1alpha1.EngineTLSStatus
+		want bool
+	}{
+		{"no engine TLS status", nil, false},
+		{"cert provisioned but fleet not converged", &computev1alpha1.EngineTLSStatus{SecretName: "s"}, false},
+		{"fleet converged", &computev1alpha1.EngineTLSStatus{SecretName: "s", Reencrypting: true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &computev1alpha1.FireboltInstance{Status: computev1alpha1.FireboltInstanceStatus{EngineTLS: tc.tls}}
+			if got := engineUpstreamTLSReady(inst); got != tc.want {
+				t.Errorf("engineUpstreamTLSReady = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // TestBuildEnvoyConfigYAMLParses guards two invariants:
 //  1. The emitted Envoy static config is valid YAML (catches any
@@ -350,7 +481,7 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 			},
 		},
 		Status: computev1alpha1.FireboltInstanceStatus{
-			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
 		},
 	})
 	var parsed map[string]any
@@ -426,7 +557,7 @@ func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsC
 			},
 		},
 		Status: computev1alpha1.FireboltInstanceStatus{
-			EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+			EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
 			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
 		},
 	})

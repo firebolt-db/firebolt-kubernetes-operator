@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -91,6 +92,28 @@ func engineTLSWildcardDNSName(namespace string) string {
 func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	tls := instance.Spec.TLS
 	if tls == nil || tls.Engine == nil || !tls.Engine.Enabled {
+		// Deferred teardown: while the engine fleet is still draining off TLS
+		// (some engine still serves it), keep Status.EngineTLS populated with
+		// Reencrypting=true so the gateway retains the trust anchor and keeps
+		// re-encrypting until every engine has rolled back to plaintext. Engines
+		// roll based on spec (Enabled=false), not on Status, so keeping this
+		// populated does not stall the drain — it only prevents the gateway from
+		// dropping to plaintext while an engine still speaks TLS. See
+		// engineFleetTLSState and engineUpstreamTLSReady.
+		if instance.Status.EngineTLS != nil {
+			_, anyOnTLS, err := r.engineFleetTLSState(ctx, instance)
+			if err != nil {
+				setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
+					"DrainCheckFailed", err.Error())
+				return err
+			}
+			if anyOnTLS {
+				instance.Status.EngineTLS.Reencrypting = true
+				setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
+					"Draining", "engine TLS disabled; retaining the trust anchor while the engine fleet rolls back to plaintext")
+				return nil
+			}
+		}
 		instance.Status.EngineTLS = nil
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionTrue,
 			"Disabled", "spec.tls.engine is unset or disabled")
@@ -122,9 +145,66 @@ func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instan
 		return nil
 	}
 
+	// The trust anchor is provisioned; tell the gateway to re-encrypt only once
+	// every engine has actually rolled onto a TLS-serving generation. Switching
+	// earlier would break upstream handshakes against engines still selecting a
+	// plaintext generation. See engineFleetTLSState / engineUpstreamTLSReady.
+	allOnTLS, _, err := r.engineFleetTLSState(ctx, instance)
+	if err != nil {
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
+			"ConvergenceCheckFailed", err.Error())
+		return err
+	}
+	instance.Status.EngineTLS.Reencrypting = allOnTLS
+
 	setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionTrue,
 		"Ready", "engine TLS certificate is provisioned")
 	return nil
+}
+
+// engineFleetTLSState inspects every FireboltEngine bound to this Instance (by
+// spec.instanceRef) and reports the fleet's observed TLS-serving state via each
+// engine's Status.ObservedEngineTLSHash (populated by computeStable):
+//
+//   - allOnTLS: there is at least one engine and every one has rolled onto the
+//     current TLS-serving hash (derived from Status.EngineTLS.SecretName).
+//     Meaningful only while Status.EngineTLS is populated.
+//   - anyOnTLS: at least one engine still reports a non-empty engine-TLS hash,
+//     i.e. is still serving TLS and has not yet drained to plaintext.
+//
+// With no engines the fleet is vacuously converged and nothing is serving TLS
+// (true, false): a brand-new Instance may flip the gateway straight to TLS, and
+// a disable with no engines tears the anchor down at once. Mirrors
+// enginesConvergedOn's list-and-filter on spec.instanceRef (engines never carry
+// a LabelInstance label).
+func (r *FireboltInstanceReconciler) engineFleetTLSState(ctx context.Context, instance *computev1alpha1.FireboltInstance) (allOnTLS, anyOnTLS bool, err error) {
+	var list computev1alpha1.FireboltEngineList
+	if err := r.List(ctx, &list, client.InNamespace(instance.Namespace)); err != nil {
+		return false, false, fmt.Errorf("listing engines for instance %s: %w", instance.Name, err)
+	}
+	expectedOn := ""
+	if instance.Status.EngineTLS != nil {
+		expectedOn = tlsHash(&ResolvedEngineTLSInfo{SecretName: instance.Status.EngineTLS.SecretName})
+	}
+	allOnTLS = expectedOn != ""
+	sawEngine := false
+	for i := range list.Items {
+		if list.Items[i].Spec.InstanceRef != instance.Name {
+			continue
+		}
+		sawEngine = true
+		observed := list.Items[i].Status.ObservedEngineTLSHash
+		if observed != "" {
+			anyOnTLS = true
+		}
+		if observed != expectedOn {
+			allOnTLS = false
+		}
+	}
+	if !sawEngine {
+		return true, false, nil
+	}
+	return allOnTLS, anyOnTLS, nil
 }
 
 // engineTLSSecretReady reports whether secret carries everything the
@@ -427,7 +507,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 	// to reference, and the fail-closed window covers the wait.
 	if ref := instance.Spec.TLS.Gateway.ClientCASecretRef; ref != nil {
 		//nolint:nilerr // a missing/incomplete client-CA Secret is a soft "not ready yet" (pending), not a hard error — mirrors the IsNotFound branch above.
-		if err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, engineTLSCASecretKey, "gateway client-CA secret"); err != nil {
+		if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, engineTLSCASecretKey, "gateway client-CA secret"); err != nil {
 			return false, nil
 		}
 	}

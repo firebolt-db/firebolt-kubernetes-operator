@@ -148,6 +148,18 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 		errs = append(errs, field.Forbidden(enginePath.Child("clientCASecretRef"),
 			"mutual TLS is only supported on spec.tls.gateway"))
 	}
+
+	// Bring-your-own Secret is not viable for the engine listener: the operator
+	// issues per-generation certificates whose SANs cover the engine pods'
+	// blue-green hostnames (…svc.cluster.local), which packdb verifies at
+	// startup, and a static user Secret cannot cover the unbounded per-generation
+	// hostname set. Engine TLS must therefore use cert-manager (certManager).
+	// secretRef remains supported on spec.tls.gateway.
+	if tls.Engine != nil && tls.Engine.SecretRef != nil {
+		errs = append(errs, field.Forbidden(enginePath.Child("secretRef"),
+			"bring-your-own Secret is not supported for the engine listener "+
+				"(per-generation certificate SANs must cover the engine pod hostnames): use certManager"))
+	}
 	return errs
 }
 
@@ -346,8 +358,18 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path) field.ErrorList {
 		}
 	}
 
+	seen := make(map[string]struct{}, len(oidc.Providers))
 	for i, p := range oidc.Providers {
 		providerPath := base.Child("providers").Index(i)
+		// packdb's IssuerRegistry::registerRemote throws when a second provider
+		// with the same name is registered, which prevents every affected engine
+		// from starting. The CRD cannot express uniqueness across list items, and
+		// validatePreferredAuthorizationServer already assumes names are unique,
+		// so reject a duplicate here.
+		if _, dup := seen[p.Name]; dup {
+			errs = append(errs, field.Duplicate(providerPath.Child("name"), p.Name))
+		}
+		seen[p.Name] = struct{}{}
 		if p.JWKS != nil {
 			if err := validateDurationField(providerPath.Child("jwks", "cacheTTL"), p.JWKS.CacheTTL); err != nil {
 				errs = append(errs, err)
@@ -456,9 +478,27 @@ func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Pat
 	case !wantsRSA && keyAlg != "ECDSA":
 		return field.Invalid(base.Child("signingAlgorithm"), alg,
 			fmt.Sprintf("requires signingKeys.certManager.algorithm=ECDSA, got %q", keyAlg))
-	default:
-		return nil
 	}
+
+	// For ECDSA (ES*) the JWT algorithm pins the exact curve: JOSE requires
+	// ES256↔P-256, ES384↔P-384, ES512↔P-521. packdb derives the JWK curve and
+	// coordinate size from the JWT algorithm rather than from the actual key,
+	// so a mismatched curve (e.g. ES256 with the default P-384 key) produces an
+	// invalid JWKS or an engine startup failure. RSA (RS*) imposes no such
+	// pairing — the algorithms differ only in digest size, any 2048..8192
+	// modulus is valid — so validateCertManagerKey's range check suffices there.
+	if !wantsRSA {
+		size := local.SigningKeys.CertManager.Size
+		if size == 0 {
+			size = 384 // matches the CRD default
+		}
+		wantSize := map[string]int32{"ES256": 256, "ES384": 384, "ES512": 521}[alg]
+		if wantSize != 0 && size != wantSize {
+			return field.Invalid(base.Child("signingKeys", "certManager", "size"), size,
+				fmt.Sprintf("must be %d (the P-%d curve) to match signingAlgorithm %q", wantSize, wantSize, alg))
+		}
+	}
+	return nil
 }
 
 // validateCertManagerKey rejects an algorithm/size combination cert-manager
@@ -523,6 +563,15 @@ func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.Er
 	case rotation == nil && retain != nil:
 		return field.ErrorList{field.Forbidden(base.Child("retainDuration"),
 			"must not be set when signingKeys.rotationInterval is unset")}
+	}
+
+	// A zero or negative interval makes stepSigningKeyRotation treat the active
+	// key as perpetually overdue, so the controller mints a new key on every
+	// reconcile — perpetual churn and repeated fleet rollouts. (metav1.Duration
+	// cannot be range-checked by a kubebuilder marker, hence this Go guard.)
+	if rotation.Duration <= 0 {
+		return field.ErrorList{field.Invalid(base.Child("rotationInterval"), rotation.Duration.String(),
+			"must be positive")}
 	}
 
 	maxTokenAge := packdbDefaultMaxTokenAge

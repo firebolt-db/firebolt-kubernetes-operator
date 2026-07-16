@@ -15036,6 +15036,10 @@
               "items": {
                 "description": "SigningKeyStatus records one JWT signing key the operator has\nprovisioned for this Instance.",
                 "properties": {
+                  "algorithm": {
+                    "description": "Algorithm and Size record the cert-manager key algorithm and size this\nkey was issued with \u2014 the resolved\nspec.auth.local.signingKeys.certManager values in effect when it was\nminted. Because the signing Certificate uses rotationPolicy:Never,\ncert-manager will not regenerate a key whose algorithm/size later\nchanges; it awaits user intervention instead. The rotation state machine\ncompares these against the current policy and, on a mismatch, mints a\nfresh NAMED key (new kid \u2192 new Secret) so new material is issued cleanly\nrather than leaving the engine fleet wedged on a key the issuer refuses\nto update. Empty/zero on a key minted before these fields existed; the\ncontroller adopts the current resolved policy as the baseline on the\nnext reconcile.",
+                    "type": "string"
+                  },
                   "createdAt": {
                     "description": "CreatedAt is when this key was provisioned.",
                     "format": "date-time",
@@ -15067,6 +15071,10 @@
                   "secretName": {
                     "description": "SecretName is the cert-manager-managed Secret holding this key's\nPEM private key (data key \"tls.key\").",
                     "type": "string"
+                  },
+                  "size": {
+                    "format": "int32",
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -15146,6 +15154,10 @@
               "description": "CreatedAt is when this certificate was provisioned.",
               "format": "date-time",
               "type": "string"
+            },
+            "reencrypting": {
+              "description": "Reencrypting reports whether the gateway is currently re-encrypting\ngateway\u2192engine traffic with TLS. It tracks the engine FLEET's observed\nprotocol, not merely whether the certificate exists: on enable it turns\ntrue only once every engine has rolled onto a TLS-serving generation (so\nthe gateway does not switch to TLS while engines still serve plaintext),\nand on disable this EngineTLSStatus is retained with Reencrypting=true\nuntil every engine has drained back to plaintext (so the gateway keeps\nthe trust anchor and TLS while any engine still serves it). This narrows,\nbut does not eliminate, the mixed-protocol window during a rollout \u2014 the\ngateway speaks one upstream protocol at a time. See engineUpstreamTLSReady.",
+              "type": "boolean"
             },
             "secretName": {
               "description": "SecretName is the cert-manager-managed Secret holding the engine\nlistener's server certificate (data keys \"tls.crt\", \"tls.key\", and,\nwhen the issuer populates it, \"ca.crt\" \u2014 the trust anchor the\ngateway uses to verify engines when re-encrypting upstream).",

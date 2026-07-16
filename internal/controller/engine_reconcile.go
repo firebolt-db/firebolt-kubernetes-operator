@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -77,10 +79,22 @@ type InstanceInfo struct {
 // pointer being non-nil) is the Secret name, which lives on the
 // Instance's Status, not its Spec.
 type ResolvedEngineTLSInfo struct {
-	// SecretName is the cert-manager-managed Secret holding the engine
-	// listener's TLS certificate — copied from
-	// FireboltInstance.Status.EngineTLS.SecretName.
+	// SecretName is the instance-wide engine-TLS Secret — copied from
+	// FireboltInstance.Status.EngineTLS.SecretName. Post-FB-896-#1 this Secret
+	// is the CA anchor: it carries the issuer's ca.crt (which the gateway
+	// trusts) and is the stable, generation-independent identity fed into
+	// tlsHash. It is NOT the Secret the engine pod serves — each blue-green
+	// generation serves its own per-generation certificate (see
+	// buildGenEngineTLSCertificate), whose Secret name is derived from the
+	// generation and mounted in buildStatefulSet.
 	SecretName string
+
+	// CertManager is the engine TLS cert-manager policy
+	// (spec.tls.engine.certManager): issuer + key algorithm/size the engine
+	// controller uses to issue each generation's server certificate. Always
+	// set when engine TLS is enabled — bring-your-own Secret is rejected for
+	// the engine listener (ValidateTLS), so cert-manager is the only source.
+	CertManager *computev1alpha1.CertManagerSpec
 }
 
 // ResolvedAuthInfo carries the desired auth config plus the concrete,
@@ -100,6 +114,18 @@ type ResolvedAuthInfo struct {
 	// JWTs, so all engines must agree on signing_keys byte-for-byte (see
 	// AuthSpec's doc comment).
 	SigningKeys []computev1alpha1.SigningKeyStatus
+
+	// AdminSecretVersion is the ResourceVersion of the admin password Secret
+	// (spec.auth.local.admin.password.name) observed when this info was
+	// resolved. Folded into authHash so an in-place password rotation — same
+	// Secret name/key, new bytes, hence a new ResourceVersion — rolls every
+	// engine's StatefulSet. packdb reads password_file only at startup, so
+	// without this a rotated password would never take effect. This is the
+	// ResourceVersion, deliberately NOT a hash of the password bytes: hashing
+	// secret material would trip weak-sensitive-data-hashing static analysis
+	// and buy nothing (RV already changes on every data write). Empty when
+	// auth is disabled (info.Auth is nil in that case).
+	AdminSecretVersion string
 }
 
 // FireboltEngineClassInfo carries the resolved FireboltEngineClass template
@@ -321,6 +347,12 @@ func computeStable(
 	// is exactly the value stsMatchesSpec just confirmed matches
 	// authHash(instanceInfo.Auth) — safe to copy onto Status verbatim.
 	status.ObservedAuthHash = current.CurrentSTS.Annotations[AnnotationAuthHash]
+	// Same reasoning for engine TLS: the annotation is absent (→ "") whenever
+	// engine TLS is disabled or this generation serves plaintext, and equals
+	// tlsHash(instanceInfo.TLS) otherwise. The instance controller reads this
+	// across the fleet to gate the gateway's upstream protocol switch (see
+	// engineFleetTLSState / engineUpstreamTLSReady).
+	status.ObservedEngineTLSHash = current.CurrentSTS.Annotations[AnnotationEngineTLSHash]
 	r.RequeueAfter = 30 * time.Second
 }
 
@@ -509,6 +541,68 @@ func buildGenResources(
 	r.EnsureConfigMap = buildConfigMap(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
 	r.EnsureHeadlessSvc = buildHeadlessService(engineName, engineNamespace, gen)
 	r.EnsureStatefulSet = buildStatefulSet(spec, engineName, engineNamespace, gen, instanceInfo, classInfo)
+	if instanceInfo.TLS != nil && instanceInfo.TLS.CertManager != nil {
+		r.EnsureEngineTLSCert = buildGenEngineTLSCertificate(engineName, engineNamespace, gen, instanceInfo.TLS)
+	}
+}
+
+// buildGenEngineTLSCertificate returns the per-generation engine-listener TLS
+// server Certificate (FB-896 #1). Its SANs are what let packdb's HTTPS startup
+// verification succeed, which the old single instance-wide wildcard could not:
+//
+//   - "*.<gen-headless>.<ns>.svc.cluster.local": every pod of this generation,
+//     regardless of replica count. A per-generation wildcard is scale-safe (a
+//     within-generation scale-up needs no reissue) and covers exactly the
+//     node hostnames buildConfigMap renders into engine.nodes[].host, which
+//     packdb uses for SNI and certificate verification between nodes.
+//   - "<engine>-service.<ns>.svc.cluster.local": the stable routing Service the
+//     gateway (and external clients) connect to. The gateway verifies engine
+//     certs against the issuer CA and suffix-matches this SAN.
+//   - "localhost": the engine-web sidecar's same-pod loopback connection.
+//
+// Same issuer/algorithm/size/RotationPolicy/duration choices as the instance
+// CA-anchor certificate (buildEngineTLSCertificate); all generations share the
+// issuer, so the single ca.crt the gateway trusts validates every generation.
+func buildGenEngineTLSCertificate(engineName, namespace string, gen int, tls *ResolvedEngineTLSInfo) *certmanagerv1.Certificate {
+	name := genResourceName(engineName, gen, SuffixEngineTLS)
+	headlessSvc := genResourceName(engineName, gen, SuffixHL)
+	labels := map[string]string{
+		LabelEngine:     engineName,
+		LabelGeneration: strconv.Itoa(gen),
+	}
+
+	algorithm := certmanagerv1.RSAKeyAlgorithm
+	if tls.CertManager.Algorithm == "ECDSA" {
+		algorithm = certmanagerv1.ECDSAKeyAlgorithm
+	}
+	issuerKind := resolveCertManagerIssuerKind(tls.CertManager.IssuerRef.Kind)
+
+	return &certmanagerv1.Certificate{
+		TypeMeta: metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+		},
+		Spec: certmanagerv1.CertificateSpec{
+			SecretName:     name,
+			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{Labels: labels},
+			DNSNames: []string{
+				"*." + headlessSvc + "." + namespace + ".svc.cluster.local",
+				engineName + SuffixService + "." + namespace + ".svc.cluster.local",
+				"localhost",
+			},
+			Usages:    []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
+			IssuerRef: cmmeta.IssuerReference{Name: tls.CertManager.IssuerRef.Name, Kind: issuerKind},
+			Duration:  &metav1.Duration{Duration: engineTLSCertDuration},
+			PrivateKey: &certmanagerv1.CertificatePrivateKey{
+				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				Encoding:       certmanagerv1.PKCS8,
+				Algorithm:      algorithm,
+				Size:           int(tls.CertManager.Size),
+			},
+		},
+	}
 }
 
 func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namespace string, gen int, instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo) *corev1.ConfigMap {
@@ -519,7 +613,14 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	nodes := make([]map[string]interface{}, spec.Replicas)
 	for i := int32(0); i < spec.Replicas; i++ {
 		podName := fmt.Sprintf("%s-%d", stsName, i)
-		host := fmt.Sprintf("%s.%s.%s.svc", podName, headlessSvcName, namespace)
+		// Full FQDN (…svc.cluster.local), not the short …svc form: packdb uses
+		// these node hosts for its HTTPS startup verification (SNI + cert SAN
+		// match), and the per-generation engine TLS certificate's SAN is the
+		// full-suffix wildcard *.<gen-headless>.<ns>.svc.cluster.local
+		// (buildGenEngineTLSCertificate). The short .svc suffix — and the extra
+		// label depth — is exactly what the old namespace-wide wildcard could
+		// not match (FB-896 #1). DNS resolves both forms identically.
+		host := fmt.Sprintf("%s.%s.%s.svc.cluster.local", podName, headlessSvcName, namespace)
 		nodes[i] = map[string]interface{}{"host": host}
 	}
 
@@ -614,11 +715,17 @@ func authSigningKeyPrivateKeyPath(id string) string {
 	return AuthSigningMountPathBase + "/" + id + "/" + corev1.TLSPrivateKeyKey
 }
 
-// engineTLSCertPath and engineTLSKeyPath return the in-container paths to
-// the engine listener's TLS certificate and private key. Must agree with
-// wherever the TLS Secret volume is mounted in buildStatefulSet.
+// engineTLSCertPath returns the in-container path packdb reads as its
+// listener certificate_file. This is NOT the raw mounted tls.crt but the
+// startup-assembled leaf+CA bundle (EngineTLSBundlePath): packdb reuses
+// certificate_file as the CA bundle for its own HTTPS startup checks
+// (FireboltCoreHealthChecker), so with a CA-backed issuer that splits the
+// chain across tls.crt (leaf) and ca.crt (issuer) the leaf alone cannot be
+// validated — the engine would stay NotReady. EngineStartupScript concatenates
+// the two mounted files into this writable path before the engine starts
+// (FB-896 #2). engineTLSKeyPath stays the raw mounted private key.
 func engineTLSCertPath() string {
-	return EngineTLSMountPath + "/" + corev1.TLSCertKey
+	return EngineTLSBundlePath
 }
 
 func engineTLSKeyPath() string {
@@ -1000,7 +1107,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 		podVolumes = append(podVolumes, *extraDataVolume)
 	}
 	podVolumes = append(podVolumes, buildAuthVolumes(instanceInfo.Auth)...)
-	podVolumes = append(podVolumes, buildEngineTLSVolumes(instanceInfo.TLS)...)
+	podVolumes = append(podVolumes, buildEngineTLSVolumes(instanceInfo.TLS, genResourceName(engineName, gen, SuffixEngineTLS))...)
 	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
 
 	// Optional built-in engine web UI sidecar (engine/class uiSidecar: true).
@@ -2159,14 +2266,17 @@ func buildAuthVolumeMounts(auth *ResolvedAuthInfo) []corev1.VolumeMount {
 // engine-listener TLS certificate. Returns nil when TLS is disabled
 // (tls == nil). A slice (rather than a single corev1.Volume) purely to
 // match buildAuthVolumes' call shape at both call sites.
-func buildEngineTLSVolumes(tls *ResolvedEngineTLSInfo) []corev1.Volume {
+func buildEngineTLSVolumes(tls *ResolvedEngineTLSInfo, secretName string) []corev1.Volume {
 	if tls == nil {
 		return nil
 	}
+	// secretName is the PER-GENERATION cert Secret (buildGenEngineTLSCertificate),
+	// not tls.SecretName (the instance CA anchor): each generation serves its own
+	// certificate whose SANs cover that generation's pod hostnames (FB-896 #1).
 	return []corev1.Volume{{
 		Name: computev1alpha1.EngineTLSVolumeName,
 		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{SecretName: tls.SecretName},
+			Secret: &corev1.SecretVolumeSource{SecretName: secretName},
 		},
 	}}
 }
@@ -2541,11 +2651,13 @@ func authHash(auth *ResolvedAuthInfo) string {
 		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName}
 	}
 	canonical, err := json.Marshal(struct {
-		Spec        *computev1alpha1.AuthSpec `json:"spec"`
-		SigningKeys []signingKeyHashInput     `json:"signingKeys"`
+		Spec               *computev1alpha1.AuthSpec `json:"spec"`
+		SigningKeys        []signingKeyHashInput     `json:"signingKeys"`
+		AdminSecretVersion string                    `json:"adminSecretVersion"`
 	}{
-		Spec:        authHashRelevantSpec(auth.Spec),
-		SigningKeys: keys,
+		Spec:               authHashRelevantSpec(auth.Spec),
+		SigningKeys:        keys,
+		AdminSecretVersion: auth.AdminSecretVersion,
 	})
 	if err != nil {
 		return contentHash(fmt.Sprintf("%v", auth))

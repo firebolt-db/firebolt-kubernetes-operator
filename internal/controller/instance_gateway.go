@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -249,15 +250,21 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // no compile-time link between the two today; consider extracting a
 // shared constant if you need to change this port.
 // engineUpstreamTLSReady reports whether the gateway should re-encrypt
-// gateway->engine traffic: spec.tls.engine is enabled AND the instance
-// controller has finished provisioning the certificate (Status.EngineTLS
-// populated by ensureEngineTLS in instance_tls.go). Gating on Status
-// (not just Spec) mirrors resolveInstanceInfo's engine-side gating:
-// rendering a trusted_ca file path before the corresponding Secret is
-// mounted would reference a volume that doesn't exist yet.
+// gateway->engine traffic right now. It reads a single Status signal that the
+// instance controller (ensureEngineTLS in instance_tls.go) computes with full
+// engine-fleet awareness before this render runs: Status.EngineTLS.Reencrypting.
+//
+// Deliberately NOT gated on spec.tls.engine.Enabled: the enable and disable
+// transitions are asymmetric and both need fleet convergence, which only the
+// reconcile can evaluate. On enable, Reencrypting stays false until every
+// engine has rolled onto a TLS-serving generation (so the gateway does not
+// switch to TLS while engines still serve plaintext); on disable, ensureEngineTLS
+// retains Status.EngineTLS with Reencrypting=true until every engine has drained
+// back to plaintext (so the gateway keeps the trust anchor and TLS while any
+// engine still serves it). Keeping this a pure predicate over the pre-computed
+// Status keeps buildEnvoyConfigYAML a pure function of the FireboltInstance.
 func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
-	return instance.Spec.TLS != nil && instance.Spec.TLS.Engine != nil && instance.Spec.TLS.Engine.Enabled &&
-		instance.Status.EngineTLS != nil
+	return instance.Status.EngineTLS != nil && instance.Status.EngineTLS.Reencrypting
 }
 
 // buildDFPUpstreamTLSTransportSocket returns the dynamic_forward_proxy
@@ -1036,6 +1043,37 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	return applySSA(ctx, r.Client, desired)
 }
 
+// gatewayTLSSecretVersions returns a stable string incorporating the
+// ResourceVersion of every TLS Secret the gateway pod mounts by name (the
+// server-cert Secret recorded in Status.GatewayTLS, and the client-CA Secret
+// if mTLS is configured). Folded into the gateway config hash so a
+// bring-your-own certificate rotated in place — same Secret name, new bytes —
+// rolls the gateway Deployment: Envoy loads the file only at process start and
+// the rendered config references the Secret by name/mount, so the config text
+// alone never changes. ResourceVersion, deliberately never the cert bytes:
+// hashing key material would trip weak-sensitive-data-hashing static analysis
+// and buys nothing (RV already changes on every write). Returns "" when the
+// gateway mounts no TLS Secret (plaintext or fail-closed-pending), leaving the
+// hash input untouched so non-TLS gateways see no spurious rollout.
+func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
+	var names []string
+	if instance.Status.GatewayTLS != nil {
+		names = append(names, instance.Status.GatewayTLS.SecretName)
+	}
+	if instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.ClientCASecretRef != nil {
+		names = append(names, instance.Spec.TLS.Gateway.ClientCASecretRef.Name)
+	}
+	var parts []string
+	for _, name := range names {
+		var secret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret); err != nil {
+			return "", fmt.Errorf("reading gateway TLS secret %s/%s for rollout hash: %w", instance.Namespace, name, err)
+		}
+		parts = append(parts, name+"="+secret.ResourceVersion)
+	}
+	return strings.Join(parts, ","), nil
+}
+
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
@@ -1048,7 +1086,15 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *gw.Replicas
 	}
 
-	configHash := contentHash(envoyYAML)
+	tlsVersions, err := r.gatewayTLSSecretVersions(ctx, instance)
+	if err != nil {
+		return err
+	}
+	configHashInput := envoyYAML
+	if tlsVersions != "" {
+		configHashInput = envoyYAML + "\x00" + tlsVersions
+	}
+	configHash := contentHash(configHashInput)
 
 	maxSurge := intstr.FromString("25%")
 	maxUnavailable := intstr.FromInt32(0)

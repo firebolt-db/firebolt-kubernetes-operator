@@ -521,6 +521,23 @@ type FireboltEngineStatus struct {
 	// +optional
 	ObservedAuthHash string `json:"observedAuthHash,omitempty"`
 
+	// ObservedEngineTLSHash is the engine-TLS content-hash (see the internal
+	// tlsHash function) that this engine's current, stable generation was last
+	// confirmed to match — copied from the running StatefulSet's own
+	// drift-detection annotation once a reconcile finds no drift. Empty when
+	// engine TLS is disabled or no generation has stabilized yet.
+	//
+	// The instance controller reads this across the engine fleet to decide
+	// when the gateway may switch its upstream protocol: it re-encrypts to
+	// engines only once every engine has rolled onto a TLS-serving generation
+	// (this hash non-empty and matching), and keeps re-encrypting until every
+	// engine has drained back to plaintext (this hash empty everywhere). Same
+	// hash used to decide whether an engine needs a new generation (see
+	// stsMatchesSpec / annotationsMatchSpec), surfaced here as this engine's
+	// own observed value.
+	// +optional
+	ObservedEngineTLSHash string `json:"observedEngineTLSHash,omitempty"`
+
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

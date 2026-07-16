@@ -261,22 +261,15 @@ func TestEnsureEngineTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 	}
 }
 
-// TestEnsureEngineTLS_SecretRefConsumesUserSecret exercises the
-// bring-your-own-Secret path: the operator provisions no cert-manager
-// Certificate, waits until the referenced Secret carries all three keys
-// (tls.crt, tls.key, ca.crt — the engine listener requires the CA for the
-// gateway's upstream validation), then records it in Status.EngineTLS.
-func TestEnsureEngineTLS_SecretRefConsumesUserSecret(t *testing.T) {
+// TestEnsureEngineTLS_SecretRefRejected verifies the controller's
+// defense-in-depth after FB-896 #1: engine bring-your-own Secret is no longer
+// supported (the operator must issue per-generation certs whose SANs cover the
+// engine pod hostnames), so ensureEngineTLS's ValidateTLS re-run rejects it
+// even on a CR that reached the cluster with a bypassed webhook — rather than
+// silently consuming a user Secret that can't satisfy packdb's verification.
+func TestEnsureEngineTLS_SecretRefRejected(t *testing.T) {
 	sch := authTestScheme(t)
-	byoSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "byo-engine-tls", Namespace: "ns-1"},
-		Data: map[string][]byte{
-			corev1.TLSCertKey:       []byte("cert"),
-			corev1.TLSPrivateKeyKey: []byte("key"),
-			// ca.crt deliberately absent at first.
-		},
-	}
-	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(byoSecret).Build()
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 
 	instance := &computev1alpha1.FireboltInstance{
@@ -291,41 +284,15 @@ func TestEnsureEngineTLS_SecretRefConsumesUserSecret(t *testing.T) {
 		},
 	}
 
-	// Missing ca.crt: not ready, status untouched, reason SecretPending.
-	if err := r.ensureEngineTLS(context.Background(), instance); err != nil {
-		t.Fatalf("ensureEngineTLS (missing ca.crt): %v", err)
+	if err := r.ensureEngineTLS(context.Background(), instance); err == nil {
+		t.Fatal("ensureEngineTLS accepted engine secretRef; want rejection (BYO not supported for the engine listener)")
 	}
 	if instance.Status.EngineTLS != nil {
-		t.Errorf("Status.EngineTLS = %+v, want nil while ca.crt missing", instance.Status.EngineTLS)
+		t.Errorf("Status.EngineTLS = %+v, want nil when the spec is rejected", instance.Status.EngineTLS)
 	}
 	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady); cond == nil ||
-		cond.Status != metav1.ConditionFalse || cond.Reason != "SecretPending" {
-		t.Errorf("EngineTLSReady = %+v, want False/SecretPending", cond)
-	}
-
-	// The operator must not have created a cert-manager Certificate.
-	var certs certmanagerv1.CertificateList
-	if err := cli.List(context.Background(), &certs); err != nil {
-		t.Fatalf("listing certificates: %v", err)
-	}
-	if len(certs.Items) != 0 {
-		t.Errorf("BYO path created %d cert-manager Certificate(s), want 0", len(certs.Items))
-	}
-
-	// User completes the Secret with ca.crt: now ready.
-	byoSecret.Data[engineTLSCASecretKey] = []byte("ca")
-	if err := cli.Update(context.Background(), byoSecret); err != nil {
-		t.Fatalf("updating byo secret: %v", err)
-	}
-	if err := r.ensureEngineTLS(context.Background(), instance); err != nil {
-		t.Fatalf("ensureEngineTLS (complete): %v", err)
-	}
-	if instance.Status.EngineTLS == nil || instance.Status.EngineTLS.SecretName != "byo-engine-tls" {
-		t.Errorf("Status.EngineTLS = %+v, want SecretName byo-engine-tls", instance.Status.EngineTLS)
-	}
-	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady); cond == nil ||
-		cond.Status != metav1.ConditionTrue || cond.Reason != "Ready" {
-		t.Errorf("EngineTLSReady = %+v, want True/Ready", cond)
+		cond.Status != metav1.ConditionFalse || cond.Reason != "TLSSpecInvalid" {
+		t.Errorf("EngineTLSReady = %+v, want False/TLSSpecInvalid", cond)
 	}
 }
 

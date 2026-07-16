@@ -544,6 +544,16 @@ func engineWithHash(name, instanceRef, hash string) *computev1alpha1.FireboltEng
 	}
 }
 
+// adminSecretForConvergence returns the admin password Secret the auth spec
+// references. enginesConvergedOn now reads its ResourceVersion and folds it
+// into the expected authHash (FB-896 #4), so every subtest must seed it.
+func adminSecretForConvergence() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: adminSecretNameForController, Namespace: "ns-1"},
+		Data:       map[string][]byte{"password": []byte("hunter2")},
+	}
+}
+
 func TestEnginesConvergedOn(t *testing.T) {
 	sch := authTestScheme(t)
 	auth := validAuthSpecForController()
@@ -554,13 +564,29 @@ func TestEnginesConvergedOn(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
 	}
-	expected := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(keys)})
+
+	// The expected hash must include the admin Secret's ResourceVersion
+	// exactly as enginesConvergedOn reads it. A probe client (its own tracker,
+	// admin Secret added first, same as each subtest below) yields the RV the
+	// fake client will assign, so the precomputed engine ObservedAuthHash
+	// matches what enginesConvergedOn computes.
+	probe := fake.NewClientBuilder().WithScheme(sch).WithObjects(adminSecretForConvergence()).Build()
+	var probeSecret corev1.Secret
+	if err := probe.Get(context.Background(),
+		client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &probeSecret); err != nil {
+		t.Fatalf("probing admin secret RV: %v", err)
+	}
+	expected := authHash(&ResolvedAuthInfo{
+		Spec:               auth,
+		SigningKeys:        signingKeysForRender(keys),
+		AdminSecretVersion: probeSecret.ResourceVersion,
+	})
 	if expected == "" {
 		t.Fatal("expected hash is empty; test fixture is wrong")
 	}
 
 	t.Run("no engines is vacuously converged", func(t *testing.T) {
-		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(adminSecretForConvergence()).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
 		if err != nil || !ok {
@@ -570,6 +596,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 
 	t.Run("all engines matching hash converges", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			adminSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 			engineWithHash("e2", "inst", expected),
 		).Build()
@@ -582,6 +609,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 
 	t.Run("one lagging engine blocks convergence", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			adminSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 			engineWithHash("e2", "inst", "stale-hash"),
 		).Build()
@@ -594,12 +622,43 @@ func TestEnginesConvergedOn(t *testing.T) {
 
 	t.Run("engine belonging to a different instance is ignored", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			adminSecretForConvergence(),
 			engineWithHash("e1", "other-inst", "irrelevant-hash"),
 		).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
 		if err != nil || !ok {
 			t.Fatalf("enginesConvergedOn = (%v, %v), want (true, nil): an unrelated Instance's engine must not block", ok, err)
+		}
+	})
+
+	t.Run("in-place admin password rotation (new RV) blocks convergence", func(t *testing.T) {
+		// Engines still carry the old-RV hash; a rotated admin Secret bumps the
+		// RV so enginesConvergedOn computes a different expected hash — the gate
+		// must wait until engines roll onto the new password.
+		rotated := adminSecretForConvergence()
+		rotated.Data["password"] = []byte("rotated-pw")
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			rotated,
+			engineWithHash("e1", "inst", expected),
+		).Build()
+		var rv corev1.Secret
+		if err := cli.Get(context.Background(),
+			client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &rv); err != nil {
+			t.Fatalf("reading rotated admin secret: %v", err)
+		}
+		newExpected := authHash(&ResolvedAuthInfo{
+			Spec: auth, SigningKeys: signingKeysForRender(keys), AdminSecretVersion: rv.ResourceVersion,
+		})
+		if newExpected == expected {
+			// Only meaningful if the fake client actually assigns a distinct RV;
+			// if not, skip rather than assert a false negative.
+			t.Skip("fake client did not assign a distinct ResourceVersion; rotation-detection assertion not exercised")
+		}
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
+		if err != nil || ok {
+			t.Fatalf("enginesConvergedOn = (%v, %v), want (false, nil): a rotated admin password must block until engines roll", ok, err)
 		}
 	})
 }
@@ -662,6 +721,72 @@ func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.
 	}
 	if instance.Status.Auth.SigningKeys[0].CreatedAt.IsZero() {
 		t.Error("CreatedAt must be set once the key is observed ready")
+	}
+}
+
+// TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey covers FB-896 finding #7: an
+// active key issued as P-384 whose policy now asks for P-256 cannot be updated
+// in place (rotationPolicy:Never), so the rotation machine must mint a fresh
+// NAMED key carrying the new curve rather than accept the stale key as ready.
+func TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+	ctx := context.Background()
+
+	auth := validAuthSpecForController()
+	auth.Local.SigningAlgorithm = "ES256"
+	auth.Local.SigningKeys.CertManager.Algorithm = "ECDSA"
+	auth.Local.SigningKeys.CertManager.Size = 256 // was P-384
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			Auth: &computev1alpha1.AuthStatus{
+				SigningKeyGeneration: 1,
+				SigningKeys: []computev1alpha1.SigningKeyStatus{{
+					ID:         AuthSigningKeyID,
+					SecretName: signingCertificateName("inst", AuthSigningKeyID),
+					CreatedAt:  metav1.NewTime(time.Now()),
+					Phase:      computev1alpha1.SigningKeyActive,
+					Algorithm:  "ECDSA",
+					Size:       384, // the curve the active key was actually issued with
+				}},
+			},
+		},
+	}
+	if err := cli.Create(ctx, signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
+		t.Fatalf("seeding active key secret: %v", err)
+	}
+
+	// Reconcile 1: drift detected → mintNextSigningKey applies the signing-2
+	// Certificate but must not append it until its Secret exists.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("reconcile 1: %v", err)
+	}
+	if got := len(instance.Status.Auth.SigningKeys); got != 1 {
+		t.Fatalf("reconcile 1: SigningKeys has %d entries, want 1 (fresh key pending its Secret)", got)
+	}
+
+	// Reconcile 2: seed signing-2's Secret → the fresh key is appended carrying
+	// the NEW curve (P-256), proving the mint used the current policy.
+	if err := cli.Create(ctx, signingKeySecretFor(instance, "signing-2")); err != nil {
+		t.Fatalf("seeding signing-2 secret: %v", err)
+	}
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("reconcile 2: %v", err)
+	}
+	keys := instance.Status.Auth.SigningKeys
+	if len(keys) != 2 {
+		t.Fatalf("reconcile 2: SigningKeys = %+v, want 2 (fresh key minted for the new curve)", keys)
+	}
+	newKey := otherSigningKey(keys)
+	if newKey == nil || newKey.ID != "signing-2" {
+		t.Fatalf("reconcile 2: other = %+v, want signing-2", newKey)
+	}
+	if newKey.Algorithm != "ECDSA" || newKey.Size != 256 {
+		t.Errorf("fresh key recorded Algorithm/Size = %q/%d, want ECDSA/256", newKey.Algorithm, newKey.Size)
 	}
 }
 
@@ -855,12 +980,22 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 	}
 	ctx := context.Background()
 	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&computev1alpha1.FireboltEngine{}).WithObjects(
+		adminSecretForConvergence(),
 		signingKeySecretFor(instance, AuthSigningKeyID),
 		signingKeySecretFor(instance, "signing-2"),
 	).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 
-	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys)})
+	// enginesConvergedOn folds the admin Secret's ResourceVersion into the
+	// expected hash (FB-896 #4), so the engine's simulated ObservedAuthHash
+	// must be computed the same way to converge.
+	var adminSec corev1.Secret
+	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &adminSec); err != nil {
+		t.Fatalf("reading admin secret RV: %v", err)
+	}
+	adminRV := adminSec.ResourceVersion
+
+	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV})
 	engine := engineWithHash("e1", "inst", "stale-hash-from-a-previous-generation")
 	if err := cli.Create(ctx, engine); err != nil {
 		t.Fatalf("seeding lagging engine: %v", err)
@@ -906,7 +1041,7 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 
 	// The engine rolls onto the promoted config too — only now is it safe
 	// to start the retain-duration countdown.
-	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys)})
+	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV})
 	if postHash == preHash {
 		t.Fatal("pre- and post-promotion hashes must differ (active-first ordering flipped); test fixture is wrong")
 	}

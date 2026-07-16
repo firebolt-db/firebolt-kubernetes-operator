@@ -163,7 +163,9 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 				TLS: &computev1alpha1.TLSSpec{Engine: &computev1alpha1.TLSListenerSpec{Enabled: true}},
 			},
 			Status: computev1alpha1.FireboltInstanceStatus{
-				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "fb-engine-tls"},
+				// Reencrypting=true is the signal the gateway render gates on
+				// (engineUpstreamTLSReady): the fleet has converged on TLS.
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "fb-engine-tls", Reencrypting: true},
 			},
 		}
 		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)

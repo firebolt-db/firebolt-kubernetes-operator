@@ -132,6 +132,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
@@ -1171,7 +1172,8 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// in ContainerCreating, with the root cause invisible on the
 		// FireboltEngine CR.
 		admin := inst.Spec.Auth.Local.Admin.Password
-		if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret"); err != nil {
+		adminRV, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret")
+		if err != nil {
 			return InstanceInfo{}, err
 		}
 		// Filtered through signingKeysForRender (Active + at most one
@@ -1183,14 +1185,15 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// that window.
 		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
 		for _, k := range renderKeys {
-			if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret"); err != nil {
+			if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret"); err != nil {
 				return InstanceInfo{}, err
 			}
 		}
 
 		info.Auth = &ResolvedAuthInfo{
-			Spec:        inst.Spec.Auth,
-			SigningKeys: renderKeys,
+			Spec:               inst.Spec.Auth,
+			SigningKeys:        renderKeys,
+			AdminSecretVersion: adminRV,
 		}
 	}
 
@@ -1205,14 +1208,14 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has engine TLS enabled but it is not ready yet", inst.Name)
 		}
 		secretName := inst.Status.EngineTLS.SecretName
-		if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSCertKey, "engine TLS secret"); err != nil {
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSCertKey, "engine TLS secret"); err != nil {
 			return InstanceInfo{}, err
 		}
-		if err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSPrivateKeyKey, "engine TLS secret"); err != nil {
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSPrivateKeyKey, "engine TLS secret"); err != nil {
 			return InstanceInfo{}, err
 		}
 
-		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName}
+		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
 	}
 
 	return info, nil

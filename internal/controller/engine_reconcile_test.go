@@ -18,6 +18,7 @@ package controller
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1321,6 +1322,43 @@ func TestAuthHash_StableAcrossRotationPolicyChange(t *testing.T) {
 	changedRendered := authHash(&ResolvedAuthInfo{Spec: rotated, SigningKeys: keys})
 	if changedRendered == after {
 		t.Error("authHash did not change after signingAlgorithm changed; test fixture or authHash itself is broken")
+	}
+}
+
+// TestAuthHash_ChangesWithAdminSecretVersion covers FB-896 finding #4: an
+// in-place admin-password rotation keeps the Secret name/key identical but
+// bumps its ResourceVersion, and authHash must fold that in so every engine
+// rolls onto the new password (packdb reads password_file only at startup).
+func TestAuthHash_ChangesWithAdminSecretVersion(t *testing.T) {
+	auth := &computev1alpha1.AuthSpec{
+		Enabled: true,
+		Local: &computev1alpha1.LocalAuthSpec{
+			Admin: computev1alpha1.AdminSpec{
+				Password: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+					Key:                  "password",
+				},
+			},
+			SigningKeys: &computev1alpha1.SigningKeyPolicy{
+				CertManager: computev1alpha1.CertManagerSpec{
+					IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+				},
+			},
+		},
+	}
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-1", SecretName: "inst-auth-signing", Phase: computev1alpha1.SigningKeyActive},
+	}
+
+	v1 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000"})
+	v1again := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000"})
+	v2 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "2000"})
+
+	if v1 != v1again {
+		t.Errorf("authHash not stable for identical AdminSecretVersion: %q vs %q", v1, v1again)
+	}
+	if v1 == v2 {
+		t.Error("authHash did not change when AdminSecretVersion changed; an in-place password rotation would never roll engines")
 	}
 }
 
@@ -2700,6 +2738,15 @@ func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
 	}
 	if len(nodes) != int(testSpec().Replicas) {
 		t.Errorf("engine.nodes length = %d, want %d", len(nodes), testSpec().Replicas)
+	}
+	// Node hosts must be full FQDNs (…svc.cluster.local), which is what the
+	// per-generation engine TLS cert's wildcard SAN matches (FB-896 #1). A
+	// short .svc suffix would fail packdb's HTTPS startup verification.
+	for i, n := range nodes {
+		host, _ := n.(map[string]interface{})["host"].(string)
+		if !strings.HasSuffix(host, ".svc.cluster.local") {
+			t.Errorf("engine.nodes[%d].host = %q, want a full .svc.cluster.local FQDN", i, host)
+		}
 	}
 
 	logging := nestedMap(t, root, "logging")

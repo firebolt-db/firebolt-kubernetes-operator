@@ -211,9 +211,16 @@ const (
 	// names the file within it.
 	AuthAdminMountPath = "/secrets/auth/admin"
 	// EngineTLSMountPath is the directory the engine-listener TLS
-	// Secret (tls.crt/tls.key) is mounted at. Must agree with
-	// engineTLSCertPath/engineTLSKeyPath's mount-path scheme.
+	// Secret (tls.crt/tls.key/ca.crt) is mounted at (read-only). Must agree
+	// with engineTLSKeyPath's mount-path scheme and with EngineStartupScript's
+	// bundle-assembly paths.
 	EngineTLSMountPath = "/secrets/tls/engine"
+	// EngineTLSBundlePath is the writable path (under the runtime emptyDir
+	// mounted at /run/firebolt) where EngineStartupScript assembles the
+	// leaf+CA bundle packdb reads as its listener certificate_file — see
+	// engineTLSCertPath and FB-896 #2. It must NOT live under
+	// EngineTLSMountPath, which is a read-only Secret mount.
+	EngineTLSBundlePath = "/run/firebolt/engine-tls-bundle.crt"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
 	// VolumeClaimTemplates and the corresponding container VolumeMount.
 	DataVolumeName = "data"
@@ -360,6 +367,16 @@ const EngineStartupScript = `
 set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
+fi
+# Engine TLS (FB-896 #2): packdb uses the listener certificate_file as BOTH the
+# served chain and its own client-side CA bundle for HTTPS startup checks, so it
+# must carry the leaf AND the issuing CA. A CA-backed cert-manager issuer splits
+# these across tls.crt (leaf) and ca.crt (issuer), so assemble a combined bundle
+# at a writable path (paths must match EngineTLSMountPath / EngineTLSBundlePath).
+# Guarded on file existence so a plaintext engine, which mounts neither, is
+# unaffected.
+if [ -f /secrets/tls/engine/tls.crt ] && [ -f /secrets/tls/engine/ca.crt ]; then
+  cat /secrets/tls/engine/tls.crt /secrets/tls/engine/ca.crt > /run/firebolt/engine-tls-bundle.crt
 fi
 exec /opt/firebolt/firebolt server --node "$POD_INDEX" --data-dir /var/lib/firebolt
 `

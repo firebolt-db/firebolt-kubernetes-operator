@@ -456,7 +456,7 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "ES256 with ECDSA cert-manager key is valid",
+			name: "ES256 with the default P-384 key is rejected (JOSE requires P-256)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local: &LocalAuthSpec{
@@ -466,11 +466,67 @@ func TestValidateAuth(t *testing.T) {
 						CertManager: CertManagerSpec{
 							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
 							Algorithm: "ECDSA",
+							// Size left empty → defaults to P-384, which does not
+							// match ES256's required P-256 curve.
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with a P-256 key is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      256,
 						},
 					},
 				},
 			},
 			wantError: false,
+		},
+		{
+			name: "ES512 with a P-521 key is valid (the 512↔521 pairing)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES512",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      521,
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "ES512 with a P-384 key is rejected (curve mismatch)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES512",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      384,
+						},
+					},
+				},
+			},
+			wantError: true,
 		},
 		{
 			name: "RSA signing key with an ECDSA-shaped size is rejected",
@@ -641,6 +697,19 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
+			name: "duplicate oidc provider names are rejected " +
+				"(packdb's IssuerRegistry::registerRemote throws on the second registration)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					{Name: "okta", DiscoveryURL: "https://second.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: true,
+		},
+		{
 			name: "rotationInterval without retainDuration is rejected",
 			auth: &AuthSpec{
 				Enabled: true,
@@ -713,6 +782,36 @@ func TestValidateAuth(t *testing.T) {
 				},
 			},
 			wantError: false,
+		},
+		{
+			name: "zero rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 0},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "negative rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: -time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
 		},
 		{
 			name: "negative local maxTokenAge is rejected (a negative floor would defeat the rotation retain-duration check)",
@@ -814,12 +913,15 @@ func TestValidateTLS(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name: "engine enabled with secretRef is valid",
+			// FB-896 #1: engine bring-your-own Secret is no longer supported —
+			// the operator must issue per-generation certificates whose SANs
+			// cover the engine pod hostnames.
+			name: "engine enabled with secretRef is rejected (BYO not supported for the engine listener)",
 			tls: &TLSSpec{Engine: &TLSListenerSpec{
 				Enabled:   true,
 				SecretRef: &corev1.LocalObjectReference{Name: "my-engine-tls"},
 			}},
-			wantError: false,
+			wantError: true,
 		},
 		{
 			name: "engine enabled with both certManager and secretRef is rejected",
@@ -861,6 +963,17 @@ func TestValidateTLS(t *testing.T) {
 			tls: &TLSSpec{Gateway: &TLSListenerSpec{
 				Enabled:     true,
 				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+			}},
+			wantError: false,
+		},
+		{
+			// Gateway bring-your-own Secret stays supported (unlike the engine
+			// listener): the gateway presents its own cert to clients and its
+			// SANs are the user's concern, not per-generation pod hostnames.
+			name: "gateway enabled with secretRef is valid",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: "my-gateway-tls"},
 			}},
 			wantError: false,
 		},

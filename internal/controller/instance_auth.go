@@ -42,6 +42,26 @@ func signingKeyID(generation int) string {
 	return fmt.Sprintf("signing-%d", generation)
 }
 
+// resolvedSigningKeyAlgSize returns the cert-manager key algorithm and size a
+// signing key would be issued with under the given policy, applying the same
+// empty→default resolution the CRD markers do (ECDSA / P-384). Used both when
+// stamping a freshly minted key's SigningKeyStatus.{Algorithm,Size} and when
+// the rotation state machine checks whether the active key's issued
+// properties still match the current policy — resolving both sides keeps a
+// spec that merely spells out the default value explicitly from reading as a
+// change.
+func resolvedSigningKeyAlgSize(cm computev1alpha1.CertManagerSpec) (string, int32) {
+	alg := cm.Algorithm
+	if alg == "" {
+		alg = "ECDSA"
+	}
+	size := cm.Size
+	if size == 0 {
+		size = 384
+	}
+	return alg, size
+}
+
 // AuthSigningKeyID is the ID (JWT "kid") of the very first signing key
 // any Instance ever mints — generation 1. Exported as a stable named
 // constant because operatorauthority.go's reserved-engine-volume-name
@@ -156,7 +176,8 @@ const reasonAuthSpecInvalid = "AuthSpecInvalid"
 // preflight shape.
 func (r *FireboltInstanceReconciler) checkAdminPasswordSecret(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	ref := instance.Spec.Auth.Local.Admin.Password
-	return checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, ref.Key, "admin password secret")
+	_, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, ref.Key, "admin password secret")
+	return err
 }
 
 // checkSecretKeyPresent verifies a Secret exists in namespace and carries
@@ -169,19 +190,22 @@ func (r *FireboltInstanceReconciler) checkAdminPasswordSecret(ctx context.Contex
 // different reconciler receiver types. label names the Secret's role
 // in error messages (e.g. "admin password secret", "signing key
 // secret").
-func checkSecretKeyPresent(ctx context.Context, cli client.Client, namespace, name, key, label string) error {
+func checkSecretKeyPresent(ctx context.Context, cli client.Client, namespace, name, key, label string) (string, error) {
 	var secret corev1.Secret
 	err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret)
 	if errors.IsNotFound(err) {
-		return fmt.Errorf("%s %s/%s not found", label, namespace, name)
+		return "", fmt.Errorf("%s %s/%s not found", label, namespace, name)
 	}
 	if err != nil {
-		return fmt.Errorf("getting %s %s/%s: %w", label, namespace, name, err)
+		return "", fmt.Errorf("getting %s %s/%s: %w", label, namespace, name, err)
 	}
 	if len(secret.Data[key]) == 0 {
-		return fmt.Errorf("%s %s/%s is missing or empty for key %q", label, namespace, name, key)
+		return "", fmt.Errorf("%s %s/%s is missing or empty for key %q", label, namespace, name, key)
 	}
-	return nil
+	// ResourceVersion lets callers fold an in-place data rotation (same name,
+	// new bytes) into a rollout hash without ever hashing the secret bytes
+	// themselves — see ResolvedAuthInfo.AdminSecretVersion.
+	return secret.ResourceVersion, nil
 }
 
 // existingSigningKeys returns instance.Status.Auth.SigningKeys, or nil if
@@ -322,7 +346,8 @@ func (r *FireboltInstanceReconciler) ensureSigningKeys(ctx context.Context, inst
 // must for a mid-rotation key.
 func (r *FireboltInstanceReconciler) bootstrapSigningKey(ctx context.Context, instance *computev1alpha1.FireboltInstance, keys []computev1alpha1.SigningKeyStatus) (bool, error) {
 	gen := authStatusGeneration(instance) + 1
-	key := computev1alpha1.SigningKeyStatus{ID: signingKeyID(gen), Phase: computev1alpha1.SigningKeyActive}
+	alg, size := resolvedSigningKeyAlgSize(instance.Spec.Auth.Local.SigningKeys.CertManager)
+	key := computev1alpha1.SigningKeyStatus{ID: signingKeyID(gen), Phase: computev1alpha1.SigningKeyActive, Algorithm: alg, Size: size}
 	ready, err := r.applySigningCertificate(ctx, instance, &key)
 	if err != nil {
 		return false, err
@@ -482,6 +507,29 @@ func (r *FireboltInstanceReconciler) stepSigningKeyRotation(ctx context.Context,
 
 	switch {
 	case other == nil:
+		// A change to the signing key's algorithm/size cannot be satisfied in
+		// place: the Certificate uses rotationPolicy:Never, so cert-manager
+		// refuses to regenerate a key whose properties changed and awaits user
+		// intervention, while the readiness check accepts the stale old key —
+		// engines would roll onto the new signing_algorithm with the old key
+		// and wedge. Treat it like a rotation trigger: mint a fresh named key
+		// (new kid → new Secret) carrying the new properties, promoted and
+		// retired through the machinery below. This runs regardless of whether
+		// periodic rotation is configured; if RetainDuration is unset the old
+		// key simply lingers as a ValidationOnly key (fail-static, keeps
+		// validating old tokens) rather than being pruned.
+		wantAlg, wantSize := resolvedSigningKeyAlgSize(policy.CertManager)
+		switch {
+		case active.Algorithm == "" || active.Size == 0:
+			// Key minted before Algorithm/Size were recorded: adopt the current
+			// resolved policy as its baseline. An existing key that did not
+			// already match current policy would be wedged in cert-manager
+			// regardless — that is the pre-existing condition this guards, not
+			// something backfilling can make worse.
+			active.Algorithm, active.Size = wantAlg, wantSize
+		case active.Algorithm != wantAlg || active.Size != wantSize:
+			return r.mintNextSigningKey(ctx, instance)
+		}
 		if policy.RotationInterval == nil {
 			return nil
 		}
@@ -565,7 +613,8 @@ func (r *FireboltInstanceReconciler) stepSigningKeyRotation(ctx context.Context,
 // it succeeds, at which point the key is appended exactly once.
 func (r *FireboltInstanceReconciler) mintNextSigningKey(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	gen := instance.Status.Auth.SigningKeyGeneration + 1
-	key := computev1alpha1.SigningKeyStatus{ID: signingKeyID(gen), Phase: computev1alpha1.SigningKeyValidationOnly}
+	alg, size := resolvedSigningKeyAlgSize(instance.Spec.Auth.Local.SigningKeys.CertManager)
+	key := computev1alpha1.SigningKeyStatus{ID: signingKeyID(gen), Phase: computev1alpha1.SigningKeyValidationOnly, Algorithm: alg, Size: size}
 	ready, err := r.applySigningCertificate(ctx, instance, &key)
 	if err != nil {
 		return err
@@ -644,12 +693,43 @@ func (r *FireboltInstanceReconciler) enginesConvergedOn(ctx context.Context, ins
 	if err := r.List(ctx, &list, client.InNamespace(instance.Namespace)); err != nil {
 		return false, fmt.Errorf("listing engines for instance %s: %w", instance.Name, err)
 	}
-	expected := authHash(&ResolvedAuthInfo{Spec: instance.Spec.Auth, SigningKeys: signingKeysForRender(keys)})
+	// Gather this Instance's engines first. With none there is nothing to
+	// compare against, so short-circuit as vacuously converged before reading
+	// the admin Secret — both an optimization and what keeps a bootstrap-time
+	// or engine-less reconcile from failing on an admin Secret it never needs.
+	var ours []*computev1alpha1.FireboltEngine
 	for i := range list.Items {
-		if list.Items[i].Spec.InstanceRef != instance.Name {
-			continue
+		if list.Items[i].Spec.InstanceRef == instance.Name {
+			ours = append(ours, &list.Items[i])
 		}
-		if list.Items[i].Status.ObservedAuthHash != expected {
+	}
+	if len(ours) == 0 {
+		return true, nil
+	}
+
+	// Must read the admin Secret's ResourceVersion and fold it into the
+	// expected hash exactly as the engine reconciler does (resolveInstanceInfo
+	// → ResolvedAuthInfo.AdminSecretVersion): otherwise, after an in-place
+	// password rotation, this side would compute a hash the engines can never
+	// match and the rotation gate would deadlock. Rotation only runs with
+	// local signing keys configured, so admin is always set here; guard nil
+	// defensively regardless.
+	var adminRV string
+	if instance.Spec.Auth != nil && instance.Spec.Auth.Local != nil {
+		admin := instance.Spec.Auth.Local.Admin.Password
+		rv, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, admin.Name, admin.Key, "admin password secret")
+		if err != nil {
+			return false, err
+		}
+		adminRV = rv
+	}
+	expected := authHash(&ResolvedAuthInfo{
+		Spec:               instance.Spec.Auth,
+		SigningKeys:        signingKeysForRender(keys),
+		AdminSecretVersion: adminRV,
+	})
+	for _, e := range ours {
+		if e.Status.ObservedAuthHash != expected {
 			return false, nil
 		}
 	}

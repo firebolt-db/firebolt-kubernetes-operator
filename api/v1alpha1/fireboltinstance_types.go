@@ -814,6 +814,23 @@ type SigningKeyStatus struct {
 	// CreatedAt is when this key was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
 
+	// Algorithm and Size record the cert-manager key algorithm and size this
+	// key was issued with — the resolved
+	// spec.auth.local.signingKeys.certManager values in effect when it was
+	// minted. Because the signing Certificate uses rotationPolicy:Never,
+	// cert-manager will not regenerate a key whose algorithm/size later
+	// changes; it awaits user intervention instead. The rotation state machine
+	// compares these against the current policy and, on a mismatch, mints a
+	// fresh NAMED key (new kid → new Secret) so new material is issued cleanly
+	// rather than leaving the engine fleet wedged on a key the issuer refuses
+	// to update. Empty/zero on a key minted before these fields existed; the
+	// controller adopts the current resolved policy as the baseline on the
+	// next reconcile.
+	// +optional
+	Algorithm string `json:"algorithm,omitempty"`
+	// +optional
+	Size int32 `json:"size,omitempty"`
+
 	// Phase is this key's current role — see SigningKeyPhase. Unset
 	// (empty string) is treated as Active for compatibility with
 	// Instances that provisioned their one signing key before this field
@@ -916,6 +933,19 @@ type EngineTLSStatus struct {
 
 	// CreatedAt is when this certificate was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
+
+	// Reencrypting reports whether the gateway is currently re-encrypting
+	// gateway→engine traffic with TLS. It tracks the engine FLEET's observed
+	// protocol, not merely whether the certificate exists: on enable it turns
+	// true only once every engine has rolled onto a TLS-serving generation (so
+	// the gateway does not switch to TLS while engines still serve plaintext),
+	// and on disable this EngineTLSStatus is retained with Reencrypting=true
+	// until every engine has drained back to plaintext (so the gateway keeps
+	// the trust anchor and TLS while any engine still serves it). This narrows,
+	// but does not eliminate, the mixed-protocol window during a rollout — the
+	// gateway speaks one upstream protocol at a time. See engineUpstreamTLSReady.
+	// +optional
+	Reencrypting bool `json:"reencrypting,omitempty"`
 }
 
 // GatewayTLSStatus reports the observed state of gateway downstream

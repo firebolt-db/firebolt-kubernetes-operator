@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +37,17 @@ import (
 // All operations are idempotent.
 func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine, result *EngineReconcileResult) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
+
+	// Apply the per-generation engine TLS Certificate first, so cert-manager
+	// can begin issuing its Secret before the StatefulSet's pods try to mount
+	// it (FB-896 #1). Pods otherwise sit in ContainerCreating until the Secret
+	// lands — self-healing, just slower.
+	if result.EnsureEngineTLSCert != nil {
+		log.Info("Ensuring engine TLS Certificate", "name", result.EnsureEngineTLSCert.Name)
+		if err := r.ensureEngineTLSCert(ctx, engine, result.EnsureEngineTLSCert); err != nil {
+			return fmt.Errorf("failed to ensure engine TLS certificate: %w", err)
+		}
+	}
 
 	if result.EnsureConfigMap != nil {
 		log.Info("Ensuring ConfigMap", "name", result.EnsureConfigMap.Name)
@@ -170,6 +182,23 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
 	log.V(1).Info("Applying ConfigMap", "name", want.Name)
+	return applySSA(ctx, r.Client, want)
+}
+
+// ensureEngineTLSCert applies the per-generation engine TLS Certificate via SSA
+// with the FireboltEngine as owner, so it (and cert-manager's derived Secret)
+// is garbage-collected when the engine or its generation is torn down. Like the
+// instance controller's cert applies, the certificate is NOT watched via
+// Owns() in SetupWithManager — envtest has no cert-manager CRDs, so watching
+// the kind would break manager startup there.
+func (r *FireboltEngineReconciler) ensureEngineTLSCert(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *certmanagerv1.Certificate) error {
+	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
+
+	want.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
+	}
+	log.V(1).Info("Applying engine TLS Certificate", "name", want.Name)
 	return applySSA(ctx, r.Client, want)
 }
 
