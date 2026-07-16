@@ -14873,6 +14873,19 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "clientCASecretRef": {
+                  "description": "ClientCASecretRef enables mutual TLS on this listener: the server\nrequires a client certificate and verifies it against the \"ca.crt\"\nbundle in the referenced Secret. The operator only reads this Secret\n(never creates or mutates it), and the listener stays not-ready until\nit exists and carries ca.crt.\n\nCurrently honored only for spec.tls.gateway \u2014 the gateway verifies\nclient certificates on its client-facing listener. Setting it on\nspec.tls.engine is rejected at admission (engine-side client-cert\nverification is not yet wired). Requires this listener's server TLS\nto be enabled.",
+                  "properties": {
+                    "name": {
+                      "default": "",
+                      "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "x-kubernetes-map-type": "atomic",
+                  "additionalProperties": false
+                },
                 "dnsNames": {
                   "description": "DNSNames lists additional Subject Alternative Names to include on\nthe provisioned certificate, beyond whatever names the operator\nderives automatically.\n\nOnly meaningful for spec.tls.gateway: the gateway's in-cluster\nService DNS names are always included automatically, but the\ngateway has no operator-managed external entrypoint (no\nIngress/LoadBalancer hostname visible to the operator \u2014 see\nTLSSpec's doc comment), so any name a client outside the cluster\nwill actually present at the TLS handshake \u2014 a custom domain, an\nexternal load balancer's hostname \u2014 must be listed here\nexplicitly, mirroring the sibling firebolt-instance-helm chart's\ntls.gateway.certManager.dnsNames.\n\nIgnored for spec.tls.engine: its SANs are fully derived from the\nnamespace (see engineTLSWildcardDNSName) and cannot be extended,\nsince every engine's routing Service already matches the\nnamespace-wide wildcard.",
                   "items": {
@@ -14952,6 +14965,19 @@
                     "issuerRef"
                   ],
                   "type": "object",
+                  "additionalProperties": false
+                },
+                "clientCASecretRef": {
+                  "description": "ClientCASecretRef enables mutual TLS on this listener: the server\nrequires a client certificate and verifies it against the \"ca.crt\"\nbundle in the referenced Secret. The operator only reads this Secret\n(never creates or mutates it), and the listener stays not-ready until\nit exists and carries ca.crt.\n\nCurrently honored only for spec.tls.gateway \u2014 the gateway verifies\nclient certificates on its client-facing listener. Setting it on\nspec.tls.engine is rejected at admission (engine-side client-cert\nverification is not yet wired). Requires this listener's server TLS\nto be enabled.",
+                  "properties": {
+                    "name": {
+                      "default": "",
+                      "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object",
+                  "x-kubernetes-map-type": "atomic",
                   "additionalProperties": false
                 },
                 "dnsNames": {

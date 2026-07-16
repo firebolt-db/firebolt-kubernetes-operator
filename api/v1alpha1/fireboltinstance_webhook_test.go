@@ -864,6 +864,33 @@ func TestValidateTLS(t *testing.T) {
 			}},
 			wantError: false,
 		},
+		{
+			name: "gateway mutual TLS with a named client CA is valid",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{Name: "clients-ca"},
+			}},
+			wantError: false,
+		},
+		{
+			name: "gateway mutual TLS with an empty client-CA name is rejected",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine mutual TLS is rejected (only gateway supports it)",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{Name: "clients-ca"},
+			}},
+			wantError: true,
+		},
 	}
 
 	v := &FireboltInstanceCustomValidator{}

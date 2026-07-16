@@ -136,8 +136,18 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 		return nil
 	}
 	var errs field.ErrorList
-	errs = append(errs, validateTLSListener(tls.Engine, field.NewPath("spec", "tls", "engine"))...)
+	enginePath := field.NewPath("spec", "tls", "engine")
+	errs = append(errs, validateTLSListener(tls.Engine, enginePath)...)
 	errs = append(errs, validateTLSListener(tls.Gateway, field.NewPath("spec", "tls", "gateway"))...)
+
+	// Mutual TLS (client-certificate verification) is honored only on the
+	// gateway's client-facing listener; the engine-side verify-client path
+	// is not wired yet, so reject it on the engine rather than silently
+	// ignore it.
+	if tls.Engine != nil && tls.Engine.ClientCASecretRef != nil {
+		errs = append(errs, field.Forbidden(enginePath.Child("clientCASecretRef"),
+			"mutual TLS is only supported on spec.tls.gateway"))
+	}
 	return errs
 }
 
@@ -151,31 +161,37 @@ func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.Erro
 		return nil
 	}
 
+	var errs field.ErrorList
+
 	hasCertManager := listener.CertManager != nil
 	hasSecretRef := listener.SecretRef != nil
 	switch {
 	case hasCertManager && hasSecretRef:
-		return field.ErrorList{field.Forbidden(base.Child("secretRef"),
-			"must not be set together with certManager: provide exactly one certificate source")}
+		errs = append(errs, field.Forbidden(base.Child("secretRef"),
+			"must not be set together with certManager: provide exactly one certificate source"))
 	case !hasCertManager && !hasSecretRef:
-		return field.ErrorList{field.Required(base.Child("certManager"),
-			"required when enabled is true: provide certManager (operator provisions via cert-manager) or secretRef (bring your own Secret)")}
-	}
-
-	if hasSecretRef {
+		errs = append(errs, field.Required(base.Child("certManager"),
+			"required when enabled is true: provide certManager (operator provisions via cert-manager) or secretRef (bring your own Secret)"))
+	case hasSecretRef:
 		if listener.SecretRef.Name == "" {
-			return field.ErrorList{field.Required(base.Child("secretRef", "name"), "required")}
+			errs = append(errs, field.Required(base.Child("secretRef", "name"), "required"))
 		}
-		return nil
+	default: // certManager only
+		if listener.CertManager.IssuerRef.Name == "" {
+			errs = append(errs, field.Required(base.Child("certManager", "issuerRef", "name"), "required"))
+		}
+		if err := validateCertManagerKey(listener.CertManager, base.Child("certManager")); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	var errs field.ErrorList
-	if listener.CertManager.IssuerRef.Name == "" {
-		errs = append(errs, field.Required(base.Child("certManager", "issuerRef", "name"), "required"))
+	// Mutual TLS: the client-CA Secret needs a name (its ca.crt presence is
+	// checked at reconcile, not admission). Whether mTLS is honored for this
+	// particular listener is enforced by the caller (ValidateTLS).
+	if listener.ClientCASecretRef != nil && listener.ClientCASecretRef.Name == "" {
+		errs = append(errs, field.Required(base.Child("clientCASecretRef", "name"), "required"))
 	}
-	if err := validateCertManagerKey(listener.CertManager, base.Child("certManager")); err != nil {
-		errs = append(errs, err)
-	}
+
 	return errs
 }
 

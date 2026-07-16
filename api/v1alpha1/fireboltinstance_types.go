@@ -642,6 +642,20 @@ type TLSListenerSpec struct {
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 
+	// ClientCASecretRef enables mutual TLS on this listener: the server
+	// requires a client certificate and verifies it against the "ca.crt"
+	// bundle in the referenced Secret. The operator only reads this Secret
+	// (never creates or mutates it), and the listener stays not-ready until
+	// it exists and carries ca.crt.
+	//
+	// Currently honored only for spec.tls.gateway — the gateway verifies
+	// client certificates on its client-facing listener. Setting it on
+	// spec.tls.engine is rejected at admission (engine-side client-cert
+	// verification is not yet wired). Requires this listener's server TLS
+	// to be enabled.
+	// +optional
+	ClientCASecretRef *corev1.LocalObjectReference `json:"clientCASecretRef,omitempty"`
+
 	// DNSNames lists additional Subject Alternative Names to include on
 	// the provisioned certificate, beyond whatever names the operator
 	// derives automatically.

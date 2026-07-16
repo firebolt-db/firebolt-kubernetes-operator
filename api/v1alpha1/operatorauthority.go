@@ -165,6 +165,12 @@ const (
 	// enabled. Mounted read-only on the Envoy container; referenced by the
 	// listener's DownstreamTlsContext in buildEnvoyConfigYAML.
 	GatewayTLSVolumeName = "tls-gateway"
+	// GatewayClientCAVolumeName carries the "ca.crt" the gateway verifies
+	// client certificates against when mutual TLS is enabled on the
+	// client-facing listener (spec.tls.gateway.clientCASecretRef). Present
+	// only once gateway TLS is ready and a client CA is configured; mounted
+	// read-only on the Envoy container.
+	GatewayClientCAVolumeName = "client-ca"
 	// MetadataConfigVolumeName carries the operator-rendered Pensieve
 	// XML config. Mounted at /configs on the metadata container.
 	MetadataConfigVolumeName = "config"

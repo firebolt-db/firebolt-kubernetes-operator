@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -514,15 +515,19 @@ func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles(t
 	}
 }
 
-// TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_NoTransportSocket
-// pins down that buildListenerDownstreamTLSTransportSocket gates on
-// Status.GatewayTLS (readiness), not just Spec.TLS.Gateway.Enabled: a
-// transport_socket referencing an unmounted certificate file would break
-// every client connection until the volume catches up.
-func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_NoTransportSocket(t *testing.T) {
+// TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_FailsClosed pins
+// down the fail-closed behavior: when gateway TLS is requested but the
+// certificate is not provisioned yet (Status.GatewayTLS nil), the
+// client-facing listener is omitted entirely rather than served as
+// plaintext. Only the always-present stats listener (which answers /healthz
+// for the liveness probe) remains, so the pod stays alive while the
+// readiness probe — which targets the now-absent client port — keeps the
+// gateway NotReady until the certificate lands.
+func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_FailsClosed(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 		Spec: computev1alpha1.FireboltInstanceSpec{
+			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
 			TLS: &computev1alpha1.TLSSpec{
 				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
 			},
@@ -533,10 +538,26 @@ func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_NoTransportSocket(t *
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
 	}
-	fc := listenerFilterChain(t, parsed)
-	if _, present := fc["transport_socket"]; present {
-		t.Errorf("client-facing listener has transport_socket before GatewayTLS is ready: %v", fc["transport_socket"])
+	names := listenerNames(t, parsed)
+	if slices.Contains(names, "listener") {
+		t.Errorf("client-facing listener present during the fail-closed window; want it omitted (no plaintext). listeners=%v", names)
 	}
+	if !slices.Contains(names, "stats_listener") {
+		t.Errorf("stats_listener missing from fail-closed config; the liveness probe needs its /healthz. listeners=%v", names)
+	}
+}
+
+// listenerNames returns the "name" of every listener in the emitted config.
+func listenerNames(t *testing.T, parsed map[string]any) []string {
+	t.Helper()
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	var names []string
+	for _, l := range listeners {
+		if name, _ := l.(map[string]any)["name"].(string); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured pins
@@ -601,6 +622,57 @@ func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testi
 	if key["filename"] != wantKey {
 		t.Errorf("private_key.filename = %v, want %v", key["filename"], wantKey)
 	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayMutualTLS pins down the mTLS shape: when a
+// client CA is configured on a ready gateway listener, the DownstreamTlsContext
+// requires a client certificate and validates it against the mounted client-CA
+// bundle. Without one, neither field is emitted (one-way TLS renders
+// byte-identically to before this feature).
+func TestBuildEnvoyConfigYAML_GatewayMutualTLS(t *testing.T) {
+	build := func(clientCA *corev1.LocalObjectReference) map[string]any {
+		got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true, ClientCASecretRef: clientCA},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+			},
+		})
+		var parsed map[string]any
+		if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+			t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+		}
+		return listenerFilterChain(t, parsed)["transport_socket"].(map[string]any)["typed_config"].(map[string]any)
+	}
+
+	t.Run("client CA requires and validates client certs", func(t *testing.T) {
+		td := build(&corev1.LocalObjectReference{Name: "clients-ca"})
+		if req, _ := td["require_client_certificate"].(bool); !req {
+			t.Errorf("require_client_certificate = %v, want true", td["require_client_certificate"])
+		}
+		vc, ok := td["common_tls_context"].(map[string]any)["validation_context"].(map[string]any)
+		if !ok {
+			t.Fatal("common_tls_context.validation_context missing with a client CA configured")
+		}
+		want := gatewayClientCAMountPath + "/" + engineTLSCASecretKey
+		if got := vc["trusted_ca"].(map[string]any)["filename"]; got != want {
+			t.Errorf("trusted_ca.filename = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no client CA keeps one-way TLS", func(t *testing.T) {
+		td := build(nil)
+		if _, present := td["require_client_certificate"]; present {
+			t.Error("require_client_certificate present without a client CA configured")
+		}
+		if _, present := td["common_tls_context"].(map[string]any)["validation_context"]; present {
+			t.Error("validation_context present without a client CA configured")
+		}
+	})
 }
 
 // listenerFilterChain returns the first filter_chain of the client-facing

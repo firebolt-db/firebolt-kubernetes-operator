@@ -8169,6 +8169,31 @@ spec:
                         required:
                         - issuerRef
                         type: object
+                      clientCASecretRef:
+                        description: |-
+                          ClientCASecretRef enables mutual TLS on this listener: the server
+                          requires a client certificate and verifies it against the "ca.crt"
+                          bundle in the referenced Secret. The operator only reads this Secret
+                          (never creates or mutates it), and the listener stays not-ready until
+                          it exists and carries ca.crt.
+
+                          Currently honored only for spec.tls.gateway — the gateway verifies
+                          client certificates on its client-facing listener. Setting it on
+                          spec.tls.engine is rejected at admission (engine-side client-cert
+                          verification is not yet wired). Requires this listener's server TLS
+                          to be enabled.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                       dnsNames:
                         description: |-
                           DNSNames lists additional Subject Alternative Names to include on
@@ -8273,6 +8298,31 @@ spec:
                         required:
                         - issuerRef
                         type: object
+                      clientCASecretRef:
+                        description: |-
+                          ClientCASecretRef enables mutual TLS on this listener: the server
+                          requires a client certificate and verifies it against the "ca.crt"
+                          bundle in the referenced Secret. The operator only reads this Secret
+                          (never creates or mutates it), and the listener stays not-ready until
+                          it exists and carries ca.crt.
+
+                          Currently honored only for spec.tls.gateway — the gateway verifies
+                          client certificates on its client-facing listener. Setting it on
+                          spec.tls.engine is rejected at admission (engine-side client-cert
+                          verification is not yet wired). Requires this listener's server TLS
+                          to be enabled.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
                       dnsNames:
                         description: |-
                           DNSNames lists additional Subject Alternative Names to include on

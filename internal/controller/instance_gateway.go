@@ -147,6 +147,13 @@ const (
 	// listener's tls_certificates filenames in
 	// buildListenerDownstreamTLSTransportSocket.
 	gatewayTLSMountPath = "/etc/envoy/tls/gateway"
+
+	// gatewayClientCAMountPath is the directory the client-CA Secret is
+	// mounted at on the Envoy container when mutual TLS is enabled on the
+	// gateway's client-facing listener (spec.tls.gateway.clientCASecretRef).
+	// Its ca.crt is the trusted_ca in the listener's DownstreamTlsContext
+	// validation_context — see buildListenerDownstreamTLSTransportSocket.
+	gatewayClientCAMountPath = "/etc/envoy/tls/client-ca"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -334,6 +341,28 @@ func gatewayDownstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool 
 		instance.Status.GatewayTLS != nil
 }
 
+// gatewayDownstreamTLSPending reports the fail-closed window: the operator
+// has been asked to terminate client TLS on the gateway (spec.tls.gateway
+// enabled) but the certificate is not provisioned yet (Status.GatewayTLS
+// nil). During this window buildEnvoyConfigYAML omits the client-facing
+// listener entirely rather than serve plaintext on the client port — see
+// buildFailClosedEnvoyConfigYAML. A gateway with TLS disabled is not
+// pending: it serves plaintext by design.
+func gatewayDownstreamTLSPending(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS == nil
+}
+
+// gatewayClientCASecretRef returns the client-CA Secret reference configured
+// for mutual TLS on the gateway's client-facing listener, or nil when mTLS is
+// not configured.
+func gatewayClientCASecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Gateway.ClientCASecretRef
+}
+
 // buildListenerDownstreamTLSTransportSocket returns the client-facing
 // listener's filter_chain transport_socket YAML block (indented to nest
 // as a sibling of "filters:" within that filter_chain entry — see
@@ -349,6 +378,22 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
 	if !gatewayDownstreamTLSReady(instance) {
 		return ""
 	}
+
+	// Mutual TLS: when a client CA is configured, verify inbound client
+	// certificates against it and refuse connections that present none. The
+	// validation_context nests inside common_tls_context (sibling of
+	// tls_certificates); require_client_certificate is a DownstreamTlsContext
+	// field (sibling of common_tls_context). Both stay absent otherwise, so a
+	// one-way-TLS gateway renders byte-identically to before this feature.
+	var validationContext, requireClientCert string
+	if gatewayClientCASecretRef(instance) != nil {
+		validationContext = fmt.Sprintf(`                validation_context:
+                  trusted_ca:
+                    filename: %s/%s
+`, gatewayClientCAMountPath, engineTLSCASecretKey)
+		requireClientCert = "              require_client_certificate: true\n"
+	}
+
 	return fmt.Sprintf(`          transport_socket:
             name: envoy.transport_sockets.tls
             typed_config:
@@ -359,12 +404,20 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
                       filename: %s/%s
                     private_key:
                       filename: %s/%s
-`,
+%s%s`,
 		gatewayTLSMountPath, corev1.TLSCertKey,
-		gatewayTLSMountPath, corev1.TLSPrivateKeyKey)
+		gatewayTLSMountPath, corev1.TLSPrivateKeyKey,
+		validationContext, requireClientCert)
 }
 
 func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	// Fail closed while a requested client TLS certificate is still
+	// provisioning: serve no client-facing listener at all rather than
+	// plaintext (see buildFailClosedEnvoyConfigYAML and
+	// gatewayDownstreamTLSPending).
+	if gatewayDownstreamTLSPending(instance) {
+		return buildFailClosedEnvoyConfigYAML(instance)
+	}
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
@@ -658,6 +711,19 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                           route:
                             cluster: admin_stats
                 http_filters:
+                  # Always-present /healthz endpoint. The gateway's liveness
+                  # probe targets this listener (the metrics port), not the
+                  # client-facing listener, so the pod stays alive even while
+                  # the client listener is withheld during the fail-closed
+                  # TLS-provisioning window (see buildFailClosedEnvoyConfigYAML).
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -844,6 +910,77 @@ admin:
 		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
 		gatewayAdminPort,                                    // admin_stats endpoint: port_value
 		gatewayAdminPort,                                    // admin: port_value
+	)
+}
+
+// buildFailClosedEnvoyConfigYAML renders the gateway's Envoy config for the
+// fail-closed window (gatewayDownstreamTLSPending): client TLS was requested
+// but the certificate is not provisioned yet. The client-facing listener is
+// deliberately ABSENT — the client port refuses connections instead of
+// serving plaintext, and the readiness probe (which targets that port) keeps
+// the gateway NotReady until the certificate lands. Only the always-present
+// stats listener (serving /healthz for the liveness probe, plus
+// /stats/prometheus) and its admin backend remain, so the pod stays alive
+// through the wait. Once ensureGatewayTLS populates Status.GatewayTLS the full
+// config from buildEnvoyConfigYAML replaces this one and the gateway rolls.
+func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	return fmt.Sprintf(`static_resources:
+  listeners:
+    - name: stats_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: stats
+                route_config:
+                  name: stats_route
+                  virtual_hosts:
+                    - name: stats
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/stats/prometheus"
+                          route:
+                            cluster: admin_stats
+                http_filters:
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: admin_stats
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: admin_stats
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: %d
+`,
+		instance.Spec.Gateway.MetricsPort, // stats_listener: port_value
+		gatewayAdminPort,                  // admin_stats endpoint: port_value
+		gatewayAdminPort,                  // admin: port_value
 	)
 }
 
@@ -1082,21 +1219,27 @@ exec 3<&- 3>&-
 sleep 8
 `, gatewayAdminPort)
 
-	// The kubelet's probe scheme must track the listener's own transport:
-	// once gateway TLS is enabled and ready, the client-facing 8080
-	// listener (and the envoy.filters.http.health_check filter riding on
-	// it, which is what /healthz answers — see preStopScript's doc
-	// comment) speaks TLS only. A plaintext HTTPGet probe against a TLS
-	// socket fails every time, which would leave the gateway forever
-	// un-Ready. The kubelet's httpGet probe does not verify the server
-	// certificate for URISchemeHTTPS, so this flip needs no CA-trust
-	// material on the probe side. Mirrors buildEngineWebSidecar's
-	// backend-scheme switch in Phase 2.
-	probeScheme := corev1.URISchemeHTTP
-	if gatewayDownstreamTLSReady(instance) {
-		probeScheme = corev1.URISchemeHTTPS
-	}
-
+	// Both probes hit /healthz on the metrics port, NOT the client-facing
+	// port. Two independent reasons force this:
+	//
+	//   - Mutual TLS: when spec.tls.gateway.clientCASecretRef is set the
+	//     client listener sets require_client_certificate, so its TLS
+	//     handshake rejects any connection that presents no client cert —
+	//     and the kubelet's httpGet probe cannot present one. A probe against
+	//     the client listener would then fail forever, wedging the gateway
+	//     NotReady. The metrics port's stats listener is always plaintext.
+	//   - Fail-closed provisioning: while gateway TLS is requested but not
+	//     yet issued, the client listener is omitted entirely
+	//     (buildFailClosedEnvoyConfigYAML) and a probe there would get
+	//     connection-refused. The stats listener is always present.
+	//
+	// Drain still works: the preStop POST to /healthcheck/fail flips the
+	// health_check filter process-wide, so the stats listener's /healthz
+	// starts returning 503 and readiness drops — exactly as before, just on
+	// the metrics port. The client-facing security posture is unchanged: the
+	// client port serves TLS (mutual, when configured) or refuses connections
+	// while fail-closed, and Instance readiness gates on the separate
+	// GatewayTLSReady condition, not on this probe.
 	envoy := corev1.Container{
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
@@ -1115,7 +1258,7 @@ sleep 8
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http"), Scheme: probeScheme},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       15,
@@ -1123,7 +1266,7 @@ sleep 8
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http"), Scheme: probeScheme},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       2,
@@ -1207,12 +1350,37 @@ sleep 8
 				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.GatewayTLS.SecretName},
 			},
 		})
+		// Mutual TLS: mount the client CA the listener verifies client
+		// certificates against, projected to ca.crt only. Gated together with
+		// the downstream cert (gatewayDownstreamTLSReady already requires the
+		// client-CA Secret to be present — see ensureGatewayTLSCertificate),
+		// and only when a client CA is configured — matching the
+		// validation_context in buildListenerDownstreamTLSTransportSocket.
+		if clientCA := gatewayClientCASecretRef(instance); clientCA != nil {
+			envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+				Name:      computev1alpha1.GatewayClientCAVolumeName,
+				MountPath: gatewayClientCAMountPath,
+				ReadOnly:  true,
+			})
+			operatorVolumes = append(operatorVolumes, corev1.Volume{
+				Name: computev1alpha1.GatewayClientCAVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: clientCA.Name,
+						Items: []corev1.KeyToPath{
+							{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+						},
+					},
+				},
+			})
+		}
 	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
 		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
-		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName)
+		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName,
+		computev1alpha1.GatewayClientCAVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {

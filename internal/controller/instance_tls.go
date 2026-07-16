@@ -419,6 +419,19 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 		return false, nil
 	}
 
+	// Mutual TLS: the client-CA Secret the Envoy pod will mount (and verify
+	// client certs against) must already exist and carry ca.crt. Gating
+	// Status.GatewayTLS on it keeps a single source of truth — once the
+	// status is populated, buildListenerDownstreamTLSTransportSocket's
+	// validation_context and the client-CA volume mount both have real files
+	// to reference, and the fail-closed window covers the wait.
+	if ref := instance.Spec.TLS.Gateway.ClientCASecretRef; ref != nil {
+		//nolint:nilerr // a missing/incomplete client-CA Secret is a soft "not ready yet" (pending), not a hard error — mirrors the IsNotFound branch above.
+		if err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, engineTLSCASecretKey, "gateway client-CA secret"); err != nil {
+			return false, nil
+		}
+	}
+
 	createdAt := metav1.Now()
 	if instance.Status.GatewayTLS != nil {
 		createdAt = instance.Status.GatewayTLS.CreatedAt
