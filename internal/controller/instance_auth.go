@@ -631,13 +631,24 @@ func removeSigningKey(keys []computev1alpha1.SigningKeyStatus, id string) []comp
 // advance whatever step is gated on that rendered state. An Instance with
 // no engines yet is vacuously converged: there is nothing that could be
 // left behind on a stale key.
+//
+// Engines bind to their instance via spec.instanceRef, not a label — the
+// operator never stamps LabelInstance onto the engine CR (only onto the
+// instance's own child resources). We therefore list every engine in the
+// namespace and filter on spec.instanceRef, exactly as the instance→engine
+// watch mapper (instanceToEngines) does. A label selector here would match
+// zero engines and make every rotation gate vacuously "converged", letting
+// promote/retire advance before engines have actually observed the new hash.
 func (r *FireboltInstanceReconciler) enginesConvergedOn(ctx context.Context, instance *computev1alpha1.FireboltInstance, keys []computev1alpha1.SigningKeyStatus) (bool, error) {
 	var list computev1alpha1.FireboltEngineList
-	if err := r.List(ctx, &list, client.InNamespace(instance.Namespace), client.MatchingLabels{LabelInstance: instance.Name}); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(instance.Namespace)); err != nil {
 		return false, fmt.Errorf("listing engines for instance %s: %w", instance.Name, err)
 	}
 	expected := authHash(&ResolvedAuthInfo{Spec: instance.Spec.Auth, SigningKeys: signingKeysForRender(keys)})
 	for i := range list.Items {
+		if list.Items[i].Spec.InstanceRef != instance.Name {
+			continue
+		}
 		if list.Items[i].Status.ObservedAuthHash != expected {
 			return false, nil
 		}

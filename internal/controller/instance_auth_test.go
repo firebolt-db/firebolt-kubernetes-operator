@@ -530,14 +530,16 @@ func TestSigningCertificateName_Generation1KeepsLegacyName(t *testing.T) {
 // --- Signing-key rotation: enginesConvergedOn ---
 
 // engineWithHash builds a minimal FireboltEngine carrying the given
-// ObservedAuthHash and instance-membership label, for tests that need to
-// simulate an engine at a particular point in its own rollout.
-func engineWithHash(name, instanceLabel, hash string) *computev1alpha1.FireboltEngine {
+// ObservedAuthHash and instance binding, for tests that need to simulate an
+// engine at a particular point in its own rollout. Engines bind to their
+// instance via spec.instanceRef (never a label), so that is what
+// enginesConvergedOn filters on.
+func engineWithHash(name, instanceRef, hash string) *computev1alpha1.FireboltEngine {
 	return &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, Namespace: "ns-1",
-			Labels: map[string]string{LabelInstance: instanceLabel},
 		},
+		Spec:   computev1alpha1.FireboltEngineSpec{InstanceRef: instanceRef},
 		Status: computev1alpha1.FireboltEngineStatus{ObservedAuthHash: hash},
 	}
 }
