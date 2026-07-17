@@ -715,6 +715,26 @@ type TLSSpec struct {
 
 	// Engine configures TLS termination on each engine's HTTP and
 	// Postgres-wire listeners.
+	//
+	// The cert-manager issuerRef is immutable while engine TLS stays enabled,
+	// enforced here at the API server (via the transition rule below) so it
+	// holds even when the validating webhook is disabled — the shipped Helm
+	// default. Reissuing per-generation engine certificates under a new CA
+	// while the gateway still trusts the old anchor (Status.EngineTLS) would
+	// fail every upstream handshake mid-roll. The rule is field-scoped to the
+	// engine listener so it does NOT freeze the gateway issuer, which shares
+	// the TLSListenerSpec/CertManagerSpec types. It permits the initial enable
+	// and a disable/re-enable (fresh certs, no overlap) — only an in-place
+	// issuer change while continuously enabled is rejected. Key algorithm/size
+	// may still change (tlsHash reissues per generation); only the issuer is
+	// frozen. The webhook re-checks this with a clearer message.
+	//
+	// The rule intentionally does not fire across a certManager⇄secretRef
+	// switch (the has(...) guards): that changes the resolved Secret name,
+	// which tlsHash folds, so it rolls the fleet through the normal
+	// convergence-gated path. Only a same-Secret issuerRef swap needs freezing,
+	// because tlsHash cannot see it (issuerRef is deliberately not folded).
+	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.issuerRef.name == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind == oldSelf.certManager.issuerRef.kind)",message="spec.tls.engine.certManager.issuerRef is immutable while engine TLS is enabled: reissuing engine certificates under a new CA while the gateway still trusts the old anchor would break every upstream handshake. Disable engine TLS or recreate the Instance to change the issuer."
 	// +optional
 	Engine *TLSListenerSpec `json:"engine,omitempty"`
 }

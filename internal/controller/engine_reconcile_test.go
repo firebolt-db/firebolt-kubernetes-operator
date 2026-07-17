@@ -1362,6 +1362,49 @@ func TestAuthHash_ChangesWithAdminSecretVersion(t *testing.T) {
 	}
 }
 
+// TestAuthHash_ChangesWithSigningKeySecretVersion covers FB-896 #3: a signing
+// key reissued under the SAME kid and SAME Secret name but with new key bytes
+// (e.g. cert-manager re-creating a deleted signing Secret) changes only its
+// Secret's ResourceVersion — ID and SecretName are unchanged. authHash must
+// fold that ResourceVersion (never the key bytes) so the reissue rolls the
+// engine fleet; otherwise old-key and new-key engines split-brain under one kid.
+func TestAuthHash_ChangesWithSigningKeySecretVersion(t *testing.T) {
+	auth := &computev1alpha1.AuthSpec{
+		Enabled: true,
+		Local: &computev1alpha1.LocalAuthSpec{
+			Admin: computev1alpha1.AdminSpec{
+				Password: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+					Key:                  "password",
+				},
+			},
+			SigningKeys: &computev1alpha1.SigningKeyPolicy{
+				CertManager: computev1alpha1.CertManagerSpec{
+					IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+				},
+			},
+		},
+	}
+	keys := []computev1alpha1.SigningKeyStatus{
+		{ID: "signing-1", SecretName: "inst-auth-signing", Phase: computev1alpha1.SigningKeyActive},
+	}
+
+	// Same ID+SecretName throughout; only the Secret's ResourceVersion moves.
+	v1 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
+		SigningKeyVersions: map[string]string{"signing-1": "500"}})
+	v1again := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
+		SigningKeyVersions: map[string]string{"signing-1": "500"}})
+	v2 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
+		SigningKeyVersions: map[string]string{"signing-1": "501"}})
+
+	if v1 != v1again {
+		t.Errorf("authHash not stable for identical SigningKeyVersions: %q vs %q", v1, v1again)
+	}
+	if v1 == v2 {
+		t.Error("authHash did not change when a signing key's Secret ResourceVersion changed; a same-kid reissue would never roll engines (split-brain)")
+	}
+}
+
 // --- Cleaning nil DrainingGeneration guard ---
 
 func TestComputeEngineReconcile_CleaningNilDrainingGeneration(t *testing.T) {

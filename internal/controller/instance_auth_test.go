@@ -554,6 +554,19 @@ func adminSecretForConvergence() *corev1.Secret {
 	}
 }
 
+// signingSecretForConvergence returns the signing-key Secret the keys fixture
+// (ID "signing-1") references. enginesConvergedOn now reads each rendered
+// signing key's Secret ResourceVersion and folds it into the expected authHash
+// (FB-896 #3), so every subtest must seed it alongside the admin Secret. Added
+// after the admin Secret and before any engines so the fake client assigns it
+// the same ResourceVersion the probe client observes.
+func signingSecretForConvergence() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixAuthSigning, Namespace: "ns-1"},
+		Data:       map[string][]byte{corev1.TLSPrivateKeyKey: []byte("fake-signing-pem")},
+	}
+}
+
 func TestEnginesConvergedOn(t *testing.T) {
 	sch := authTestScheme(t)
 	auth := validAuthSpecForController()
@@ -565,28 +578,39 @@ func TestEnginesConvergedOn(t *testing.T) {
 		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
 	}
 
-	// The expected hash must include the admin Secret's ResourceVersion
-	// exactly as enginesConvergedOn reads it. A probe client (its own tracker,
-	// admin Secret added first, same as each subtest below) yields the RV the
-	// fake client will assign, so the precomputed engine ObservedAuthHash
-	// matches what enginesConvergedOn computes.
-	probe := fake.NewClientBuilder().WithScheme(sch).WithObjects(adminSecretForConvergence()).Build()
-	var probeSecret corev1.Secret
+	// The expected hash must include the admin AND each signing-key Secret's
+	// ResourceVersion exactly as enginesConvergedOn reads them. A probe client
+	// (its own tracker, same objects in the same order as each subtest below)
+	// yields the RVs the fake client will assign, so the precomputed engine
+	// ObservedAuthHash matches what enginesConvergedOn computes.
+	probe := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		adminSecretForConvergence(),
+		signingSecretForConvergence(),
+	).Build()
+	var probeAdmin, probeSigning corev1.Secret
 	if err := probe.Get(context.Background(),
-		client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &probeSecret); err != nil {
+		client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &probeAdmin); err != nil {
 		t.Fatalf("probing admin secret RV: %v", err)
+	}
+	if err := probe.Get(context.Background(),
+		client.ObjectKey{Namespace: "ns-1", Name: "inst" + SuffixAuthSigning}, &probeSigning); err != nil {
+		t.Fatalf("probing signing secret RV: %v", err)
 	}
 	expected := authHash(&ResolvedAuthInfo{
 		Spec:               auth,
 		SigningKeys:        signingKeysForRender(keys),
-		AdminSecretVersion: probeSecret.ResourceVersion,
+		AdminSecretVersion: probeAdmin.ResourceVersion,
+		SigningKeyVersions: map[string]string{"signing-1": probeSigning.ResourceVersion},
 	})
 	if expected == "" {
 		t.Fatal("expected hash is empty; test fixture is wrong")
 	}
 
 	t.Run("no engines is vacuously converged", func(t *testing.T) {
-		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(adminSecretForConvergence()).Build()
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			adminSecretForConvergence(),
+			signingSecretForConvergence(),
+		).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		ok, err := r.enginesConvergedOn(context.Background(), instance, keys)
 		if err != nil || !ok {
@@ -597,6 +621,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 	t.Run("all engines matching hash converges", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			adminSecretForConvergence(),
+			signingSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 			engineWithHash("e2", "inst", expected),
 		).Build()
@@ -610,6 +635,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 	t.Run("one lagging engine blocks convergence", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			adminSecretForConvergence(),
+			signingSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 			engineWithHash("e2", "inst", "stale-hash"),
 		).Build()
@@ -623,6 +649,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 	t.Run("engine belonging to a different instance is ignored", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			adminSecretForConvergence(),
+			signingSecretForConvergence(),
 			engineWithHash("e1", "other-inst", "irrelevant-hash"),
 		).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
@@ -640,15 +667,21 @@ func TestEnginesConvergedOn(t *testing.T) {
 		rotated.Data["password"] = []byte("rotated-pw")
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			rotated,
+			signingSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 		).Build()
-		var rv corev1.Secret
+		var rv, signingRV corev1.Secret
 		if err := cli.Get(context.Background(),
 			client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &rv); err != nil {
 			t.Fatalf("reading rotated admin secret: %v", err)
 		}
+		if err := cli.Get(context.Background(),
+			client.ObjectKey{Namespace: "ns-1", Name: "inst" + SuffixAuthSigning}, &signingRV); err != nil {
+			t.Fatalf("reading signing secret: %v", err)
+		}
 		newExpected := authHash(&ResolvedAuthInfo{
 			Spec: auth, SigningKeys: signingKeysForRender(keys), AdminSecretVersion: rv.ResourceVersion,
+			SigningKeyVersions: map[string]string{"signing-1": signingRV.ResourceVersion},
 		})
 		if newExpected == expected {
 			// Only meaningful if the fake client actually assigns a distinct RV;
@@ -679,9 +712,22 @@ func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string)
 	}
 }
 
+// markSigningCertReady simulates cert-manager completing issuance by setting
+// the signing Certificate the operator already applied for kid to Ready for
+// its current generation. applySigningCertificate (FB-896 #4) now gates
+// readiness on this in addition to the Secret carrying a private key, so a
+// test that seeds signingKeySecretFor and expects readiness must also mark the
+// Certificate ready. Requires the fake client to be built
+// WithStatusSubresource(&certmanagerv1.Certificate{}) so the status survives
+// the next reconcile's server-side apply of the (unchanged) Certificate spec.
+func markSigningCertReady(t *testing.T, cli client.Client, instance *computev1alpha1.FireboltInstance, kid string) {
+	t.Helper()
+	markCertReadyForGeneration(t, cli, instance.Namespace, signingCertificateName(instance.Name, kid))
+}
+
 func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.T) {
 	sch := authTestScheme(t)
-	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&certmanagerv1.Certificate{}).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 
 	instance := &computev1alpha1.FireboltInstance{
@@ -708,10 +754,12 @@ func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.
 		t.Error("CreatedAt must stay unset until the Secret is actually observed ready")
 	}
 
-	// Simulate cert-manager finishing issuance, then reconcile again.
+	// Simulate cert-manager finishing issuance (Secret written AND Certificate
+	// marked Ready for its current generation), then reconcile again.
 	if err := cli.Create(context.Background(), signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
 		t.Fatalf("seeding signing key secret: %v", err)
 	}
+	markSigningCertReady(t, cli, instance, AuthSigningKeyID)
 	ready, err = r.ensureSigningKeys(context.Background(), instance)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -832,7 +880,7 @@ func TestEnsureAuth_DisableRetainsGenerationCounter(t *testing.T) {
 // separately.
 func TestEnsureSigningKeys_FullRotationLifecycle(t *testing.T) {
 	sch := authTestScheme(t)
-	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&certmanagerv1.Certificate{}).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 	ctx := context.Background()
 
@@ -862,6 +910,14 @@ func TestEnsureSigningKeys_FullRotationLifecycle(t *testing.T) {
 	if err := cli.Create(ctx, signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
 		t.Fatalf("seeding initial signing key secret: %v", err)
 	}
+	// Prime: apply signing-1's Certificate and mark it Ready so the active key
+	// is considered ready (FB-896 #4); otherwise ensureSigningKeys would
+	// short-circuit before the rotation state machine ever runs. The priming
+	// reconcile itself returns not-ready and does not rotate.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("priming reconcile: %v", err)
+	}
+	markSigningCertReady(t, cli, instance, AuthSigningKeyID)
 
 	// Step 1: rotation is due, but signing-2's Secret does not exist yet —
 	// mintNextSigningKey must apply the Certificate without appending an
@@ -879,6 +935,8 @@ func TestEnsureSigningKeys_FullRotationLifecycle(t *testing.T) {
 	if err := cli.Create(ctx, signingKeySecretFor(instance, "signing-2")); err != nil {
 		t.Fatalf("seeding signing-2 secret: %v", err)
 	}
+	// signing-2's Certificate was applied by step 1's mint; mark it Ready too.
+	markSigningCertReady(t, cli, instance, "signing-2")
 	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
 		t.Fatalf("step 2: unexpected error: %v", err)
 	}
@@ -1013,23 +1071,45 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 		},
 	}
 	ctx := context.Background()
-	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&computev1alpha1.FireboltEngine{}).WithObjects(
+	cli := fake.NewClientBuilder().WithScheme(sch).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &certmanagerv1.Certificate{}).WithObjects(
 		adminSecretForConvergence(),
 		signingKeySecretFor(instance, AuthSigningKeyID),
 		signingKeySecretFor(instance, "signing-2"),
 	).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 
-	// enginesConvergedOn folds the admin Secret's ResourceVersion into the
-	// expected hash (FB-896 #4), so the engine's simulated ObservedAuthHash
-	// must be computed the same way to converge.
-	var adminSec corev1.Secret
+	// Prime: apply both signing Certificates and mark them Ready for their
+	// current generation, so the active key counts as ready (FB-896 #4) and the
+	// ONLY thing gating promotion below is the lagging engine — the property
+	// this test exists to prove — not an un-issued Certificate. The priming
+	// reconcile returns not-ready (certs not yet marked) and does not rotate.
+	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
+		t.Fatalf("priming reconcile: %v", err)
+	}
+	markSigningCertReady(t, cli, instance, AuthSigningKeyID)
+	markSigningCertReady(t, cli, instance, "signing-2")
+
+	// enginesConvergedOn folds the admin AND each rendered signing-key Secret's
+	// ResourceVersion into the expected hash (FB-896 #3/#4), so the engine's
+	// simulated ObservedAuthHash must be computed the same way to converge.
+	var adminSec, signing1Sec, signing2Sec corev1.Secret
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &adminSec); err != nil {
 		t.Fatalf("reading admin secret RV: %v", err)
 	}
+	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: signingCertificateName("inst", AuthSigningKeyID)}, &signing1Sec); err != nil {
+		t.Fatalf("reading signing-1 secret RV: %v", err)
+	}
+	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: signingCertificateName("inst", "signing-2")}, &signing2Sec); err != nil {
+		t.Fatalf("reading signing-2 secret RV: %v", err)
+	}
 	adminRV := adminSec.ResourceVersion
+	signingVersions := map[string]string{
+		AuthSigningKeyID: signing1Sec.ResourceVersion,
+		"signing-2":      signing2Sec.ResourceVersion,
+	}
 
-	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV})
+	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyVersions: signingVersions})
 	engine := engineWithHash("e1", "inst", "stale-hash-from-a-previous-generation")
 	if err := cli.Create(ctx, engine); err != nil {
 		t.Fatalf("seeding lagging engine: %v", err)
@@ -1075,7 +1155,7 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 
 	// The engine rolls onto the promoted config too — only now is it safe
 	// to start the retain-duration countdown.
-	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV})
+	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyVersions: signingVersions})
 	if postHash == preHash {
 		t.Fatal("pre- and post-promotion hashes must differ (active-first ordering flipped); test fixture is wrong")
 	}

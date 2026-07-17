@@ -87,6 +87,21 @@ spec:
   # re-encrypts its upstream connection to engines using the same
   # certificate's CA. Requires a CA-backed issuer (see prerequisite 1).
   #
+  # KNOWN LIMITATION — toggling tls.engine on a fleet with live engines is not
+  # seamless. The engine listener is TLS-only-or-plaintext (never both) on one
+  # port, and the gateway uses a single upstream protocol for the whole fleet,
+  # so during the roll there is a transient window where already-switched
+  # engines and the not-yet-switched gateway (or vice versa) disagree on the
+  # protocol and queries can return 503 until the fleet converges. Prefer
+  # enabling/disabling engine TLS before scaling engines up, or during a
+  # maintenance window. (Steady-state operation and cert rotation are seamless.)
+  #
+  # The engine certManager.issuerRef is IMMUTABLE while engine TLS is enabled
+  # (enforced at the API server): moving per-generation engine certs to a new CA
+  # while the gateway still trusts the old anchor would break every upstream
+  # handshake mid-roll. Disable engine TLS (or recreate the Instance) to change
+  # it. Key algorithm/size may still be changed in place.
+  #
   # tls.gateway: enabling it terminates TLS on the gateway's client-facing
   # listener. The certificate always covers the gateway's in-cluster
   # Service DNS names automatically; dnsNames below is only needed for

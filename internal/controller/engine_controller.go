@@ -1239,16 +1239,24 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// existence here would only produce a spurious failure during
 		// that window.
 		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
+		signingVersions := make(map[string]string, len(renderKeys))
 		for _, k := range renderKeys {
-			if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret"); err != nil {
+			// Capture the signing Secret's ResourceVersion (not its bytes) and
+			// fold it into authHash so a same-name/same-kid reissue rolls the
+			// fleet — see ResolvedAuthInfo.SigningKeyVersions. enginesConvergedOn
+			// performs the identical read so the rotation gate stays matchable.
+			rv, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret")
+			if err != nil {
 				return InstanceInfo{}, err
 			}
+			signingVersions[k.ID] = rv
 		}
 
 		info.Auth = &ResolvedAuthInfo{
 			Spec:               inst.Spec.Auth,
 			SigningKeys:        renderKeys,
 			AdminSecretVersion: adminRV,
+			SigningKeyVersions: signingVersions,
 		}
 	}
 

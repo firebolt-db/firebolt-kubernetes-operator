@@ -14834,7 +14834,7 @@
           "description": "TLS configures TLS termination on the gateway's client-facing\nlistener and on each engine's own listeners.",
           "properties": {
             "engine": {
-              "description": "Engine configures TLS termination on each engine's HTTP and\nPostgres-wire listeners.",
+              "description": "Engine configures TLS termination on each engine's HTTP and\nPostgres-wire listeners.\n\nThe cert-manager issuerRef is immutable while engine TLS stays enabled,\nenforced here at the API server (via the transition rule below) so it\nholds even when the validating webhook is disabled \u2014 the shipped Helm\ndefault. Reissuing per-generation engine certificates under a new CA\nwhile the gateway still trusts the old anchor (Status.EngineTLS) would\nfail every upstream handshake mid-roll. The rule is field-scoped to the\nengine listener so it does NOT freeze the gateway issuer, which shares\nthe TLSListenerSpec/CertManagerSpec types. It permits the initial enable\nand a disable/re-enable (fresh certs, no overlap) \u2014 only an in-place\nissuer change while continuously enabled is rejected. Key algorithm/size\nmay still change (tlsHash reissues per generation); only the issuer is\nfrozen. The webhook re-checks this with a clearer message.\n\nThe rule intentionally does not fire across a certManager\u21c4secretRef\nswitch (the has(...) guards): that changes the resolved Secret name,\nwhich tlsHash folds, so it rolls the fleet through the normal\nconvergence-gated path. Only a same-Secret issuerRef swap needs freezing,\nbecause tlsHash cannot see it (issuerRef is deliberately not folded).",
               "properties": {
                 "certManager": {
                   "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
@@ -14925,6 +14925,12 @@
                 }
               },
               "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "spec.tls.engine.certManager.issuerRef is immutable while engine TLS is enabled: reissuing engine certificates under a new CA while the gateway still trusts the old anchor would break every upstream handshake. Disable engine TLS or recreate the Instance to change the issuer.",
+                  "rule": "!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.issuerRef.name == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind == oldSelf.certManager.issuerRef.kind)"
+                }
+              ],
               "additionalProperties": false
             },
             "gateway": {

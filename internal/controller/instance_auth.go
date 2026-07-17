@@ -408,6 +408,24 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 	}
 
 	key.SecretName = desired.Spec.SecretName
+
+	// Require the Certificate to be Ready for its current generation before
+	// treating the mounted key as usable: a failed re-issuance would otherwise
+	// leave the previous signing Secret in place and keep AuthReady reported
+	// true against a stale key. Signing keys are always cert-manager-provisioned
+	// (no bring-your-own), so this check always applies. See
+	// certificateReadyForCurrentGeneration (instance_tls.go).
+	var cert certmanagerv1.Certificate
+	if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: desired.Name}, &cert); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("getting signing certificate %s/%s: %w", instance.Namespace, desired.Name, err)
+	}
+	if !certificateReadyForCurrentGeneration(&cert) {
+		return false, nil
+	}
+
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: key.SecretName}, &secret)
 	if errors.IsNotFound(err) {
@@ -734,10 +752,26 @@ func (r *FireboltInstanceReconciler) enginesConvergedOn(ctx context.Context, ins
 		}
 		adminRV = rv
 	}
+
+	// Read each rendered signing key's Secret ResourceVersion and fold it into
+	// the expected hash exactly as resolveInstanceInfo does — same helper, same
+	// keys, same namespace (a signing Secret is one object shared by both
+	// sites). Omitting it here would make this side compute a hash the engines
+	// can never match after a same-name/same-kid reissue, deadlocking the gate.
+	renderKeys := signingKeysForRender(keys)
+	signingVersions := make(map[string]string, len(renderKeys))
+	for _, k := range renderKeys {
+		rv, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret")
+		if err != nil {
+			return false, err
+		}
+		signingVersions[k.ID] = rv
+	}
 	expected := authHash(&ResolvedAuthInfo{
 		Spec:               instance.Spec.Auth,
-		SigningKeys:        signingKeysForRender(keys),
+		SigningKeys:        renderKeys,
 		AdminSecretVersion: adminRV,
+		SigningKeyVersions: signingVersions,
 	})
 	for _, e := range ours {
 		if e.Status.ObservedAuthHash != expected {

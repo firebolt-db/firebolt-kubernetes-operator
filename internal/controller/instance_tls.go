@@ -242,6 +242,27 @@ func engineTLSSecretReady(secret *corev1.Secret) bool {
 		len(secret.Data[engineTLSCASecretKey]) > 0
 }
 
+// certificateReadyForCurrentGeneration reports whether a cert-manager
+// Certificate is Ready AND that Ready status was observed for the
+// Certificate's CURRENT generation. Checking only the Secret's key material
+// (engineTLSSecretReady/gatewayTLSSecretReady) is not enough: after an
+// issuer or DNS-SAN change, a re-issuance that then FAILS leaves the previous
+// Secret in place, so a Secret-only check would keep reporting the listener
+// Ready while cert-manager still serves the stale old certificate. Requiring
+// the Ready condition's ObservedGeneration to match metadata.generation means
+// a Ready=True left over from a prior successful issuance no longer counts
+// once the desired spec has moved on. cert-manager tracks ObservedGeneration
+// per condition (there is no top-level Status.ObservedGeneration), so it is
+// read off the Ready condition itself.
+func certificateReadyForCurrentGeneration(cert *certmanagerv1.Certificate) bool {
+	for _, c := range cert.Status.Conditions {
+		if c.Type == certmanagerv1.CertificateConditionReady {
+			return c.Status == cmmeta.ConditionTrue && c.ObservedGeneration == cert.Generation
+		}
+	}
+	return false
+}
+
 // ensureEngineTLSCertificate applies the desired engine-TLS Certificate
 // and, once cert-manager has issued it, records the resulting Secret in
 // instance.Status.EngineTLS. Returns ready=true only once
@@ -273,6 +294,24 @@ func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Cont
 			return false, fmt.Errorf("applying engine TLS certificate: %w", err)
 		}
 		secretName = desired.Spec.SecretName
+
+		// Cert-manager path only: require the Certificate to be Ready for its
+		// current generation before trusting the Secret, so a failed
+		// re-issuance cannot keep the previous certificate reported ready. A
+		// BYO SecretRef has no Certificate object, so this check is scoped to
+		// this branch. Returning not-ready here leaves Status.EngineTLS
+		// untouched, so the still-valid old cert keeps serving while the
+		// condition reports the re-issuance is pending.
+		var cert certmanagerv1.Certificate
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: desired.Name}, &cert); err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("getting engine TLS certificate %s/%s: %w", instance.Namespace, desired.Name, err)
+		}
+		if !certificateReadyForCurrentGeneration(&cert) {
+			return false, nil
+		}
 	}
 
 	var secret corev1.Secret
@@ -497,6 +536,26 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 			return false, fmt.Errorf("applying gateway TLS certificate: %w", err)
 		}
 		secretName = desired.Spec.SecretName
+
+		// Cert-manager path only: require the Certificate to be Ready for its
+		// current generation (see certificateReadyForCurrentGeneration) so a
+		// failed re-issuance after an issuer/DNS-SAN change cannot keep the
+		// stale certificate reported ready. Scoped to this branch because a BYO
+		// SecretRef has no Certificate. Returning not-ready leaves
+		// Status.GatewayTLS untouched, so the still-valid old cert keeps serving
+		// while the condition reports the re-issuance is pending — deliberately
+		// the opposite of the fail-closed client-CA handling below, which is an
+		// authorization control rather than a still-valid server certificate.
+		var cert certmanagerv1.Certificate
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: desired.Name}, &cert); err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("getting gateway TLS certificate %s/%s: %w", instance.Namespace, desired.Name, err)
+		}
+		if !certificateReadyForCurrentGeneration(&cert) {
+			return false, nil
+		}
 	}
 
 	var secret corev1.Secret
@@ -520,6 +579,15 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 	if ref := instance.Spec.TLS.Gateway.ClientCASecretRef; ref != nil {
 		//nolint:nilerr // a missing/incomplete client-CA Secret is a soft "not ready yet" (pending), not a hard error — mirrors the IsNotFound branch above.
 		if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, engineTLSCASecretKey, "gateway client-CA secret"); err != nil {
+			// Fail closed: enabling mutual TLS means the operator intends to
+			// REJECT clients without a valid certificate. Until the client-CA
+			// Secret exists and carries ca.crt we must NOT leave a stale non-nil
+			// Status.GatewayTLS standing — gatewayDownstreamTLSReady keys off it,
+			// and a stale value keeps the previous one-way (or old-CA) Envoy pods
+			// serving (maxUnavailable=0), still accepting the very clients the new
+			// policy is meant to reject. Clearing it flips gatewayDownstreamTLSPending
+			// on, so the fail-closed listener-omission path takes over instead.
+			instance.Status.GatewayTLS = nil
 			return false, nil
 		}
 	}

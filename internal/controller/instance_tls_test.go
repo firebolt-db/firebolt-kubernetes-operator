@@ -22,13 +22,38 @@ import (
 	"testing"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// markCertReadyForGeneration marks the cert-manager Certificate ns/name Ready
+// for its current generation, simulating cert-manager completing issuance.
+// FB-896 #4 gates TLS/auth readiness on this (not just Secret-key presence), so
+// tests that seed a Secret and expect readiness must also mark the Certificate
+// ready. Requires the fake client to be built
+// WithStatusSubresource(&certmanagerv1.Certificate{}) so the status survives
+// the next reconcile's server-side apply of the (unchanged) Certificate spec.
+func markCertReadyForGeneration(t *testing.T, cli client.Client, ns, name string) {
+	t.Helper()
+	var cert certmanagerv1.Certificate
+	if err := cli.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &cert); err != nil {
+		t.Fatalf("getting certificate %q to mark ready: %v", name, err)
+	}
+	cert.Status.Conditions = []certmanagerv1.CertificateCondition{{
+		Type:               certmanagerv1.CertificateConditionReady,
+		Status:             cmmeta.ConditionTrue,
+		ObservedGeneration: cert.Generation,
+	}}
+	if err := cli.Status().Update(context.Background(), &cert); err != nil {
+		t.Fatalf("marking certificate %q ready: %v", name, err)
+	}
+}
 
 // validEngineTLSSpecForController returns a TLSSpec that satisfies
 // ValidateTLS on its own, mirroring validAuthSpecForController.
@@ -340,6 +365,165 @@ func TestEnsureGatewayTLS_SecretRefConsumesUserSecret(t *testing.T) {
 	}
 	if len(certs.Items) != 0 {
 		t.Errorf("BYO path created %d cert-manager Certificate(s), want 0", len(certs.Items))
+	}
+}
+
+// TestEnsureGatewayTLS_ClientCAPendingFailsClosed covers FB-896 #2: when mutual
+// TLS is requested (clientCASecretRef) but the client-CA Secret is missing, the
+// gateway must fail CLOSED. A stale non-nil Status.GatewayTLS left standing
+// keeps gatewayDownstreamTLSReady true, so the previous one-way pods keep
+// serving (maxUnavailable=0) and accept the very clients the new mTLS policy
+// should reject. Clearing the status flips gatewayDownstreamTLSPending on so the
+// fail-closed (listener-omission) path takes over. Uses a BYO server Secret to
+// isolate this from the server-cert Certificate-readiness path (#4).
+func TestEnsureGatewayTLS_ClientCAPendingFailsClosed(t *testing.T) {
+	sch := authTestScheme(t)
+	byoSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "byo-gw-tls", Namespace: "ns-1"},
+		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(byoSecret).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:           true,
+					SecretRef:         &corev1.LocalObjectReference{Name: "byo-gw-tls"},
+					ClientCASecretRef: &corev1.LocalObjectReference{Name: "gw-client-ca"}, // deliberately never seeded
+				},
+			},
+		},
+		// Simulate a previously-ready one-way gateway whose status is now stale.
+		Status: computev1alpha1.FireboltInstanceStatus{
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "byo-gw-tls"},
+		},
+	}
+
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS: %v", err)
+	}
+	if instance.Status.GatewayTLS != nil {
+		t.Errorf("Status.GatewayTLS = %+v, want nil (cleared so the gateway fails closed while the client-CA is pending)", instance.Status.GatewayTLS)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionFalse {
+		t.Errorf("GatewayTLSReady = %+v, want False while the client-CA is pending", cond)
+	}
+}
+
+// TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration covers
+// FB-896 #4: a cert-manager-backed listener must not be reported ready on the
+// mere presence of a Secret carrying tls.crt/tls.key — the Certificate must be
+// Ready for its CURRENT generation. Otherwise a failed re-issuance (issuer/SAN
+// change) leaves the previous certificate serving while GatewayTLSReady stays
+// True indefinitely.
+func TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration(t *testing.T) {
+	sch := authTestScheme(t)
+	certName := gatewayTLSCertificateName("inst")
+	// The Secret carries valid key material (a prior issuance); the Certificate
+	// the apply below creates starts with no Ready condition.
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(sch).
+		WithStatusSubresource(&certmanagerv1.Certificate{}).WithObjects(secret).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{TLS: validGatewayTLSSpecForController()},
+	}
+
+	// Secret present, Certificate not Ready for its current generation → not ready.
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS (cert not ready): %v", err)
+	}
+	if instance.Status.GatewayTLS != nil {
+		t.Errorf("Status.GatewayTLS = %+v, want nil while the Certificate is not Ready for its current generation", instance.Status.GatewayTLS)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionFalse {
+		t.Errorf("GatewayTLSReady = %+v, want False while the Certificate is not Ready", cond)
+	}
+
+	// cert-manager finishes issuance: the Certificate goes Ready for its gen.
+	markCertReadyForGeneration(t, cli, "ns-1", certName)
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS (cert ready): %v", err)
+	}
+	if instance.Status.GatewayTLS == nil || instance.Status.GatewayTLS.SecretName != certName {
+		t.Errorf("Status.GatewayTLS = %+v, want SecretName %q once the Certificate is Ready", instance.Status.GatewayTLS, certName)
+	}
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionTrue {
+		t.Errorf("GatewayTLSReady = %+v, want True once the Certificate is Ready for its current generation", cond)
+	}
+}
+
+// TestEnsureGatewayTLS_StaleReadyGenerationKeepsServingButReportsDegraded is
+// the core FB-896 #4 case: a Ready=True condition left over from a PRIOR
+// successful issuance — its ObservedGeneration now lagging the Certificate's
+// current generation because a re-issuance (after a DNS-SAN/issuer change) is
+// failing — must NOT count as ready. The operator keeps serving the still-valid
+// old certificate (Status.GatewayTLS retained) but flips GatewayTLSReady to
+// False so the degraded state is visible. Retaining the status here is the
+// deliberate opposite of the client-CA fail-closed handling (#2): a failing
+// server-cert re-issuance is not a reason to tear down a still-valid cert.
+func TestEnsureGatewayTLS_StaleReadyGenerationKeepsServingButReportsDegraded(t *testing.T) {
+	sch := authTestScheme(t)
+	certName := gatewayTLSCertificateName("inst")
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
+	}
+	cli := fake.NewClientBuilder().WithScheme(sch).
+		WithStatusSubresource(&certmanagerv1.Certificate{}).WithObjects(secret).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{TLS: validGatewayTLSSpecForController()},
+		// A previous generation is already provisioned and serving.
+		Status: computev1alpha1.FireboltInstanceStatus{
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: certName},
+		},
+	}
+
+	// Priming reconcile creates the Certificate (no Ready condition yet).
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS (priming): %v", err)
+	}
+	// Simulate cert-manager reporting Ready for a PRIOR generation only: the
+	// current desired generation's issuance has not succeeded.
+	var cert certmanagerv1.Certificate
+	if err := cli.Get(context.Background(), client.ObjectKey{Namespace: "ns-1", Name: certName}, &cert); err != nil {
+		t.Fatalf("getting gateway certificate: %v", err)
+	}
+	cert.Status.Conditions = []certmanagerv1.CertificateCondition{{
+		Type:               certmanagerv1.CertificateConditionReady,
+		Status:             cmmeta.ConditionTrue,
+		ObservedGeneration: cert.Generation - 1, // stale: last success was a prior generation
+	}}
+	if err := cli.Status().Update(context.Background(), &cert); err != nil {
+		t.Fatalf("setting stale Ready condition: %v", err)
+	}
+
+	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
+		t.Fatalf("ensureGatewayTLS (stale ready): %v", err)
+	}
+	// Keep serving the still-valid old cert: Status.GatewayTLS must be retained.
+	if instance.Status.GatewayTLS == nil || instance.Status.GatewayTLS.SecretName != certName {
+		t.Errorf("Status.GatewayTLS = %+v, want retained (%q) so the still-valid old cert keeps serving during a failed re-issuance",
+			instance.Status.GatewayTLS, certName)
+	}
+	// ...but report degraded (not Ready) for the stale-generation success.
+	if cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady); cond == nil ||
+		cond.Status != metav1.ConditionFalse {
+		t.Errorf("GatewayTLSReady = %+v, want False for a Ready condition observed on a prior generation", cond)
 	}
 }
 

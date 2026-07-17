@@ -126,6 +126,22 @@ type ResolvedAuthInfo struct {
 	// and buy nothing (RV already changes on every data write). Empty when
 	// auth is disabled (info.Auth is nil in that case).
 	AdminSecretVersion string
+
+	// SigningKeyVersions maps each signing key's ID (JWT "kid") to the
+	// ResourceVersion of its Secret observed when this info was resolved.
+	// Folded into authHash alongside each key's SecretName so an in-place
+	// reissue — same kid and same Secret name but new key bytes, e.g.
+	// cert-manager re-creating a deleted signing Secret, or a manual tls.key
+	// edit — rolls every engine's StatefulSet. Without it, engines still
+	// running the old key would reject tokens that restarted pods (now holding
+	// the replacement key under the same kid) sign, and vice versa: a
+	// cross-engine split-brain under one kid, invisible to every other drift
+	// check because ID and SecretName are unchanged. Like AdminSecretVersion
+	// this is the ResourceVersion, deliberately NOT a hash of the key bytes
+	// (that would trip weak-sensitive-data-hashing static analysis and buy
+	// nothing). Keyed by ID so a value stays bound to its kid regardless of
+	// ordering; nil/empty when auth is disabled.
+	SigningKeyVersions map[string]string
 }
 
 // FireboltEngineClassInfo carries the resolved FireboltEngineClass template
@@ -2614,8 +2630,11 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 // authHash returns a content-hash of everything auth-relevant to a
 // rendered engine pod: the full resolved AuthSpec (native config, JWT
 // durations, the whole OIDC block, preferred_authorization_server, ...)
-// plus each signing key's ID+SecretName (active key first, so a rotation
-// reordering active/retained keys is itself observed as drift). Returns
+// plus each signing key's ID, SecretName, and Secret ResourceVersion (active
+// key first, so a rotation reordering active/retained keys is itself observed
+// as drift; the ResourceVersion catches a same-name/same-kid reissue whose new
+// key bytes would otherwise be invisible — see ResolvedAuthInfo.SigningKeyVersions).
+// Returns
 // "" when auth is disabled, keeping AnnotationAuthHash absent and the
 // rendered pod byte-identical to an engine with auth never configured.
 //
@@ -2643,12 +2662,15 @@ func authHash(auth *ResolvedAuthInfo) string {
 		return ""
 	}
 	type signingKeyHashInput struct {
-		ID         string `json:"id"`
-		SecretName string `json:"secretName"`
+		ID            string `json:"id"`
+		SecretName    string `json:"secretName"`
+		SecretVersion string `json:"secretVersion"`
 	}
 	keys := make([]signingKeyHashInput, len(auth.SigningKeys))
 	for i, k := range auth.SigningKeys {
-		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName}
+		// auth.SigningKeyVersions may be nil (e.g. a caller that predates this
+		// field); a nil-map read yields "", which is stable and harmless.
+		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName, SecretVersion: auth.SigningKeyVersions[k.ID]}
 	}
 	canonical, err := json.Marshal(struct {
 		Spec               *computev1alpha1.AuthSpec `json:"spec"`
