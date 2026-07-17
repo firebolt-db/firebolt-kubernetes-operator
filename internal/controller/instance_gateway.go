@@ -223,6 +223,92 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
+// gatewayRolloutComplete reports whether the gateway Deployment has fully
+// rolled out its current pod template: every replica is on the latest template
+// (no old pods from a prior config remain) and is available. Unlike
+// isGatewayReady's ReadyReplicas > 0 — which an *old* pod satisfies mid-roll —
+// this is the signal that a config change has actually propagated to every
+// serving pod. Two features gate on it: the fail-closed→secure staging in
+// ensureGatewayTLS (so old insecure pods are gone before the secure listener is
+// reported ready — FB-896 #1) and the engine-CA trust-bundle expansion in
+// ensureEngineCABundle (so a newly-trusted CA is actually loaded by every
+// gateway pod before old-CA engine generations are allowed to retire —
+// FB-896 #4).
+//
+// Returns false (not an error) when the Deployment does not exist yet.
+func (r *FireboltInstanceReconciler) gatewayRolloutComplete(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
+// deploymentRolledOut reports whether every replica of dep is on its latest
+// pod template and available, with no surplus old-template pods lingering.
+// Pure so both gatewayRolloutComplete and gatewayFailClosedRolledOut share it.
+func deploymentRolledOut(dep *appsv1.Deployment) bool {
+	// Spec.Replicas defaults to 1 when unset, matching apps/v1 semantics; the
+	// operator always sets it explicitly (ensureGatewayDeployment), so this is
+	// only defensive.
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	// ObservedGeneration is compared against metadata.Generation so a status
+	// that predates the config write we just applied never reads as "rolled
+	// out". UpdatedReplicas == desired means every replica is on the newest
+	// template; Replicas == desired means no surplus old-template pods linger
+	// (MaxSurge can briefly push the total above desired mid-roll);
+	// AvailableReplicas == desired means they are all actually serving.
+	st := dep.Status
+	return st.ObservedGeneration >= dep.Generation &&
+		st.UpdatedReplicas == desired &&
+		st.Replicas == desired &&
+		st.AvailableReplicas == desired
+}
+
+// gatewayServingCurrentConfig reports whether the gateway is *actually serving*
+// the config that reflects the instance's current state right now — its running
+// pods are all on a pod template whose config-hash matches buildEnvoyConfigYAML
+// for the current instance, and that rollout is complete.
+//
+// The config-hash check is load-bearing, not redundant with
+// gatewayRolloutComplete: this may be evaluated BEFORE the gateway Deployment is
+// (re)applied in a reconcile, so the Deployment can still carry a previous
+// config that is itself "fully rolled out". Confirming the template's hash
+// matches the current desired config is what distinguishes "serving the current
+// config" from "serving a stale one that happens to be settled".
+//
+// Two callers rely on it: the staged tightening transition (FB-896 #1) invokes
+// it with Status.GatewayTLS already nil, so buildEnvoyConfigYAML yields the
+// fail-closed config and this answers "is the fail-closed rollout done?"; the
+// engine-trust-bundle publish step (FB-896 #4) invokes it in steady state, so
+// it answers "has the gateway rolled out the config embedding the current CA
+// bundle?" — the precondition for publishing Status.RolledEngineTrustCAs.
+func (r *FireboltInstanceReconciler) gatewayServingCurrentConfig(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	wantHash, err := r.gatewayConfigHash(ctx, instance, buildEnvoyConfigYAML(instance))
+	if err != nil {
+		return false, err
+	}
+	if dep.Spec.Template.Annotations[AnnotationConfigHash] != wantHash {
+		return false, nil
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
 // buildEnvoyConfigYAML generates the Envoy static config for the gateway.
 //
 // Routing model:
@@ -358,6 +444,55 @@ func gatewayDownstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool 
 func gatewayDownstreamTLSPending(instance *computev1alpha1.FireboltInstance) bool {
 	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
 		instance.Status.GatewayTLS == nil
+}
+
+// gatewayDesiredMode returns the security posture spec.tls.gateway asks the
+// client-facing listener to serve: GatewayTLSModeMutual when a client CA is
+// configured (mTLS), else GatewayTLSModeOneWay. Returns "" when gateway TLS is
+// unset or disabled (plaintext).
+func gatewayDesiredMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil || !instance.Spec.TLS.Gateway.Enabled {
+		return ""
+	}
+	if instance.Spec.TLS.Gateway.ClientCASecretRef != nil {
+		return computev1alpha1.GatewayTLSModeMutual
+	}
+	return computev1alpha1.GatewayTLSModeOneWay
+}
+
+// gatewayServedMode returns the posture the gateway is currently serving,
+// derived from Status.GatewayTLS (nil ⇒ plaintext/pending). A populated status
+// written before Mode existed (upgrade) reads as one-way TLS, its only prior
+// meaning.
+func gatewayServedMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Status.GatewayTLS == nil {
+		return ""
+	}
+	if instance.Status.GatewayTLS.Mode == "" {
+		return computev1alpha1.GatewayTLSModeOneWay
+	}
+	return instance.Status.GatewayTLS.Mode
+}
+
+// gatewayPostureLevel maps a posture to a strictness ordinal so the controller
+// can compare desired against served: plaintext(0) < one-way TLS(1) < mTLS(2).
+func gatewayPostureLevel(mode string) int {
+	switch mode {
+	case computev1alpha1.GatewayTLSModeMutual:
+		return 2
+	case computev1alpha1.GatewayTLSModeOneWay:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// gatewayPostureTightening reports whether the desired client-facing posture is
+// stricter than what the gateway currently serves — the only case that needs a
+// staged fail-closed rollout (FB-896 #1). Loosening (mTLS→one-way, TLS→off) and
+// steady state carry no fail-open risk and skip staging.
+func gatewayPostureTightening(instance *computev1alpha1.FireboltInstance) bool {
+	return gatewayPostureLevel(gatewayDesiredMode(instance)) > gatewayPostureLevel(gatewayServedMode(instance))
 }
 
 // gatewayClientCASecretRef returns the client-CA Secret reference configured
@@ -1079,7 +1214,12 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		}
 	}
 	if engineUpstreamTLSReady(instance) {
-		names = append(names, instance.Status.EngineTLS.SecretName)
+		// The gateway mounts the operator-assembled trust bundle, not the anchor
+		// Secret directly (see effectiveGatewayPodTemplate / ensureEngineCABundle),
+		// so fold the bundle's ResourceVersion: it changes whenever the trusted CA
+		// set changes (a generation added under a rotated CA, or an old CA pruned),
+		// rolling the gateway so Envoy reloads trusted_ca.
+		names = append(names, engineCABundleSecretName(instance.Name))
 	}
 	var parts []string
 	for _, name := range names {
@@ -1095,6 +1235,25 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 	return strings.Join(parts, ","), nil
 }
 
+// gatewayConfigHash returns the value stamped onto the gateway pod template's
+// AnnotationConfigHash: the rendered Envoy config folded with the
+// ResourceVersions of every TLS Secret the pod mounts (gatewayTLSSecretVersions),
+// so an in-place Secret rotation rolls the Deployment even when the config text
+// is unchanged. Shared by ensureGatewayDeployment (which stamps it) and
+// gatewayFailClosedRolledOut (which compares against it), so the two can never
+// disagree about what "the current config" hashes to.
+func (r *FireboltInstanceReconciler) gatewayConfigHash(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) (string, error) {
+	tlsVersions, err := r.gatewayTLSSecretVersions(ctx, instance)
+	if err != nil {
+		return "", err
+	}
+	configHashInput := envoyYAML
+	if tlsVersions != "" {
+		configHashInput = envoyYAML + "\x00" + tlsVersions
+	}
+	return contentHash(configHashInput), nil
+}
+
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
@@ -1107,15 +1266,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *gw.Replicas
 	}
 
-	tlsVersions, err := r.gatewayTLSSecretVersions(ctx, instance)
+	configHash, err := r.gatewayConfigHash(ctx, instance, envoyYAML)
 	if err != nil {
 		return err
 	}
-	configHashInput := envoyYAML
-	if tlsVersions != "" {
-		configHashInput = envoyYAML + "\x00" + tlsVersions
-	}
-	configHash := contentHash(configHashInput)
 
 	maxSurge := intstr.FromString("25%")
 	maxUnavailable := intstr.FromInt32(0)
@@ -1376,11 +1530,13 @@ sleep 8
 		},
 	}
 	// Present only once engine TLS is enabled and ready — see
-	// buildDFPUpstreamTLSTransportSocket's matching gate. Projected down to
-	// just ca.crt via Items: the gateway only validates engine server certs
-	// against this CA (envoy.yaml points solely at the ca.crt path), so the
-	// engine listener's private key (tls.key) must never land in the gateway
-	// pod's filesystem where a gateway compromise could exfiltrate it.
+	// buildDFPUpstreamTLSTransportSocket's matching gate. Sources the
+	// operator-assembled trust BUNDLE (ensureEngineCABundle, FB-896 #4), not the
+	// single anchor Secret: the bundle's ca.crt is the union of every live
+	// generation's CA, so the gateway keeps trusting engines across a CA
+	// rotation behind the immutable issuer name. Projected to just ca.crt (the
+	// bundle carries only that key anyway); envoy.yaml points solely at the
+	// ca.crt path, and no private key ever belongs in the gateway pod.
 	if engineUpstreamTLSReady(instance) {
 		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
 			Name:      computev1alpha1.GatewayEngineCAVolumeName,
@@ -1391,7 +1547,7 @@ sleep 8
 			Name: computev1alpha1.GatewayEngineCAVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
-					SecretName: instance.Status.EngineTLS.SecretName,
+					SecretName: engineCABundleSecretName(instance.Name),
 					Items: []corev1.KeyToPath{
 						{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
 					},

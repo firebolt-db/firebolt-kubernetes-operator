@@ -70,6 +70,18 @@ type InstanceInfo struct {
 	// render endpoints.http.listeners[].tls and mount the corresponding
 	// Secret.
 	TLS *ResolvedEngineTLSInfo
+
+	// EngineTrustBundleReady reports whether the gateway has confirmed it
+	// trusts THIS engine's current-generation certificate CA — i.e. that CA's
+	// fingerprint appears in FireboltInstance.Status.RolledEngineTrustCAs, the
+	// set the gateway has actually rolled out (FB-896 #4). computeCreating gates
+	// the blue-green cutover (the Service-selector flip to the new generation)
+	// on this: routing traffic to a generation whose cert the gateway cannot yet
+	// verify — as happens briefly after a CA rotation behind the immutable
+	// issuer name, until the gateway rolls the expanded trust bundle — would
+	// make the engine unreachable through the gateway. Always true when engine
+	// TLS is disabled (TLS == nil): there is nothing for the gateway to trust.
+	EngineTrustBundleReady bool
 }
 
 // ResolvedEngineTLSInfo carries the concrete, currently-provisioned
@@ -430,6 +442,19 @@ func computeCreating(
 	}
 
 	if !current.CurrentPodsReady {
+		r.RequeueAfter = 5 * time.Second
+		return
+	}
+
+	// FB-896 #4: hold the blue-green cutover (the Service-selector flip in
+	// computeSwitching) until the gateway has rolled out trust for THIS
+	// generation's certificate CA. A generation minted under a CA rotated behind
+	// the (name-immutable) issuer would otherwise take over the Service selector
+	// before the gateway could verify it — making the engine unreachable through
+	// the gateway until the gateway rolled its expanded trust bundle. The gate is
+	// scoped to engine TLS being enabled; same-CA rollouts (the common case) find
+	// their CA already trusted and do not wait here.
+	if instanceInfo.TLS != nil && !instanceInfo.EngineTrustBundleReady {
 		r.RequeueAfter = 5 * time.Second
 		return
 	}

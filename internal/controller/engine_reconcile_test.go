@@ -603,6 +603,65 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 	}
 }
 
+// TestComputeCreating_HoldsCutoverUntilGatewayTrustsGenerationCA covers the
+// FB-896 #4 cutover gate: with engine TLS enabled, a ready new generation must
+// NOT advance to Switching (the Service-selector flip) until the gateway has
+// confirmed it trusts that generation's certificate CA
+// (InstanceInfo.EngineTrustBundleReady, published as Status.RolledEngineTrustCAs).
+// Mirrors S3_CreatingToSwitching (pods ready) but with engine TLS in play.
+func TestComputeCreating_HoldsCutoverUntilGatewayTrustsGenerationCA(t *testing.T) {
+	spec := testSpec()
+	tlsInfo := func(bundleReady bool) InstanceInfo {
+		return InstanceInfo{
+			MetadataEndpoint: testMetadataEndpoint,
+			InstanceID:       testInstanceID,
+			TLS: &ResolvedEngineTLSInfo{
+				SecretName:  "inst" + SuffixEngineTLS,
+				CertManager: &computev1alpha1.CertManagerSpec{IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "ca"}},
+			},
+			EngineTrustBundleReady: bundleReady,
+		}
+	}
+	run := func(info InstanceInfo) EngineReconcileResult {
+		status := &computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: 1,
+			ActiveGeneration:  0,
+		}
+		current := EngineState{
+			// Built from the same InstanceInfo so stsMatchesSpec holds and
+			// computeCreating reaches the pods-ready/cutover path rather than the
+			// STS-drift recreate branch.
+			CurrentSTS:              buildStatefulSet(spec, testEngineName, testNamespace, 1, info, nil),
+			CurrentHeadlessSvc:      &corev1.Service{},
+			CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, info, nil),
+			CurrentPodsReady:        true,
+			CurrentPodTotal:         3,
+			CurrentPodReady:         3,
+			ClusterService:          makeClusterSvc(testEngineName, 0),
+			ClusterServiceTargetGen: 0,
+		}
+		return computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, info, nil)
+	}
+
+	t.Run("holds in Creating until the gateway trusts the generation CA", func(t *testing.T) {
+		result := run(tlsInfo(false))
+		if result.Status.Phase != computev1alpha1.PhaseCreating {
+			t.Errorf("phase = %s, want Creating (cutover held until the gateway trusts the CA)", result.Status.Phase)
+		}
+		if result.RequeueAfter != 5*time.Second {
+			t.Errorf("RequeueAfter = %v, want 5s while waiting for the trust bundle", result.RequeueAfter)
+		}
+	})
+
+	t.Run("advances to Switching once the gateway trusts the generation CA", func(t *testing.T) {
+		result := run(tlsInfo(true))
+		if result.Status.Phase != computev1alpha1.PhaseSwitching {
+			t.Errorf("phase = %s, want Switching once the trust bundle covers the generation", result.Status.Phase)
+		}
+	})
+}
+
 func TestComputeEngineReconcile_S3_SwitchingUpdateSelector(t *testing.T) {
 	spec := testSpec()
 	status := &computev1alpha1.FireboltEngineStatus{

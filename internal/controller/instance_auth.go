@@ -426,6 +426,32 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 		return false, nil
 	}
 
+	// FB-896 #3: witness the Certificate revision so an unexpected regeneration
+	// of this key's material under its STABLE kid becomes visible. cert-manager
+	// bumps Status.Revision on every re-issuance (the Secret was deleted and
+	// reissued, or its bytes edited); the operator itself never re-issues an
+	// existing key's Certificate — a rotation always mints a NEW kid — so a bump
+	// on a key we have already observed means its private key was silently
+	// replaced. The destroyed old key can no longer validate tokens it signed,
+	// so surface a Warning; the round-5 signing-Secret ResourceVersion folded
+	// into authHash separately re-converges the fleet onto the new material.
+	// Only the public, monotonic revision is recorded — never the key bytes.
+	if rev := cert.Status.Revision; rev != nil {
+		switch {
+		case key.ObservedCertRevision == nil:
+			revCopy := *rev
+			key.ObservedCertRevision = &revCopy
+		case *rev > *key.ObservedCertRevision:
+			if r.EventRecorder != nil {
+				r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "SigningKeyMaterialRegenerated",
+					"Reconcile", "signing key %q (Secret %s/%s) was regenerated under the same kid (cert revision %d→%d); tokens signed with the previous key can no longer be validated. Engines will re-converge onto the new material.",
+					key.ID, instance.Namespace, key.SecretName, *key.ObservedCertRevision, *rev)
+			}
+			revCopy := *rev
+			key.ObservedCertRevision = &revCopy
+		}
+	}
+
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: key.SecretName}, &secret)
 	if errors.IsNotFound(err) {

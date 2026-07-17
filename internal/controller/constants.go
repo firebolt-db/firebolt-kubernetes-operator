@@ -137,6 +137,13 @@ const (
 	// Certificate (and its target Secret) holding the gateway's
 	// downstream (client-facing) TLS server certificate.
 	SuffixGatewayTLS = "-gateway-tls"
+	// SuffixEngineCABundle is appended to form the name of the
+	// operator-owned Secret holding the concatenated engine trust bundle the
+	// gateway mounts as trusted_ca: the union of every CA currently signing a
+	// live engine generation's certificate (plus the anchor). Unlike the other
+	// suffixed resources this is NOT a cert-manager Certificate — the operator
+	// assembles and writes it directly (see ensureEngineCABundle, FB-896 #4).
+	SuffixEngineCABundle = "-engine-ca-bundle"
 
 	// MetadataServicePort is the gRPC port the metadata service listens on.
 	MetadataServicePort = 7000

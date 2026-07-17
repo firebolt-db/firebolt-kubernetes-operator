@@ -18027,6 +18027,23 @@ spec:
                             ID is the key identifier rendered as the JWT "kid" and as
                             instance.auth.local.signing_keys[].id on every engine.
                           type: string
+                        observedCertRevision:
+                          description: |-
+                            ObservedCertRevision witnesses the cert-manager Certificate revision
+                            (Certificate.Status.Revision) this key's material was last observed at.
+                            It is recorded, never the key bytes — hashing secret material would trip
+                            weak-sensitive-data-hashing static analysis and the revision already
+                            changes on every re-issuance. cert-manager increments the revision each
+                            time it re-issues (e.g. after the Secret is deleted, or its bytes are
+                            edited in place), which — because signing Secrets use rotationPolicy:Never
+                            and the operator only ever re-issues by minting a NEW kid — means a bump
+                            on an existing key is an *unexpected* regeneration of the material under a
+                            stable kid: a hazard, since the destroyed old key can no longer validate
+                            tokens it signed. The operator surfaces such a bump as a Warning Event and
+                            re-records the value here (FB-896 #3); the round-5 signing-Secret
+                            ResourceVersion folded into authHash separately re-converges the fleet
+                            onto the new material. Nil until first observed.
+                          type: integer
                         phase:
                           description: |-
                             Phase is this key's current role — see SigningKeyPhase. Unset
@@ -18175,6 +18192,16 @@ spec:
                     description: CreatedAt is when this certificate was provisioned.
                     format: date-time
                     type: string
+                  mode:
+                    description: |-
+                      Mode is the security posture this populated status represents —
+                      GatewayTLSModeOneWay ("TLS") or GatewayTLSModeMutual ("MutualTLS"). It
+                      records what the gateway is actually *serving* so the controller can tell
+                      a tightening transition (plaintext→TLS, one-way→mTLS) apart from a steady
+                      or loosening one and stage a fail-closed rollout only when tightening (see
+                      FB-896 #1). Empty on a status written before this field existed; treated
+                      as one-way TLS, its only possible prior meaning.
+                    type: string
                   secretName:
                     description: |-
                       SecretName is the cert-manager-managed Secret holding the gateway's
@@ -18204,6 +18231,22 @@ spec:
                 - Degraded
                 - Failed
                 type: string
+              rolledEngineTrustCAs:
+                description: |-
+                  RolledEngineTrustCAs lists the SHA-256 fingerprints (hex) of the engine
+                  CA certificates the gateway has been CONFIRMED to have rolled out into its
+                  upstream trusted_ca bundle — updated only once the gateway Deployment is
+                  fully serving the config that embeds the current bundle (see
+                  ensureEngineCABundle / gatewayServingCurrentConfig, FB-896 #4). The engine
+                  controller gates a blue-green generation's Service-selector cutover on its
+                  own generation certificate's CA fingerprint appearing here, so it never
+                  routes traffic to a generation the gateway cannot yet verify (which would
+                  make the engine unreachable after a CA rotation behind the immutable
+                  issuer). A public fingerprint, never key material. Nil/empty when engine
+                  upstream TLS is not engaged (nothing to trust).
+                items:
+                  type: string
+                type: array
             type: object
         required:
         - spec

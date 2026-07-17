@@ -20,6 +20,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -1279,6 +1280,41 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		}
 
 		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
+
+		// FB-896 #4 cutover gate: the gateway must already trust THIS engine's
+		// current-generation certificate CA before its Service selector may flip
+		// to that generation (see computeCreating). Confirm the generation cert's
+		// CA fingerprint appears in the set the gateway has confirmed-rolled-out
+		// (inst.Status.RolledEngineTrustCAs), using the same fingerprint the
+		// instance controller publishes with.
+		//
+		// The gate is VACUOUS until the gateway actually re-encrypts upstream
+		// (engineUpstreamTLSReady, i.e. Status.EngineTLS.Reencrypting). Before
+		// that the gateway talks plaintext to engines and verifies no certificate,
+		// so a cutover endangers nothing — and gating here would DEADLOCK the
+		// initial enable ramp: info.TLS is set the moment the anchor is ready
+		// (InstanceConditionEngineTLSReady), but Reencrypting only flips true once
+		// the fleet has cut over to TLS, and the trust bundle is only published
+		// once the gateway re-encrypts. Requiring trust before the first cutover
+		// would prevent the very convergence that produces the trust. Once the
+		// gateway IS re-encrypting, the check is strict per generation: a
+		// missing/keyless generation Secret, or a CA not yet in the rolled set
+		// (e.g. just after a CA rotation), leaves this false and the cutover
+		// simply waits. Same-CA rollouts find their CA already present.
+		if !engineUpstreamTLSReady(inst) {
+			info.EngineTrustBundleReady = true
+		} else {
+			gen := engine.Status.CurrentGeneration
+			var genSecret corev1.Secret
+			genSecretName := genResourceName(engine.Name, gen, SuffixEngineTLS)
+			if err := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: genSecretName}, &genSecret); err == nil {
+				if ca := genSecret.Data[engineTLSCASecretKey]; len(ca) > 0 {
+					info.EngineTrustBundleReady = slices.Contains(inst.Status.RolledEngineTrustCAs, caFingerprint(string(ca)))
+				}
+			} else if !errors.IsNotFound(err) {
+				return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s for trust-bundle cutover gate: %w", gen, genSecretName, err)
+			}
+		}
 	}
 
 	return info, nil

@@ -170,11 +170,13 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 		}
 		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
 		v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName)
-		if v == nil || v.Secret == nil || v.Secret.SecretName != "fb-engine-tls" {
-			t.Errorf("engine-CA volume = %+v, want Secret.SecretName=fb-engine-tls", v)
+		// FB-896 #4: the gateway mounts the operator-assembled trust BUNDLE, not
+		// the anchor Secret directly, so it can trust every live generation's CA.
+		if v == nil || v.Secret == nil || v.Secret.SecretName != engineCABundleSecretName("fb") {
+			t.Errorf("engine-CA volume = %+v, want Secret.SecretName=%s", v, engineCABundleSecretName("fb"))
 		}
-		// Least-privilege: only ca.crt is projected, so the engine listener's
-		// private key (tls.key) never lands in the gateway pod.
+		// Least-privilege: only ca.crt is projected, so no private key
+		// (tls.key) ever lands in the gateway pod.
 		if v != nil && v.Secret != nil {
 			if len(v.Secret.Items) != 1 || v.Secret.Items[0].Key != engineTLSCASecretKey || v.Secret.Items[0].Path != engineTLSCASecretKey {
 				t.Errorf("engine-CA volume Items = %+v, want exactly [{Key:%s Path:%s}]", v.Secret.Items, engineTLSCASecretKey, engineTLSCASecretKey)

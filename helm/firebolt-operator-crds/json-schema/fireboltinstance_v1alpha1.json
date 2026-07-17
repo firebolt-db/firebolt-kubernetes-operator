@@ -15072,6 +15072,10 @@
                     "description": "ID is the key identifier rendered as the JWT \"kid\" and as\ninstance.auth.local.signing_keys[].id on every engine.",
                     "type": "string"
                   },
+                  "observedCertRevision": {
+                    "description": "ObservedCertRevision witnesses the cert-manager Certificate revision\n(Certificate.Status.Revision) this key's material was last observed at.\nIt is recorded, never the key bytes \u2014 hashing secret material would trip\nweak-sensitive-data-hashing static analysis and the revision already\nchanges on every re-issuance. cert-manager increments the revision each\ntime it re-issues (e.g. after the Secret is deleted, or its bytes are\nedited in place), which \u2014 because signing Secrets use rotationPolicy:Never\nand the operator only ever re-issues by minting a NEW kid \u2014 means a bump\non an existing key is an *unexpected* regeneration of the material under a\nstable kid: a hazard, since the destroyed old key can no longer validate\ntokens it signed. The operator surfaces such a bump as a Warning Event and\nre-records the value here (FB-896 #3); the round-5 signing-Secret\nResourceVersion folded into authHash separately re-converges the fleet\nonto the new material. Nil until first observed.",
+                    "type": "integer"
+                  },
                   "phase": {
                     "description": "Phase is this key's current role \u2014 see SigningKeyPhase. Unset\n(empty string) is treated as Active for compatibility with\nInstances that provisioned their one signing key before this field\nexisted; the controller normalizes it to Active explicitly on the\nnext reconcile.",
                     "enum": [
@@ -15205,6 +15209,10 @@
               "format": "date-time",
               "type": "string"
             },
+            "mode": {
+              "description": "Mode is the security posture this populated status represents \u2014\nGatewayTLSModeOneWay (\"TLS\") or GatewayTLSModeMutual (\"MutualTLS\"). It\nrecords what the gateway is actually *serving* so the controller can tell\na tightening transition (plaintext\u2192TLS, one-way\u2192mTLS) apart from a steady\nor loosening one and stage a fail-closed rollout only when tightening (see\nFB-896 #1). Empty on a status written before this field existed; treated\nas one-way TLS, its only possible prior meaning.",
+              "type": "string"
+            },
             "secretName": {
               "description": "SecretName is the cert-manager-managed Secret holding the gateway's\nserver certificate (data keys \"tls.crt\" and \"tls.key\"). Unlike\nEngineTLSStatus, no \"ca.crt\" is required: the gateway presents this\ncertificate to clients but never uses it to authenticate a peer, so\nno CA-backed-issuer requirement applies here.",
               "type": "string"
@@ -15234,6 +15242,13 @@
             "Failed"
           ],
           "type": "string"
+        },
+        "rolledEngineTrustCAs": {
+          "description": "RolledEngineTrustCAs lists the SHA-256 fingerprints (hex) of the engine\nCA certificates the gateway has been CONFIRMED to have rolled out into its\nupstream trusted_ca bundle \u2014 updated only once the gateway Deployment is\nfully serving the config that embeds the current bundle (see\nensureEngineCABundle / gatewayServingCurrentConfig, FB-896 #4). The engine\ncontroller gates a blue-green generation's Service-selector cutover on its\nown generation certificate's CA fingerprint appearing here, so it never\nroutes traffic to a generation the gateway cannot yet verify (which would\nmake the engine unreachable after a CA rotation behind the immutable\nissuer). A public fingerprint, never key material. Nil/empty when engine\nupstream TLS is not engaged (nothing to trust).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object",

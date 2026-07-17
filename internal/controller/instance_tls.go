@@ -18,7 +18,11 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -407,6 +411,174 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 	}
 }
 
+// engineCABundleSecretName is the operator-owned Secret the gateway mounts as
+// its engine trusted_ca (FB-896 #4). See SuffixEngineCABundle.
+func engineCABundleSecretName(instanceName string) string {
+	return instanceName + SuffixEngineCABundle
+}
+
+// ensureEngineCABundle assembles the gateway's engine trust bundle: the union
+// of every distinct CA certificate currently signing a live engine
+// generation's TLS Secret, plus the instance-wide anchor
+// (Status.EngineTLS.SecretName). It writes the concatenation to the
+// operator-owned Secret engineCABundleSecretName(instance) under ca.crt, which
+// the gateway pod mounts instead of the single anchor ca.crt, and returns the
+// SHA-256 fingerprints (hex) of the CAs it assembled — the set the caller
+// publishes to Status.RolledEngineTrustCAs once the gateway has rolled it out,
+// so the engine cutover gate can confirm a generation's CA is trusted.
+//
+// Why a bundle: the gateway verifies engines against a CA, but the CA material
+// behind an issuer can rotate even though the issuer *name* is immutable. A
+// per-generation cert minted after such a rotation is signed by the NEW CA
+// while the anchor (rotationPolicy:Never, ~100yr) still carries the OLD one;
+// trusting only one would make the gateway reject either the old or the new
+// generation, so an ordinary later rollout could make an engine unreachable.
+// Trusting the union lets both verify during the overlap. Because the bundle is
+// reassembled from *live* generations every reconcile, a CA drops out on its
+// own once the last generation using it retires (self-pruning) — no separate
+// convergence bookkeeping.
+//
+// Bound, not eliminated: a new CA is only discoverable once a generation cert
+// signed by it exists, so the bundle expands and the gateway rolls only after
+// that — new-CA certs are rejected for one gateway roll. Coordinating that with
+// engine retirement is handled separately (see enginesTrustBundleConverged /
+// the engine cutover gate).
+//
+// ca.crt is a public certificate, so deduping it raises no
+// weak-sensitive-data-hashing concern (unlike private key material). A missing
+// or keyless Secret is skipped, not an error. Runs only while engine upstream
+// TLS is engaged (engineUpstreamTLSReady); otherwise the gateway mounts no
+// engine CA and there is nothing to maintain.
+func (r *FireboltInstanceReconciler) ensureEngineCABundle(ctx context.Context, instance *computev1alpha1.FireboltInstance) ([]string, error) {
+	if !engineUpstreamTLSReady(instance) {
+		return nil, nil
+	}
+
+	// The anchor plus every live generation's per-engine TLS Secret across the
+	// fleet — the complete set of CAs that may currently be in play.
+	names := []string{instance.Status.EngineTLS.SecretName}
+	var engines computev1alpha1.FireboltEngineList
+	if err := r.List(ctx, &engines, client.InNamespace(instance.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing engines for CA bundle: %w", err)
+	}
+	for i := range engines.Items {
+		e := &engines.Items[i]
+		if e.Spec.InstanceRef != instance.Name {
+			continue
+		}
+		for _, gen := range liveEngineGenerations(e) {
+			names = append(names, genResourceName(e.Name, gen, SuffixEngineTLS))
+		}
+	}
+
+	var cas [][]byte
+	for _, name := range names {
+		var secret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret); err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("reading CA secret %s/%s for engine trust bundle: %w", instance.Namespace, name, err)
+		}
+		if ca := secret.Data[engineTLSCASecretKey]; len(ca) > 0 {
+			cas = append(cas, ca)
+		}
+	}
+
+	blobs := dedupCABlobs(cas)
+	desired := &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      engineCABundleSecretName(instance.Name),
+			Namespace: instance.Namespace,
+			Labels:    instanceLabels(instance.Name, "engine-ca-bundle"),
+		},
+		Data: map[string][]byte{engineTLSCASecretKey: caBundleBytes(blobs)},
+	}
+	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
+		return nil, err
+	}
+	if err := applySSA(ctx, r.Client, desired); err != nil {
+		return nil, fmt.Errorf("applying engine CA bundle secret: %w", err)
+	}
+
+	fps := make([]string, len(blobs))
+	for i, b := range blobs {
+		fps[i] = caFingerprint(b)
+	}
+	return fps, nil
+}
+
+// liveEngineGenerations returns the distinct, nonzero generation numbers an
+// engine currently has resources for: the latest created, the active, and any
+// draining generation. A CA signing any of these must stay in the gateway
+// trust bundle until the generation retires.
+func liveEngineGenerations(e *computev1alpha1.FireboltEngine) []int {
+	seen := map[int]bool{}
+	var out []int
+	add := func(g int) {
+		if g > 0 && !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	add(e.Status.CurrentGeneration)
+	add(e.Status.ActiveGeneration)
+	if e.Status.DrainingGeneration != nil {
+		add(*e.Status.DrainingGeneration)
+	}
+	return out
+}
+
+// dedupCABlobs trims each ca.crt input, drops empties and duplicates, and
+// returns the distinct blobs in a deterministic (sorted) order. Whole-blob
+// dedup, not per-certificate: each ca.crt is one issuer's CA (chain), so
+// identical CAs across the anchor and every generation collapse to one entry in
+// the common no-rotation case, while a rotated CA yields a distinct blob that
+// coexists. Sorted output means an unchanged CA set yields byte-identical
+// results across reconciles — so the bundle Secret's ResourceVersion (folded
+// into the gateway config hash) and the published fingerprint set only change
+// when the trusted CA set actually changes, avoiding spurious gateway rollouts.
+func dedupCABlobs(inputs [][]byte) []string {
+	seen := map[string]struct{}{}
+	var blobs []string
+	for _, in := range inputs {
+		b := strings.TrimSpace(string(in))
+		if b == "" {
+			continue
+		}
+		if _, ok := seen[b]; ok {
+			continue
+		}
+		seen[b] = struct{}{}
+		blobs = append(blobs, b)
+	}
+	sort.Strings(blobs)
+	return blobs
+}
+
+// caBundleBytes joins deduped CA blobs into a single PEM bundle. Envoy's
+// trusted_ca accepts concatenated PEMs.
+func caBundleBytes(blobs []string) []byte {
+	return []byte(strings.Join(blobs, "\n"))
+}
+
+// caFingerprint is the hex SHA-256 of a trimmed CA blob — the stable, public
+// identity published in Status.RolledEngineTrustCAs and matched by the engine
+// cutover gate. Computed over the same trimmed bytes on both sides
+// (dedupCABlobs here, the per-generation ca.crt in the engine controller) so
+// the same CA always yields the same fingerprint. Never hashes key material.
+func caFingerprint(blob string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(blob)))
+	return hex.EncodeToString(sum[:])
+}
+
+// mergeCACerts assembles the deduped, deterministic PEM trust bundle from raw
+// ca.crt inputs. Thin composition of dedupCABlobs + caBundleBytes.
+func mergeCACerts(inputs [][]byte) []byte {
+	return caBundleBytes(dedupCABlobs(inputs))
+}
+
 // gatewayTLSCertDuration mirrors engineTLSCertDuration's reasoning: even
 // though Envoy is not packdb (it may reload a filename-referenced TLS
 // certificate on change rather than only at process startup), the
@@ -472,11 +644,20 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, insta
 		return err
 	}
 
-	ready, err := r.ensureGatewayTLSCertificate(ctx, instance)
+	ready, staging, err := r.ensureGatewayTLSCertificate(ctx, instance)
 	if err != nil {
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
 			"CertificateEnsureFailed", err.Error())
 		return err
+	}
+	if staging {
+		// FB-896 #1: cert material is ready, but the gateway is being tightened
+		// (plaintext→TLS or one-way→mTLS) and is intentionally serving fail-closed
+		// until the previous, looser pods are fully replaced. Report not-ready with
+		// a distinct reason rather than the generic pending message.
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
+			"StagingFailClosed", "tightening gateway TLS posture: serving fail-closed until the previous listener's pods are fully replaced")
+		return nil
 	}
 	if !ready {
 		reason, msg := "CertificatePending", "waiting for cert-manager to issue the gateway TLS certificate"
@@ -513,13 +694,27 @@ func gatewayTLSSecretReady(secret *corev1.Secret) bool {
 // ensureGatewayTLSCertificate applies the desired gateway-TLS Certificate
 // and, once cert-manager has issued it, records the resulting Secret in
 // instance.Status.GatewayTLS. Returns ready=true only once
-// gatewayTLSSecretReady is satisfied.
+// gatewayTLSSecretReady is satisfied AND — on a tightening posture transition —
+// the fail-closed rollout has completed.
+//
+// staging=true reports the FB-896 #1 window: all cert material is ready, but
+// the desired client-facing posture is stricter than what the gateway is
+// currently serving (plaintext→TLS, or one-way→mTLS). Populating
+// Status.GatewayTLS immediately would render the secure listener and roll the
+// gateway with MaxUnavailable=0, so old, looser pods would keep serving behind
+// the same Service alongside the new secure pods until the roll finished —
+// accepting the very clients the tighter posture is meant to reject
+// (fail-open). Instead we hold Status.GatewayTLS nil (→
+// gatewayDownstreamTLSPending → buildFailClosedEnvoyConfigYAML omits the
+// listener) until gatewayFailClosedRolledOut confirms every old pod is gone,
+// then serve secure. A brief reject-all window during a deliberate tighten is
+// the accepted trade for never being fail-open.
 //
 // Not covered by the envtest suite for the same reason as
 // ensureEngineTLSCertificate: envtest has no cert-manager CRDs installed.
 // buildGatewayTLSCertificate and gatewayTLSSecretReady carry the
 // unit-tested surface for this function's logic.
-func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (ready, staging bool, err error) {
 	var secretName string
 	if ref := instance.Spec.TLS.Gateway.SecretRef; ref != nil {
 		// Bring-your-own-Secret: operator-consumed, not operator-owned. The
@@ -530,10 +725,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
 
 		if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-			return false, err
+			return false, false, err
 		}
 		if err := applySSA(ctx, r.Client, desired); err != nil {
-			return false, fmt.Errorf("applying gateway TLS certificate: %w", err)
+			return false, false, fmt.Errorf("applying gateway TLS certificate: %w", err)
 		}
 		secretName = desired.Spec.SecretName
 
@@ -549,25 +744,24 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 		var cert certmanagerv1.Certificate
 		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: desired.Name}, &cert); err != nil {
 			if errors.IsNotFound(err) {
-				return false, nil
+				return false, false, nil
 			}
-			return false, fmt.Errorf("getting gateway TLS certificate %s/%s: %w", instance.Namespace, desired.Name, err)
+			return false, false, fmt.Errorf("getting gateway TLS certificate %s/%s: %w", instance.Namespace, desired.Name, err)
 		}
 		if !certificateReadyForCurrentGeneration(&cert) {
-			return false, nil
+			return false, false, nil
 		}
 	}
 
 	var secret corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: secretName}, &secret)
-	if errors.IsNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("getting gateway TLS secret %s/%s: %w", instance.Namespace, secretName, err)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: secretName}, &secret); err != nil {
+		if errors.IsNotFound(err) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("getting gateway TLS secret %s/%s: %w", instance.Namespace, secretName, err)
 	}
 	if !gatewayTLSSecretReady(&secret) {
-		return false, nil
+		return false, false, nil
 	}
 
 	// Mutual TLS: the client-CA Secret the Envoy pod will mount (and verify
@@ -588,7 +782,27 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 			// policy is meant to reject. Clearing it flips gatewayDownstreamTLSPending
 			// on, so the fail-closed listener-omission path takes over instead.
 			instance.Status.GatewayTLS = nil
-			return false, nil
+			return false, false, nil
+		}
+	}
+
+	// FB-896 #1: stage a fail-closed rollout before serving a *tighter* posture.
+	// All cert material is confirmed ready here, so populating Status.GatewayTLS
+	// would immediately render the secure listener. On a tightening transition,
+	// force fail-closed (clear the status) and withhold readiness until the
+	// gateway is actually serving that fail-closed config — gatewayFailClosedRolledOut
+	// confirms both that the running pod template IS the fail-closed one (this
+	// function runs before the Deployment is re-applied in a reconcile, so on the
+	// first tightening reconcile the Deployment still carries the looser config)
+	// and that its rollout is complete. Loosening/steady transitions skip this.
+	if gatewayPostureTightening(instance) {
+		instance.Status.GatewayTLS = nil
+		rolled, err := r.gatewayServingCurrentConfig(ctx, instance)
+		if err != nil {
+			return false, false, err
+		}
+		if !rolled {
+			return false, true, nil
 		}
 	}
 
@@ -599,8 +813,9 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 	instance.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{
 		SecretName: secretName,
 		CreatedAt:  createdAt,
+		Mode:       gatewayDesiredMode(instance),
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // buildGatewayTLSCertificate returns the desired cert-manager Certificate

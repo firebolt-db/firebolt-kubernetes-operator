@@ -852,6 +852,23 @@ type SigningKeyStatus struct {
 	// CreatedAt is when this key was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
 
+	// ObservedCertRevision witnesses the cert-manager Certificate revision
+	// (Certificate.Status.Revision) this key's material was last observed at.
+	// It is recorded, never the key bytes — hashing secret material would trip
+	// weak-sensitive-data-hashing static analysis and the revision already
+	// changes on every re-issuance. cert-manager increments the revision each
+	// time it re-issues (e.g. after the Secret is deleted, or its bytes are
+	// edited in place), which — because signing Secrets use rotationPolicy:Never
+	// and the operator only ever re-issues by minting a NEW kid — means a bump
+	// on an existing key is an *unexpected* regeneration of the material under a
+	// stable kid: a hazard, since the destroyed old key can no longer validate
+	// tokens it signed. The operator surfaces such a bump as a Warning Event and
+	// re-records the value here (FB-896 #3); the round-5 signing-Secret
+	// ResourceVersion folded into authHash separately re-converges the fleet
+	// onto the new material. Nil until first observed.
+	// +optional
+	ObservedCertRevision *int `json:"observedCertRevision,omitempty"`
+
 	// Algorithm and Size record the cert-manager key algorithm and size this
 	// key was issued with — the resolved
 	// spec.auth.local.signingKeys.certManager values in effect when it was
@@ -986,6 +1003,20 @@ type EngineTLSStatus struct {
 	Reencrypting bool `json:"reencrypting,omitempty"`
 }
 
+// GatewayTLSMode enumerates the security posture the gateway's client-facing
+// listener serves once TLS is enabled, recorded in GatewayTLSStatus.Mode so the
+// operator can distinguish a *tightening* transition (which needs a staged
+// fail-closed rollout — see FB-896 #1) from a steady or loosening one.
+const (
+	// GatewayTLSModeOneWay is one-way (server-only) TLS: the gateway presents
+	// a certificate but does not require one from clients.
+	GatewayTLSModeOneWay = "TLS"
+	// GatewayTLSModeMutual is mutual TLS: the gateway additionally verifies a
+	// client certificate against the configured client CA and rejects clients
+	// that present none.
+	GatewayTLSModeMutual = "MutualTLS"
+)
+
 // GatewayTLSStatus reports the observed state of gateway downstream
 // (client-facing) TLS provisioning — the crypto material the gateway's
 // listener needs, as opposed to TLSListenerSpec's desired configuration.
@@ -999,6 +1030,16 @@ type GatewayTLSStatus struct {
 
 	// CreatedAt is when this certificate was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
+
+	// Mode is the security posture this populated status represents —
+	// GatewayTLSModeOneWay ("TLS") or GatewayTLSModeMutual ("MutualTLS"). It
+	// records what the gateway is actually *serving* so the controller can tell
+	// a tightening transition (plaintext→TLS, one-way→mTLS) apart from a steady
+	// or loosening one and stage a fail-closed rollout only when tightening (see
+	// FB-896 #1). Empty on a status written before this field existed; treated
+	// as one-way TLS, its only possible prior meaning.
+	// +optional
+	Mode string `json:"mode,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.
@@ -1041,6 +1082,20 @@ type FireboltInstanceStatus struct {
 	// spec.tls.gateway is unset or disabled.
 	// +optional
 	GatewayTLS *GatewayTLSStatus `json:"gatewayTLS,omitempty"`
+
+	// RolledEngineTrustCAs lists the SHA-256 fingerprints (hex) of the engine
+	// CA certificates the gateway has been CONFIRMED to have rolled out into its
+	// upstream trusted_ca bundle — updated only once the gateway Deployment is
+	// fully serving the config that embeds the current bundle (see
+	// ensureEngineCABundle / gatewayServingCurrentConfig, FB-896 #4). The engine
+	// controller gates a blue-green generation's Service-selector cutover on its
+	// own generation certificate's CA fingerprint appearing here, so it never
+	// routes traffic to a generation the gateway cannot yet verify (which would
+	// make the engine unreachable after a CA rotation behind the immutable
+	// issuer). A public fingerprint, never key material. Nil/empty when engine
+	// upstream TLS is not engaged (nothing to trust).
+	// +optional
+	RolledEngineTrustCAs []string `json:"rolledEngineTrustCAs,omitempty"`
 
 	// Conditions represent the latest available observations of the Instance's state.
 	// +optional

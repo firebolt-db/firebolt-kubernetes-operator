@@ -23,12 +23,14 @@ import (
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -723,6 +725,90 @@ func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string)
 func markSigningCertReady(t *testing.T, cli client.Client, instance *computev1alpha1.FireboltInstance, kid string) {
 	t.Helper()
 	markCertReadyForGeneration(t, cli, instance.Namespace, signingCertificateName(instance.Name, kid))
+}
+
+// setSigningCertReadyRevision marks the signing Certificate for kid Ready for
+// its current generation AND stamps Status.Revision — the witness FB-896 #3
+// keys off. markSigningCertReady sets only the Ready condition, so tests that
+// exercise the regeneration-detection path use this instead.
+func setSigningCertReadyRevision(t *testing.T, cli client.Client, instance *computev1alpha1.FireboltInstance, kid string, rev int) {
+	t.Helper()
+	name := signingCertificateName(instance.Name, kid)
+	var cert certmanagerv1.Certificate
+	if err := cli.Get(context.Background(), client.ObjectKey{Namespace: instance.Namespace, Name: name}, &cert); err != nil {
+		t.Fatalf("getting signing cert %q: %v", name, err)
+	}
+	cert.Status.Conditions = []certmanagerv1.CertificateCondition{{
+		Type:               certmanagerv1.CertificateConditionReady,
+		Status:             cmmeta.ConditionTrue,
+		ObservedGeneration: cert.Generation,
+	}}
+	revCopy := rev
+	cert.Status.Revision = &revCopy
+	if err := cli.Status().Update(context.Background(), &cert); err != nil {
+		t.Fatalf("setting signing cert ready+revision: %v", err)
+	}
+}
+
+// TestApplySigningCertificate_RegenerationUnderStableKidWarns covers FB-896 #3:
+// when a signing key's material is regenerated under its STABLE kid (the
+// cert-manager Certificate revision bumps — e.g. the Secret was deleted and
+// reissued), the operator records the new revision witness and emits exactly
+// one Warning Event, while keeping AuthReady usable. A first observation and a
+// steady (unchanged) revision must emit nothing.
+func TestApplySigningCertificate_RegenerationUnderStableKidWarns(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&certmanagerv1.Certificate{}).Build()
+	rec := events.NewFakeRecorder(8)
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch, EventRecorder: rec}
+	ctx := context.Background()
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: validAuthSpecForController()},
+	}
+	if err := cli.Create(ctx, signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
+		t.Fatalf("seeding signing key secret: %v", err)
+	}
+	key := &computev1alpha1.SigningKeyStatus{ID: AuthSigningKeyID, Phase: computev1alpha1.SigningKeyActive}
+
+	// Applies the Certificate; no Ready/revision yet → not ready, nothing recorded.
+	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || ready {
+		t.Fatalf("applySigningCertificate (pre-issue) = (%v, %v), want (false, nil)", ready, err)
+	}
+
+	// First successful issuance: revision 1 recorded, no event.
+	setSigningCertReadyRevision(t, cli, instance, AuthSigningKeyID, 1)
+	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
+		t.Fatalf("applySigningCertificate (rev 1) = (%v, %v), want (true, nil)", ready, err)
+	}
+	if key.ObservedCertRevision == nil || *key.ObservedCertRevision != 1 {
+		t.Errorf("ObservedCertRevision = %v, want 1 recorded on first observation", key.ObservedCertRevision)
+	}
+	if evs := drainEvents(rec); len(evs) != 0 {
+		t.Errorf("first observation emitted %v, want no events", evs)
+	}
+
+	// Unexpected regeneration under the same kid: revision bumps to 2.
+	setSigningCertReadyRevision(t, cli, instance, AuthSigningKeyID, 2)
+	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
+		t.Fatalf("applySigningCertificate (rev 2) = (%v, %v), want (true, nil)", ready, err)
+	}
+	if key.ObservedCertRevision == nil || *key.ObservedCertRevision != 2 {
+		t.Errorf("ObservedCertRevision = %v, want re-recorded as 2", key.ObservedCertRevision)
+	}
+	evs := drainEvents(rec)
+	if len(evs) != 1 || !strings.Contains(evs[0], "SigningKeyMaterialRegenerated") {
+		t.Fatalf("events = %v, want exactly one SigningKeyMaterialRegenerated warning", evs)
+	}
+
+	// Steady state: same revision → no further events.
+	if _, err := r.applySigningCertificate(ctx, instance, key); err != nil {
+		t.Fatalf("applySigningCertificate (steady): %v", err)
+	}
+	if evs := drainEvents(rec); len(evs) != 0 {
+		t.Errorf("steady state emitted %v, want no events", evs)
+	}
 }
 
 func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.T) {

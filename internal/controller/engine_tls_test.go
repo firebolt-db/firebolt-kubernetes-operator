@@ -401,3 +401,79 @@ func TestResolveInstanceInfo_TLSReadyAndSecretPresentPopulatesTLS(t *testing.T) 
 		t.Errorf("info.TLS.SecretName = %q, want test-instance-engine-tls", info.TLS.SecretName)
 	}
 }
+
+// TestResolveInstanceInfo_EngineTrustBundleGate covers the FB-896 #4 cutover
+// correlation seam: resolveInstanceInfo sets EngineTrustBundleReady only when
+// THIS engine's current-generation certificate CA fingerprint appears in the
+// instance's published RolledEngineTrustCAs (the set the gateway has confirmed
+// rolled out). computeCreating gates the Service-selector cutover on this.
+func TestResolveInstanceInfo_EngineTrustBundleGate(t *testing.T) {
+	sch := authGatingTestScheme(t)
+	engine := engineForAuthFixture()
+	engine.Status.CurrentGeneration = 3
+	genSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace},
+		Data:       map[string][]byte{engineTLSCASecretKey: []byte("gen-ca-3")},
+	}
+
+	// reencrypting builds the fixture with the gateway already re-encrypting
+	// upstream, so the gate is STRICT (per-generation membership) rather than
+	// vacuous.
+	reencrypting := func() *computev1alpha1.FireboltInstance {
+		return engineTLSEnabledInstanceFixture(true, &computev1alpha1.EngineTLSStatus{
+			SecretName: "test-instance-engine-tls", Reencrypting: true,
+		})
+	}
+
+	t.Run("ready when the generation CA is in the rolled trust set", func(t *testing.T) {
+		inst := reencrypting()
+		inst.Status.RolledEngineTrustCAs = []string{caFingerprint("gen-ca-3")}
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture(), genSecret).Build()
+		r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
+		info, err := r.resolveInstanceInfo(context.Background(), engine)
+		if err != nil {
+			t.Fatalf("resolveInstanceInfo: %v", err)
+		}
+		if !info.EngineTrustBundleReady {
+			t.Error("EngineTrustBundleReady = false, want true when the generation CA is in RolledEngineTrustCAs")
+		}
+	})
+
+	t.Run("not ready when the generation CA is absent from the rolled trust set", func(t *testing.T) {
+		inst := reencrypting()
+		inst.Status.RolledEngineTrustCAs = []string{caFingerprint("some-other-ca")} // e.g. only the old CA, pre-rotation-roll
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture(), genSecret).Build()
+		r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
+		info, err := r.resolveInstanceInfo(context.Background(), engine)
+		if err != nil {
+			t.Fatalf("resolveInstanceInfo: %v", err)
+		}
+		if info.EngineTrustBundleReady {
+			t.Error("EngineTrustBundleReady = true, want false when the gateway has not yet rolled the generation CA")
+		}
+	})
+
+	// Regression for the enable-ramp deadlock: before the gateway re-encrypts
+	// upstream (Reencrypting=false), the trust bundle is not yet published
+	// (RolledEngineTrustCAs nil), but the gate must be VACUOUS — otherwise the
+	// first engine could never cut over to TLS, so the fleet could never
+	// converge, so Reencrypting could never flip true. info.TLS is already
+	// non-nil here (anchor ready), which is exactly the state that deadlocked.
+	t.Run("vacuous during the initial enable ramp (gateway not yet re-encrypting)", func(t *testing.T) {
+		// The default EngineTLSStatus leaves Reencrypting unset (false).
+		inst := engineTLSEnabledInstanceFixture(true, &computev1alpha1.EngineTLSStatus{SecretName: "test-instance-engine-tls"})
+		inst.Status.RolledEngineTrustCAs = nil
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture(), genSecret).Build()
+		r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
+		info, err := r.resolveInstanceInfo(context.Background(), engine)
+		if err != nil {
+			t.Fatalf("resolveInstanceInfo: %v", err)
+		}
+		if info.TLS == nil {
+			t.Fatal("info.TLS is nil; the deadlock only bites when TLS is resolved before Reencrypting")
+		}
+		if !info.EngineTrustBundleReady {
+			t.Error("EngineTrustBundleReady = false during the enable ramp; the first cutover would deadlock")
+		}
+	})
+}

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,6 +32,67 @@ import (
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// TestGatewayRolloutComplete covers the shared rollout-observation primitive
+// (FB-896 #1/#4): unlike isGatewayReady's ReadyReplicas > 0, it must report
+// true only when every replica is on the latest pod template and available —
+// i.e. no old pods from a prior (looser/less-trusting) config remain.
+func TestGatewayRolloutComplete(t *testing.T) {
+	sch := authTestScheme(t)
+	inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"}}
+
+	two := int32(2)
+	dep := func(mutate func(*appsv1.Deployment)) *appsv1.Deployment {
+		d := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixGateway, Namespace: "ns-1", Generation: 3},
+			Spec:       appsv1.DeploymentSpec{Replicas: &two},
+			Status: appsv1.DeploymentStatus{
+				ObservedGeneration: 3, UpdatedReplicas: 2, Replicas: 2, AvailableReplicas: 2,
+			},
+		}
+		if mutate != nil {
+			mutate(d)
+		}
+		return d
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*appsv1.Deployment)
+		want   bool
+	}{
+		{"fully rolled out", nil, true},
+		{"status predates spec write", func(d *appsv1.Deployment) { d.Status.ObservedGeneration = 2 }, false},
+		{"not all replicas updated", func(d *appsv1.Deployment) { d.Status.UpdatedReplicas = 1 }, false},
+		{"surplus old-template pods linger", func(d *appsv1.Deployment) { d.Status.Replicas = 3 }, false},
+		{"updated but not yet available", func(d *appsv1.Deployment) { d.Status.AvailableReplicas = 1 }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(dep(tc.mutate)).Build()
+			r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+			got, err := r.gatewayRolloutComplete(context.Background(), inst)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("gatewayRolloutComplete = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("deployment absent returns false without error", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		got, err := r.gatewayRolloutComplete(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got {
+			t.Error("gatewayRolloutComplete = true, want false when the Deployment does not exist")
+		}
+	})
+}
 
 // TestGatewayTLSSecretVersions covers FB-896 findings #2/#5/#6: an in-place
 // bring-your-own cert rotation must roll the gateway (#5); the fail-closed
@@ -135,8 +197,10 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 		}
 	})
 
-	t.Run("#6 engine-CA RV folded while re-encryption is active", func(t *testing.T) {
-		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("inst-engine-tls")).Build()
+	t.Run("#6/#4 engine-CA bundle RV folded while re-encryption is active", func(t *testing.T) {
+		// The gateway mounts the assembled trust BUNDLE, not the anchor directly
+		// (FB-896 #4), so it is the bundle Secret's RV that must be folded.
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("inst-engine-ca-bundle")).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		inst := &computev1alpha1.FireboltInstance{
 			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
@@ -148,8 +212,8 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(got, "inst-engine-tls=") {
-			t.Errorf("gatewayTLSSecretVersions = %q, want the engine-CA anchor folded while re-encrypting", got)
+		if !strings.Contains(got, engineCABundleSecretName("inst")+"=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want the engine-CA bundle folded while re-encrypting", got)
 		}
 	})
 }

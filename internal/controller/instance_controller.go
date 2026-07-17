@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -73,6 +74,14 @@ type FireboltInstanceReconciler struct {
 	// MetricsRecorder records Prometheus metrics for instance CRs.
 	// Must be non-nil; use metrics.NoOpInstanceRecorder{} in tests.
 	MetricsRecorder metrics.InstanceRecorder
+
+	// EventRecorder emits Kubernetes Events on the FireboltInstance CR.
+	// Populated in SetupWithManager when nil; unit tests that exercise
+	// event-emitting paths inject an events.FakeRecorder. Nil is tolerated: the
+	// emit helpers no-op, so tests that do not care about events leave it unset.
+	// Mirrors FireboltEngineReconciler.EventRecorder; the operator's events RBAC
+	// grant (see engine_controller.go) covers both controllers.
+	EventRecorder events.EventRecorder
 
 	// NameFilter, when non-empty, restricts this reconciler to a single
 	// FireboltInstance by name. Requests for any other instance are dropped.
@@ -226,6 +235,20 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		log.Error(err, "Failed to ensure gateway TLS")
 	}
 
+	// Step 0.7: Assemble the gateway's engine trust bundle — the union of every
+	// live engine generation's CA plus the instance anchor — so the gateway
+	// keeps trusting engines across a CA rotation behind the (name-immutable)
+	// issuer (FB-896 #4). Reads Status.EngineTLS and the engine fleet; must run
+	// before Step 4 because the gateway pod mounts this bundle and folds its
+	// ResourceVersion into the config hash. Same failure-isolation as the TLS
+	// steps: a failure leaves the previous bundle in place rather than blocking.
+	// The returned fingerprints are published to Status.RolledEngineTrustCAs
+	// after Step 4, but only once the gateway has actually rolled the bundle out.
+	engineTrustCAFingerprints, err := r.ensureEngineCABundle(ctx, instance)
+	if err != nil {
+		log.Error(err, "Failed to ensure engine CA bundle")
+	}
+
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
 	// Postgres and metadata are not separate phases: the metadata service
 	// retries its DB connection internally for up to ~60s on startup, which
@@ -310,6 +333,8 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			"Provisioning", "gateway Deployment has no ready replicas yet")
 	}
 
+	r.publishRolledEngineTrustCAs(ctx, instance, engineTrustCAFingerprints)
+
 	setInstanceReadyRollup(instance)
 	instance.Status.Phase = r.computePhase(instance)
 
@@ -318,6 +343,29 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// publishRolledEngineTrustCAs records, in Status.RolledEngineTrustCAs, the
+// engine CA fingerprints the gateway has CONFIRMED rolled out — so the engine's
+// blue-green cutover gate can verify a new generation's CA is trusted before
+// flipping its Service selector (FB-896 #4). The set is updated only once the
+// gateway is actually serving the config that embeds the current bundle
+// (gatewayServingCurrentConfig): mid-roll the old pods still serve the previous
+// (subset) bundle, so keeping the last-confirmed set is the safe floor. It is
+// cleared when engine upstream TLS is not engaged — the gate is then vacuous.
+func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Context, instance *computev1alpha1.FireboltInstance, fingerprints []string) {
+	if !engineUpstreamTLSReady(instance) {
+		instance.Status.RolledEngineTrustCAs = nil
+		return
+	}
+	serving, err := r.gatewayServingCurrentConfig(ctx, instance)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "checking gateway engine-trust-bundle rollout")
+		return
+	}
+	if serving {
+		instance.Status.RolledEngineTrustCAs = fingerprints
+	}
 }
 
 func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -708,6 +756,9 @@ func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // custom controller name. Useful for E2E tests that spin up multiple in-process
 // reconcilers per suite and need unique metric names across them.
 func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name string) error {
+	if r.EventRecorder == nil {
+		r.EventRecorder = mgr.GetEventRecorder(name)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
 		Owns(&appsv1.StatefulSet{}).
