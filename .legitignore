@@ -29,3 +29,8 @@ value_74C1494275B3EC5601DEB210A6ACA034
 value_536FF1BE56D281A30D1704BBA91C043C
 value_A6AE22CADAC3B0BEE06B0684CFA2B2F8
 value_ABC139F439D41936CB2EB99E927041D9
+# Round-5: the `AdminSecretVersion:` struct-field assignment in TestEnginesConvergedOn
+# (instance_auth_test.go) — the value is a Kubernetes Secret ResourceVersion (a
+# monotonic counter, e.g. "1000"), not a credential; flagged by proximity to the
+# "...SecretVersion" field name.
+value_12BD5CBF22C28EF00574A366AF8190B7
