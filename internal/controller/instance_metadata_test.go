@@ -163,6 +163,29 @@ func TestBuildMetadataConfigXML_EscapesUserFields(t *testing.T) {
 	}
 }
 
+// TestBuildMetadataConfigXML_GarbageCollectionKeys pins the GC key names to the
+// dialect the dedicated-pensieve server actually reads
+// (pensieve_lite.metadata_storage.garbage_collection.{enabled,time_horizon_sec,interval_ms}).
+// An earlier template rendered <interval_seconds>/<max_age_seconds>, key names no server
+// version has ever read, so GC silently ran on the server defaults (60s interval, 1h
+// horizon) instead of the values below.
+func TestBuildMetadataConfigXML_GarbageCollectionKeys(t *testing.T) {
+	got := buildMetadataConfigXML(mkMetadataInstance())
+	for _, want := range []string{
+		"<interval_ms>3600000</interval_ms>",
+		"<time_horizon_sec>86400</time_horizon_sec>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in rendered config; got:\n%s", want, got)
+		}
+	}
+	for _, stale := range []string{"<interval_seconds>", "<max_age_seconds>"} {
+		if strings.Contains(got, stale) {
+			t.Errorf("stale GC key %q must not be rendered (the server never read it); got:\n%s", stale, got)
+		}
+	}
+}
+
 // The metadata (pensieve) pod has the same security posture as the
 // internal PostgreSQL and Envoy gateway pods: built-in non-root user,
 // read-only rootfs, all capabilities dropped, RuntimeDefault seccomp, and

@@ -127,8 +127,8 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
       </postgresql>
       <garbage_collection>
         <enabled>true</enabled>
-        <interval_seconds>3600</interval_seconds>
-        <max_age_seconds>86400</max_age_seconds>
+        <interval_ms>3600000</interval_ms>
+        <time_horizon_sec>86400</time_horizon_sec>
       </garbage_collection>
     </metadata_storage>
   </pensieve_lite>
