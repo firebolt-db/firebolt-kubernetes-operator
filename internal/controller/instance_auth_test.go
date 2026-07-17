@@ -18,12 +18,18 @@ package controller
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -556,16 +562,46 @@ func adminSecretForConvergence() *corev1.Secret {
 	}
 }
 
+// mustGenSigningCertPEM returns a fresh self-signed certificate PEM (random
+// ECDSA key). For fixtures that only need a parseable tls.crt whose public-key
+// fingerprint is read back from the seeded Secret. Panics on error (test-only).
+func mustGenSigningCertPEM() []byte {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "firebolt-signing-test"},
+		NotBefore:    time.Unix(0, 0),
+		NotAfter:     time.Unix(1<<33, 0),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// convergenceSigningCertPEM is a fixed self-signed signing certificate reused by
+// the convergence fixtures so signingSecretForConvergence returns a
+// byte-identical tls.crt across the probe and real clients. Computed once at
+// package init (not per call) so signingKeyFingerprint yields the same
+// public-key fingerprint on both sides.
+var convergenceSigningCertPEM = mustGenSigningCertPEM()
+
 // signingSecretForConvergence returns the signing-key Secret the keys fixture
 // (ID "signing-1") references. enginesConvergedOn now reads each rendered
-// signing key's Secret ResourceVersion and folds it into the expected authHash
-// (FB-896 #3), so every subtest must seed it alongside the admin Secret. Added
-// after the admin Secret and before any engines so the fake client assigns it
-// the same ResourceVersion the probe client observes.
+// signing key's public-key fingerprint (from tls.crt) and folds it into the
+// expected authHash (FB-896 #4), so every subtest must seed a Secret carrying
+// both tls.key (the existence gate) and a parseable tls.crt.
 func signingSecretForConvergence() *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixAuthSigning, Namespace: "ns-1"},
-		Data:       map[string][]byte{corev1.TLSPrivateKeyKey: []byte("fake-signing-pem")},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: []byte("fake-signing-pem"),
+			corev1.TLSCertKey:       convergenceSigningCertPEM,
+		},
 	}
 }
 
@@ -580,29 +616,29 @@ func TestEnginesConvergedOn(t *testing.T) {
 		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: auth},
 	}
 
-	// The expected hash must include the admin AND each signing-key Secret's
-	// ResourceVersion exactly as enginesConvergedOn reads them. A probe client
-	// (its own tracker, same objects in the same order as each subtest below)
-	// yields the RVs the fake client will assign, so the precomputed engine
-	// ObservedAuthHash matches what enginesConvergedOn computes.
+	// The expected hash must fold the admin Secret's ResourceVersion and each
+	// signing key's public-key fingerprint exactly as enginesConvergedOn reads
+	// them. A probe client (its own tracker, same objects in the same order as
+	// each subtest below) yields the admin RV the fake client will assign; the
+	// signing fingerprint is deterministic from the fixed convergence cert.
 	probe := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		adminSecretForConvergence(),
 		signingSecretForConvergence(),
 	).Build()
-	var probeAdmin, probeSigning corev1.Secret
+	var probeAdmin corev1.Secret
 	if err := probe.Get(context.Background(),
 		client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &probeAdmin); err != nil {
 		t.Fatalf("probing admin secret RV: %v", err)
 	}
-	if err := probe.Get(context.Background(),
-		client.ObjectKey{Namespace: "ns-1", Name: "inst" + SuffixAuthSigning}, &probeSigning); err != nil {
-		t.Fatalf("probing signing secret RV: %v", err)
+	signingFP, err := signingKeyPublicKeyFingerprint(convergenceSigningCertPEM)
+	if err != nil {
+		t.Fatalf("fingerprinting convergence signing cert: %v", err)
 	}
 	expected := authHash(&ResolvedAuthInfo{
-		Spec:               auth,
-		SigningKeys:        signingKeysForRender(keys),
-		AdminSecretVersion: probeAdmin.ResourceVersion,
-		SigningKeyVersions: map[string]string{"signing-1": probeSigning.ResourceVersion},
+		Spec:                   auth,
+		SigningKeys:            signingKeysForRender(keys),
+		AdminSecretVersion:     probeAdmin.ResourceVersion,
+		SigningKeyFingerprints: map[string]string{"signing-1": signingFP},
 	})
 	if expected == "" {
 		t.Fatal("expected hash is empty; test fixture is wrong")
@@ -672,18 +708,14 @@ func TestEnginesConvergedOn(t *testing.T) {
 			signingSecretForConvergence(),
 			engineWithHash("e1", "inst", expected),
 		).Build()
-		var rv, signingRV corev1.Secret
+		var rv corev1.Secret
 		if err := cli.Get(context.Background(),
 			client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &rv); err != nil {
 			t.Fatalf("reading rotated admin secret: %v", err)
 		}
-		if err := cli.Get(context.Background(),
-			client.ObjectKey{Namespace: "ns-1", Name: "inst" + SuffixAuthSigning}, &signingRV); err != nil {
-			t.Fatalf("reading signing secret: %v", err)
-		}
 		newExpected := authHash(&ResolvedAuthInfo{
 			Spec: auth, SigningKeys: signingKeysForRender(keys), AdminSecretVersion: rv.ResourceVersion,
-			SigningKeyVersions: map[string]string{"signing-1": signingRV.ResourceVersion},
+			SigningKeyFingerprints: map[string]string{"signing-1": signingFP},
 		})
 		if newExpected == expected {
 			// Only meaningful if the fake client actually assigns a distinct RV;
@@ -710,7 +742,13 @@ func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string)
 	name := signingCertificateName(instance.Name, kid)
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace},
-		Data:       map[string][]byte{corev1.TLSPrivateKeyKey: []byte("fake-pem-" + kid)},
+		Data: map[string][]byte{
+			// A parseable tls.crt alongside the (fake) tls.key so the FB-896 #4
+			// public-key fingerprint fold can read a real public key. Seeded once
+			// and read back, so a random cert per Secret is fine.
+			corev1.TLSPrivateKeyKey: []byte("fake-pem-" + kid),
+			corev1.TLSCertKey:       mustGenSigningCertPEM(),
+		},
 	}
 }
 
@@ -727,35 +765,57 @@ func markSigningCertReady(t *testing.T, cli client.Client, instance *computev1al
 	markCertReadyForGeneration(t, cli, instance.Namespace, signingCertificateName(instance.Name, kid))
 }
 
-// setSigningCertReadyRevision marks the signing Certificate for kid Ready for
-// its current generation AND stamps Status.Revision — the witness FB-896 #3
-// keys off. markSigningCertReady sets only the Ready condition, so tests that
-// exercise the regeneration-detection path use this instead.
-func setSigningCertReadyRevision(t *testing.T, cli client.Client, instance *computev1alpha1.FireboltInstance, kid string, rev int) {
+// newSigningKey returns a fresh ECDSA private key for building test signing
+// certificates.
+func newSigningKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
-	name := signingCertificateName(instance.Name, kid)
-	var cert certmanagerv1.Certificate
-	if err := cli.Get(context.Background(), client.ObjectKey{Namespace: instance.Namespace, Name: name}, &cert); err != nil {
-		t.Fatalf("getting signing cert %q: %v", name, err)
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating test signing key: %v", err)
 	}
-	cert.Status.Conditions = []certmanagerv1.CertificateCondition{{
-		Type:               certmanagerv1.CertificateConditionReady,
-		Status:             cmmeta.ConditionTrue,
-		ObservedGeneration: cert.Generation,
-	}}
-	revCopy := rev
-	cert.Status.Revision = &revCopy
-	if err := cli.Status().Update(context.Background(), &cert); err != nil {
-		t.Fatalf("setting signing cert ready+revision: %v", err)
+	return k
+}
+
+// signingCertForKey returns a self-signed certificate PEM carrying key's public
+// key. serial only affects the certificate bytes, not the public-key
+// fingerprint signingKeyPublicKeyFingerprint computes — so reusing one key with
+// a new serial models a cert-only reissuance (same key, new cert), and a fresh
+// key models a genuine key replacement.
+func signingCertForKey(t *testing.T, key *ecdsa.PrivateKey, serial int64) []byte {
+	t.Helper()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(serial),
+		Subject:      pkix.Name{CommonName: "firebolt-signing-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating test signing cert: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// updateSecretCert rewrites the tls.crt of the named Secret, modeling
+// cert-manager writing a re-issued certificate into the same Secret.
+func updateSecretCert(t *testing.T, cli client.Client, name string, certPEM []byte) {
+	t.Helper()
+	var s corev1.Secret
+	if err := cli.Get(context.Background(), client.ObjectKey{Namespace: "ns-1", Name: name}, &s); err != nil {
+		t.Fatalf("getting secret %q: %v", name, err)
+	}
+	s.Data[corev1.TLSCertKey] = certPEM
+	if err := cli.Update(context.Background(), &s); err != nil {
+		t.Fatalf("updating secret %q cert: %v", name, err)
 	}
 }
 
-// TestApplySigningCertificate_RegenerationUnderStableKidWarns covers FB-896 #3:
-// when a signing key's material is regenerated under its STABLE kid (the
-// cert-manager Certificate revision bumps — e.g. the Secret was deleted and
-// reissued), the operator records the new revision witness and emits exactly
-// one Warning Event, while keeping AuthReady usable. A first observation and a
-// steady (unchanged) revision must emit nothing.
+// TestApplySigningCertificate_RegenerationUnderStableKidWarns covers FB-896 #4:
+// the operator warns when a signing key's material is genuinely replaced under
+// its STABLE kid (the public key changes), but NOT when cert-manager merely
+// re-issues the certificate while reusing the key (a revision bump with the same
+// public key — an issuer-capped renewal or `cmctl renew`). A first observation
+// and a steady (unchanged) key must emit nothing; readiness is kept throughout.
 func TestApplySigningCertificate_RegenerationUnderStableKidWarns(t *testing.T) {
 	sch := authTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&certmanagerv1.Certificate{}).Build()
@@ -767,42 +827,67 @@ func TestApplySigningCertificate_RegenerationUnderStableKidWarns(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: validAuthSpecForController()},
 	}
-	if err := cli.Create(ctx, signingKeySecretFor(instance, AuthSigningKeyID)); err != nil {
+	keyA := newSigningKey(t)
+	secretName := signingCertificateName(instance.Name, AuthSigningKeyID)
+	if err := cli.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: "ns-1"},
+		Data: map[string][]byte{
+			corev1.TLSPrivateKeyKey: []byte("fake-key-pem"),
+			corev1.TLSCertKey:       signingCertForKey(t, keyA, 1),
+		},
+	}); err != nil {
 		t.Fatalf("seeding signing key secret: %v", err)
 	}
 	key := &computev1alpha1.SigningKeyStatus{ID: AuthSigningKeyID, Phase: computev1alpha1.SigningKeyActive}
 
-	// Applies the Certificate; no Ready/revision yet → not ready, nothing recorded.
+	// Applies the Certificate; not Ready yet → not ready, nothing recorded.
 	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || ready {
 		t.Fatalf("applySigningCertificate (pre-issue) = (%v, %v), want (false, nil)", ready, err)
 	}
 
-	// First successful issuance: revision 1 recorded, no event.
-	setSigningCertReadyRevision(t, cli, instance, AuthSigningKeyID, 1)
+	// First successful issuance: public-key fingerprint recorded, no event.
+	markSigningCertReady(t, cli, instance, AuthSigningKeyID)
 	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
-		t.Fatalf("applySigningCertificate (rev 1) = (%v, %v), want (true, nil)", ready, err)
+		t.Fatalf("applySigningCertificate (first issue) = (%v, %v), want (true, nil)", ready, err)
 	}
-	if key.ObservedCertRevision == nil || *key.ObservedCertRevision != 1 {
-		t.Errorf("ObservedCertRevision = %v, want 1 recorded on first observation", key.ObservedCertRevision)
+	if key.ObservedPublicKeyFingerprint == nil {
+		t.Fatal("ObservedPublicKeyFingerprint nil, want the first public key recorded")
 	}
+	firstFP := *key.ObservedPublicKeyFingerprint
 	if evs := drainEvents(rec); len(evs) != 0 {
 		t.Errorf("first observation emitted %v, want no events", evs)
 	}
 
-	// Unexpected regeneration under the same kid: revision bumps to 2.
-	setSigningCertReadyRevision(t, cli, instance, AuthSigningKeyID, 2)
+	// Cert-only reissuance (issuer-capped renewal / cmctl renew): SAME private
+	// key, new certificate bytes. The public key — and the fingerprint — are
+	// unchanged, so NO warning and NO re-record. This is the FB-896 #4 fix: a
+	// revision bump alone must not read as a key regeneration.
+	updateSecretCert(t, cli, secretName, signingCertForKey(t, keyA, 2))
 	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
-		t.Fatalf("applySigningCertificate (rev 2) = (%v, %v), want (true, nil)", ready, err)
+		t.Fatalf("applySigningCertificate (cert-only reissue) = (%v, %v), want (true, nil)", ready, err)
 	}
-	if key.ObservedCertRevision == nil || *key.ObservedCertRevision != 2 {
-		t.Errorf("ObservedCertRevision = %v, want re-recorded as 2", key.ObservedCertRevision)
+	if key.ObservedPublicKeyFingerprint == nil || *key.ObservedPublicKeyFingerprint != firstFP {
+		t.Errorf("ObservedPublicKeyFingerprint changed on a cert-only reissuance (want unchanged %q); the key did not change", firstFP)
+	}
+	if evs := drainEvents(rec); len(evs) != 0 {
+		t.Errorf("cert-only reissuance emitted %v, want no events (the key did not change)", evs)
+	}
+
+	// Genuine key replacement under the same kid: new public key → one warning.
+	keyB := newSigningKey(t)
+	updateSecretCert(t, cli, secretName, signingCertForKey(t, keyB, 3))
+	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
+		t.Fatalf("applySigningCertificate (key replaced) = (%v, %v), want (true, nil)", ready, err)
+	}
+	if key.ObservedPublicKeyFingerprint == nil || *key.ObservedPublicKeyFingerprint == firstFP {
+		t.Errorf("ObservedPublicKeyFingerprint = %v, want re-recorded to the new (different) key", key.ObservedPublicKeyFingerprint)
 	}
 	evs := drainEvents(rec)
 	if len(evs) != 1 || !strings.Contains(evs[0], "SigningKeyMaterialRegenerated") {
 		t.Fatalf("events = %v, want exactly one SigningKeyMaterialRegenerated warning", evs)
 	}
 
-	// Steady state: same revision → no further events.
+	// Steady state: same key → no further events.
 	if _, err := r.applySigningCertificate(ctx, instance, key); err != nil {
 		t.Fatalf("applySigningCertificate (steady): %v", err)
 	}
@@ -1176,26 +1261,35 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 	markSigningCertReady(t, cli, instance, AuthSigningKeyID)
 	markSigningCertReady(t, cli, instance, "signing-2")
 
-	// enginesConvergedOn folds the admin AND each rendered signing-key Secret's
-	// ResourceVersion into the expected hash (FB-896 #3/#4), so the engine's
-	// simulated ObservedAuthHash must be computed the same way to converge.
+	// enginesConvergedOn folds the admin Secret's ResourceVersion and each
+	// rendered signing key's public-key fingerprint into the expected hash
+	// (FB-896 #4), so the engine's simulated ObservedAuthHash must be computed
+	// the same way to converge.
 	var adminSec, signing1Sec, signing2Sec corev1.Secret
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &adminSec); err != nil {
 		t.Fatalf("reading admin secret RV: %v", err)
 	}
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: signingCertificateName("inst", AuthSigningKeyID)}, &signing1Sec); err != nil {
-		t.Fatalf("reading signing-1 secret RV: %v", err)
+		t.Fatalf("reading signing-1 secret: %v", err)
 	}
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: signingCertificateName("inst", "signing-2")}, &signing2Sec); err != nil {
-		t.Fatalf("reading signing-2 secret RV: %v", err)
+		t.Fatalf("reading signing-2 secret: %v", err)
 	}
 	adminRV := adminSec.ResourceVersion
-	signingVersions := map[string]string{
-		AuthSigningKeyID: signing1Sec.ResourceVersion,
-		"signing-2":      signing2Sec.ResourceVersion,
+	fp1, err := signingKeyPublicKeyFingerprint(signing1Sec.Data[corev1.TLSCertKey])
+	if err != nil {
+		t.Fatalf("fingerprinting signing-1 cert: %v", err)
+	}
+	fp2, err := signingKeyPublicKeyFingerprint(signing2Sec.Data[corev1.TLSCertKey])
+	if err != nil {
+		t.Fatalf("fingerprinting signing-2 cert: %v", err)
+	}
+	signingFPs := map[string]string{
+		AuthSigningKeyID: fp1,
+		"signing-2":      fp2,
 	}
 
-	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyVersions: signingVersions})
+	preHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyFingerprints: signingFPs})
 	engine := engineWithHash("e1", "inst", "stale-hash-from-a-previous-generation")
 	if err := cli.Create(ctx, engine); err != nil {
 		t.Fatalf("seeding lagging engine: %v", err)
@@ -1241,7 +1335,7 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 
 	// The engine rolls onto the promoted config too — only now is it safe
 	// to start the retain-duration countdown.
-	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyVersions: signingVersions})
+	postHash := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: signingKeysForRender(instance.Status.Auth.SigningKeys), AdminSecretVersion: adminRV, SigningKeyFingerprints: signingFPs})
 	if postHash == preHash {
 		t.Fatal("pre- and post-promotion hashes must differ (active-first ordering flipped); test fixture is wrong")
 	}

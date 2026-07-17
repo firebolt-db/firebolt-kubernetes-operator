@@ -19,7 +19,9 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"sort"
 	"strings"
@@ -620,6 +622,33 @@ func caBundleBytes(blobs []string) []byte {
 func caFingerprint(blob string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(blob)))
 	return hex.EncodeToString(sum[:])
+}
+
+// signingKeyPublicKeyFingerprint returns the hex SHA-256 of the DER
+// SubjectPublicKeyInfo parsed from a signing key's tls.crt. It fingerprints the
+// PUBLIC KEY, not the whole certificate, so the value changes only when the
+// private key is actually replaced: under rotationPolicy:Never a cert-only
+// reissuance (an issuer-capped lifetime, or a manual `cmctl renew`) rewrites
+// tls.crt — new serial/notAfter, bumped Certificate.Status.Revision — while
+// reusing the same key, leaving the public key and this fingerprint unchanged.
+// Public material only; the private key (tls.key) is never read or hashed, so
+// this raises no weak-sensitive-data-hashing concern (same rationale as
+// caFingerprint). Returns an error when tls.crt is absent or unparseable.
+func signingKeyPublicKeyFingerprint(certPEM []byte) (string, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return "", fmt.Errorf("signing certificate: no PEM block found in %d bytes", len(certPEM))
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parsing signing certificate: %w", err)
+	}
+	spki, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return "", fmt.Errorf("marshaling signing public key: %w", err)
+	}
+	sum := sha256.Sum256(spki)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // mergeCACerts assembles the deduped, deterministic PEM trust bundle from raw

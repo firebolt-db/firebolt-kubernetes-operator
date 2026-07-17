@@ -29,7 +29,7 @@ import (
 // default). This suite runs against envtest with the CRD bases applied and NO
 // webhook installed (see suite_test.go), so every rejection below is the API
 // server evaluating the CEL rule alone — not the webhook.
-var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webhook-free)", func() {
+var _ = Describe("FireboltInstance TLS certManager immutability (CEL, webhook-free)", func() {
 	const ns = "default"
 	ctx := context.Background()
 
@@ -94,17 +94,49 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 		})).To(Succeed())
 	})
 
-	It("allows changing the engine key size while enabled (only the issuer is frozen)", func() {
-		inst := mkInstance("cel-engine-size-mutable", enabledListener(), nil)
+	It("rejects changing the engine key size while engine TLS stays enabled", func() {
+		inst := mkInstance("cel-engine-size-frozen", enabledListener(), nil)
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
+		// FB-896 #2: the stable-name anchor cert cannot regenerate its key under
+		// rotationPolicy:Never, so an in-place algorithm/size edit while enabled
+		// wedges it — the CEL rule rejects it.
+		err := mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
+			cur.Spec.TLS.Engine.CertManager.Size = 256
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("algorithm/size is immutable"))
+	})
+
+	It("allows changing the engine key size in the same update that disables engine TLS", func() {
+		inst := mkInstance("cel-engine-size-disable", enabledListener(), nil)
+		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
+
+		// Disabling breaks the continuously-enabled precondition, so a new key
+		// size for a later re-enable (fresh key material) is permitted.
 		Expect(mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
+			cur.Spec.TLS.Engine.Enabled = false
 			cur.Spec.TLS.Engine.CertManager.Size = 256
 		})).To(Succeed())
 	})
 
-	It("does NOT freeze the gateway issuerRef (the rule is engine-scoped)", func() {
+	It("rejects changing the gateway key size while gateway TLS stays enabled", func() {
+		inst := mkInstance("cel-gateway-size-frozen", nil, enabledListener())
+		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
+
+		// FB-896 #2: the gateway serving cert has a stable Secret name too, so
+		// its key algorithm/size are frozen while enabled (same rule, gateway-scoped).
+		err := mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
+			cur.Spec.TLS.Gateway.CertManager.Size = 256
+		})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("algorithm/size is immutable"))
+	})
+
+	It("does NOT freeze the gateway issuerRef (only key params are gateway-frozen)", func() {
 		inst := mkInstance("cel-gateway-issuer-mutable", nil, enabledListener())
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()

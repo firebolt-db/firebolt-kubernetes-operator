@@ -107,6 +107,20 @@ type ResolvedEngineTLSInfo struct {
 	// set when engine TLS is enabled — bring-your-own Secret is rejected for
 	// the engine listener (ValidateTLS), so cert-manager is the only source.
 	CertManager *computev1alpha1.CertManagerSpec
+
+	// ServingCertFP is the fingerprint (hex SHA-256 via caFingerprint) of the
+	// CURRENT generation's serving-certificate tls.crt, read live in
+	// resolveInstanceInfo (FB-896 #1). It is deliberately NOT folded into
+	// tlsHash: tlsHash is reconstructed instance-side (engineFleetTLSState) with
+	// no per-generation context, so folding a per-generation value there would
+	// make the re-encryption convergence gate unreproducible and deadlock it.
+	// Instead computeStable compares it against Status.ObservedEngineServingCertFP
+	// and rolls a new generation when a cert-manager re-issuance changes the
+	// served leaf (an issuer-capped renewal or `cmctl renew`), so running pods
+	// stop serving stale material. Empty when the generation's serving Secret is
+	// not yet readable (fresh generation, or engine TLS just enabled). tls.crt is
+	// a public certificate, so fingerprinting it raises no key-hashing concern.
+	ServingCertFP string
 }
 
 // ResolvedAuthInfo carries the desired auth config plus the concrete,
@@ -139,21 +153,24 @@ type ResolvedAuthInfo struct {
 	// auth is disabled (info.Auth is nil in that case).
 	AdminSecretVersion string
 
-	// SigningKeyVersions maps each signing key's ID (JWT "kid") to the
-	// ResourceVersion of its Secret observed when this info was resolved.
-	// Folded into authHash alongside each key's SecretName so an in-place
-	// reissue — same kid and same Secret name but new key bytes, e.g.
-	// cert-manager re-creating a deleted signing Secret, or a manual tls.key
-	// edit — rolls every engine's StatefulSet. Without it, engines still
-	// running the old key would reject tokens that restarted pods (now holding
-	// the replacement key under the same kid) sign, and vice versa: a
-	// cross-engine split-brain under one kid, invisible to every other drift
-	// check because ID and SecretName are unchanged. Like AdminSecretVersion
-	// this is the ResourceVersion, deliberately NOT a hash of the key bytes
-	// (that would trip weak-sensitive-data-hashing static analysis and buy
-	// nothing). Keyed by ID so a value stays bound to its kid regardless of
-	// ordering; nil/empty when auth is disabled.
-	SigningKeyVersions map[string]string
+	// SigningKeyFingerprints maps each signing key's ID (JWT "kid") to the
+	// public-key fingerprint of its Secret's tls.crt observed when this info was
+	// resolved (see signingKeyFingerprint / signingKeyPublicKeyFingerprint).
+	// Folded into authHash alongside each key's SecretName so a genuine key
+	// replacement under a stable kid — same kid and Secret name but a NEW private
+	// key — rolls every engine's StatefulSet. Without it, engines still running
+	// the old key would reject tokens that restarted pods (now holding the
+	// replacement key under the same kid) sign, and vice versa: a cross-engine
+	// split-brain under one kid, invisible to every other drift check because ID
+	// and SecretName are unchanged. This folds the public-key fingerprint rather
+	// than the Secret ResourceVersion (FB-896 #4): under rotationPolicy:Never a
+	// cert-only reissuance bumps the ResourceVersion while reusing the key, so a
+	// ResourceVersion fold rolled the fleet for nothing; the fingerprint changes
+	// only when the key actually does. Public material only, never a hash of the
+	// key bytes (that would trip weak-sensitive-data-hashing static analysis).
+	// Keyed by ID so a value stays bound to its kid regardless of ordering;
+	// nil/empty when auth is disabled.
+	SigningKeyFingerprints map[string]string
 }
 
 // FireboltEngineClassInfo carries the resolved FireboltEngineClass template
@@ -335,6 +352,37 @@ func computeStable(
 		return
 	}
 
+	// FB-896 #1: roll a new generation when THIS generation's serving certificate
+	// has been re-issued in place out from under the running pods. packdb reads
+	// its certificate only at process start, and the drift hash checked by
+	// stsMatchesSpec is generation-independent (anchor name + key policy), so a
+	// cert-manager re-issuance of the per-generation leaf — an issuer-capped
+	// renewal, or a manual `cmctl renew` — is otherwise invisible: pods keep
+	// serving the stale leaf until an unrelated restart, eventually an expired
+	// certificate or a CA the refreshed gateway trust bundle no longer accepts. A
+	// live fingerprint that differs from the one recorded for THIS SAME generation
+	// starts a fresh blue-green roll, which mints a new per-generation cert and
+	// cuts over through the #4 trust-bundle gate (so a coincident CA rotation
+	// stays coordinated).
+	//
+	// The generation guard (ObservedEngineServingCertGen == gen) is essential:
+	// every new generation issues its own certificate with a fresh key, so its
+	// fingerprint always differs from the prior generation's. Comparing across a
+	// generation boundary — after any ordinary spec-driven roll — would read that
+	// expected difference as a re-issuance and roll forever. Other guards: roll
+	// only when a serving cert was actually read this pass (empty live FP =
+	// transient/absent Secret) and a baseline has been recorded for this
+	// generation (empty = first observation, just record below).
+	if instanceInfo.TLS != nil && instanceInfo.TLS.ServingCertFP != "" &&
+		status.ObservedEngineServingCertGen == gen &&
+		status.ObservedEngineServingCertFP != "" &&
+		status.ObservedEngineServingCertFP != instanceInfo.TLS.ServingCertFP {
+		status.CurrentGeneration++
+		status.Phase = computev1alpha1.PhaseCreating
+		r.Requeue = true
+		return
+	}
+
 	// Missing ConfigMap / headless service are recoverable in-place: both
 	// are deterministic from (engineName, namespace, gen) plus the
 	// already-verified stable spec, so rebuilding at the current generation
@@ -381,6 +429,22 @@ func computeStable(
 	// across the fleet to gate the gateway's upstream protocol switch (see
 	// engineFleetTLSState / engineUpstreamTLSReady).
 	status.ObservedEngineTLSHash = current.CurrentSTS.Annotations[AnnotationEngineTLSHash]
+
+	// FB-896 #1: record the serving-cert fingerprint (and the generation it
+	// belongs to) this stable generation is on, so a later in-place re-issuance
+	// of the SAME generation's cert is caught as drift by the check above, while a
+	// future generation's naturally-different fingerprint is not. Cleared when
+	// engine TLS is disabled; empty when the serving Secret was not readable this
+	// pass. A first observation (or a new generation) just records this baseline —
+	// the drift check requires a matching generation AND a non-empty prior value,
+	// so it never rolls on the "" → set or the gen-N → gen-N+1 transition.
+	if instanceInfo.TLS != nil {
+		status.ObservedEngineServingCertFP = instanceInfo.TLS.ServingCertFP
+		status.ObservedEngineServingCertGen = gen
+	} else {
+		status.ObservedEngineServingCertFP = ""
+		status.ObservedEngineServingCertGen = 0
+	}
 	r.RequeueAfter = 30 * time.Second
 }
 
@@ -2655,10 +2719,11 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 // authHash returns a content-hash of everything auth-relevant to a
 // rendered engine pod: the full resolved AuthSpec (native config, JWT
 // durations, the whole OIDC block, preferred_authorization_server, ...)
-// plus each signing key's ID, SecretName, and Secret ResourceVersion (active
+// plus each signing key's ID, SecretName, and public-key fingerprint (active
 // key first, so a rotation reordering active/retained keys is itself observed
-// as drift; the ResourceVersion catches a same-name/same-kid reissue whose new
-// key bytes would otherwise be invisible — see ResolvedAuthInfo.SigningKeyVersions).
+// as drift; the fingerprint catches a same-name/same-kid key REPLACEMENT whose
+// new key material would otherwise be invisible, while ignoring a cert-only
+// reissuance that reuses the key — see ResolvedAuthInfo.SigningKeyFingerprints).
 // Returns
 // "" when auth is disabled, keeping AnnotationAuthHash absent and the
 // rendered pod byte-identical to an engine with auth never configured.
@@ -2687,15 +2752,15 @@ func authHash(auth *ResolvedAuthInfo) string {
 		return ""
 	}
 	type signingKeyHashInput struct {
-		ID            string `json:"id"`
-		SecretName    string `json:"secretName"`
-		SecretVersion string `json:"secretVersion"`
+		ID          string `json:"id"`
+		SecretName  string `json:"secretName"`
+		PublicKeyFP string `json:"publicKeyFP"`
 	}
 	keys := make([]signingKeyHashInput, len(auth.SigningKeys))
 	for i, k := range auth.SigningKeys {
-		// auth.SigningKeyVersions may be nil (e.g. a caller that predates this
-		// field); a nil-map read yields "", which is stable and harmless.
-		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName, SecretVersion: auth.SigningKeyVersions[k.ID]}
+		// auth.SigningKeyFingerprints may be nil (e.g. a caller that predates
+		// this field); a nil-map read yields "", which is stable and harmless.
+		keys[i] = signingKeyHashInput{ID: k.ID, SecretName: k.SecretName, PublicKeyFP: auth.SigningKeyFingerprints[k.ID]}
 	}
 	canonical, err := json.Marshal(struct {
 		Spec               *computev1alpha1.AuthSpec `json:"spec"`
@@ -2758,11 +2823,14 @@ func tlsHash(tls *ResolvedEngineTLSInfo) string {
 		return ""
 	}
 	// Fold the serving-certificate policy (key algorithm + size) alongside the
-	// Secret name so an in-place spec.tls.engine.certManager alg/size edit
-	// changes the hash → a new blue-green generation → buildGenEngineTLSCertificate
-	// reissues the per-generation cert under the new policy (it reads exactly
-	// these fields). Without this, a policy edit stayed unapplied until an
-	// unrelated rollout because the status Secret name is generation-independent.
+	// Secret name so the algorithm/size a listener is enabled (or re-enabled)
+	// with reaches the hash → a new blue-green generation → buildGenEngineTLSCertificate
+	// reissues the per-generation cert under that policy (it reads exactly these
+	// fields). An in-place alg/size edit while engine TLS stays enabled is now
+	// rejected (validateImmutableTLSKeyParams / the CEL rule on TLSSpec.Engine),
+	// because the stable-name anchor cert would wedge under rotationPolicy:Never;
+	// this fold therefore matters on the initial enable and across a
+	// disable/re-enable, where the new policy takes effect from a fresh key.
 	// A differing key size across generations is harmless — TLS negotiates per
 	// connection, unlike the JWT signing keyset. IssuerRef is deliberately NOT
 	// folded and is immutable instead: reissuing engine certs under a new CA

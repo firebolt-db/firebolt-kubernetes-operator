@@ -710,6 +710,20 @@ type TLSListenerSpec struct {
 type TLSSpec struct {
 	// Gateway configures TLS termination on the Envoy gateway's
 	// client-facing listener.
+	//
+	// The cert-manager key algorithm/size are immutable while gateway TLS stays
+	// enabled: the gateway serving Certificate has a stable Secret name under
+	// rotationPolicy:Never, so cert-manager reuses its existing key on reissue
+	// and will not regenerate it to match a changed algorithm/size — the
+	// Certificate wedges. A disable/re-enable (fresh key material) is permitted.
+	// The rule is field-scoped to the gateway listener (the shared
+	// TLSListenerSpec/CertManagerSpec types are not frozen struct-wide), skips a
+	// certManager⇄secretRef switch (has(...) guards), and the webhook re-checks
+	// it with a clearer message. Unlike the engine listener the gateway issuer is
+	// NOT frozen: reissuing the client cert under a new CA is a valid rotation
+	// (clients update their trust store) and reuses the same key, so it does not
+	// wedge.
+	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.algorithm == oldSelf.certManager.algorithm && self.certManager.size == oldSelf.certManager.size)",message="spec.tls.gateway.certManager algorithm/size is immutable while gateway TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name key to match, wedging the certificate. Disable gateway TLS or recreate the Instance to change the key parameters."
 	// +optional
 	Gateway *TLSListenerSpec `json:"gateway,omitempty"`
 
@@ -725,16 +739,27 @@ type TLSSpec struct {
 	// engine listener so it does NOT freeze the gateway issuer, which shares
 	// the TLSListenerSpec/CertManagerSpec types. It permits the initial enable
 	// and a disable/re-enable (fresh certs, no overlap) — only an in-place
-	// issuer change while continuously enabled is rejected. Key algorithm/size
-	// may still change (tlsHash reissues per generation); only the issuer is
-	// frozen. The webhook re-checks this with a clearer message.
+	// issuer change while continuously enabled is rejected.
 	//
-	// The rule intentionally does not fire across a certManager⇄secretRef
-	// switch (the has(...) guards): that changes the resolved Secret name,
-	// which tlsHash folds, so it rolls the fleet through the normal
-	// convergence-gated path. Only a same-Secret issuerRef swap needs freezing,
-	// because tlsHash cannot see it (issuerRef is deliberately not folded).
+	// The cert-manager key algorithm/size are likewise immutable while engine
+	// TLS stays enabled (second rule below). The stable-name anchor Certificate
+	// (Status.EngineTLS) carries the same key policy under rotationPolicy:Never,
+	// so cert-manager reuses its existing private key on every reissue and will
+	// NOT regenerate it to match a changed algorithm/size — the Certificate
+	// silently keeps the old key or never goes Ready for the new spec. The
+	// per-generation serving cert would pick up a new algorithm/size on its own
+	// (a fresh Secret name each generation), but the anchor it shares an issuer
+	// with would not, so an in-place edit still wedges engine TLS; freeze while
+	// enabled and permit it across a disable/re-enable (fresh key material).
+	//
+	// Both rules intentionally do not fire across a certManager⇄secretRef switch
+	// (the has(...) guards): that changes the resolved Secret name, which tlsHash
+	// folds, so it rolls the fleet through the normal convergence-gated path.
+	// Only same-Secret issuer/key-param swaps need freezing, because tlsHash
+	// cannot see them (issuerRef/algorithm/size are deliberately not folded
+	// across the anchor). The webhook re-checks both with clearer messages.
 	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.issuerRef.name == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind == oldSelf.certManager.issuerRef.kind)",message="spec.tls.engine.certManager.issuerRef is immutable while engine TLS is enabled: reissuing engine certificates under a new CA while the gateway still trusts the old anchor would break every upstream handshake. Disable engine TLS or recreate the Instance to change the issuer."
+	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.algorithm == oldSelf.certManager.algorithm && self.certManager.size == oldSelf.certManager.size)",message="spec.tls.engine.certManager algorithm/size is immutable while engine TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name anchor key to match, wedging the certificate. Disable engine TLS or recreate the Instance to change the key parameters."
 	// +optional
 	Engine *TLSListenerSpec `json:"engine,omitempty"`
 }
@@ -852,22 +877,24 @@ type SigningKeyStatus struct {
 	// CreatedAt is when this key was provisioned.
 	CreatedAt metav1.Time `json:"createdAt"`
 
-	// ObservedCertRevision witnesses the cert-manager Certificate revision
-	// (Certificate.Status.Revision) this key's material was last observed at.
-	// It is recorded, never the key bytes — hashing secret material would trip
-	// weak-sensitive-data-hashing static analysis and the revision already
-	// changes on every re-issuance. cert-manager increments the revision each
-	// time it re-issues (e.g. after the Secret is deleted, or its bytes are
-	// edited in place), which — because signing Secrets use rotationPolicy:Never
-	// and the operator only ever re-issues by minting a NEW kid — means a bump
-	// on an existing key is an *unexpected* regeneration of the material under a
-	// stable kid: a hazard, since the destroyed old key can no longer validate
-	// tokens it signed. The operator surfaces such a bump as a Warning Event and
-	// re-records the value here (FB-896 #3); the round-5 signing-Secret
-	// ResourceVersion folded into authHash separately re-converges the fleet
-	// onto the new material. Nil until first observed.
+	// ObservedPublicKeyFingerprint witnesses the identity of this key's material
+	// under its STABLE kid: the hex SHA-256 of the SubjectPublicKeyInfo parsed
+	// from the key's tls.crt (see signingKeyPublicKeyFingerprint). Only the
+	// public key is fingerprinted — never the private key bytes, which would trip
+	// weak-sensitive-data-hashing static analysis. It keys off the public KEY
+	// rather than the Certificate revision because, under rotationPolicy:Never, a
+	// cert-only reissuance (an issuer-capped lifetime, or a manual `cmctl renew`)
+	// bumps Certificate.Status.Revision while reusing the private key — so a
+	// revision bump does NOT mean the key changed. The operator itself only ever
+	// re-issues by minting a NEW kid, so a fingerprint change on an EXISTING kid
+	// is a genuine, unexpected key replacement: a hazard, since the destroyed old
+	// key can no longer validate tokens it signed. The operator surfaces such a
+	// change as a Warning Event and re-records it here (FB-896 #4). Nil until
+	// first observed. A pointer (like the ObservedCertRevision it replaced) keeps
+	// SigningKeyStatus compact — a value string would push the struct past
+	// gocritic's rangeValCopy threshold for every loop that ranges these keys.
 	// +optional
-	ObservedCertRevision *int `json:"observedCertRevision,omitempty"`
+	ObservedPublicKeyFingerprint *string `json:"observedPublicKeyFingerprint,omitempty"`
 
 	// Algorithm and Size record the cert-manager key algorithm and size this
 	// key was issued with — the resolved

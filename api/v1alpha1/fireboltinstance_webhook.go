@@ -106,6 +106,7 @@ func validateImmutableFields(oldInst, newInst *FireboltInstance) field.ErrorList
 	var errs field.ErrorList
 	errs = append(errs, validateImmutableSigningKey(oldInst, newInst)...)
 	errs = append(errs, validateImmutableEngineTLSIssuer(oldInst, newInst)...)
+	errs = append(errs, validateImmutableTLSKeyParams(oldInst, newInst)...)
 	return errs
 }
 
@@ -156,8 +157,8 @@ func engineTLSCertManaged(inst *FireboltInstance) bool {
 // validateImmutableEngineTLSIssuer freezes the engine TLS issuer while engine
 // TLS stays enabled. Reissuing per-generation engine certificates under a new
 // CA while the gateway still trusts the old CA anchor (Status.EngineTLS) would
-// fail every upstream handshake mid-roll. Key algorithm/size may still change
-// (tlsHash folds them, reissuing per generation) — only the issuer is frozen.
+// fail every upstream handshake mid-roll. The key algorithm/size are frozen
+// separately (validateImmutableTLSKeyParams).
 func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.ErrorList {
 	if !engineTLSCertManaged(oldInst) || !engineTLSCertManaged(newInst) {
 		return nil
@@ -172,6 +173,60 @@ func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.
 		"is immutable while engine TLS is enabled: reissuing engine certificates under a new CA "+
 			"while the gateway still trusts the old CA anchor would fail every upstream handshake. "+
 			"Disable engine TLS or recreate the Instance to change the issuer.")}
+}
+
+// gatewayTLSCertManaged reports whether gateway TLS is enabled and provisioned
+// via cert-manager on inst. A bring-your-own SecretRef gateway has no
+// operator-managed key parameters to freeze.
+func gatewayTLSCertManaged(inst *FireboltInstance) bool {
+	return inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil && inst.Spec.TLS.Gateway.Enabled &&
+		inst.Spec.TLS.Gateway.CertManager != nil
+}
+
+// validateImmutableTLSKeyParams freezes the cert-manager key algorithm and size
+// on each TLS listener while that listener stays continuously enabled. The
+// engine anchor and the gateway serving cert both use stable Secret names with
+// rotationPolicy:Never, so cert-manager reuses the existing private key on every
+// reissue and will NOT regenerate it to match a changed algorithm/size — the
+// Certificate silently keeps the old key or never goes Ready for the new spec.
+// (The per-generation engine serving cert picks up a new algorithm/size on its
+// own — a fresh Secret name each generation — but the stable-name anchor it
+// shares an issuer with does not, so an in-place edit still wedges engine TLS.)
+// A disable/re-enable or a new Instance starts from fresh key material and is
+// permitted; only an in-place edit while continuously enabled is rejected.
+// Mirrors the CEL transition rules on TLSSpec.Engine / TLSSpec.Gateway with
+// clearer, field-scoped messages.
+func validateImmutableTLSKeyParams(oldInst, newInst *FireboltInstance) field.ErrorList {
+	var errs field.ErrorList
+	if engineTLSCertManaged(oldInst) && engineTLSCertManaged(newInst) {
+		errs = append(errs, immutableKeyParamErrs(
+			oldInst.Spec.TLS.Engine.CertManager, newInst.Spec.TLS.Engine.CertManager,
+			field.NewPath("spec", "tls", "engine", "certManager"), "engine")...)
+	}
+	if gatewayTLSCertManaged(oldInst) && gatewayTLSCertManaged(newInst) {
+		errs = append(errs, immutableKeyParamErrs(
+			oldInst.Spec.TLS.Gateway.CertManager, newInst.Spec.TLS.Gateway.CertManager,
+			field.NewPath("spec", "tls", "gateway", "certManager"), "gateway")...)
+	}
+	return errs
+}
+
+// immutableKeyParamErrs reports any algorithm/size change between two
+// CertManagerSpecs, phrased for the named listener.
+func immutableKeyParamErrs(oldCM, newCM *CertManagerSpec, base *field.Path, listener string) field.ErrorList {
+	var errs field.ErrorList
+	if oldCM.Algorithm != newCM.Algorithm {
+		errs = append(errs, field.Invalid(base.Child("algorithm"), newCM.Algorithm,
+			fmt.Sprintf("is immutable while %s TLS is enabled: under rotationPolicy:Never cert-manager will "+
+				"not regenerate the existing stable-name key to match, wedging the certificate. Disable %s TLS "+
+				"or recreate the Instance to change the key algorithm.", listener, listener)))
+	}
+	if oldCM.Size != newCM.Size {
+		errs = append(errs, field.Invalid(base.Child("size"), newCM.Size,
+			fmt.Sprintf("is immutable while %s TLS is enabled (same reason as algorithm): disable %s TLS "+
+				"or recreate the Instance to change the key size.", listener, listener)))
+	}
+	return errs
 }
 
 // ValidateDelete validates a FireboltInstance on deletion.
@@ -487,28 +542,95 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path) field.ErrorList {
 // parsePackdbDuration parses a duration string using the grammar packdb's
 // config loader accepts for every instance.auth duration field (TokenExpiry,
 // MaxTokenAge, ClockSkewTolerance, CacheTTL, RefreshInterval): Go's
-// time.ParseDuration grammar plus a "d" (days) unit, which Go's standard
-// library does not support (packdb
-// src/Common/Configuration/Unit/Duration.h: "Parser implementation for
-// Go-style duration strings"). Multi-component strings mixing "d" with
-// other units (e.g. "1d12h") are not supported here — every default and
-// realistic auth duration value packdb ships is a single component (e.g.
-// "1d", "30s", "1h"). A value that fails to parse here is guaranteed to
-// fail packdb's own config load the same way, crashing every engine at
-// startup; this validates it at admission time instead.
+// time.ParseDuration grammar plus a "d" (days) unit that Go's standard library
+// does not support. packdb's parser
+// (src/Common/Configuration/Unit/Duration.cpp) is a multi-component tokenizer,
+// so "d" may appear on its own ("1d"), combined with the standard units in any
+// order ("1d12h", "12h1d"), and with a fractional value ("1.5d") — packdb
+// accepts all of these. A value that fails to parse here is guaranteed to fail
+// packdb's own config load the same way, crashing every engine at startup;
+// this validates it at admission time instead.
+//
+// Standard (no-"d") strings take time.ParseDuration's exact integer parse
+// verbatim; only a "d"-bearing string falls through to the component sum below,
+// so the float arithmetic never affects a value Go could parse on its own.
+// isDurationNumByte reports whether b can appear in a duration component's
+// numeric prefix (a digit or the decimal point).
+func isDurationNumByte(b byte) bool {
+	return (b >= '0' && b <= '9') || b == '.'
+}
+
 func parsePackdbDuration(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
-	days, ok := strings.CutSuffix(s, "d")
-	if !ok || days == "" {
+	// packdb grammar: an optional leading sign, then one or more
+	// <number><unit> components. A bare number with no unit is rejected, as
+	// packdb rejects it for these (non-legacy) config fields.
+	body := s
+	neg := false
+	switch {
+	case strings.HasPrefix(body, "+"):
+		body = body[1:]
+	case strings.HasPrefix(body, "-"):
+		neg = true
+		body = body[1:]
+	}
+	if body == "" {
 		return 0, fmt.Errorf("invalid duration %q", s)
 	}
-	n, err := strconv.ParseFloat(days, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+	var total time.Duration
+	for body != "" {
+		i := 0
+		for i < len(body) && isDurationNumByte(body[i]) {
+			i++
+		}
+		if i == 0 {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		num := body[:i]
+		body = body[i:]
+
+		j := 0
+		for j < len(body) && !isDurationNumByte(body[j]) {
+			j++
+		}
+		if j == 0 {
+			return 0, fmt.Errorf("invalid duration %q: value %q has no unit", s, num)
+		}
+		unit := body[:j]
+		body = body[j:]
+
+		var scale time.Duration
+		switch unit {
+		case "ns":
+			scale = time.Nanosecond
+		case "us", "µs", "μs":
+			scale = time.Microsecond
+		case "ms":
+			scale = time.Millisecond
+		case "s":
+			scale = time.Second
+		case "m":
+			scale = time.Minute
+		case "h":
+			scale = time.Hour
+		case "d":
+			scale = 24 * time.Hour
+		default:
+			return 0, fmt.Errorf("invalid duration %q: unknown unit %q", s, unit)
+		}
+
+		n, err := strconv.ParseFloat(num, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+		}
+		total += time.Duration(n * float64(scale))
 	}
-	return time.Duration(n * float64(24*time.Hour)), nil
+	if neg {
+		total = -total
+	}
+	return total, nil
 }
 
 // validateDurationField rejects a non-empty value that parsePackdbDuration
@@ -634,6 +756,15 @@ func validateCertManagerKey(cm *CertManagerSpec, base *field.Path) *field.Error 
 // RetainDuration when MaxTokenAge is left unset.
 const packdbDefaultMaxTokenAge = 24 * time.Hour
 
+// packdbDefaultClockSkew is packdb's own built-in default for
+// instance.auth.local.clock_skew_tolerance (30s; src/PackDB/Auth/
+// JwtValidationConfig.h). validateSigningKeyRotation adds it to the
+// RetainDuration floor: packdb rejects a token only once
+// current_time - iat > max_token_age + clock_skew_tolerance, so a token stays
+// valid until iat + maxTokenAge + clockSkewTolerance and the key must be
+// retained for that whole window, not just maxTokenAge.
+const packdbDefaultClockSkew = 30 * time.Second
+
 // validateSigningKeyRotation enforces that SigningKeyPolicy's
 // RotationInterval and RetainDuration are always set together (base is
 // already scoped to "signingKeys" by the caller), and that RetainDuration
@@ -677,11 +808,25 @@ func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.Er
 			maxTokenAge = d
 		}
 	}
-	if retain.Duration < maxTokenAge {
+	// packdb accepts a token until iat + maxTokenAge + clockSkewTolerance, so
+	// the retained key must outlive that whole window. Resolve the local
+	// clock-skew tolerance the same defensively-flooring way as maxTokenAge
+	// above: a missing, unparseable, or negative value falls back to packdb's
+	// 30s default rather than lowering the floor. An explicit "0s" (no
+	// tolerance) is honored and leaves the floor at exactly maxTokenAge.
+	clockSkew := packdbDefaultClockSkew
+	if local.ClockSkewTolerance != "" {
+		if d, err := parsePackdbDuration(local.ClockSkewTolerance); err == nil && d >= 0 {
+			clockSkew = d
+		}
+	}
+	floor := maxTokenAge + clockSkew
+	if retain.Duration < floor {
 		return field.ErrorList{field.Invalid(base.Child("retainDuration"), retain.Duration.String(),
-			fmt.Sprintf("must be at least maxTokenAge (%s): a token signed the instant a key is demoted "+
-				"remains valid until it ages out, so the operator must not prune that key any sooner — "+
-				"add extra margin on top of this minimum for a full engine fleet rollout to complete", maxTokenAge))}
+			fmt.Sprintf("must be at least maxTokenAge + clockSkewTolerance (%s + %s = %s): a token signed the "+
+				"instant a key is demoted stays valid until iat + maxTokenAge + clockSkewTolerance, so the operator "+
+				"must not prune that key any sooner — add extra margin on top of this minimum for a full engine "+
+				"fleet rollout to complete", maxTokenAge, clockSkew, floor))}
 	}
 	return nil
 }

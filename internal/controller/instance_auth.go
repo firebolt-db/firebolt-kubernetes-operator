@@ -225,6 +225,36 @@ func checkSecretKeyPresent(ctx context.Context, cli client.Client, namespace, na
 	return secret.ResourceVersion, nil
 }
 
+// signingKeyFingerprint reads a signing key Secret and returns the public-key
+// fingerprint of its tls.crt, after confirming the private key (tls.key) is
+// present — the same existence gate checkSecretKeyPresent applies. It is folded
+// into authHash at BOTH sites (resolveInstanceInfo and enginesConvergedOn) in
+// place of the Secret ResourceVersion (FB-896 #4): under rotationPolicy:Never a
+// cert-only reissuance rewrites the Secret (new tls.crt, new ResourceVersion)
+// while reusing the key, so folding the ResourceVersion rolled the fleet for
+// nothing; folding the public-key fingerprint rolls it only when the key
+// actually changes. Both sites MUST call this so the folded value stays
+// byte-identical, or the rotation convergence gate (enginesConvergedOn vs each
+// engine's ObservedAuthHash) can never match and rotation deadlocks. Public
+// material only; the private key is never read or hashed.
+func signingKeyFingerprint(ctx context.Context, cli client.Client, namespace, name string) (string, error) {
+	var secret corev1.Secret
+	if err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret); err != nil {
+		if errors.IsNotFound(err) {
+			return "", fmt.Errorf("signing key secret %s/%s not found", namespace, name)
+		}
+		return "", fmt.Errorf("getting signing key secret %s/%s: %w", namespace, name, err)
+	}
+	if len(secret.Data[corev1.TLSPrivateKeyKey]) == 0 {
+		return "", fmt.Errorf("signing key secret %s/%s is missing or empty for key %q", namespace, name, corev1.TLSPrivateKeyKey)
+	}
+	fp, err := signingKeyPublicKeyFingerprint(secret.Data[corev1.TLSCertKey])
+	if err != nil {
+		return "", fmt.Errorf("signing key secret %s/%s: %w", namespace, name, err)
+	}
+	return fp, nil
+}
+
 // existingSigningKeys returns instance.Status.Auth.SigningKeys, or nil if
 // auth has never been provisioned for this Instance yet.
 func existingSigningKeys(instance *computev1alpha1.FireboltInstance) []computev1alpha1.SigningKeyStatus {
@@ -426,32 +456,6 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 		return false, nil
 	}
 
-	// FB-896 #3: witness the Certificate revision so an unexpected regeneration
-	// of this key's material under its STABLE kid becomes visible. cert-manager
-	// bumps Status.Revision on every re-issuance (the Secret was deleted and
-	// reissued, or its bytes edited); the operator itself never re-issues an
-	// existing key's Certificate — a rotation always mints a NEW kid — so a bump
-	// on a key we have already observed means its private key was silently
-	// replaced. The destroyed old key can no longer validate tokens it signed,
-	// so surface a Warning; the round-5 signing-Secret ResourceVersion folded
-	// into authHash separately re-converges the fleet onto the new material.
-	// Only the public, monotonic revision is recorded — never the key bytes.
-	if rev := cert.Status.Revision; rev != nil {
-		switch {
-		case key.ObservedCertRevision == nil:
-			revCopy := *rev
-			key.ObservedCertRevision = &revCopy
-		case *rev > *key.ObservedCertRevision:
-			if r.EventRecorder != nil {
-				r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "SigningKeyMaterialRegenerated",
-					"Reconcile", "signing key %q (Secret %s/%s) was regenerated under the same kid (cert revision %d→%d); tokens signed with the previous key can no longer be validated. Engines will re-converge onto the new material.",
-					key.ID, instance.Namespace, key.SecretName, *key.ObservedCertRevision, *rev)
-			}
-			revCopy := *rev
-			key.ObservedCertRevision = &revCopy
-		}
-	}
-
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: key.SecretName}, &secret)
 	if errors.IsNotFound(err) {
@@ -467,6 +471,37 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 		// ready yet.
 		return false, nil
 	}
+
+	// FB-896 #4: witness the key's PUBLIC-KEY identity so an actual replacement
+	// of the private key under this STABLE kid becomes visible. We fingerprint
+	// the public key (SubjectPublicKeyInfo of tls.crt), NOT the Certificate
+	// revision: under rotationPolicy:Never cert-manager re-issues the cert
+	// (bumping Status.Revision and rewriting tls.crt) while REUSING the private
+	// key on an issuer-capped renewal or a manual `cmctl renew`, so a revision
+	// bump does not mean the key changed. Only a genuine key replacement changes
+	// the public key. The operator itself only ever re-issues by minting a NEW
+	// kid, so a fingerprint change on an existing kid means the previous key was
+	// destroyed and can no longer validate tokens it signed — surface a Warning.
+	// A same-name/new-bytes write still bumps the Secret ResourceVersion that
+	// authHash folds, so the fleet re-converges onto genuinely new material
+	// regardless. Best-effort: an unparseable tls.crt just skips the witness
+	// (the key is still usable via tls.key). Public material only.
+	if fp, fpErr := signingKeyPublicKeyFingerprint(secret.Data[corev1.TLSCertKey]); fpErr == nil && fp != "" {
+		switch {
+		case key.ObservedPublicKeyFingerprint == nil:
+			fpCopy := fp
+			key.ObservedPublicKeyFingerprint = &fpCopy
+		case *key.ObservedPublicKeyFingerprint != fp:
+			if r.EventRecorder != nil {
+				r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "SigningKeyMaterialRegenerated",
+					"Reconcile", "signing key %q (Secret %s/%s) was regenerated under the same kid (its public key changed); tokens signed with the previous key can no longer be validated. Engines will re-converge onto the new material.",
+					key.ID, instance.Namespace, key.SecretName)
+			}
+			fpCopy := fp
+			key.ObservedPublicKeyFingerprint = &fpCopy
+		}
+	}
+
 	if key.CreatedAt.IsZero() {
 		key.CreatedAt = metav1.Now()
 	}
@@ -779,25 +814,25 @@ func (r *FireboltInstanceReconciler) enginesConvergedOn(ctx context.Context, ins
 		adminRV = rv
 	}
 
-	// Read each rendered signing key's Secret ResourceVersion and fold it into
+	// Read each rendered signing key's public-key fingerprint and fold it into
 	// the expected hash exactly as resolveInstanceInfo does — same helper, same
 	// keys, same namespace (a signing Secret is one object shared by both
 	// sites). Omitting it here would make this side compute a hash the engines
-	// can never match after a same-name/same-kid reissue, deadlocking the gate.
+	// can never match after a same-kid key replacement, deadlocking the gate.
 	renderKeys := signingKeysForRender(keys)
-	signingVersions := make(map[string]string, len(renderKeys))
+	signingFPs := make(map[string]string, len(renderKeys))
 	for _, k := range renderKeys {
-		rv, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret")
+		fp, err := signingKeyFingerprint(ctx, r.Client, instance.Namespace, k.SecretName)
 		if err != nil {
 			return false, err
 		}
-		signingVersions[k.ID] = rv
+		signingFPs[k.ID] = fp
 	}
 	expected := authHash(&ResolvedAuthInfo{
-		Spec:               instance.Spec.Auth,
-		SigningKeys:        renderKeys,
-		AdminSecretVersion: adminRV,
-		SigningKeyVersions: signingVersions,
+		Spec:                   instance.Spec.Auth,
+		SigningKeys:            renderKeys,
+		AdminSecretVersion:     adminRV,
+		SigningKeyFingerprints: signingFPs,
 	})
 	for _, e := range ours {
 		if e.Status.ObservedAuthHash != expected {

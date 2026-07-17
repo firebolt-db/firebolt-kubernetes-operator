@@ -129,6 +129,18 @@ func TestValidateUpdate_ImmutableFields(t *testing.T) {
 			},
 		}
 	}
+	gatewayTLS := func(alg string, size int32) *TLSSpec {
+		return &TLSSpec{
+			Gateway: &TLSListenerSpec{
+				Enabled: true,
+				CertManager: &CertManagerSpec{
+					IssuerRef: CertManagerIssuerRef{Name: "gw-ca", Kind: "ClusterIssuer"},
+					Algorithm: alg,
+					Size:      size,
+				},
+			},
+		}
+	}
 
 	tests := []struct {
 		name          string
@@ -174,10 +186,50 @@ func TestValidateUpdate_ImmutableFields(t *testing.T) {
 			wantErrSubstr: "issuerRef",
 		},
 		{
-			name: "engine TLS key size change allowed (issuer unchanged)",
+			name: "engine TLS key size change rejected (issuer unchanged)",
 			mutate: func(o, n *FireboltInstance) {
 				o.Spec.TLS = engineTLS("ca-1", 384)
 				n.Spec.TLS = engineTLS("ca-1", 256)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "engine TLS key algorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-1", 2048)
+				n.Spec.TLS.Engine.CertManager.Algorithm = "RSA"
+			},
+			wantErrSubstr: "algorithm",
+		},
+		{
+			name: "engine TLS alg/size change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Engine: &TLSListenerSpec{Enabled: false}}
+				n.Spec.TLS = engineTLS("ca-1", 256)
+			},
+		},
+		{
+			name: "gateway TLS key size change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = gatewayTLS("ECDSA", 384)
+				n.Spec.TLS = gatewayTLS("ECDSA", 256)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "gateway TLS key algorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = gatewayTLS("ECDSA", 384)
+				n.Spec.TLS = gatewayTLS("RSA", 2048)
+			},
+			wantErrSubstr: "algorithm",
+		},
+		{
+			name: "gateway TLS alg/size change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{Enabled: false}}
+				n.Spec.TLS = gatewayTLS("RSA", 2048)
 			},
 		},
 	}
@@ -912,7 +964,7 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "rotationInterval with retainDuration at least maxTokenAge is valid",
+			name: "retainDuration exactly maxTokenAge is rejected (short by the clock-skew tolerance)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local: &LocalAuthSpec{
@@ -920,7 +972,54 @@ func TestValidateAuth(t *testing.T) {
 					SigningKeys: &SigningKeyPolicy{
 						CertManager:      validSigningKeys().CertManager,
 						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
-						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // == default maxTokenAge, < maxTokenAge + 30s
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "rotationInterval with retainDuration at least maxTokenAge + default clock skew is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24*time.Hour + 30*time.Second}, // == maxTokenAge + default 30s skew
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "explicit clockSkewTolerance widens the retainDuration floor",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					ClockSkewTolerance: "5m",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24*time.Hour + 30*time.Second}, // < maxTokenAge + 5m
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "explicit zero clockSkewTolerance keeps the floor at exactly maxTokenAge",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					ClockSkewTolerance: "0s",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // == maxTokenAge, skew 0
 					},
 				},
 			},
@@ -1172,11 +1271,12 @@ func TestValidateTLS(t *testing.T) {
 }
 
 // TestParsePackdbDuration pins down the grammar against packdb's actual
-// duration parser (src/Common/Configuration/Unit/Duration.h): Go's
+// duration parser (src/Common/Configuration/Unit/Duration.cpp): Go's
 // time.ParseDuration grammar plus a "d" (days) unit that Go's standard
-// library doesn't support, since every duration default in packdb's own
-// schema (application-config.schema.json) uses "d" for values of a day or
-// more (e.g. instance.auth.local.jwt.max_token_age default "1d").
+// library doesn't support, and — like packdb's multi-component tokenizer — "d"
+// combined with the standard units in any order (e.g. "1d12h"). Every duration
+// default in packdb's own schema (application-config.schema.json) uses "d" for
+// values of a day or more (e.g. instance.auth.local.jwt.max_token_age "1d").
 func TestParsePackdbDuration(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1191,9 +1291,15 @@ func TestParsePackdbDuration(t *testing.T) {
 		{name: "multiple days", in: "7d", want: 7 * 24 * time.Hour},
 		{name: "fractional days", in: "0.5d", want: 12 * time.Hour},
 		{name: "negative days", in: "-1d", want: -24 * time.Hour},
+		{name: "days then hours", in: "1d12h", want: 36 * time.Hour},
+		{name: "hours then days", in: "12h1d", want: 36 * time.Hour},
+		{name: "days then minutes", in: "1d30m", want: 24*time.Hour + 30*time.Minute},
+		{name: "fractional days multi-component", in: "1.5d", want: 36 * time.Hour},
+		{name: "negative multi-component with days", in: "-1d12h", want: -36 * time.Hour},
 		{name: "empty string is invalid", in: "", wantErr: true},
 		{name: "bare number with no unit is invalid", in: "5", wantErr: true},
 		{name: "bogus unit is invalid", in: "1hr", wantErr: true},
+		{name: "bogus unit inside a day-component string is invalid", in: "1d1hr", wantErr: true},
 		{name: "bare d with no number is invalid", in: "d", wantErr: true},
 	}
 	for _, tc := range tests {

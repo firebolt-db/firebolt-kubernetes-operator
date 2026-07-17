@@ -1304,6 +1304,126 @@ func TestComputeEngineReconcile_StableStampsObservedAuthHash(t *testing.T) {
 	}
 }
 
+// TestComputeEngineReconcile_StableServingCertReissue covers FB-896 #1: a stable
+// generation whose serving certificate has been re-issued (a changed live
+// fingerprint vs the recorded baseline) rolls a new blue-green generation, so
+// running pods stop serving the stale leaf; a first observation just records the
+// baseline, an unchanged fingerprint stays stable, and an empty live fingerprint
+// (transient/absent Secret) never rolls.
+func TestComputeEngineReconcile_StableServingCertReissue(t *testing.T) {
+	spec := testSpec()
+	tlsInfo := func(fp string) InstanceInfo {
+		return InstanceInfo{
+			MetadataEndpoint: testMetadataEndpoint,
+			InstanceID:       testInstanceID,
+			TLS: &ResolvedEngineTLSInfo{
+				SecretName:    "inst-engine-tls",
+				CertManager:   &computev1alpha1.CertManagerSpec{IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "ca"}, Algorithm: "ECDSA", Size: 384},
+				ServingCertFP: fp,
+			},
+		}
+	}
+	// stableState builds an engine that stsMatchesSpec accepts (STS built from the
+	// same instanceInfo, so the generation-independent tlsHash matches) with the
+	// given recorded serving-cert fingerprint baseline.
+	stableState := func(instanceInfo InstanceInfo, observedFP string) (*computev1alpha1.FireboltEngineStatus, EngineState) {
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, instanceInfo, nil)
+		status := stableStatus()
+		status.ObservedEngineServingCertFP = observedFP
+		current := EngineState{
+			CurrentSTS:              sts,
+			CurrentHeadlessSvc:      &corev1.Service{},
+			CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 0, instanceInfo, nil),
+			CurrentPodsReady:        true,
+			CurrentPodTotal:         3,
+			CurrentPodReady:         3,
+			ClusterService:          makeClusterSvc(testEngineName, 0),
+			ClusterServiceTargetGen: 0,
+		}
+		return status, current
+	}
+
+	t.Run("re-issued serving cert rolls a new generation", func(t *testing.T) {
+		info := tlsInfo("fp-new")
+		status, current := stableState(info, "fp-old")
+		result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, info, nil)
+		if result.Status.Phase != computev1alpha1.PhaseCreating {
+			t.Fatalf("phase = %s, want Creating (serving-cert re-issued)", result.Status.Phase)
+		}
+		if result.Status.CurrentGeneration != 1 {
+			t.Errorf("CurrentGeneration = %d, want 1 (bumped)", result.Status.CurrentGeneration)
+		}
+	})
+
+	t.Run("first observation records the baseline without rolling", func(t *testing.T) {
+		info := tlsInfo("fp-new")
+		status, current := stableState(info, "") // no baseline yet
+		result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, info, nil)
+		if result.Status.Phase != computev1alpha1.PhaseStable {
+			t.Fatalf("phase = %s, want Stable (first observation must not roll)", result.Status.Phase)
+		}
+		if result.Status.ObservedEngineServingCertFP != "fp-new" {
+			t.Errorf("ObservedEngineServingCertFP = %q, want fp-new recorded", result.Status.ObservedEngineServingCertFP)
+		}
+	})
+
+	t.Run("unchanged serving cert stays stable", func(t *testing.T) {
+		info := tlsInfo("fp-x")
+		status, current := stableState(info, "fp-x")
+		result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, info, nil)
+		if result.Status.Phase != computev1alpha1.PhaseStable {
+			t.Fatalf("phase = %s, want Stable (no drift)", result.Status.Phase)
+		}
+		if result.Status.ObservedEngineServingCertFP != "fp-x" {
+			t.Errorf("ObservedEngineServingCertFP = %q, want fp-x", result.Status.ObservedEngineServingCertFP)
+		}
+	})
+
+	t.Run("empty live fingerprint never rolls", func(t *testing.T) {
+		info := tlsInfo("") // serving Secret not readable this pass
+		status, current := stableState(info, "fp-old")
+		result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, info, nil)
+		if result.Status.Phase != computev1alpha1.PhaseStable {
+			t.Fatalf("phase = %s, want Stable (empty live fingerprint must not roll)", result.Status.Phase)
+		}
+	})
+
+	// Regression: a fingerprint difference across a GENERATION boundary is
+	// expected (each generation issues its own cert with a fresh key) and must
+	// NOT be read as an in-place re-issuance — otherwise every ordinary
+	// spec-driven roll would trigger an endless re-roll. The baseline here was
+	// observed on the prior generation (4); the current generation is 5.
+	t.Run("freshly-rolled generation with a different fingerprint does not roll", func(t *testing.T) {
+		info := tlsInfo("fp-gen5")
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 5, info, nil)
+		status := &computev1alpha1.FireboltEngineStatus{
+			Phase:                        computev1alpha1.PhaseStable,
+			CurrentGeneration:            5,
+			ActiveGeneration:             5,
+			ObservedEngineServingCertFP:  "fp-gen4",
+			ObservedEngineServingCertGen: 4, // baseline from the PRIOR generation
+		}
+		current := EngineState{
+			CurrentSTS:              sts,
+			CurrentHeadlessSvc:      &corev1.Service{},
+			CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 5, info, nil),
+			CurrentPodsReady:        true,
+			CurrentPodTotal:         3,
+			CurrentPodReady:         3,
+			ClusterService:          makeClusterSvc(testEngineName, 5),
+			ClusterServiceTargetGen: 5,
+		}
+		result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 1, info, nil)
+		if result.Status.Phase != computev1alpha1.PhaseStable {
+			t.Fatalf("phase = %s, want Stable: a new generation's fingerprint differs by design and must not read as an in-place re-issue", result.Status.Phase)
+		}
+		if result.Status.ObservedEngineServingCertGen != 5 || result.Status.ObservedEngineServingCertFP != "fp-gen5" {
+			t.Errorf("baseline = (%d, %q), want (5, fp-gen5) adopted for the new generation",
+				result.Status.ObservedEngineServingCertGen, result.Status.ObservedEngineServingCertFP)
+		}
+	})
+}
+
 // TestComputeEngineReconcile_StableAuthDisabledObservedAuthHashEmpty pins
 // down the counterpart: an engine with auth disabled must never carry a
 // stale non-empty ObservedAuthHash forward, since authHash(nil) == "" is
@@ -1448,19 +1568,20 @@ func TestAuthHash_ChangesWithSigningKeySecretVersion(t *testing.T) {
 		{ID: "signing-1", SecretName: "inst-auth-signing", Phase: computev1alpha1.SigningKeyActive},
 	}
 
-	// Same ID+SecretName throughout; only the Secret's ResourceVersion moves.
+	// Same ID+SecretName throughout; only the signing key's public-key
+	// fingerprint moves.
 	v1 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
-		SigningKeyVersions: map[string]string{"signing-1": "500"}})
+		SigningKeyFingerprints: map[string]string{"signing-1": "fp-a"}})
 	v1again := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
-		SigningKeyVersions: map[string]string{"signing-1": "500"}})
+		SigningKeyFingerprints: map[string]string{"signing-1": "fp-a"}})
 	v2 := authHash(&ResolvedAuthInfo{Spec: auth, SigningKeys: keys, AdminSecretVersion: "1000",
-		SigningKeyVersions: map[string]string{"signing-1": "501"}})
+		SigningKeyFingerprints: map[string]string{"signing-1": "fp-b"}})
 
 	if v1 != v1again {
-		t.Errorf("authHash not stable for identical SigningKeyVersions: %q vs %q", v1, v1again)
+		t.Errorf("authHash not stable for identical SigningKeyFingerprints: %q vs %q", v1, v1again)
 	}
 	if v1 == v2 {
-		t.Error("authHash did not change when a signing key's Secret ResourceVersion changed; a same-kid reissue would never roll engines (split-brain)")
+		t.Error("authHash did not change when a signing key's public-key fingerprint changed; a same-kid key replacement would never roll engines (split-brain)")
 	}
 }
 

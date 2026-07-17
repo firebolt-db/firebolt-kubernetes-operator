@@ -1240,24 +1240,27 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// existence here would only produce a spurious failure during
 		// that window.
 		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
-		signingVersions := make(map[string]string, len(renderKeys))
+		signingFPs := make(map[string]string, len(renderKeys))
 		for _, k := range renderKeys {
-			// Capture the signing Secret's ResourceVersion (not its bytes) and
-			// fold it into authHash so a same-name/same-kid reissue rolls the
-			// fleet — see ResolvedAuthInfo.SigningKeyVersions. enginesConvergedOn
-			// performs the identical read so the rotation gate stays matchable.
-			rv, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, k.SecretName, corev1.TLSPrivateKeyKey, "signing key secret")
+			// Capture the signing key's public-key fingerprint (not its bytes)
+			// and fold it into authHash so a genuine same-kid key replacement
+			// rolls the fleet, while a cert-only reissuance that reuses the key
+			// does not — see ResolvedAuthInfo.SigningKeyFingerprints.
+			// enginesConvergedOn performs the identical read so the rotation gate
+			// stays matchable. The read also confirms tls.key is present, the same
+			// existence gate the previous ResourceVersion read provided.
+			fp, err := signingKeyFingerprint(ctx, r.Client, engine.Namespace, k.SecretName)
 			if err != nil {
 				return InstanceInfo{}, err
 			}
-			signingVersions[k.ID] = rv
+			signingFPs[k.ID] = fp
 		}
 
 		info.Auth = &ResolvedAuthInfo{
-			Spec:               inst.Spec.Auth,
-			SigningKeys:        renderKeys,
-			AdminSecretVersion: adminRV,
-			SigningKeyVersions: signingVersions,
+			Spec:                   inst.Spec.Auth,
+			SigningKeys:            renderKeys,
+			AdminSecretVersion:     adminRV,
+			SigningKeyFingerprints: signingFPs,
 		}
 	}
 
@@ -1283,6 +1286,26 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 
 		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
 
+		// Read the current generation's serving-certificate Secret once. It drives
+		// two independent signals below: its tls.crt is the FB-896 #1 serving-cert
+		// drift fingerprint (a cert-manager re-issuance of the served leaf must
+		// roll a new generation, since packdb reads the cert only at startup), and
+		// its ca.crt is the FB-896 #4 trust-bundle cutover gate. A NotFound is
+		// benign — the fresh generation's cert is not written yet, or engine TLS
+		// was just enabled — leaving both signals at their empty/vacuous default.
+		gen := engine.Status.CurrentGeneration
+		var genSecret corev1.Secret
+		genSecretName := genResourceName(engine.Name, gen, SuffixEngineTLS)
+		genErr := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: genSecretName}, &genSecret)
+		if genErr != nil && !errors.IsNotFound(genErr) {
+			return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s: %w", gen, genSecretName, genErr)
+		}
+		if genErr == nil {
+			if crt := genSecret.Data[corev1.TLSCertKey]; len(crt) > 0 {
+				info.TLS.ServingCertFP = caFingerprint(string(crt))
+			}
+		}
+
 		// FB-896 #4 cutover gate: the gateway must already trust THIS engine's
 		// current-generation certificate CA before its Service selector may flip
 		// to that generation (see computeCreating). Confirm the generation cert's
@@ -1305,16 +1328,9 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// simply waits. Same-CA rollouts find their CA already present.
 		if !engineUpstreamTLSReady(inst) {
 			info.EngineTrustBundleReady = true
-		} else {
-			gen := engine.Status.CurrentGeneration
-			var genSecret corev1.Secret
-			genSecretName := genResourceName(engine.Name, gen, SuffixEngineTLS)
-			if err := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: genSecretName}, &genSecret); err == nil {
-				if ca := genSecret.Data[engineTLSCASecretKey]; len(ca) > 0 {
-					info.EngineTrustBundleReady = slices.Contains(inst.Status.RolledEngineTrustCAs, caFingerprint(string(ca)))
-				}
-			} else if !errors.IsNotFound(err) {
-				return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s for trust-bundle cutover gate: %w", gen, genSecretName, err)
+		} else if genErr == nil {
+			if ca := genSecret.Data[engineTLSCASecretKey]; len(ca) > 0 {
+				info.EngineTrustBundleReady = slices.Contains(inst.Status.RolledEngineTrustCAs, caFingerprint(string(ca)))
 			}
 		}
 	}

@@ -14834,7 +14834,7 @@
           "description": "TLS configures TLS termination on the gateway's client-facing\nlistener and on each engine's own listeners.",
           "properties": {
             "engine": {
-              "description": "Engine configures TLS termination on each engine's HTTP and\nPostgres-wire listeners.\n\nThe cert-manager issuerRef is immutable while engine TLS stays enabled,\nenforced here at the API server (via the transition rule below) so it\nholds even when the validating webhook is disabled \u2014 the shipped Helm\ndefault. Reissuing per-generation engine certificates under a new CA\nwhile the gateway still trusts the old anchor (Status.EngineTLS) would\nfail every upstream handshake mid-roll. The rule is field-scoped to the\nengine listener so it does NOT freeze the gateway issuer, which shares\nthe TLSListenerSpec/CertManagerSpec types. It permits the initial enable\nand a disable/re-enable (fresh certs, no overlap) \u2014 only an in-place\nissuer change while continuously enabled is rejected. Key algorithm/size\nmay still change (tlsHash reissues per generation); only the issuer is\nfrozen. The webhook re-checks this with a clearer message.\n\nThe rule intentionally does not fire across a certManager\u21c4secretRef\nswitch (the has(...) guards): that changes the resolved Secret name,\nwhich tlsHash folds, so it rolls the fleet through the normal\nconvergence-gated path. Only a same-Secret issuerRef swap needs freezing,\nbecause tlsHash cannot see it (issuerRef is deliberately not folded).",
+              "description": "Engine configures TLS termination on each engine's HTTP and\nPostgres-wire listeners.\n\nThe cert-manager issuerRef is immutable while engine TLS stays enabled,\nenforced here at the API server (via the transition rule below) so it\nholds even when the validating webhook is disabled \u2014 the shipped Helm\ndefault. Reissuing per-generation engine certificates under a new CA\nwhile the gateway still trusts the old anchor (Status.EngineTLS) would\nfail every upstream handshake mid-roll. The rule is field-scoped to the\nengine listener so it does NOT freeze the gateway issuer, which shares\nthe TLSListenerSpec/CertManagerSpec types. It permits the initial enable\nand a disable/re-enable (fresh certs, no overlap) \u2014 only an in-place\nissuer change while continuously enabled is rejected.\n\nThe cert-manager key algorithm/size are likewise immutable while engine\nTLS stays enabled (second rule below). The stable-name anchor Certificate\n(Status.EngineTLS) carries the same key policy under rotationPolicy:Never,\nso cert-manager reuses its existing private key on every reissue and will\nNOT regenerate it to match a changed algorithm/size \u2014 the Certificate\nsilently keeps the old key or never goes Ready for the new spec. The\nper-generation serving cert would pick up a new algorithm/size on its own\n(a fresh Secret name each generation), but the anchor it shares an issuer\nwith would not, so an in-place edit still wedges engine TLS; freeze while\nenabled and permit it across a disable/re-enable (fresh key material).\n\nBoth rules intentionally do not fire across a certManager\u21c4secretRef switch\n(the has(...) guards): that changes the resolved Secret name, which tlsHash\nfolds, so it rolls the fleet through the normal convergence-gated path.\nOnly same-Secret issuer/key-param swaps need freezing, because tlsHash\ncannot see them (issuerRef/algorithm/size are deliberately not folded\nacross the anchor). The webhook re-checks both with clearer messages.",
               "properties": {
                 "certManager": {
                   "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
@@ -14929,12 +14929,16 @@
                 {
                   "message": "spec.tls.engine.certManager.issuerRef is immutable while engine TLS is enabled: reissuing engine certificates under a new CA while the gateway still trusts the old anchor would break every upstream handshake. Disable engine TLS or recreate the Instance to change the issuer.",
                   "rule": "!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.issuerRef.name == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind == oldSelf.certManager.issuerRef.kind)"
+                },
+                {
+                  "message": "spec.tls.engine.certManager algorithm/size is immutable while engine TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name anchor key to match, wedging the certificate. Disable engine TLS or recreate the Instance to change the key parameters.",
+                  "rule": "!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.algorithm == oldSelf.certManager.algorithm && self.certManager.size == oldSelf.certManager.size)"
                 }
               ],
               "additionalProperties": false
             },
             "gateway": {
-              "description": "Gateway configures TLS termination on the Envoy gateway's\nclient-facing listener.",
+              "description": "Gateway configures TLS termination on the Envoy gateway's\nclient-facing listener.\n\nThe cert-manager key algorithm/size are immutable while gateway TLS stays\nenabled: the gateway serving Certificate has a stable Secret name under\nrotationPolicy:Never, so cert-manager reuses its existing key on reissue\nand will not regenerate it to match a changed algorithm/size \u2014 the\nCertificate wedges. A disable/re-enable (fresh key material) is permitted.\nThe rule is field-scoped to the gateway listener (the shared\nTLSListenerSpec/CertManagerSpec types are not frozen struct-wide), skips a\ncertManager\u21c4secretRef switch (has(...) guards), and the webhook re-checks\nit with a clearer message. Unlike the engine listener the gateway issuer is\nNOT frozen: reissuing the client cert under a new CA is a valid rotation\n(clients update their trust store) and reuses the same key, so it does not\nwedge.",
               "properties": {
                 "certManager": {
                   "description": "CertManager configures the cert-manager Certificate used to\nprovision this listener's server certificate. Provide exactly one of\nCertManager or SecretRef when Enabled is true.",
@@ -15025,6 +15029,12 @@
                 }
               },
               "type": "object",
+              "x-kubernetes-validations": [
+                {
+                  "message": "spec.tls.gateway.certManager algorithm/size is immutable while gateway TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name key to match, wedging the certificate. Disable gateway TLS or recreate the Instance to change the key parameters.",
+                  "rule": "!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.algorithm == oldSelf.certManager.algorithm && self.certManager.size == oldSelf.certManager.size)"
+                }
+              ],
               "additionalProperties": false
             }
           },
@@ -15072,9 +15082,9 @@
                     "description": "ID is the key identifier rendered as the JWT \"kid\" and as\ninstance.auth.local.signing_keys[].id on every engine.",
                     "type": "string"
                   },
-                  "observedCertRevision": {
-                    "description": "ObservedCertRevision witnesses the cert-manager Certificate revision\n(Certificate.Status.Revision) this key's material was last observed at.\nIt is recorded, never the key bytes \u2014 hashing secret material would trip\nweak-sensitive-data-hashing static analysis and the revision already\nchanges on every re-issuance. cert-manager increments the revision each\ntime it re-issues (e.g. after the Secret is deleted, or its bytes are\nedited in place), which \u2014 because signing Secrets use rotationPolicy:Never\nand the operator only ever re-issues by minting a NEW kid \u2014 means a bump\non an existing key is an *unexpected* regeneration of the material under a\nstable kid: a hazard, since the destroyed old key can no longer validate\ntokens it signed. The operator surfaces such a bump as a Warning Event and\nre-records the value here (FB-896 #3); the round-5 signing-Secret\nResourceVersion folded into authHash separately re-converges the fleet\nonto the new material. Nil until first observed.",
-                    "type": "integer"
+                  "observedPublicKeyFingerprint": {
+                    "description": "ObservedPublicKeyFingerprint witnesses the identity of this key's material\nunder its STABLE kid: the hex SHA-256 of the SubjectPublicKeyInfo parsed\nfrom the key's tls.crt (see signingKeyPublicKeyFingerprint). Only the\npublic key is fingerprinted \u2014 never the private key bytes, which would trip\nweak-sensitive-data-hashing static analysis. It keys off the public KEY\nrather than the Certificate revision because, under rotationPolicy:Never, a\ncert-only reissuance (an issuer-capped lifetime, or a manual `cmctl renew`)\nbumps Certificate.Status.Revision while reusing the private key \u2014 so a\nrevision bump does NOT mean the key changed. The operator itself only ever\nre-issues by minting a NEW kid, so a fingerprint change on an EXISTING kid\nis a genuine, unexpected key replacement: a hazard, since the destroyed old\nkey can no longer validate tokens it signed. The operator surfaces such a\nchange as a Warning Event and re-records it here (FB-896 #4). Nil until\nfirst observed. A pointer (like the ObservedCertRevision it replaced) keeps\nSigningKeyStatus compact \u2014 a value string would push the struct past\ngocritic's rangeValCopy threshold for every loop that ranges these keys.",
+                    "type": "string"
                   },
                   "phase": {
                     "description": "Phase is this key's current role \u2014 see SigningKeyPhase. Unset\n(empty string) is treated as Active for compatibility with\nInstances that provisioned their one signing key before this field\nexisted; the controller normalizes it to Active explicitly on the\nnext reconcile.",

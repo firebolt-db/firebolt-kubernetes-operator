@@ -538,6 +538,28 @@ type FireboltEngineStatus struct {
 	// +optional
 	ObservedEngineTLSHash string `json:"observedEngineTLSHash,omitempty"`
 
+	// ObservedEngineServingCertFP is the fingerprint of the serving-certificate
+	// tls.crt the current stable generation was last confirmed on, recorded once
+	// a reconcile finds the generation stable (FB-896 #1). ObservedEngineServingCertGen
+	// records which generation that fingerprint belongs to. computeStable treats a
+	// changed fingerprint as an in-place re-issuance — and rolls a fresh
+	// generation so running pods stop serving the stale leaf — ONLY when the
+	// recorded generation equals the current one. Every new generation issues its
+	// own certificate (a fresh key), so its fingerprint legitimately differs from
+	// the prior generation's; without the generation guard, an ordinary
+	// spec-driven roll would look like a re-issuance and roll forever. A
+	// coordinated re-issuance roll cuts over through the #4 trust-bundle gate.
+	// Empty/zero when engine TLS is disabled or no generation has stabilized yet;
+	// first observation (empty fingerprint) records without rolling. tls.crt is a
+	// public certificate.
+	// +optional
+	ObservedEngineServingCertFP string `json:"observedEngineServingCertFP,omitempty"`
+
+	// ObservedEngineServingCertGen is the generation ObservedEngineServingCertFP
+	// was observed at — see that field. Zero when unset.
+	// +optional
+	ObservedEngineServingCertGen int `json:"observedEngineServingCertGen,omitempty"`
+
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

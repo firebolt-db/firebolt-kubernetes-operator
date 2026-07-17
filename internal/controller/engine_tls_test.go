@@ -426,6 +426,37 @@ func TestResolveInstanceInfo_TLSReadyAndSecretPresentPopulatesTLS(t *testing.T) 
 	}
 }
 
+// TestResolveInstanceInfo_PopulatesServingCertFP covers FB-896 #1: the current
+// generation's serving-certificate fingerprint is read live from its tls.crt so
+// computeStable can detect a cert-manager re-issuance and roll a new generation.
+// It is read regardless of whether the gateway is re-encrypting upstream (unlike
+// the trust-bundle gate), since a stale serving cert is a hazard even before the
+// fleet finishes cutting over.
+func TestResolveInstanceInfo_PopulatesServingCertFP(t *testing.T) {
+	sch := authGatingTestScheme(t)
+	engine := engineForAuthFixture()
+	engine.Status.CurrentGeneration = 3
+	certPEM := []byte("current-generation-serving-cert")
+	genSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace},
+		Data:       map[string][]byte{corev1.TLSCertKey: certPEM},
+	}
+	inst := engineTLSEnabledInstanceFixture(true, &computev1alpha1.EngineTLSStatus{SecretName: "test-instance-engine-tls"})
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture(), genSecret).Build()
+	r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
+
+	info, err := r.resolveInstanceInfo(context.Background(), engine)
+	if err != nil {
+		t.Fatalf("resolveInstanceInfo: %v", err)
+	}
+	if info.TLS == nil {
+		t.Fatal("info.TLS is nil, want populated")
+	}
+	if want := caFingerprint(string(certPEM)); info.TLS.ServingCertFP != want {
+		t.Errorf("ServingCertFP = %q, want %q (fingerprint of the current generation's tls.crt)", info.TLS.ServingCertFP, want)
+	}
+}
+
 // TestResolveInstanceInfo_EngineTrustBundleGate covers the FB-896 #4 cutover
 // correlation seam: resolveInstanceInfo sets EngineTrustBundleReady only when
 // THIS engine's current-generation certificate CA fingerprint appears in the

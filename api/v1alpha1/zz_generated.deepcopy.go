@@ -719,6 +719,11 @@ func (in *FireboltInstanceStatus) DeepCopyInto(out *FireboltInstanceStatus) {
 		*out = new(GatewayTLSStatus)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.RolledEngineTrustCAs != nil {
+		in, out := &in.RolledEngineTrustCAs, &out.RolledEngineTrustCAs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))
@@ -1079,6 +1084,11 @@ func (in *SigningKeyPolicy) DeepCopy() *SigningKeyPolicy {
 func (in *SigningKeyStatus) DeepCopyInto(out *SigningKeyStatus) {
 	*out = *in
 	in.CreatedAt.DeepCopyInto(&out.CreatedAt)
+	if in.ObservedPublicKeyFingerprint != nil {
+		in, out := &in.ObservedPublicKeyFingerprint, &out.ObservedPublicKeyFingerprint
+		*out = new(string)
+		**out = **in
+	}
 	if in.DemotedAt != nil {
 		in, out := &in.DemotedAt, &out.DemotedAt
 		*out = (*in).DeepCopy()
