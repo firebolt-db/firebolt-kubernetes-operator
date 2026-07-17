@@ -33,11 +33,13 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 	const ns = "default"
 	ctx := context.Background()
 
-	engineTLS := func(issuer string) *computev1alpha1.TLSListenerSpec {
+	// A TLS listener enabled with issuer "ca-a"; tests move it to "ca-b" via the
+	// mutate hook. Reused for both the engine and gateway listeners.
+	enabledListener := func() *computev1alpha1.TLSListenerSpec {
 		return &computev1alpha1.TLSListenerSpec{
 			Enabled: true,
 			CertManager: &computev1alpha1.CertManagerSpec{
-				IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: issuer, Kind: "ClusterIssuer"},
+				IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "ca-a", Kind: "ClusterIssuer"},
 			},
 		}
 	}
@@ -68,7 +70,7 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 	}
 
 	It("rejects changing the engine issuerRef while engine TLS stays enabled", func() {
-		inst := mkInstance("cel-engine-issuer-frozen", engineTLS("ca-a"), nil)
+		inst := mkInstance("cel-engine-issuer-frozen", enabledListener(), nil)
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
@@ -80,7 +82,7 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 	})
 
 	It("allows changing the engine issuerRef in the same update that disables engine TLS", func() {
-		inst := mkInstance("cel-engine-issuer-disable", engineTLS("ca-a"), nil)
+		inst := mkInstance("cel-engine-issuer-disable", enabledListener(), nil)
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
@@ -93,7 +95,7 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 	})
 
 	It("allows changing the engine key size while enabled (only the issuer is frozen)", func() {
-		inst := mkInstance("cel-engine-size-mutable", engineTLS("ca-a"), nil)
+		inst := mkInstance("cel-engine-size-mutable", enabledListener(), nil)
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
@@ -103,7 +105,7 @@ var _ = Describe("FireboltInstance engine TLS issuerRef immutability (CEL, webho
 	})
 
 	It("does NOT freeze the gateway issuerRef (the rule is engine-scoped)", func() {
-		inst := mkInstance("cel-gateway-issuer-mutable", nil, engineTLS("ca-a"))
+		inst := mkInstance("cel-gateway-issuer-mutable", nil, enabledListener())
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
