@@ -508,11 +508,12 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	// per-generation TLS Secret orphans once the engine is gone. Delete both by
 	// label, Certificate before Secret (a live Certificate recreates a deleted
 	// target Secret — see instance_controller.go's reconcileDelete). The
-	// Certificate List tolerates a missing cert-manager CRD (envtest installs
-	// none); with no CRD, no such certs/secrets can exist.
+	// Certificate List tolerates the Certificate kind being unavailable to this
+	// client (certKindUnavailable) — either its CRD isn't installed or the type
+	// isn't in the client scheme — in which case no such certs/secrets exist.
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
-		if !apimeta.IsNoMatchError(err) {
+		if !certKindUnavailable(err) {
 			log.Error(err, "Failed to list Certificates for cleanup")
 			errs = append(errs, err)
 		}
@@ -555,6 +556,20 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 
 	log.Info("Finalizer removed, deletion complete")
 	return nil
+}
+
+// certKindUnavailable reports whether a List/Get for cert-manager Certificates
+// failed only because the Certificate kind is unavailable to this client —
+// either its CRD isn't installed (IsNoMatchError, e.g. envtest, which installs
+// no cert-manager CRDs) or the type isn't registered in the client's scheme
+// (IsNotRegisteredError, e.g. a fake-client unit test with a minimal scheme).
+// Both mean no Certificates can exist for this client, so there is nothing to
+// reclaim. In production the operator registers certmanagerv1 and, wherever
+// engine TLS is used, cert-manager is installed — so neither fires, and a
+// genuinely missing registration would already have failed Certificate creation
+// (ensureEngineTLSCert) loudly, long before deletion.
+func certKindUnavailable(err error) bool {
+	return apimeta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err)
 }
 
 // appendExternalFinalizer adds obj to the report iff it carries one or

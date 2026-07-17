@@ -23,7 +23,6 @@ import (
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -139,7 +138,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	// per-generation certs/secrets can exist at all.
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList, ns, engineLabels); err != nil {
-		if !apimeta.IsNoMatchError(err) {
+		if !certKindUnavailable(err) {
 			log.Error(err, "GC: failed to list Certificates")
 			return
 		}
