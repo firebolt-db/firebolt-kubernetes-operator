@@ -1254,6 +1254,33 @@ func (r *FireboltInstanceReconciler) gatewayConfigHash(ctx context.Context, inst
 	return contentHash(configHashInput), nil
 }
 
+// gatewayRollingUpdateStrategy picks the gateway Deployment's rollout strategy.
+// While the gateway is fail-closed pending a tighter posture
+// (gatewayDownstreamTLSPending — TLS enabled but Status.GatewayTLS not yet
+// populated: an enable, a one-way→mTLS or client-CA-swap staging step, or a
+// missing client-CA) it drops old pods to zero endpoints BEFORE new fail-closed
+// pods start (MaxUnavailable=100%, MaxSurge=0). Otherwise it uses the
+// zero-downtime default (MaxUnavailable=0, MaxSurge=25%).
+//
+// FB-896 #1: the client-facing Service has one selector and old Ready pods stay
+// endpoints under MaxUnavailable=0, so a plain rolling update to the fail-closed
+// config keeps the looser listener serving throughout the roll (fail-open).
+// Forcing old pods out first trades that for a brief reject-all
+// (connection-refused) window — the accepted posture for a deliberate tighten. A
+// fresh gateway (no old pods) sees only a harmless 0→N create; the subsequent
+// fail-closed→secure roll runs zero-downtime because fail-closed pods reject
+// during it, so there is no fail-open left to guard against.
+func gatewayRollingUpdateStrategy(instance *computev1alpha1.FireboltInstance) *appsv1.RollingUpdateDeployment {
+	if gatewayDownstreamTLSPending(instance) {
+		maxUnavailable := intstr.FromString("100%")
+		maxSurge := intstr.FromInt32(0)
+		return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+	}
+	maxUnavailable := intstr.FromInt32(0)
+	maxSurge := intstr.FromString("25%")
+	return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+}
+
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
@@ -1271,9 +1298,6 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		return err
 	}
 
-	maxSurge := intstr.FromString("25%")
-	maxUnavailable := intstr.FromInt32(0)
-
 	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
 
 	desired := &appsv1.Deployment{
@@ -1287,11 +1311,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &maxUnavailable,
-					MaxSurge:       &maxSurge,
-				},
+				Type:          appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: gatewayRollingUpdateStrategy(instance),
 			},
 			Template: podTemplate,
 		},

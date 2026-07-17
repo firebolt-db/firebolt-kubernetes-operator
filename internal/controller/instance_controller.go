@@ -243,10 +243,11 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// ResourceVersion into the config hash. Same failure-isolation as the TLS
 	// steps: a failure leaves the previous bundle in place rather than blocking.
 	// The returned fingerprints are published to Status.RolledEngineTrustCAs
-	// after Step 4, but only once the gateway has actually rolled the bundle out.
-	engineTrustCAFingerprints, err := r.ensureEngineCABundle(ctx, instance)
-	if err != nil {
-		log.Error(err, "Failed to ensure engine CA bundle")
+	// after Step 4, but only once the gateway has actually rolled the bundle out —
+	// and only when assembly succeeded (see the bundleErr guard there).
+	engineTrustCAFingerprints, bundleErr := r.ensureEngineCABundle(ctx, instance)
+	if bundleErr != nil {
+		log.Error(bundleErr, "Failed to ensure engine CA bundle")
 	}
 
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
@@ -333,7 +334,9 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			"Provisioning", "gateway Deployment has no ready replicas yet")
 	}
 
-	r.publishRolledEngineTrustCAs(ctx, instance, engineTrustCAFingerprints)
+	// FB-896 #6: publishRolledEngineTrustCAs preserves the prior confirmed set
+	// when assembly failed (bundleErr != nil), rather than clobbering it with nil.
+	r.publishRolledEngineTrustCAs(ctx, instance, engineTrustCAFingerprints, bundleErr)
 
 	setInstanceReadyRollup(instance)
 	instance.Status.Phase = r.computePhase(instance)
@@ -353,7 +356,18 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // (gatewayServingCurrentConfig): mid-roll the old pods still serve the previous
 // (subset) bundle, so keeping the last-confirmed set is the safe floor. It is
 // cleared when engine upstream TLS is not engaged — the gate is then vacuous.
-func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Context, instance *computev1alpha1.FireboltInstance, fingerprints []string) {
+//
+// bundleErr is the error from assembling the bundle (ensureEngineCABundle). When
+// it is non-nil the fingerprints are nil but the previous bundle Secret and
+// gateway Deployment may still match and be fully serving, so this preserves the
+// last-confirmed set rather than clobbering it — otherwise a transient assembly
+// error would wrongly block engine cutovers the gateway can still serve
+// (FB-896 #6). ensureEngineCABundle returns (nil, nil) when engine upstream TLS
+// is not engaged, so the clear-on-disable path below still runs in that case.
+func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Context, instance *computev1alpha1.FireboltInstance, fingerprints []string, bundleErr error) {
+	if bundleErr != nil {
+		return
+	}
 	if !engineUpstreamTLSReady(instance) {
 		instance.Status.RolledEngineTrustCAs = nil
 		return
@@ -630,12 +644,20 @@ func setInstanceCondition(
 //
 // EngineTLSReady and GatewayTLSReady are part of the roll-up (they report
 // True with reason "Disabled" when their feature is off, so they never
-// block a non-TLS instance): when TLS is requested the Instance must not
-// advertise Ready until the certificate is issued, or it would report
-// Ready while the gateway is still serving/​re-encrypting in plaintext
-// during cert provisioning. There is no deadlock — cert-manager issues
-// the certificates independently, and engines gate their own reconcile on
-// Status.EngineTLS directly rather than on this top-level condition.
+// block a non-TLS instance). When TLS is requested the Instance must not
+// advertise Ready until the requested secure path is actually serving, not
+// merely provisioned:
+//   - EngineTLSReady is convergence-gated (FB-896 #4): True only once the
+//     engine fleet has rolled onto TLS and the gateway is re-encrypting
+//     upstream, so the Instance never reports Ready over a plaintext hop.
+//   - GatewayTLSReady is serving-gated (FB-896 #5): True only once the secure
+//     client-facing listener has actually rolled out, so the Instance never
+//     reports Ready while the client port still rejects.
+//
+// There is no deadlock — cert-manager issues the certificates independently,
+// and engines gate their own reconcile on the provisioned Status.EngineTLS
+// directly (resolveInstanceInfo), NOT on the convergence-gated EngineTLSReady
+// condition, so the enable ramp still produces the convergence that flips it.
 func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	components := []string{
 		computev1alpha1.InstanceConditionMetadataReady,

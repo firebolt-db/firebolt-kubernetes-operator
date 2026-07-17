@@ -15204,6 +15204,10 @@
         "gatewayTLS": {
           "description": "GatewayTLS reports the crypto material the operator has provisioned\nfor the gateway's downstream (client-facing) TLS listener. Nil when\nspec.tls.gateway is unset or disabled.",
           "properties": {
+            "clientCAFingerprint": {
+              "description": "ClientCAFingerprint is the SHA-256 fingerprint (hex) of the client CA's\nca.crt that the mutual-TLS listener is currently serving \u2014 recorded so the\ncontroller can detect a client-CA *replacement* (CA-A\u2192CA-B) that keeps the\nmode MutualTLS but retires trust in the old CA. Such a swap is a tightening\ntransition even though the posture ordinal is unchanged, and must stage a\nfail-closed rollout so old pods stop accepting the retired CA's clients (see\nFB-896 #2). Empty for one-way TLS (no client CA) and while pending. ca.crt\nis a public certificate, so fingerprinting it raises no\nweak-sensitive-data-hashing concern.",
+              "type": "string"
+            },
             "createdAt": {
               "description": "CreatedAt is when this certificate was provisioned.",
               "format": "date-time",

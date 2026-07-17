@@ -94,6 +94,65 @@ func TestGatewayRolloutComplete(t *testing.T) {
 	})
 }
 
+// TestGatewayRollingUpdateStrategy covers FB-896 #1: while the gateway is
+// fail-closed pending a tighter posture (gatewayDownstreamTLSPending), the
+// rollout must drop old pods to zero endpoints before new ones start
+// (MaxUnavailable=100%, MaxSurge=0) so the looser listener cannot keep serving
+// during the roll (fail-open). Every other state — disabled, or already serving
+// a populated posture — keeps the zero-downtime default (MaxUnavailable=0,
+// MaxSurge=25%).
+func TestGatewayRollingUpdateStrategy(t *testing.T) {
+	enabledGateway := &computev1alpha1.TLSListenerSpec{
+		Enabled:   true,
+		SecretRef: &corev1.LocalObjectReference{Name: "gw-tls"},
+	}
+	cases := []struct {
+		name           string
+		spec           *computev1alpha1.TLSSpec
+		served         *computev1alpha1.GatewayTLSStatus
+		wantMaxUnavail string
+		wantMaxSurge   string
+	}{
+		{
+			name:           "pending fail-closed tighten drains old pods first",
+			spec:           &computev1alpha1.TLSSpec{Gateway: enabledGateway},
+			served:         nil, // Status.GatewayTLS nil while enabled ⇒ pending
+			wantMaxUnavail: "100%",
+			wantMaxSurge:   "0",
+		},
+		{
+			name:           "already serving secure ⇒ zero-downtime",
+			spec:           &computev1alpha1.TLSSpec{Gateway: enabledGateway},
+			served:         &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls", Mode: computev1alpha1.GatewayTLSModeOneWay},
+			wantMaxUnavail: "0",
+			wantMaxSurge:   "25%",
+		},
+		{
+			name:           "gateway TLS disabled ⇒ zero-downtime",
+			spec:           nil,
+			served:         nil,
+			wantMaxUnavail: "0",
+			wantMaxSurge:   "25%",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &computev1alpha1.FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+				Spec:       computev1alpha1.FireboltInstanceSpec{TLS: tc.spec},
+				Status:     computev1alpha1.FireboltInstanceStatus{GatewayTLS: tc.served},
+			}
+			s := gatewayRollingUpdateStrategy(inst)
+			if got := s.MaxUnavailable.String(); got != tc.wantMaxUnavail {
+				t.Errorf("MaxUnavailable = %q, want %q", got, tc.wantMaxUnavail)
+			}
+			if got := s.MaxSurge.String(); got != tc.wantMaxSurge {
+				t.Errorf("MaxSurge = %q, want %q", got, tc.wantMaxSurge)
+			}
+		})
+	}
+}
+
 // TestGatewayTLSSecretVersions covers FB-896 findings #2/#5/#6: an in-place
 // bring-your-own cert rotation must roll the gateway (#5); the fail-closed
 // provisioning window (mTLS configured, client-CA not yet present) must NOT

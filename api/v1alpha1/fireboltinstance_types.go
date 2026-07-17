@@ -1040,6 +1040,18 @@ type GatewayTLSStatus struct {
 	// as one-way TLS, its only possible prior meaning.
 	// +optional
 	Mode string `json:"mode,omitempty"`
+
+	// ClientCAFingerprint is the SHA-256 fingerprint (hex) of the client CA's
+	// ca.crt that the mutual-TLS listener is currently serving — recorded so the
+	// controller can detect a client-CA *replacement* (CA-A→CA-B) that keeps the
+	// mode MutualTLS but retires trust in the old CA. Such a swap is a tightening
+	// transition even though the posture ordinal is unchanged, and must stage a
+	// fail-closed rollout so old pods stop accepting the retired CA's clients (see
+	// FB-896 #2). Empty for one-way TLS (no client CA) and while pending. ca.crt
+	// is a public certificate, so fingerprinting it raises no
+	// weak-sensitive-data-hashing concern.
+	// +optional
+	ClientCAFingerprint string `json:"clientCAFingerprint,omitempty"`
 }
 
 // FireboltInstanceStatus defines the observed state of a Firebolt Instance.

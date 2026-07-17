@@ -1262,14 +1262,16 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 	}
 
 	if inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled {
-		// Mirrors the auth gating above: wait for the instance
-		// controller's own combined readiness signal
-		// (InstanceConditionEngineTLSReady, set in instance_tls.go's
-		// ensureEngineTLS), then re-verify the Secret this engine's pod
-		// is about to mount exists right now.
-		ready := apimeta.IsStatusConditionTrue(inst.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady)
-		if !ready || inst.Status.EngineTLS == nil {
-			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has engine TLS enabled but it is not ready yet", inst.Name)
+		// FB-896 #4: unblock the engine roll on the PROVISIONED fact — the anchor
+		// Secret recorded in Status.EngineTLS (written only once the anchor cert is
+		// Ready, in ensureEngineTLSCertificate) — NOT on
+		// InstanceConditionEngineTLSReady. That condition is now convergence-gated
+		// (True only once the whole fleet is re-encrypting), so gating the roll on
+		// it would deadlock the enable ramp: engines would never roll onto TLS, the
+		// fleet would never converge, and the condition would never flip True. Then
+		// re-verify the Secret this engine's pod is about to mount exists right now.
+		if inst.Status.EngineTLS == nil {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has engine TLS enabled but it is not provisioned yet", inst.Name)
 		}
 		secretName := inst.Status.EngineTLS.SecretName
 		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSCertKey, "engine TLS secret"); err != nil {

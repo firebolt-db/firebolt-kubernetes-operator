@@ -359,13 +359,37 @@ func TestResolveInstanceInfo_TLSDisabled(t *testing.T) {
 
 func TestResolveInstanceInfo_TLSEnabledButNotReadyBlocks(t *testing.T) {
 	sch := authGatingTestScheme(t)
-	inst := engineTLSEnabledInstanceFixture(false, nil) // EngineTLSReady condition absent
+	inst := engineTLSEnabledInstanceFixture(false, nil) // anchor not provisioned (Status.EngineTLS nil)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture()).Build()
 	r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
 
 	_, err := r.resolveInstanceInfo(context.Background(), engineForAuthFixture())
 	if err == nil {
-		t.Fatal("resolveInstanceInfo: expected error when EngineTLSReady is not True, got nil")
+		t.Fatal("resolveInstanceInfo: expected error when Status.EngineTLS is not provisioned, got nil")
+	}
+}
+
+// TestResolveInstanceInfo_UnblocksOnProvisionedNotCondition is the FB-896 #4
+// no-deadlock regression: the engine roll onto TLS must be unblocked by the
+// PROVISIONED fact (Status.EngineTLS populated), NOT by
+// InstanceConditionEngineTLSReady — which is now convergence-gated (True only
+// once the fleet is re-encrypting). If the roll waited on that condition, the
+// first engine could never roll, the fleet could never converge, and the
+// condition could never flip True. Here the condition is deliberately absent
+// (still Converging) yet the anchor is provisioned and the Secret present, so
+// info.TLS must be populated.
+func TestResolveInstanceInfo_UnblocksOnProvisionedNotCondition(t *testing.T) {
+	sch := authGatingTestScheme(t)
+	inst := engineTLSEnabledInstanceFixture(false, &computev1alpha1.EngineTLSStatus{SecretName: "test-instance-engine-tls"})
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(inst, engineTLSSecretFixture()).Build()
+	r := &FireboltEngineReconciler{Client: cli, Scheme: sch, MetricsRecorder: enginemetrics.NoOpEngineRecorder{}}
+
+	info, err := r.resolveInstanceInfo(context.Background(), engineForAuthFixture())
+	if err != nil {
+		t.Fatalf("resolveInstanceInfo: unexpected error with EngineTLSReady absent but provisioned: %v", err)
+	}
+	if info.TLS == nil || info.TLS.SecretName != "test-instance-engine-tls" {
+		t.Errorf("info.TLS = %+v, want populated from Status.EngineTLS regardless of the EngineTLSReady condition", info.TLS)
 	}
 }
 
