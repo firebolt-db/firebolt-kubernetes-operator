@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,148 @@ func TestValidateUpdate_AllowsSameID(t *testing.T) {
 	_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
 	if err != nil {
 		t.Errorf("ValidateUpdate: unexpected error: %v", err)
+	}
+}
+
+// TestValidateUpdate_ImmutableFields covers FB-896 round-4 #1 and #5: the JWT
+// signing algorithm and signing-key size are immutable while auth stays
+// enabled (packdb cannot serve two key curves at once), and the engine TLS
+// issuer is immutable while engine TLS stays enabled (reissuing under a new CA
+// would break the gateway's trust anchor mid-roll). A change made across a
+// disable/re-enable is permitted (fresh key material, no overlap).
+func TestValidateUpdate_ImmutableFields(t *testing.T) {
+	v := &FireboltInstanceCustomValidator{}
+	authEnabled := func(alg, keyAlg string, size int32) *AuthSpec {
+		return &AuthSpec{
+			Enabled: true,
+			Local: &LocalAuthSpec{
+				Admin:            validAdminSpec(),
+				SigningAlgorithm: alg,
+				SigningKeys: &SigningKeyPolicy{
+					CertManager: CertManagerSpec{
+						IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+						Algorithm: keyAlg,
+						Size:      size,
+					},
+				},
+			},
+		}
+	}
+	engineTLS := func(issuer string, size int32) *TLSSpec {
+		return &TLSSpec{
+			Engine: &TLSListenerSpec{
+				Enabled: true,
+				CertManager: &CertManagerSpec{
+					IssuerRef: CertManagerIssuerRef{Name: issuer, Kind: "ClusterIssuer"},
+					Algorithm: "ECDSA",
+					Size:      size,
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(oldInst, newInst *FireboltInstance)
+		wantErrSubstr string // "" => expect no error
+	}{
+		{
+			name: "signingAlgorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+				n.Spec.Auth = authEnabled("ES256", "ECDSA", 256)
+			},
+			wantErrSubstr: "signingAlgorithm",
+		},
+		{
+			name: "signing key size change rejected (RSA family unchanged)",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("RS256", "RSA", 2048)
+				n.Spec.Auth = authEnabled("RS256", "RSA", 4096)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "unchanged auth allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+				n.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+			},
+		},
+		{
+			name: "change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = &AuthSpec{Enabled: false}
+				n.Spec.Auth = authEnabled("ES256", "ECDSA", 256)
+			},
+		},
+		{
+			name: "engine TLS issuerRef change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-2", 384)
+			},
+			wantErrSubstr: "issuerRef",
+		},
+		{
+			name: "engine TLS key size change allowed (issuer unchanged)",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-1", 256)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldInst := &FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}
+			newInst := &FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}
+			tc.mutate(oldInst, newInst)
+			_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
+			if tc.wantErrSubstr == "" {
+				if err != nil {
+					t.Fatalf("ValidateUpdate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateUpdate: expected error containing %q, got nil", tc.wantErrSubstr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("ValidateUpdate error = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
+}
+
+// TestValidatePodTemplate_GatewayClientCAVolumeReserved covers FB-896 round-4
+// #7: "client-ca" is an operator-rendered gateway volume, so a user sidecar
+// may not mount it by that name. Before it joined operatorOwnedGatewayVolumeNames
+// the template passed admission, then the volume was silently dropped at render
+// (mTLS off) or resolved to the operator's CA (mTLS on).
+func TestValidatePodTemplate_GatewayClientCAVolumeReserved(t *testing.T) {
+	template := &corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: GatewayContainerName},
+				{
+					Name:         "extra",
+					VolumeMounts: []corev1.VolumeMount{{Name: GatewayClientCAVolumeName, MountPath: "/x"}},
+				},
+			},
+		},
+	}
+	errs := ValidatePodTemplate(template, field.NewPath("spec", "gateway", "template"), GatewayPodTemplateRules)
+	if len(errs) == 0 {
+		t.Fatalf("expected rejection for a sidecar mounting the reserved %q volume", GatewayClientCAVolumeName)
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), GatewayClientCAVolumeName) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("errors %v do not mention the reserved volume %q", errs, GatewayClientCAVolumeName)
 	}
 }
 

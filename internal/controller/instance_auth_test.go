@@ -728,7 +728,15 @@ func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.
 // active key issued as P-384 whose policy now asks for P-256 cannot be updated
 // in place (rotationPolicy:Never), so the rotation machine must mint a fresh
 // NAMED key carrying the new curve rather than accept the stale key as ready.
-func TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey(t *testing.T) {
+// TestEnsureSigningKeys_AlgSizeDriftDoesNotMint verifies that a change to the
+// signing algorithm/size is NOT migrated in place by minting a fresh key
+// (FB-896 round-4 #1). packdb exposes one global signing_algorithm and cannot
+// serve two key curves at once, so such a change is rejected at admission
+// (validateImmutableSigningKey) rather than migrated. Were the webhook
+// bypassed, the controller must fail static — keep the existing active key —
+// rather than mint a new-curve key that would produce an invalid mixed-curve
+// keyset. This is the inverse of the removed mint-on-drift behavior.
+func TestEnsureSigningKeys_AlgSizeDriftDoesNotMint(t *testing.T) {
 	sch := authTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).Build()
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
@@ -737,7 +745,7 @@ func TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey(t *testing.T) {
 	auth := validAuthSpecForController()
 	auth.Local.SigningAlgorithm = "ES256"
 	auth.Local.SigningKeys.CertManager.Algorithm = "ECDSA"
-	auth.Local.SigningKeys.CertManager.Size = 256 // was P-384
+	auth.Local.SigningKeys.CertManager.Size = 256 // spec now asks for P-256
 
 	instance := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
@@ -760,33 +768,59 @@ func TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey(t *testing.T) {
 		t.Fatalf("seeding active key secret: %v", err)
 	}
 
-	// Reconcile 1: drift detected → mintNextSigningKey applies the signing-2
-	// Certificate but must not append it until its Secret exists.
 	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
-		t.Fatalf("reconcile 1: %v", err)
-	}
-	if got := len(instance.Status.Auth.SigningKeys); got != 1 {
-		t.Fatalf("reconcile 1: SigningKeys has %d entries, want 1 (fresh key pending its Secret)", got)
-	}
-
-	// Reconcile 2: seed signing-2's Secret → the fresh key is appended carrying
-	// the NEW curve (P-256), proving the mint used the current policy.
-	if err := cli.Create(ctx, signingKeySecretFor(instance, "signing-2")); err != nil {
-		t.Fatalf("seeding signing-2 secret: %v", err)
-	}
-	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
-		t.Fatalf("reconcile 2: %v", err)
+		t.Fatalf("ensureSigningKeys: %v", err)
 	}
 	keys := instance.Status.Auth.SigningKeys
-	if len(keys) != 2 {
-		t.Fatalf("reconcile 2: SigningKeys = %+v, want 2 (fresh key minted for the new curve)", keys)
+	if len(keys) != 1 {
+		t.Fatalf("SigningKeys = %+v, want 1 (drift must NOT mint a fresh key)", keys)
 	}
-	newKey := otherSigningKey(keys)
-	if newKey == nil || newKey.ID != "signing-2" {
-		t.Fatalf("reconcile 2: other = %+v, want signing-2", newKey)
+	if active := activeSigningKey(keys); active == nil || active.ID != AuthSigningKeyID ||
+		active.Algorithm != "ECDSA" || active.Size != 384 {
+		t.Errorf("active key = %+v, want the original ECDSA/384 key left unchanged", active)
 	}
-	if newKey.Algorithm != "ECDSA" || newKey.Size != 256 {
-		t.Errorf("fresh key recorded Algorithm/Size = %q/%d, want ECDSA/256", newKey.Algorithm, newKey.Size)
+}
+
+// TestEnsureAuth_DisableRetainsGenerationCounter covers FB-896 round-4 #3:
+// disabling auth must preserve the monotonic SigningKeyGeneration so a later
+// re-enable mints a FRESH generation rather than resetting to 0 and reusing the
+// leftover signing-1 key material (which cert-manager reuses behind the
+// existing Secret name, resurrecting previously-issued tokens).
+func TestEnsureAuth_DisableRetainsGenerationCounter(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+	ctx := context.Background()
+
+	// Instance that has already rotated to generation 2 while enabled.
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec:       computev1alpha1.FireboltInstanceSpec{Auth: &computev1alpha1.AuthSpec{Enabled: false}},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			Auth: &computev1alpha1.AuthStatus{
+				SigningKeyGeneration: 2,
+				SigningKeys: []computev1alpha1.SigningKeyStatus{{
+					ID: signingKeyID(2), Phase: computev1alpha1.SigningKeyActive,
+				}},
+			},
+		},
+	}
+
+	if err := r.ensureAuth(ctx, instance); err != nil {
+		t.Fatalf("ensureAuth (disable): %v", err)
+	}
+	if instance.Status.Auth == nil {
+		t.Fatal("disable nil'd Status.Auth, losing the generation high-water mark")
+	}
+	if got := instance.Status.Auth.SigningKeyGeneration; got != 2 {
+		t.Errorf("SigningKeyGeneration = %d, want 2 preserved across disable", got)
+	}
+	if got := len(instance.Status.Auth.SigningKeys); got != 0 {
+		t.Errorf("SigningKeys not cleared on disable: %d entries", got)
+	}
+	// A subsequent bootstrap (re-enable) must pick generation 3, never 1/2.
+	if got := authStatusGeneration(instance) + 1; got != 3 {
+		t.Errorf("next bootstrap generation = %d, want 3 (fresh, no collision)", got)
 	}
 }
 

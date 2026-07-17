@@ -72,14 +72,106 @@ func (v *FireboltInstanceCustomValidator) ValidateCreate(_ context.Context, inst
 
 // ValidateUpdate validates a FireboltInstance on update.
 func (v *FireboltInstanceCustomValidator) ValidateUpdate(
-	_ context.Context, _, newInst *FireboltInstance,
+	_ context.Context, oldInst, newInst *FireboltInstance,
 ) (admission.Warnings, error) {
 	// spec.id immutability is enforced by CEL on the CRD itself
 	// (XValidation rule="oldSelf == '' || self == oldSelf"), so it works
 	// even when webhooks are disabled. The empty->value transition is
 	// explicitly allowed so the controller fallback can generate and
 	// persist an ID when the defaulting webhook is not active.
-	return nil, validateSpec(newInst).ToAggregate()
+	//
+	// Signing algorithm/size immutability is primarily enforced at the API
+	// server by CEL transition rules (see fireboltinstance_types.go:
+	// LocalAuthSpec.SigningAlgorithm and SigningKeyPolicy.CertManager), so it
+	// holds even if this webhook is bypassed — critical because a bypassed
+	// change would permanently wedge engines (renderAuthConfig reads
+	// signing_algorithm from spec, and there is no in-place migration). The
+	// checks below re-enforce those with a clearer message AND cover the engine
+	// TLS issuerRef, which is NOT CEL-enforced: its key/curve fields live in the
+	// CertManagerSpec struct shared with the gateway-TLS listener, so a
+	// struct-level CEL rule would wrongly freeze the gateway issuer too;
+	// comparing the specific engine path here scopes it exactly.
+	errs := validateSpec(newInst)
+	errs = append(errs, validateImmutableFields(oldInst, newInst)...)
+	return nil, errs.ToAggregate()
+}
+
+// validateImmutableFields rejects in-place changes to key/curve properties that
+// cannot be migrated on a live Instance. Each rule fires only while the owning
+// feature stays continuously enabled across the update: disabling a feature and
+// re-enabling it starts from fresh key material (no overlap with the old key),
+// so a change made across that gap is safe and is permitted — only an in-place
+// edit while the feature is continuously enabled is rejected.
+func validateImmutableFields(oldInst, newInst *FireboltInstance) field.ErrorList {
+	var errs field.ErrorList
+	errs = append(errs, validateImmutableSigningKey(oldInst, newInst)...)
+	errs = append(errs, validateImmutableEngineTLSIssuer(oldInst, newInst)...)
+	return errs
+}
+
+// authLocalEnabled reports whether the local auth server (which owns the JWT
+// signing key) is enabled and configured on inst.
+func authLocalEnabled(inst *FireboltInstance) bool {
+	return inst.Spec.Auth != nil && inst.Spec.Auth.Enabled && inst.Spec.Auth.Local != nil
+}
+
+// validateImmutableSigningKey freezes the JWT signing algorithm and the signing
+// key size while auth stays enabled. packdb exposes a single global
+// signing_algorithm and derives each key's curve from it (the config schema has
+// no per-key algorithm field), so it can never serve two curves at once —
+// changing either in place would roll engines onto a signing_algorithm their
+// mounted key no longer matches, producing an invalid JWKS. There is no safe
+// in-place migration; the change must go through a disable/re-enable (fresh
+// key) or a new Instance.
+func validateImmutableSigningKey(oldInst, newInst *FireboltInstance) field.ErrorList {
+	if !authLocalEnabled(oldInst) || !authLocalEnabled(newInst) {
+		return nil
+	}
+	oldLocal, newLocal := oldInst.Spec.Auth.Local, newInst.Spec.Auth.Local
+	base := field.NewPath("spec", "auth", "local")
+	var errs field.ErrorList
+	if oldLocal.SigningAlgorithm != newLocal.SigningAlgorithm {
+		errs = append(errs, field.Invalid(base.Child("signingAlgorithm"), newLocal.SigningAlgorithm,
+			"is immutable while auth is enabled: packdb uses one global signing algorithm and "+
+				"cannot serve two key curves at once, so changing it in place would break token "+
+				"validation. Disable auth (or recreate the Instance) to change it."))
+	}
+	if oldLocal.SigningKeys != nil && newLocal.SigningKeys != nil &&
+		oldLocal.SigningKeys.CertManager.Size != newLocal.SigningKeys.CertManager.Size {
+		errs = append(errs, field.Invalid(base.Child("signingKeys", "certManager", "size"),
+			newLocal.SigningKeys.CertManager.Size,
+			"is immutable while auth is enabled (same reason as signingAlgorithm): disable auth "+
+				"or recreate the Instance to change the signing key size."))
+	}
+	return errs
+}
+
+// engineTLSCertManaged reports whether engine TLS is enabled and provisioned via
+// cert-manager on inst (bring-your-own is rejected for the engine listener).
+func engineTLSCertManaged(inst *FireboltInstance) bool {
+	return inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled &&
+		inst.Spec.TLS.Engine.CertManager != nil
+}
+
+// validateImmutableEngineTLSIssuer freezes the engine TLS issuer while engine
+// TLS stays enabled. Reissuing per-generation engine certificates under a new
+// CA while the gateway still trusts the old CA anchor (Status.EngineTLS) would
+// fail every upstream handshake mid-roll. Key algorithm/size may still change
+// (tlsHash folds them, reissuing per generation) — only the issuer is frozen.
+func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.ErrorList {
+	if !engineTLSCertManaged(oldInst) || !engineTLSCertManaged(newInst) {
+		return nil
+	}
+	oldRef := oldInst.Spec.TLS.Engine.CertManager.IssuerRef
+	newRef := newInst.Spec.TLS.Engine.CertManager.IssuerRef
+	if oldRef.Name == newRef.Name && oldRef.Kind == newRef.Kind {
+		return nil
+	}
+	return field.ErrorList{field.Invalid(
+		field.NewPath("spec", "tls", "engine", "certManager", "issuerRef"), newRef,
+		"is immutable while engine TLS is enabled: reissuing engine certificates under a new CA "+
+			"while the gateway still trusts the old CA anchor would fail every upstream handshake. "+
+			"Disable engine TLS or recreate the Instance to change the issuer.")}
 }
 
 // ValidateDelete validates a FireboltInstance on deletion.

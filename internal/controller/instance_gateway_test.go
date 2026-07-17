@@ -32,11 +32,31 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// TestGatewayTLSSecretVersions covers FB-896 finding #5: a bring-your-own
-// gateway cert rotated in place (same Secret name, new bytes) must change the
-// gateway config hash so the Deployment rolls and Envoy reloads the cert.
+// TestGatewayTLSSecretVersions covers FB-896 findings #2/#5/#6: an in-place
+// bring-your-own cert rotation must roll the gateway (#5); the fail-closed
+// provisioning window (mTLS configured, client-CA not yet present) must NOT
+// error and abort the roll (#2); and an in-place engine-CA reissue must roll
+// the gateway while re-encryption is active (#6). The tracked secret set
+// mirrors the pod-template mounts exactly.
 func TestGatewayTLSSecretVersions(t *testing.T) {
 	sch := authTestScheme(t)
+
+	// gwEnabled builds an instance with gateway TLS turned on in spec — the
+	// precondition gatewayDownstreamTLSReady checks alongside Status.GatewayTLS.
+	gwEnabled := func() *computev1alpha1.FireboltInstance {
+		return &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+		}
+	}
+	tlsSecret := func(name string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1"},
+			Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key"), "ca.crt": []byte("ca")},
+		}
+	}
 
 	t.Run("no gateway TLS returns empty", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).Build()
@@ -52,16 +72,10 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 	})
 
 	t.Run("gateway TLS secret RV is included and changes on in-place rotation", func(t *testing.T) {
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "gw-tls", Namespace: "ns-1"},
-			Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
-		}
-		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(secret).Build()
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("gw-tls")).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
-		inst := &computev1alpha1.FireboltInstance{
-			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-			Status:     computev1alpha1.FireboltInstanceStatus{GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}},
-		}
+		inst := gwEnabled()
+		inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
 		before, err := r.gatewayTLSSecretVersions(context.Background(), inst)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -84,6 +98,58 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 		}
 		if after == before {
 			t.Error("gatewayTLSSecretVersions did not change after in-place secret rotation; the gateway Deployment would never roll")
+		}
+	})
+
+	t.Run("#2 fail-closed pending: missing client-CA is tolerated, nothing folded", func(t *testing.T) {
+		// mTLS configured but neither the server cert (Status.GatewayTLS nil) nor
+		// the BYO client-CA Secret exists yet. The helper must return "" with NO
+		// error, so the fail-closed Deployment still rolls — the old code hard-Got
+		// the absent client-CA and aborted the whole gateway reconcile (fail-open).
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := gwEnabled()
+		inst.Spec.TLS.Gateway.ClientCASecretRef = &corev1.LocalObjectReference{Name: "client-ca"}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("fail-closed window must not error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("gatewayTLSSecretVersions = %q, want empty during the fail-closed window", got)
+		}
+	})
+
+	t.Run("#2 client-CA RV folded once downstream TLS is ready", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).
+			WithObjects(tlsSecret("gw-tls"), tlsSecret("client-ca")).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := gwEnabled()
+		inst.Spec.TLS.Gateway.ClientCASecretRef = &corev1.LocalObjectReference{Name: "client-ca"}
+		inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(got, "gw-tls=") || !strings.Contains(got, "client-ca=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want both server cert and client-CA folded", got)
+		}
+	})
+
+	t.Run("#6 engine-CA RV folded while re-encryption is active", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("inst-engine-tls")).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			},
+		}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(got, "inst-engine-tls=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want the engine-CA anchor folded while re-encrypting", got)
 		}
 	})
 }

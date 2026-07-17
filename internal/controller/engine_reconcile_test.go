@@ -3032,3 +3032,42 @@ func TestEngineShutdownWaitSeconds(t *testing.T) {
 		prev = got
 	}
 }
+
+// TestTLSHash_ReflectsCertPolicy covers FB-896 round-4 #5: an in-place engine
+// serving-cert key algorithm/size change must change tlsHash so a new
+// generation reissues the per-generation certificate, while the issuer — which
+// is immutable and NOT folded — must never change the hash (folding it would
+// reissue engine certs under a new CA while the gateway still trusts the old
+// anchor).
+func TestTLSHash_ReflectsCertPolicy(t *testing.T) {
+	cm := func(alg string, size int32) *computev1alpha1.CertManagerSpec {
+		return &computev1alpha1.CertManagerSpec{
+			IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+			Algorithm: alg,
+			Size:      size,
+		}
+	}
+	base := tlsHash(&ResolvedEngineTLSInfo{SecretName: "s", CertManager: cm("ECDSA", 384)})
+	if base == "" {
+		t.Fatal("tlsHash returned empty for a TLS-enabled engine")
+	}
+	if got := tlsHash(&ResolvedEngineTLSInfo{SecretName: "s", CertManager: cm("ECDSA", 256)}); got == base {
+		t.Error("tlsHash unchanged on a key size change; a policy edit would never roll the fleet")
+	}
+	if got := tlsHash(&ResolvedEngineTLSInfo{SecretName: "s", CertManager: cm("RSA", 384)}); got == base {
+		t.Error("tlsHash unchanged on a key algorithm change")
+	}
+	// A different issuer must NOT change the hash: issuerRef is immutable
+	// instead (see validateImmutableEngineTLSIssuer).
+	diffIssuer := &computev1alpha1.CertManagerSpec{
+		IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "different-ca"},
+		Algorithm: "ECDSA",
+		Size:      384,
+	}
+	if got := tlsHash(&ResolvedEngineTLSInfo{SecretName: "s", CertManager: diffIssuer}); got != base {
+		t.Error("tlsHash changed on an issuerRef change; issuerRef must not be folded")
+	}
+	if tlsHash(nil) != "" {
+		t.Error("tlsHash(nil) must be empty")
+	}
+}

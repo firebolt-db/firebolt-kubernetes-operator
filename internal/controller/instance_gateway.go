@@ -1044,29 +1044,50 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 }
 
 // gatewayTLSSecretVersions returns a stable string incorporating the
-// ResourceVersion of every TLS Secret the gateway pod mounts by name (the
-// server-cert Secret recorded in Status.GatewayTLS, and the client-CA Secret
-// if mTLS is configured). Folded into the gateway config hash so a
-// bring-your-own certificate rotated in place — same Secret name, new bytes —
-// rolls the gateway Deployment: Envoy loads the file only at process start and
-// the rendered config references the Secret by name/mount, so the config text
-// alone never changes. ResourceVersion, deliberately never the cert bytes:
-// hashing key material would trip weak-sensitive-data-hashing static analysis
-// and buys nothing (RV already changes on every write). Returns "" when the
-// gateway mounts no TLS Secret (plaintext or fail-closed-pending), leaving the
-// hash input untouched so non-TLS gateways see no spurious rollout.
+// ResourceVersion of every TLS Secret the gateway pod actually mounts by name,
+// folded into the gateway config hash so a Secret rotated in place — same
+// name, new bytes — rolls the gateway Deployment. Envoy loads these files only
+// at process start and the rendered config references them by name/mount, so
+// the config text alone never changes on an in-place rotation. ResourceVersion,
+// deliberately never the cert bytes: hashing key material would trip
+// weak-sensitive-data-hashing static analysis and buys nothing (RV already
+// changes on every write).
+//
+// The tracked set mirrors the pod-template mounts exactly, keyed off the same
+// predicates the mount logic uses (see effectiveGatewayPodTemplate):
+//   - the downstream server cert (Status.GatewayTLS) and — only once downstream
+//     TLS is READY — the mTLS client-CA, both gated on gatewayDownstreamTLSReady.
+//     During the fail-closed provisioning window (Status.GatewayTLS nil, and a
+//     bring-your-own client-CA that may not exist yet) neither is mounted, so
+//     neither is read: a hard Get on the not-yet-created client-CA here used to
+//     abort the whole gateway roll, so the fail-closed Deployment never came up
+//     and the prior plaintext/one-way-TLS listener stayed up (fail-open).
+//   - the upstream engine-CA anchor (Status.EngineTLS), gated on
+//     engineUpstreamTLSReady exactly like its mount, so an in-place engine-CA
+//     reissue rolls the gateway and Envoy reloads trusted_ca.
+//
+// A missing Secret is tolerated (skipped, not an error): it only means the hash
+// omits that entry until the Secret lands, and a later reconcile folds it in.
+// Returns "" when the gateway mounts no TLS Secret (plaintext or
+// fail-closed-pending), leaving the hash input untouched.
 func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
 	var names []string
-	if instance.Status.GatewayTLS != nil {
+	if gatewayDownstreamTLSReady(instance) {
 		names = append(names, instance.Status.GatewayTLS.SecretName)
+		if ref := gatewayClientCASecretRef(instance); ref != nil {
+			names = append(names, ref.Name)
+		}
 	}
-	if instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.ClientCASecretRef != nil {
-		names = append(names, instance.Spec.TLS.Gateway.ClientCASecretRef.Name)
+	if engineUpstreamTLSReady(instance) {
+		names = append(names, instance.Status.EngineTLS.SecretName)
 	}
 	var parts []string
 	for _, name := range names {
 		var secret corev1.Secret
 		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret); err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
 			return "", fmt.Errorf("reading gateway TLS secret %s/%s for rollout hash: %w", instance.Namespace, name, err)
 		}
 		parts = append(parts, name+"="+secret.ResourceVersion)

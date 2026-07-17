@@ -184,7 +184,19 @@ func (r *FireboltInstanceReconciler) engineFleetTLSState(ctx context.Context, in
 	}
 	expectedOn := ""
 	if instance.Status.EngineTLS != nil {
-		expectedOn = tlsHash(&ResolvedEngineTLSInfo{SecretName: instance.Status.EngineTLS.SecretName})
+		// Build the SAME ResolvedEngineTLSInfo the engine controller hashes
+		// (resolveInstanceInfo, engine_controller.go), including the
+		// cert-manager policy, so tlsHash matches on both sides — tlsHash now
+		// folds the serving-cert alg/size, so omitting CertManager here would
+		// make the gate never converge. Spec.TLS.Engine is non-nil in the
+		// steady/enable state that allOnTLS is consumed in; during a disable
+		// drain it may be nil, but only anyOnTLS (independent of expectedOn) is
+		// read then, so falling back to no policy is safe.
+		info := &ResolvedEngineTLSInfo{SecretName: instance.Status.EngineTLS.SecretName}
+		if instance.Spec.TLS != nil && instance.Spec.TLS.Engine != nil {
+			info.CertManager = instance.Spec.TLS.Engine.CertManager
+		}
+		expectedOn = tlsHash(info)
 	}
 	allOnTLS = expectedOn != ""
 	sawEngine := false

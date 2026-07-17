@@ -2710,7 +2710,25 @@ func tlsHash(tls *ResolvedEngineTLSInfo) string {
 	if tls == nil {
 		return ""
 	}
-	return contentHash(tls.SecretName)
+	// Fold the serving-certificate policy (key algorithm + size) alongside the
+	// Secret name so an in-place spec.tls.engine.certManager alg/size edit
+	// changes the hash → a new blue-green generation → buildGenEngineTLSCertificate
+	// reissues the per-generation cert under the new policy (it reads exactly
+	// these fields). Without this, a policy edit stayed unapplied until an
+	// unrelated rollout because the status Secret name is generation-independent.
+	// A differing key size across generations is harmless — TLS negotiates per
+	// connection, unlike the JWT signing keyset. IssuerRef is deliberately NOT
+	// folded and is immutable instead: reissuing engine certs under a new CA
+	// while the gateway still trusts the old anchor would fail every upstream
+	// handshake mid-roll. This MUST fold the same fields at both hash sites
+	// (resolveInstanceInfo and engineFleetTLSState) or the #3 gateway
+	// re-encryption convergence gate would never match.
+	var alg string
+	var size int32
+	if tls.CertManager != nil {
+		alg, size = tls.CertManager.Algorithm, tls.CertManager.Size
+	}
+	return contentHash(fmt.Sprintf("%s\x00%s\x00%d", tls.SecretName, alg, size))
 }
 
 // getEnginePodSecurityContext returns the resolved pod-level security context

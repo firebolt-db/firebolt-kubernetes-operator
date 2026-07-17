@@ -208,6 +208,7 @@ var operatorOwnedGatewayVolumeNames = []string{
 	GatewayTmpVolumeName,
 	GatewayEngineCAVolumeName,
 	GatewayTLSVolumeName,
+	GatewayClientCAVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator

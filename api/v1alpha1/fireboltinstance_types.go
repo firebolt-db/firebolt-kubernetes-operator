@@ -357,6 +357,15 @@ type AdminSpec struct {
 type SigningKeyPolicy struct {
 	// CertManager configures the cert-manager Certificate used to
 	// generate the signing keypair.
+	//
+	// The key size is immutable once set (enforced by the API server, so it
+	// holds even if the validating webhook is bypassed): packdb derives every
+	// signing key's curve from the single global signingAlgorithm and cannot
+	// serve two curves at once, so a size change cannot be migrated in place.
+	// The rule is scoped to this signing-only field, leaving TLS listener key
+	// sizes (which share CertManagerSpec) mutable. issuerRef/algorithm changes
+	// are separately constrained by the signingAlgorithm compatibility check.
+	// +kubebuilder:validation:XValidation:rule="self.size == oldSelf.size || oldSelf.size == 0",message="signing key size is immutable once set; recreate the instance to change it"
 	CertManager CertManagerSpec `json:"certManager"`
 
 	// RotationInterval, when set, enables operator-owned periodic
@@ -410,8 +419,17 @@ type LocalAuthSpec struct {
 	// cert-manager key algorithm: the RS* family requires an RSA key, the
 	// ES* family requires ECDSA. Defaults to ES384, matching the ECDSA
 	// signing-key default.
+	//
+	// Immutable once set (enforced by the API server via the transition rule
+	// below, so it holds even if the validating webhook is bypassed): packdb
+	// exposes one global signing_algorithm and derives every key's curve from
+	// it, so it can never hold two curves at once. Changing it in place would
+	// roll engines onto a signing_algorithm their mounted key no longer matches
+	// — an invalid JWKS / permanent startup wedge. Recreate the Instance (or
+	// disable auth and drop spec.auth.local first) to change it.
 	// +kubebuilder:validation:Enum=RS256;RS384;RS512;ES256;ES384;ES512
 	// +kubebuilder:default=ES384
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf || oldSelf == ''",message="signingAlgorithm is immutable once set; recreate the instance to change the JWT signing algorithm"
 	// +optional
 	SigningAlgorithm string `json:"signingAlgorithm,omitempty"`
 

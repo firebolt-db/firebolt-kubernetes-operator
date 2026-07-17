@@ -186,11 +186,18 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 }
 
 // ensureEngineTLSCert applies the per-generation engine TLS Certificate via SSA
-// with the FireboltEngine as owner, so it (and cert-manager's derived Secret)
-// is garbage-collected when the engine or its generation is torn down. Like the
-// instance controller's cert applies, the certificate is NOT watched via
-// Owns() in SetupWithManager — envtest has no cert-manager CRDs, so watching
-// the kind would break manager startup there.
+// with the FireboltEngine as owner. Ownership makes Kubernetes GC reclaim the
+// Certificate object when the engine is deleted, but it does NOT reclaim the
+// Certificate on a mere generation rollover (the owner is the engine, not a
+// per-generation object), and it does NOT reclaim cert-manager's derived Secret
+// at all (cert-manager owner-references the Secret to the Certificate only when
+// --enable-certificate-owner-ref is set, which this operator does not require).
+// Both are therefore swept explicitly by LabelEngine/LabelGeneration:
+// gcOrphanedResources reclaims drained/abandoned generations, and the engine's
+// reconcileDelete reclaims everything on engine deletion. Like the instance
+// controller's cert applies, the certificate is NOT watched via Owns() in
+// SetupWithManager — envtest has no cert-manager CRDs, so watching the kind
+// would break manager startup there.
 func (r *FireboltEngineReconciler) ensureEngineTLSCert(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *certmanagerv1.Certificate) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 

@@ -124,7 +124,24 @@ func signingCertificateName(instanceName, kid string) string {
 func (r *FireboltInstanceReconciler) ensureAuth(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	auth := instance.Spec.Auth
 	if auth == nil || !auth.Enabled {
-		instance.Status.Auth = nil
+		// Preserve the monotonic signing-key generation counter across a
+		// disable so a later re-enable mints a FRESH generation (N+1) with a
+		// brand-new Certificate/Secret name, instead of resetting to 0 and
+		// re-bootstrapping generation 1. cert-manager (rotationPolicy:Never)
+		// reuses the existing private key and kid behind a Secret name that
+		// already exists, so a reset would silently resurrect a retired key —
+		// making previously-issued tokens valid again. The SigningKeys list is
+		// cleared (nothing is rendered while disabled); the orphaned
+		// Certificates/Secrets are harmless while the counter only advances and
+		// are swept when the Instance is deleted (reconcileDelete). Keeping a
+		// non-nil Status.Auth here is safe: the only Status.Auth == nil readers
+		// are existingSigningKeys / authStatusGeneration, both of which treat an
+		// empty SigningKeys list exactly like "no keys provisioned yet".
+		if gen := authStatusGeneration(instance); gen > 0 {
+			instance.Status.Auth = &computev1alpha1.AuthStatus{SigningKeyGeneration: gen}
+		} else {
+			instance.Status.Auth = nil
+		}
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionAuthReady, metav1.ConditionTrue,
 			"Disabled", "spec.auth is unset or disabled")
 		return nil
@@ -507,28 +524,22 @@ func (r *FireboltInstanceReconciler) stepSigningKeyRotation(ctx context.Context,
 
 	switch {
 	case other == nil:
-		// A change to the signing key's algorithm/size cannot be satisfied in
-		// place: the Certificate uses rotationPolicy:Never, so cert-manager
-		// refuses to regenerate a key whose properties changed and awaits user
-		// intervention, while the readiness check accepts the stale old key —
-		// engines would roll onto the new signing_algorithm with the old key
-		// and wedge. Treat it like a rotation trigger: mint a fresh named key
-		// (new kid → new Secret) carrying the new properties, promoted and
-		// retired through the machinery below. This runs regardless of whether
-		// periodic rotation is configured; if RetainDuration is unset the old
-		// key simply lingers as a ValidationOnly key (fail-static, keeps
-		// validating old tokens) rather than being pruned.
-		wantAlg, wantSize := resolvedSigningKeyAlgSize(policy.CertManager)
-		switch {
-		case active.Algorithm == "" || active.Size == 0:
-			// Key minted before Algorithm/Size were recorded: adopt the current
-			// resolved policy as its baseline. An existing key that did not
-			// already match current policy would be wedged in cert-manager
-			// regardless — that is the pre-existing condition this guards, not
-			// something backfilling can make worse.
+		// Backfill Algorithm/Size onto a key minted before they were recorded,
+		// so the scheduler and status reflect its real policy. A legitimate
+		// algorithm/size drift never reaches here: both signingAlgorithm and
+		// the signing-key size are immutable after first set — enforced at the
+		// API server by CEL transition rules on LocalAuthSpec.SigningAlgorithm
+		// and on SigningKeyPolicy.CertManager (see fireboltinstance_types.go),
+		// and again in the validating webhook (validateImmutableSigningKey) for
+		// a clearer message. packdb's single global signing_algorithm cannot
+		// represent two curves at once (the closed config schema has no per-key
+		// algorithm field), so an in-place change is unsupportable — it is
+		// rejected at admission rather than migrated by minting a new key, which
+		// would only have produced an invalid mixed-curve keyset. A legacy key
+		// (minted before Algorithm/Size existed) simply adopts its baseline.
+		if active.Algorithm == "" || active.Size == 0 {
+			wantAlg, wantSize := resolvedSigningKeyAlgSize(policy.CertManager)
 			active.Algorithm, active.Size = wantAlg, wantSize
-		case active.Algorithm != wantAlg || active.Size != wantSize:
-			return r.mintNextSigningKey(ctx, instance)
 		}
 		if policy.RotationInterval == nil {
 			return nil

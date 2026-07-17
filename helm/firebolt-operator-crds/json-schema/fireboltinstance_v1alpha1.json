@@ -84,7 +84,7 @@
                 },
                 "signingAlgorithm": {
                   "default": "ES384",
-                  "description": "SigningAlgorithm is the JWT signing algorithm used by the embedded\nauthorization server. Must be compatible with SigningKeys'\ncert-manager key algorithm: the RS* family requires an RSA key, the\nES* family requires ECDSA. Defaults to ES384, matching the ECDSA\nsigning-key default.",
+                  "description": "SigningAlgorithm is the JWT signing algorithm used by the embedded\nauthorization server. Must be compatible with SigningKeys'\ncert-manager key algorithm: the RS* family requires an RSA key, the\nES* family requires ECDSA. Defaults to ES384, matching the ECDSA\nsigning-key default.\n\nImmutable once set (enforced by the API server via the transition rule\nbelow, so it holds even if the validating webhook is bypassed): packdb\nexposes one global signing_algorithm and derives every key's curve from\nit, so it can never hold two curves at once. Changing it in place would\nroll engines onto a signing_algorithm their mounted key no longer matches\n\u2014 an invalid JWKS / permanent startup wedge. Recreate the Instance (or\ndisable auth and drop spec.auth.local first) to change it.",
                   "enum": [
                     "RS256",
                     "RS384",
@@ -93,13 +93,19 @@
                     "ES384",
                     "ES512"
                   ],
-                  "type": "string"
+                  "type": "string",
+                  "x-kubernetes-validations": [
+                    {
+                      "message": "signingAlgorithm is immutable once set; recreate the instance to change the JWT signing algorithm",
+                      "rule": "self == oldSelf || oldSelf == ''"
+                    }
+                  ]
                 },
                 "signingKeys": {
                   "description": "SigningKeys controls how the operator provisions the signing\nkeypair. Required when auth is enabled: packdb's own dev-autogen\nfallback (used when signing_keys is empty) mints a different key\nper engine process, which breaks cross-engine token validation in\nany multi-engine deployment \u2014 exactly the topology this operator\nalways creates.",
                   "properties": {
                     "certManager": {
-                      "description": "CertManager configures the cert-manager Certificate used to\ngenerate the signing keypair.",
+                      "description": "CertManager configures the cert-manager Certificate used to\ngenerate the signing keypair.\n\nThe key size is immutable once set (enforced by the API server, so it\nholds even if the validating webhook is bypassed): packdb derives every\nsigning key's curve from the single global signingAlgorithm and cannot\nserve two curves at once, so a size change cannot be migrated in place.\nThe rule is scoped to this signing-only field, leaving TLS listener key\nsizes (which share CertManagerSpec) mutable. issuerRef/algorithm changes\nare separately constrained by the signingAlgorithm compatibility check.",
                       "properties": {
                         "algorithm": {
                           "default": "ECDSA",
@@ -145,6 +151,12 @@
                         "issuerRef"
                       ],
                       "type": "object",
+                      "x-kubernetes-validations": [
+                        {
+                          "message": "signing key size is immutable once set; recreate the instance to change it",
+                          "rule": "self.size == oldSelf.size || oldSelf.size == 0"
+                        }
+                      ],
                       "additionalProperties": false
                     },
                     "retainDuration": {

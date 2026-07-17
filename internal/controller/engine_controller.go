@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -495,6 +496,45 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 			log.Info("Deleting ConfigMap", "name", cmList.Items[i].Name)
 			if err := r.deleteIfExists(ctx, &cmList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete ConfigMap", "name", cmList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	// Per-generation engine TLS Certificates and their cert-manager-derived
+	// Secrets carry LabelEngine. The Certificate is owner-referenced to the
+	// engine so Kubernetes GC would eventually remove it, but cert-manager does
+	// not owner-reference the derived Secret, so without this explicit sweep the
+	// per-generation TLS Secret orphans once the engine is gone. Delete both by
+	// label, Certificate before Secret (a live Certificate recreates a deleted
+	// target Secret — see instance_controller.go's reconcileDelete). The
+	// Certificate List tolerates a missing cert-manager CRD (envtest installs
+	// none); with no CRD, no such certs/secrets can exist.
+	certList := &certmanagerv1.CertificateList{}
+	if err := r.List(ctx, certList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		if !apimeta.IsNoMatchError(err) {
+			log.Error(err, "Failed to list Certificates for cleanup")
+			errs = append(errs, err)
+		}
+	} else {
+		for i := range certList.Items {
+			log.Info("Deleting Certificate", "name", certList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &certList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Certificate", "name", certList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	secretList := &corev1.SecretList{}
+	if err := r.List(ctx, secretList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		log.Error(err, "Failed to list Secrets for cleanup")
+		errs = append(errs, err)
+	} else {
+		for i := range secretList.Items {
+			log.Info("Deleting Secret", "name", secretList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &secretList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Secret", "name", secretList.Items[i].Name)
 				errs = append(errs, err)
 			}
 		}
