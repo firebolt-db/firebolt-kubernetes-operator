@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.2...firebolt-operator-v0.4.0) (2026-07-20)
+
+
+### Features
+
+* add anonymous Scarf usage telemetry (FB-1354) ([86ac31b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/86ac31bb83f8c58cc338274149d17ee3a4c3aac8))
+* couple telemetry opt-out to default image routing (FB-1354) ([3d78f21](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3d78f218a2cb035917a961e5dd41164c2d5e2ac5))
+* route public operator and engine pulls through Scarf (FB-1354) ([3b2a64f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3b2a64f50619ae2ed5707737322e16aafc33bee7))
+
+
+### Bug Fixes
+
+* address telemetry scheduling and Kind routing review (FB-1354) ([abdc68b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/abdc68bca137f723842240dfb4efa68157369310))
+* **controller:** render the GC config keys the metadata server actually reads (FB-2259) ([#65](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/65)) ([8e7c9f1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8e7c9f15f72fb7f7e93c221ae2cb45fc3209c003))
+
 ## [0.3.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.1...firebolt-operator-v0.3.2) (2026-07-14)
 
 
