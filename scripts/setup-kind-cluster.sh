@@ -174,7 +174,7 @@ docker exec "${CONTROL_PLANE}" kubectl --kubeconfig=/etc/kubernetes/admin.conf \
     wait --for=condition=Ready node --all --timeout=120s
 
 # Wire containerd to use the local registry as a mirror for every embedded
-# image registry, including the Firebolt-owned Scarf gateway.
+# image registry.
 # Done after nodes are Ready so we know the node containers are running and
 # `kind get nodes` returns the full set.
 configure_mirrors

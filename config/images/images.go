@@ -30,8 +30,7 @@ import (
 	"strings"
 )
 
-// DirectEngineRepository is the upstream engine repository that bypasses the
-// Scarf gateway.
+// DirectEngineRepository is the engine's upstream GHCR repository.
 const DirectEngineRepository = "ghcr.io/firebolt-db/engine"
 
 var defaults = parse(raw)
