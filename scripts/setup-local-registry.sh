@@ -11,7 +11,8 @@ set -euo pipefail
 # A local OCI registry sidesteps the duplication: images live ONCE in the
 # registry, and each kind node pulls only the layers it actually runs. The
 # kind nodes are wired to use this registry as a transparent mirror for
-# ghcr.io / docker.io via /etc/containerd/certs.d hosts.toml files written
+# ghcr.io, docker.io, and oci.firebolt.io via /etc/containerd/certs.d
+# hosts.toml files written
 # in scripts/setup-kind-cluster.sh after the cluster comes up.
 #
 # Layout:

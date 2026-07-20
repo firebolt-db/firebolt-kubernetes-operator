@@ -62,6 +62,8 @@ The operator sends one anonymous, aggregate usage event to [Scarf](https://scarf
 
 The event contains the operator and engine versions, Kubernetes minor version, OS and architecture, and bucketed instance, engine, and replica counts. It does not contain names, stable identifiers, query data, schemas, connection parameters, secrets, or configuration. Counts are bucketed rather than exact. As with any network request, the source IP address is visible to Scarf; Scarf may use it to infer the company and does not store it.
 
+This README also contains a cookie-free Scarf pixel for aggregate page-view statistics. Viewing it in a client that loads remote images can make a request to Scarf independently of the operator's runtime settings; blocking remote images prevents that request.
+
 Image and chart pulls through `oci.firebolt.io` additionally record the requested version and platform before redirecting to GitHub Container Registry.
 
 You can opt out in any of these ways:

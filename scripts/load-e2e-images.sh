@@ -105,11 +105,12 @@ declare -a IMAGES=(
 # mirror expects. The transformation matches Docker's implicit image
 # normalisation:
 #   ghcr.io/firebolt-db/engine:dev   -> firebolt-db/engine:dev   (strip explicit host)
+#   oci.firebolt.io/firebolt-db/engine:latest -> firebolt-db/engine:latest
 #   envoyproxy/envoy:v1.37.2         -> envoyproxy/envoy:v1.37.2 (org/name; keep)
 #   postgres:16-alpine               -> library/postgres:16-alpine (official Docker Hub)
-# The kind nodes' containerd hosts.toml maps both ghcr.io and docker.io to
-# the local registry, so a single push under each upstream's path makes the
-# image resolvable without changing the operator-baked image references.
+# The kind nodes' containerd hosts.toml maps each embedded image registry to the
+# local registry, so a single push under each upstream's path makes the image
+# resolvable without changing the operator-baked image references.
 to_registry_path() {
     local image="$1"
     local first_seg="${image%%/*}"
