@@ -154,7 +154,7 @@ The `oci.firebolt.io` host is Firebolt's [Scarf](https://scarf.sh) gateway. It r
 
 By default, the operator also sends one anonymous aggregate usage event to Scarf at most once per day. The event contains operator and engine versions, Kubernetes minor version, OS and architecture, and bucketed instance, engine, and replica counts. It contains no names, stable identifiers, query data, schemas, connection parameters, secrets, or configuration. As with any network request, the source IP is visible to Scarf; Scarf may use it to infer the company and does not store it.
 
-Disable runtime telemetry with `--set telemetry.enabled=false`, or set `DO_NOT_TRACK=1` or `SCARF_NO_ANALYTICS=1` in the operator environment.
+Set `--set telemetry.enabled=false` to disable runtime telemetry and switch the default operator and engine image repositories to GHCR. Images explicitly configured in Helm values, `FireboltEngine`, or `FireboltEngineClass` resources are preserved. To bypass Scarf for the chart download too, install from `oci://ghcr.io/firebolt-db/helm-charts`; Helm selects the chart repository before reading chart values. `DO_NOT_TRACK=1` and `SCARF_NO_ANALYTICS=1` disable runtime events only.
 
 ## Multi-tenant install: scope the Firebolt Operator to specific namespaces
 

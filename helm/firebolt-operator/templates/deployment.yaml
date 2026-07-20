@@ -44,7 +44,11 @@ spec:
       {{- end }}
       containers:
         - name: manager
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- $imageRepository := .Values.image.repository }}
+          {{- if and (eq .Values.telemetry.enabled false) (eq $imageRepository "oci.firebolt.io/firebolt-db/firebolt-operator") }}
+          {{- $imageRepository = "ghcr.io/firebolt-db/firebolt-operator" }}
+          {{- end }}
+          image: "{{ $imageRepository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /manager
