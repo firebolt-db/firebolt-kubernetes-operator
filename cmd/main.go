@@ -130,6 +130,9 @@ func main() {
 		_, _ = fmt.Println(version)
 		os.Exit(0)
 	}
+	if !telemetryEnabled {
+		controller.UseDirectEngineRepository()
+	}
 
 	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
 

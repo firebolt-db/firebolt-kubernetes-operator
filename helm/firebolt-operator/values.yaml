@@ -215,7 +215,9 @@ telemetry:
   # bucketed instance/engine/replica counts. It contains no names, stable
   # identifiers, query data, schemas, or configuration. The source IP is visible
   # to Scarf for company inference but is not stored. Set false to disable;
-  # DO_NOT_TRACK and SCARF_NO_ANALYTICS are also honored.
+  # when the default Scarf image repositories are unchanged, this also switches
+  # operator and engine pulls to GHCR. User-supplied image repositories are
+  # preserved. DO_NOT_TRACK and SCARF_NO_ANALYTICS disable runtime events only.
   enabled: true
 
 # -- Additional CLI arguments passed to the operator binary.

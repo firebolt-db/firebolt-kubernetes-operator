@@ -228,6 +228,14 @@ var (
 	DefaultEngineWebImage = images.DefaultEngineWeb()
 )
 
+// UseDirectEngineRepository changes only the operator's fallback engine
+// repository. Images set on a FireboltEngine or FireboltEngineClass continue to
+// take precedence.
+func UseDirectEngineRepository() {
+	DefaultEngineRepository = images.DirectEngineRepository
+	DefaultEngineImage = resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
+}
+
 // resolveImageRef returns "repository:tag" for a component, using fields from
 // the user-supplied ImageSpec when present and falling back to the supplied
 // component defaults otherwise. A nil spec, an empty repository, or an empty

@@ -68,9 +68,13 @@ Image and chart pulls through `oci.firebolt.io` additionally record the requeste
 
 You can opt out in any of these ways:
 
-- Set `telemetry.enabled=false` in the Helm values.
-- Set `DO_NOT_TRACK=1` or `SCARF_NO_ANALYTICS=1` in the operator environment.
-- Pull images and charts directly from `ghcr.io` instead of `oci.firebolt.io`.
+- Set `telemetry.enabled=false` in the Helm values. This disables runtime events
+  and switches the default operator and engine repositories to GHCR; custom
+  image repositories remain unchanged.
+- Install the chart from `oci://ghcr.io/firebolt-db/helm-charts` to bypass Scarf
+  for the chart download as well. Helm selects the chart repository before it
+  reads chart values.
+- `DO_NOT_TRACK=1` and `SCARF_NO_ANALYTICS=1` disable runtime events only.
 
 ## Firebolt Operator flags
 
