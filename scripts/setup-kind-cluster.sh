@@ -25,8 +25,9 @@ CLUSTER_NAME="${1:-operator-test-e2e}"
 CONTROL_PLANE="${CLUSTER_NAME}-control-plane"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Local OCI registry that kind nodes use as a transparent mirror for
-# ghcr.io / docker.io. Defaults match scripts/setup-local-registry.sh.
+# Local OCI registry that kind nodes use as a transparent mirror for the
+# registries referenced by the embedded image defaults. Defaults match
+# scripts/setup-local-registry.sh.
 REGISTRY_NAME="${REGISTRY_NAME:-kind-registry}"
 REGISTRY_PORT="${REGISTRY_PORT:-5001}"
 # In-cluster endpoint that kind nodes use to reach the registry. Resolved
@@ -37,7 +38,7 @@ REGISTRY_ENDPOINT="http://${REGISTRY_NAME}:5000"
 # under the path the upstream uses (firebolt-db/engine, library/postgres,
 # envoyproxy/envoy, ...), so a single hosts.toml per upstream is enough to
 # make pulls transparent.
-MIRRORED_HOSTS=("ghcr.io" "docker.io")
+MIRRORED_HOSTS=("ghcr.io" "docker.io" "oci.firebolt.io")
 
 # Write /etc/containerd/certs.d/<host>/hosts.toml on every kind node, aliasing
 # each mirrored upstream to the local registry. containerd hot-reloads this
@@ -172,7 +173,8 @@ echo "Waiting for node to be Ready..."
 docker exec "${CONTROL_PLANE}" kubectl --kubeconfig=/etc/kubernetes/admin.conf \
     wait --for=condition=Ready node --all --timeout=120s
 
-# Wire containerd to use the local registry as a mirror for ghcr.io / docker.io.
+# Wire containerd to use the local registry as a mirror for every embedded
+# image registry, including the Firebolt-owned Scarf gateway.
 # Done after nodes are Ready so we know the node containers are running and
 # `kind get nodes` returns the full set.
 configure_mirrors

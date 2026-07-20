@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	dockerref "github.com/distribution/reference"
 	"github.com/go-logr/logr"
 	"github.com/scarf-sh/scarf-go/scarf"
 	"k8s.io/client-go/discovery"
@@ -103,9 +104,13 @@ func (r *Reporter) Start(ctx context.Context) error {
 		interval = reportInterval
 	}
 
-	// This jitter only spreads report timing across installations; it does not
-	// protect secrets and therefore does not need cryptographic randomness.
-	timer := time.NewTimer(time.Duration(rand.Int64N(int64(maxStartupJitter)))) //nolint:gosec // non-cryptographic jitter
+	// Wait a full reporting interval before the first event. This preserves the
+	// at-most-once-per-day guarantee across pod restarts and leader failovers
+	// without storing an identifier or last-send marker in the cluster. Jitter
+	// spreads otherwise simultaneous reports and does not need cryptographic
+	// randomness.
+	initialDelay := interval + time.Duration(rand.Int64N(int64(maxStartupJitter))) //nolint:gosec // non-cryptographic jitter
+	timer := time.NewTimer(initialDelay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -225,13 +230,12 @@ func engineTag(engine *computev1alpha1.FireboltEngine, classes map[string]*compu
 }
 
 func tagOf(image string) string {
-	if at := strings.IndexByte(image, '@'); at >= 0 {
-		image = image[:at]
+	named, err := dockerref.ParseNormalizedNamed(image)
+	if err != nil {
+		return ""
 	}
-	lastSlash := strings.LastIndexByte(image, '/')
-	lastColon := strings.LastIndexByte(image, ':')
-	if lastColon > lastSlash {
-		return image[lastColon+1:]
+	if tagged, ok := named.(dockerref.Tagged); ok {
+		return tagged.Tag()
 	}
 	return ""
 }

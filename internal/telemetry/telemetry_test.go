@@ -19,6 +19,7 @@ package telemetry
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,13 +45,13 @@ func (f *fakeLogger) LogEvent(payload map[string]any) error {
 
 func TestTagOf(t *testing.T) {
 	cases := map[string]string{
-		"ghcr.io/firebolt-db/engine:release-4.32.0":      "release-4.32.0",
-		"ghcr.io/firebolt-db/engine":                     "",
-		"engine:dev":                                     "dev",
-		"localhost:5000/firebolt-db/engine:tag":          "tag",
-		"localhost:5000/firebolt-db/engine":              "",
-		"ghcr.io/firebolt-db/engine@sha256:abc123":       "",
-		"ghcr.io/firebolt-db/engine:1.2.3@sha256:abc123": "1.2.3",
+		"ghcr.io/firebolt-db/engine:release-4.32.0": "release-4.32.0",
+		"ghcr.io/firebolt-db/engine":                "",
+		"engine:dev":                                "dev",
+		"localhost:5000/firebolt-db/engine:tag":     "tag",
+		"localhost:5000/firebolt-db/engine":         "",
+		"ghcr.io/firebolt-db/engine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":       "",
+		"ghcr.io/firebolt-db/engine:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "1.2.3",
 	}
 	for input, want := range cases {
 		if got := tagOf(input); got != want {
@@ -261,5 +262,24 @@ func TestStartDisabled(t *testing.T) {
 				t.Errorf("disabled reporter sent %d events, want 0", len(logger.events))
 			}
 		})
+	}
+}
+
+func TestStartWaitsFullIntervalBeforeFirstReport(t *testing.T) {
+	logger := &fakeLogger{enabled: true}
+	reporter := &Reporter{
+		Client:   newFakeClient(t),
+		Enabled:  true,
+		Interval: time.Hour,
+		logger:   logger,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	if err := reporter.Start(ctx); err != nil {
+		t.Fatalf("Start() returned error: %v", err)
+	}
+	if len(logger.events) != 0 {
+		t.Errorf("reporter sent %d events before the first interval, want 0", len(logger.events))
 	}
 }
