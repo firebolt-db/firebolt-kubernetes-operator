@@ -6,7 +6,7 @@ apiVersion: kind.x-k8s.io/v1alpha4
 # `containerdConfigPatches` switches every node's containerd to look up
 # per-host pull configuration under /etc/containerd/certs.d/<host>/hosts.toml.
 # scripts/setup-kind-cluster.sh writes those files post-create to alias
-# ghcr.io / docker.io to the local OCI registry started by
+# ghcr.io, docker.io, and oci.firebolt.io to the local OCI registry started by
 # scripts/setup-local-registry.sh, so we never duplicate the engine image
 # (~5 GB) into every kind node's containerd snapshotter.
 #

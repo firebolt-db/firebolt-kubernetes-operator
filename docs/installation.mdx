@@ -11,7 +11,20 @@ This page explains how to install the Firebolt Operator in a Kubernetes cluster.
 - Kubernetes 1.28 or later. The CRDs use CEL transition rules for field immutability.
 - Helm installed on the machine or automation that deploys the Firebolt Operator.
 - Access to the OCI Helm chart registry that hosts the Firebolt Operator charts.
+- Engine nodes that run Linux kernel 6.1 or later. See [Kernel requirement](#kernel-requirement).
 - Engine nodes that provide a locked-memory (`memlock`) limit of at least 8 GiB. See [Engine node requirements](#engine-node-requirements).
+
+## Kernel requirement
+
+The engine uses `io_uring` for asynchronous I/O, so every engine node must run Linux kernel 6.1 or later. On older kernels, such as 5.10, engines crash-loop at startup.
+
+Check the kernel version on an engine node:
+
+```bash
+uname -r
+```
+
+Any version 6.1 or later is enough. If a node runs an older kernel, move your engine nodes to a node image that ships kernel 6.1 or later. Most current node images from managed Kubernetes providers already meet this requirement.
 
 ## Engine node requirements
 
@@ -125,7 +138,7 @@ Install the CRD chart before installing the Firebolt Operator chart. This is the
 allows you full control over the CRDs lifecycle.
 
 ```bash
-helm upgrade --install firebolt-crds oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator-crds
+helm upgrade --install firebolt-crds oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator-crds
 ```
 
 ### Option 2: Firebolt Operator chart `crds/` directory
@@ -145,10 +158,16 @@ Prefer Option 1 for any deployment that will need to upgrade the operator over t
 Install the Firebolt Operator controller:
 
 ```bash
-helm upgrade --skip-crds --install firebolt-operator oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator
+helm upgrade --skip-crds --install firebolt-operator oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator
 ```
 
 Omit `--skip-crds` if you chose the bundled `crds/` directory option above.
+
+The `oci.firebolt.io` host is Firebolt's [Scarf](https://scarf.sh) gateway. It records the requested chart version and platform and redirects to GitHub Container Registry. To bypass the gateway, replace `oci://oci.firebolt.io` with `oci://ghcr.io`.
+
+By default, the operator also sends one anonymous aggregate usage event to Scarf at most once per day. The event contains operator and engine versions, Kubernetes minor version, OS and architecture, and bucketed instance, engine, and replica counts. It contains no names, stable identifiers, query data, schemas, connection parameters, secrets, or configuration. As with any network request, the source IP is visible to Scarf; Scarf may use it to infer the company and does not store it.
+
+Set `--set telemetry.enabled=false` to disable runtime telemetry and switch the default operator and engine image repositories to GHCR. Images explicitly configured in Helm values, `FireboltEngine`, or `FireboltEngineClass` resources are preserved. To bypass Scarf for the chart download too, install from `oci://ghcr.io/firebolt-db/helm-charts`; Helm selects the chart repository before reading chart values. `DO_NOT_TRACK=1` and `SCARF_NO_ANALYTICS=1` disable runtime events only.
 
 ## Multi-tenant install: scope the Firebolt Operator to specific namespaces
 
@@ -160,7 +179,7 @@ them under `watchNamespaces`:
 
 ```bash
 helm upgrade --skip-crds --install firebolt-operator \
-  oci://ghcr.io/firebolt-db/helm-charts/firebolt-operator \
+  oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator \
   --set 'watchNamespaces={tenant-a,tenant-b}'
 ```
 

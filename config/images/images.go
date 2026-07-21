@@ -30,6 +30,9 @@ import (
 	"strings"
 )
 
+// DirectEngineRepository is the engine's upstream GHCR repository.
+const DirectEngineRepository = "ghcr.io/firebolt-db/engine"
+
 var defaults = parse(raw)
 
 func parse(data string) map[string]string {

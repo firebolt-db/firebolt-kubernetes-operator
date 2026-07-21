@@ -22,7 +22,30 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
 )
+
+func TestUseDirectEngineRepositoryPreservesUserOverride(t *testing.T) {
+	originalRepository := DefaultEngineRepository
+	originalImage := DefaultEngineImage
+	t.Cleanup(func() {
+		DefaultEngineRepository = originalRepository
+		DefaultEngineImage = originalImage
+	})
+
+	UseDirectEngineRepository()
+
+	if DefaultEngineRepository != images.DirectEngineRepository {
+		t.Errorf("DefaultEngineRepository = %q, want %q", DefaultEngineRepository, images.DirectEngineRepository)
+	}
+	if got, want := DefaultEngineImage, images.DirectEngineRepository+":"+DefaultEngineTag; got != want {
+		t.Errorf("DefaultEngineImage = %q, want %q", got, want)
+	}
+	override := &computev1alpha1.ImageSpec{Repository: "mirror.example.com/engine"}
+	if got, want := resolveImageRef(override, DefaultEngineRepository, DefaultEngineTag), "mirror.example.com/engine:"+DefaultEngineTag; got != want {
+		t.Errorf("user repository override = %q, want %q", got, want)
+	}
+}
 
 // TestResolveImageRef pins the partial-override semantics that make
 // ImageSpec.Repository and ImageSpec.Tag independently optional. Each

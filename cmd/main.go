@@ -45,6 +45,7 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 	fireboltmetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -75,6 +76,8 @@ func main() {
 	var watchNamespacesArg string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
 	var gatewayWakeClusterRole string
+	var telemetryEnabled bool
+	var telemetryEndpoint string
 	var tlsOpts []func(*tls.Config)
 	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
@@ -115,6 +118,10 @@ func main() {
 			"a per-instance RoleBinding (so the gateway can stamp the wake annotation). "+
 			"Empty fails any FireboltInstance reconcile that requires operator-managed gateway RBAC; "+
 			"users supplying their own gateway ServiceAccount via spec.gateway.template.spec.serviceAccountName are unaffected.")
+	flag.BoolVar(&telemetryEnabled, "telemetry", true,
+		"Send a once-daily anonymous aggregate usage event. Set false to disable.")
+	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultEndpoint,
+		"Scarf Event Collection endpoint for anonymous aggregate usage events.")
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -122,6 +129,9 @@ func main() {
 	if showVersion {
 		_, _ = fmt.Println(version)
 		os.Exit(0)
+	}
+	if !telemetryEnabled {
+		controller.UseDirectEngineRepository()
 	}
 
 	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
@@ -282,6 +292,17 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngine")
 			os.Exit(1)
 		}
+	}
+
+	if err := mgr.Add(&telemetry.Reporter{
+		Client:          mgr.GetClient(),
+		Config:          mgr.GetConfig(),
+		OperatorVersion: version,
+		Endpoint:        telemetryEndpoint,
+		Enabled:         telemetryEnabled,
+	}); err != nil {
+		setupLog.Error(err, "unable to register telemetry reporter")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 

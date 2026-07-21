@@ -1,5 +1,8 @@
 # Firebolt Kubernetes Operator
 
+[![Downloads](https://scarf.sh/installs-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
+[![Companies](https://scarf.sh/company-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
+
 A Kubernetes operator that manages Firebolt infrastructure: metadata services, an Envoy query-routing proxy, and compute engines with zero-downtime scaling via blue-green deployments.
 
 ## Overview
@@ -53,6 +56,26 @@ This is the fast path if you want the agent to drive the install for you. If you
 
 For a step-by-step walkthrough, follow the quickstart guide in our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstart) or using the documentation source file at [`docs/quickstart.mdx`](docs/quickstart.mdx).
 
+## Telemetry
+
+The operator sends one anonymous, aggregate usage event to [Scarf](https://scarf.sh) at most once per day. This helps Firebolt understand how the community runs the operator and prioritize improvements.
+
+The event contains the operator and engine versions, Kubernetes minor version, OS and architecture, and bucketed instance, engine, and replica counts. It does not contain names, stable identifiers, query data, schemas, connection parameters, secrets, or configuration. Counts are bucketed rather than exact. As with any network request, the source IP address is visible to Scarf; Scarf may use it to infer the company and does not store it.
+
+This README also contains a cookie-free Scarf pixel for aggregate page-view statistics. Viewing it in a client that loads remote images can make a request to Scarf independently of the operator's runtime settings; blocking remote images prevents that request.
+
+Image and chart pulls through `oci.firebolt.io` additionally record the requested version and platform before redirecting to GitHub Container Registry.
+
+You can opt out in any of these ways:
+
+- Set `telemetry.enabled=false` in the Helm values. This disables runtime events
+  and switches the default operator and engine repositories to GHCR; custom
+  image repositories remain unchanged.
+- Install the chart from `oci://ghcr.io/firebolt-db/helm-charts` to bypass Scarf
+  for the chart download as well. Helm selects the chart repository before it
+  reads chart values.
+- `DO_NOT_TRACK=1` and `SCARF_NO_ANALYTICS=1` disable runtime events only.
+
 ## Firebolt Operator flags
 
 The Firebolt Operator supports these runtime flags. The binary default is what
@@ -78,6 +101,8 @@ the manager uses when you run it directly. The Helm chart default is what the
 | `--engine-max-cpu` | `""` | Not set | Maximum allowed CPU request and limit on the engine container (`spec.template.spec.containers[name=engine].resources`). Empty disables the bound. |
 | `--engine-max-memory` | `""` | Not set | Maximum allowed memory request and limit on the engine container. Empty disables the bound. |
 | `--engine-max-ephemeral-storage` | `""` | Not set | Maximum allowed ephemeral-storage request and limit on the engine container. Empty disables the bound. |
+| `--telemetry` | `true` | `true` | Send a once-daily anonymous aggregate usage event. |
+| `--telemetry-endpoint` | `https://telemetry.firebolt.io/firebolt-operator` | Same as binary | Scarf Event Collection endpoint for anonymous aggregate usage events. |
 | `--zap-devel` | `false` | Not set | Enable controller-runtime development logging defaults. |
 | `--zap-encoder` | `json` | `json` | Log encoding. Valid values are `json` and `console`. |
 | `--zap-log-level` | `info` | `info` | Minimum log level. Valid values include `debug`, `info`, `error`, and `panic`. |
@@ -96,3 +121,5 @@ make test-e2e           # E2E tests (requires Kind cluster)
 - For **contributor** detail, conventions, and rules for making changes to this repo, see [`AGENTS.md`](AGENTS.md).
 - The Helm chart for the operator lives in [helm/firebolt-operator](helm/firebolt-operator/README.md).
 - The pure CRD chart for the operator lives in [helm/firebolt-operator-crds](helm/firebolt-operator-crds/README.md).
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://px.firebolt.io/a.png?x-pxid=44d8e5cd-a225-4212-8705-a7639ab30398&page=operator-README" alt="" width="1" height="1" style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;" />

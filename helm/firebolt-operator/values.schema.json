@@ -220,6 +220,15 @@
     "priorityClassName": {
       "type": "string"
     },
+    "telemetry": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["enabled"]
+    },
     "additionalArgs": {
       "type": "array",
       "items": { "type": "string" }

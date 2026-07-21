@@ -2,6 +2,20 @@
 
 appVersion: v0.1.1
 
+## [0.2.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.1.4...firebolt-operator-chart-0.2.0) (2026-07-21)
+
+
+### Features
+
+* add anonymous Scarf usage telemetry (FB-1354) ([86ac31b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/86ac31bb83f8c58cc338274149d17ee3a4c3aac8))
+* couple telemetry opt-out to default image routing (FB-1354) ([3d78f21](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3d78f218a2cb035917a961e5dd41164c2d5e2ac5))
+* route public operator and engine pulls through Scarf (FB-1354) ([3b2a64f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3b2a64f50619ae2ed5707737322e16aafc33bee7))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.4.0 ([02ea005](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/02ea0058fe94e37358ffc351d7400c330457010c))
+
 ## [0.1.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.1.3...firebolt-operator-chart-0.1.4) (2026-07-14)
 
 
