@@ -272,8 +272,6 @@ The `formal-verification.yaml` `detect` job is **path-scoped**: on a PR it sets 
 
 ### Commit conventions
 
-Ask before creating or amending commits.
-
 ```
 <type>(<scope>): <description> (<issue-ref>)
 ```
@@ -287,6 +285,7 @@ Rules:
 - Subject: imperative mood, lowercase, no trailing period; keep it under 100 characters.
 - Body: explain what changed and *why*.
 - An issue reference is required: either a GitHub issue (`#123`) or a Linear ticket (`FB-<ticket>`); take it from the branch name or last commit.
+- CI-only changes MUST use `ci:` with an optional scope (for example, `ci(test): ...`), never `fix(ci):`. A `fix:` conventional commit always triggers a patch release, which is not required for CI changes.
 
 Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (#123)`
 
