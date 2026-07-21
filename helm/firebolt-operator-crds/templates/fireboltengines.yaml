@@ -4325,6 +4325,64 @@ spec:
                   user edits in audit trails.
                 format: date-time
                 type: string
+              observedAuthHash:
+                description: |-
+                  ObservedAuthHash is the auth content-hash (see the internal
+                  authHash function) that this engine's current, stable generation
+                  was last confirmed to match — copied from the running
+                  StatefulSet's own drift-detection annotation once a reconcile finds
+                  no drift. Empty when auth is disabled or no generation has
+                  stabilized yet.
+
+                  This exists so the instance controller can tell, for its own
+                  signing-key rotation state machine, whether every engine in an
+                  Instance has actually rolled onto a given signing-keys set —
+                  without the instance controller needing to read engine
+                  StatefulSets directly or recompute engine-side rendering rules
+                  itself. It is intentionally the same hash already used to decide
+                  whether an engine needs a new generation (see stsMatchesSpec /
+                  annotationsMatchSpec), just surfaced here as this engine's own
+                  observed value of it.
+                type: string
+              observedEngineServingCertFP:
+                description: |-
+                  ObservedEngineServingCertFP is the fingerprint of the serving-certificate
+                  tls.crt the current stable generation was last confirmed on, recorded once
+                  a reconcile finds the generation stable (FB-896 #1). ObservedEngineServingCertGen
+                  records which generation that fingerprint belongs to. computeStable treats a
+                  changed fingerprint as an in-place re-issuance — and rolls a fresh
+                  generation so running pods stop serving the stale leaf — ONLY when the
+                  recorded generation equals the current one. Every new generation issues its
+                  own certificate (a fresh key), so its fingerprint legitimately differs from
+                  the prior generation's; without the generation guard, an ordinary
+                  spec-driven roll would look like a re-issuance and roll forever. A
+                  coordinated re-issuance roll cuts over through the #4 trust-bundle gate.
+                  Empty/zero when engine TLS is disabled or no generation has stabilized yet;
+                  first observation (empty fingerprint) records without rolling. tls.crt is a
+                  public certificate.
+                type: string
+              observedEngineServingCertGen:
+                description: |-
+                  ObservedEngineServingCertGen is the generation ObservedEngineServingCertFP
+                  was observed at — see that field. Zero when unset.
+                type: integer
+              observedEngineTLSHash:
+                description: |-
+                  ObservedEngineTLSHash is the engine-TLS content-hash (see the internal
+                  tlsHash function) that this engine's current, stable generation was last
+                  confirmed to match — copied from the running StatefulSet's own
+                  drift-detection annotation once a reconcile finds no drift. Empty when
+                  engine TLS is disabled or no generation has stabilized yet.
+
+                  The instance controller reads this across the engine fleet to decide
+                  when the gateway may switch its upstream protocol: it re-encrypts to
+                  engines only once every engine has rolled onto a TLS-serving generation
+                  (this hash non-empty and matching), and keeps re-encrypting until every
+                  engine has drained back to plaintext (this hash empty everywhere). Same
+                  hash used to decide whether an engine needs a new generation (see
+                  stsMatchesSpec / annotationsMatchSpec), surfaced here as this engine's
+                  own observed value.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the metadata.generation that was
                   last fully reconciled to stable.

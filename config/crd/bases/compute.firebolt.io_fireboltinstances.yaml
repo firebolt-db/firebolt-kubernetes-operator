@@ -56,55 +56,368 @@ spec:
               Instance.
             properties:
               auth:
-                description: Auth configures authentication for engine nodes.
+                description: |-
+                  Auth configures authentication for every engine in this Instance.
+                  See AuthSpec for why this is Instance-wide rather than per-Engine.
                 properties:
-                  mode:
-                    description: Mode is the authentication mode.
-                    enum:
-                    - disabled
-                    - native
-                    - openid
-                    type: string
-                  oidc:
-                    description: OIDC configures OpenID Connect. Required when mode
-                      is "openid".
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled turns on authentication for every engine in this Instance.
+                      When false, engines run in packdb's unauthenticated mode and every
+                      connection is treated as the admin. Local, OIDC, and
+                      PreferredAuthorizationServer below are only meaningful when Enabled
+                      is true; the validating webhook rejects setting them while Enabled
+                      is false, matching packdb's own config validation (instance.auth's
+                      admin and oidc fields must be absent when instance.auth.enabled is
+                      false).
+                    type: boolean
+                  local:
+                    description: |-
+                      Local configures the embedded ("_local") authorization server:
+                      native username/password login and JWT signing. Required when
+                      Enabled is true.
                     properties:
-                      claimMappings:
-                        additionalProperties:
-                          type: string
-                        description: 'ClaimMappings maps OIDC claims to Firebolt user
-                          attributes (e.g. {"username": "email"}).'
-                        type: object
-                      clientID:
-                        description: ClientID is the OIDC client identifier.
-                        minLength: 1
-                        type: string
-                      clientSecretRef:
-                        description: ClientSecretRef references a Secret containing
-                          the OIDC client secret.
+                      admin:
+                        description: |-
+                          Admin configures the Instance admin account. Required when auth is
+                          enabled — packdb rejects a config with auth.enabled=true and no
+                          admin block.
                         properties:
                           name:
-                            default: ""
+                            default: firebolt
                             description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              Name is the admin username. Defaults to "firebolt" — packdb's own
+                              default — so omitting it matches engine behavior when auth is
+                              first enabled.
                             type: string
+                          password:
+                            description: |-
+                              Password references the Secret key holding the admin password.
+                              Required when auth is enabled: the operator does not generate an
+                              admin password, because a generated credential the user never sees
+                              is not something they can use to log in. The referenced Secret is
+                              mounted into every engine pod and rendered as
+                              instance.auth.admin.password_file — never password_value — so the
+                              plaintext password never appears in the rendered config.yaml or its
+                              ConfigMap.
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        required:
+                        - password
                         type: object
-                        x-kubernetes-map-type: atomic
-                      issuerURL:
-                        description: IssuerURL is the OIDC provider's issuer URL.
-                        minLength: 1
+                      clockSkewTolerance:
+                        description: |-
+                          ClockSkewTolerance is the permitted clock drift when validating
+                          time-based JWT claims. Defaults to packdb's own default (30s) when
+                          empty.
+                        type: string
+                      maxTokenAge:
+                        description: |-
+                          MaxTokenAge bounds how old a token's iat claim may be, independent
+                          of TokenExpiry. Defaults to packdb's own default (1d) when empty.
+                        type: string
+                      passwordLogin:
+                        default: admin_only
+                        description: |-
+                          PasswordLogin controls whether password login is available to any
+                          user or only the admin account. Defaults to admin_only (packdb's
+                          own default).
+                        enum:
+                        - admin_only
+                        - any_user
+                        type: string
+                      signingAlgorithm:
+                        default: ES384
+                        description: |-
+                          SigningAlgorithm is the JWT signing algorithm used by the embedded
+                          authorization server. Must be compatible with SigningKeys'
+                          cert-manager key algorithm: the RS* family requires an RSA key, the
+                          ES* family requires ECDSA. Defaults to ES384, matching the ECDSA
+                          signing-key default.
+
+                          Immutable once set (enforced by the API server via the transition rule
+                          below, so it holds even if the validating webhook is bypassed): packdb
+                          exposes one global signing_algorithm and derives every key's curve from
+                          it, so it can never hold two curves at once. Changing it in place would
+                          roll engines onto a signing_algorithm their mounted key no longer matches
+                          — an invalid JWKS / permanent startup wedge. Recreate the Instance (or
+                          disable auth and drop spec.auth.local first) to change it.
+                        enum:
+                        - RS256
+                        - RS384
+                        - RS512
+                        - ES256
+                        - ES384
+                        - ES512
+                        type: string
+                        x-kubernetes-validations:
+                        - message: signingAlgorithm is immutable once set; recreate
+                            the instance to change the JWT signing algorithm
+                          rule: self == oldSelf || oldSelf == ''
+                      signingKeys:
+                        description: |-
+                          SigningKeys controls how the operator provisions the signing
+                          keypair. Required when auth is enabled: packdb's own dev-autogen
+                          fallback (used when signing_keys is empty) mints a different key
+                          per engine process, which breaks cross-engine token validation in
+                          any multi-engine deployment — exactly the topology this operator
+                          always creates.
+                        properties:
+                          certManager:
+                            description: |-
+                              CertManager configures the cert-manager Certificate used to
+                              generate the signing keypair.
+
+                              The key size is immutable once set (enforced by the API server, so it
+                              holds even if the validating webhook is bypassed): packdb derives every
+                              signing key's curve from the single global signingAlgorithm and cannot
+                              serve two curves at once, so a size change cannot be migrated in place.
+                              The rule is scoped to this signing-only field, leaving TLS listener key
+                              sizes (which share CertManagerSpec) mutable. issuerRef/algorithm changes
+                              are separately constrained by the signingAlgorithm compatibility check.
+                            properties:
+                              algorithm:
+                                default: ECDSA
+                                description: Algorithm is the private key algorithm.
+                                enum:
+                                - RSA
+                                - ECDSA
+                                type: string
+                              issuerRef:
+                                description: |-
+                                  IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                                  signs the generated Certificate.
+                                properties:
+                                  kind:
+                                    default: ClusterIssuer
+                                    description: |-
+                                      Kind is the referenced resource's kind. Issuer is namespaced (must
+                                      live in the same namespace as this FireboltInstance); ClusterIssuer
+                                      is cluster-scoped.
+                                    enum:
+                                    - Issuer
+                                    - ClusterIssuer
+                                    type: string
+                                  name:
+                                    description: Name is the name of the Issuer or
+                                      ClusterIssuer.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              size:
+                                default: 384
+                                description: |-
+                                  Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                                  ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                                  matching the ECDSA algorithm default). The algorithm/size combination
+                                  is validated at admission (see validateCertManagerKey).
+                                format: int32
+                                type: integer
+                            required:
+                            - issuerRef
+                            type: object
+                            x-kubernetes-validations:
+                            - message: signing key size is immutable once set; recreate
+                                the instance to change it
+                              rule: self.size == oldSelf.size || oldSelf.size == 0
+                          retainDuration:
+                            description: |-
+                              RetainDuration bounds how long a demoted key is kept in
+                              signing_keys[] as validation-only after it stops signing new
+                              tokens, before the operator drops it from every engine's rendered
+                              config and deletes its Certificate/Secret. Must be at least
+                              instance.auth.local.maxTokenAge (packdb default: 1 day) plus
+                              however long a full engine fleet rollout realistically takes: a
+                              token signed in the last instant the old key was active must fully
+                              expire before the key that could validate it disappears.
+
+                              Required whenever RotationInterval is set; rejected otherwise (see
+                              ValidateAuth).
+                            type: string
+                          rotationInterval:
+                            description: |-
+                              RotationInterval, when set, enables operator-owned periodic
+                              rotation: measured from the active key's CreatedAt, once this much
+                              time has passed the operator mints a new key and promotes it via a
+                              two-phase rollout that never opens a validation gap (see
+                              AuthStatus's doc comment). Omit to keep a single, permanent,
+                              non-rotating key, matching this operator's original behavior.
+
+                              RetainDuration must also be set whenever this is set.
+                            type: string
+                        required:
+                        - certManager
+                        type: object
+                      tokenExpiry:
+                        description: |-
+                          TokenExpiry is how long issued access tokens remain valid, as a Go
+                          duration string (e.g. "1h"). Defaults to packdb's own default (1h)
+                          when empty.
                         type: string
                     required:
-                    - clientID
-                    - issuerURL
+                    - admin
                     type: object
-                required:
-                - mode
+                  oidc:
+                    description: |-
+                      OIDC configures OpenID Connect bearer-token authentication against
+                      one or more external identity providers.
+                    properties:
+                      jwt:
+                        description: JWT configures validation parameters shared by
+                          every provider.
+                        properties:
+                          clockSkewTolerance:
+                            description: |-
+                              ClockSkewTolerance is the permitted clock drift when validating
+                              time-based claims on OIDC-issued tokens. Defaults to packdb's own
+                              default (30s) when empty.
+                            type: string
+                          maxTokenAge:
+                            description: |-
+                              MaxTokenAge bounds how old an OIDC token's iat claim may be.
+                              Defaults to packdb's own default (1d) when empty.
+                            type: string
+                        type: object
+                      providers:
+                        description: |-
+                          Providers lists the trusted OIDC identity providers. Must be
+                          non-empty when OIDC is configured at all — packdb rejects a
+                          present oidc block with an empty providers list.
+                        items:
+                          description: |-
+                            OIDCProviderSpec configures one trusted OIDC identity provider. packdb
+                            validates bearer tokens against this provider's published keys — it is
+                            a JWT validator, not an OAuth2 client: there is no client ID/secret,
+                            redirect URI, or authorization-code flow here, because the engine never
+                            initiates a login. An external client (the Firebolt CLI, a BI tool)
+                            performs the OIDC flow itself and presents the resulting access token
+                            to the engine as a bearer token.
+                          properties:
+                            audience:
+                              description: |-
+                                Audience is the expected "aud" claim on tokens from this provider.
+                                Defaults to the Instance's canonical issuer URL when empty
+                                (packdb's own default).
+                              type: string
+                            discovery:
+                              description: |-
+                                Discovery configures refresh of this provider's OpenID discovery
+                                document.
+                              properties:
+                                refreshInterval:
+                                  description: |-
+                                    RefreshInterval is how often the engine re-fetches the provider's
+                                    /.well-known/openid-configuration document, as a Go duration
+                                    string. Defaults to packdb's own default (1d) when empty.
+                                  type: string
+                              type: object
+                            discoveryURL:
+                              description: |-
+                                DiscoveryURL is the provider's OpenID Connect discovery endpoint
+                                (typically ending in /.well-known/openid-configuration). Must be
+                                an https:// URL — packdb requires TLS for every outbound OIDC
+                                fetch except loopback.
+                              minLength: 1
+                              pattern: ^https://.+
+                              type: string
+                            jitProvisioning:
+                              description: |-
+                                JITProvisioning controls automatic user creation on first login via
+                                this provider.
+                              properties:
+                                defaultRoles:
+                                  description: |-
+                                    DefaultRoles lists the roles granted to an auto-provisioned user.
+                                    Defaults to ["public"] (packdb's own default) when empty.
+                                  items:
+                                    type: string
+                                  type: array
+                                enabled:
+                                  default: false
+                                  description: Enabled turns on just-in-time user
+                                    provisioning for this provider.
+                                  type: boolean
+                              type: object
+                            jwks:
+                              description: JWKS configures caching of this provider's
+                                published key set.
+                              properties:
+                                cacheTTL:
+                                  description: |-
+                                    CacheTTL is how long a fetched JWKS document is cached before being
+                                    re-fetched, as a Go duration string. Defaults to packdb's own
+                                    default (1h) when empty.
+                                  type: string
+                              type: object
+                            name:
+                              description: |-
+                                Name is this provider's machine identifier, used in the
+                                ?auth=<name> connection parameter and as the authorization server
+                                name clients select. Must not start with "_" — that prefix is
+                                reserved by packdb for Firebolt-managed authorization servers (the
+                                embedded server is named "_local").
+                              minLength: 1
+                              pattern: ^[^_].*$
+                              type: string
+                            title:
+                              description: |-
+                                Title is a human-readable label for this provider, shown in UIs.
+                                Defaults to Name when empty.
+                              type: string
+                            usernameMapping:
+                              description: |-
+                                UsernameMapping is a Go-template string mapping token claims to the
+                                Firebolt username; claims are interpolated with double-brace markers.
+                                For example, the "email" claim on its own, or the "iss" and "sub"
+                                claims joined with a pipe.
+                              minLength: 1
+                              type: string
+                          required:
+                          - discoveryURL
+                          - name
+                          - usernameMapping
+                          type: object
+                        minItems: 1
+                        type: array
+                    required:
+                    - providers
+                    type: object
+                  preferredAuthorizationServer:
+                    description: |-
+                      PreferredAuthorizationServer names the authorization server clients
+                      should use by default when a connection doesn't select one
+                      explicitly: either "_local" (the embedded server) or the Name of
+                      one of the OIDC providers below. Advisory only; surfaced to clients
+                      via /.well-known/firebolt. Must be unset when Enabled is false and,
+                      when set, must name a configured server.
+                    type: string
                 type: object
+                x-kubernetes-validations:
+                - message: spec.auth.local is required when spec.auth.enabled is true
+                  rule: '!self.enabled || has(self.local)'
               gateway:
                 description: Gateway configures the query routing gateway (Envoy proxy).
                 properties:
@@ -17320,6 +17633,343 @@ spec:
                 - PodIP
                 - ApiserverProxy
                 type: string
+              tls:
+                description: |-
+                  TLS configures TLS termination on the gateway's client-facing
+                  listener and on each engine's own listeners.
+                properties:
+                  engine:
+                    description: |-
+                      Engine configures TLS termination on each engine's HTTP and
+                      Postgres-wire listeners.
+
+                      The cert-manager issuerRef is immutable while engine TLS stays enabled,
+                      enforced here at the API server (via the transition rule below) so it
+                      holds even when the validating webhook is disabled — the shipped Helm
+                      default. Reissuing per-generation engine certificates under a new CA
+                      while the gateway still trusts the old anchor (Status.EngineTLS) would
+                      fail every upstream handshake mid-roll. The rule is field-scoped to the
+                      engine listener so it does NOT freeze the gateway issuer, which shares
+                      the TLSListenerSpec/CertManagerSpec types. It permits the initial enable
+                      and a disable/re-enable (fresh certs, no overlap) — only an in-place
+                      issuer change while continuously enabled is rejected.
+
+                      The cert-manager key algorithm/size are likewise immutable while engine
+                      TLS stays enabled (second rule below). The stable-name anchor Certificate
+                      (Status.EngineTLS) carries the same key policy under rotationPolicy:Never,
+                      so cert-manager reuses its existing private key on every reissue and will
+                      NOT regenerate it to match a changed algorithm/size — the Certificate
+                      silently keeps the old key or never goes Ready for the new spec. The
+                      per-generation serving cert would pick up a new algorithm/size on its own
+                      (a fresh Secret name each generation), but the anchor it shares an issuer
+                      with would not, so an in-place edit still wedges engine TLS; freeze while
+                      enabled and permit it across a disable/re-enable (fresh key material).
+
+                      Both rules intentionally do not fire across a certManager⇄secretRef switch
+                      (the has(...) guards): that changes the resolved Secret name, which tlsHash
+                      folds, so it rolls the fleet through the normal convergence-gated path.
+                      Only same-Secret issuer/key-param swaps need freezing, because tlsHash
+                      cannot see them (issuerRef/algorithm/size are deliberately not folded
+                      across the anchor). The webhook re-checks both with clearer messages.
+                    properties:
+                      certManager:
+                        description: |-
+                          CertManager configures the cert-manager Certificate used to
+                          provision this listener's server certificate. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          algorithm:
+                            default: ECDSA
+                            description: Algorithm is the private key algorithm.
+                            enum:
+                            - RSA
+                            - ECDSA
+                            type: string
+                          issuerRef:
+                            description: |-
+                              IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                              signs the generated Certificate.
+                            properties:
+                              kind:
+                                default: ClusterIssuer
+                                description: |-
+                                  Kind is the referenced resource's kind. Issuer is namespaced (must
+                                  live in the same namespace as this FireboltInstance); ClusterIssuer
+                                  is cluster-scoped.
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
+                              name:
+                                description: Name is the name of the Issuer or ClusterIssuer.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          size:
+                            default: 384
+                            description: |-
+                              Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                              ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                              matching the ECDSA algorithm default). The algorithm/size combination
+                              is validated at admission (see validateCertManagerKey).
+                            format: int32
+                            type: integer
+                        required:
+                        - issuerRef
+                        type: object
+                      clientCASecretRef:
+                        description: |-
+                          ClientCASecretRef enables mutual TLS on this listener: the server
+                          requires a client certificate and verifies it against the "ca.crt"
+                          bundle in the referenced Secret. The operator only reads this Secret
+                          (never creates or mutates it), and the listener stays not-ready until
+                          it exists and carries ca.crt.
+
+                          Currently honored only for spec.tls.gateway — the gateway verifies
+                          client certificates on its client-facing listener. Setting it on
+                          spec.tls.engine is rejected at admission (engine-side client-cert
+                          verification is not yet wired). Requires this listener's server TLS
+                          to be enabled.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      dnsNames:
+                        description: |-
+                          DNSNames lists additional Subject Alternative Names to include on
+                          the provisioned certificate, beyond whatever names the operator
+                          derives automatically.
+
+                          Only meaningful for spec.tls.gateway: the gateway's in-cluster
+                          Service DNS names are always included automatically, but the
+                          gateway has no operator-managed external entrypoint (no
+                          Ingress/LoadBalancer hostname visible to the operator — see
+                          TLSSpec's doc comment), so any name a client outside the cluster
+                          will actually present at the TLS handshake — a custom domain, an
+                          external load balancer's hostname — must be listed here
+                          explicitly, mirroring the sibling firebolt-instance-helm chart's
+                          tls.gateway.certManager.dnsNames.
+
+                          Ignored for spec.tls.engine: its SANs are fully derived from the
+                          namespace (see engineTLSWildcardDNSName) and cannot be extended,
+                          since every engine's routing Service already matches the
+                          namespace-wide wildcard.
+                        items:
+                          type: string
+                        type: array
+                      enabled:
+                        default: false
+                        description: Enabled turns on TLS for this listener.
+                        type: boolean
+                      secretRef:
+                        description: |-
+                          SecretRef supplies a pre-existing Kubernetes Secret holding this
+                          listener's certificate material instead of provisioning one via
+                          cert-manager — for a certificate issued by a CA the cluster has no
+                          cert-manager integration with. The Secret must carry "tls.crt" and
+                          "tls.key" (the standard kubernetes.io/tls keys); an engine listener
+                          additionally requires "ca.crt", since the gateway validates engine
+                          certificates against it when re-encrypting upstream (see
+                          EngineTLSStatus). The operator only reads this Secret; it never
+                          creates, mutates, or garbage-collects it. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'spec.tls.engine.certManager.issuerRef is immutable
+                        while engine TLS is enabled: reissuing engine certificates
+                        under a new CA while the gateway still trusts the old anchor
+                        would break every upstream handshake. Disable engine TLS or
+                        recreate the Instance to change the issuer.'
+                      rule: '!(self.enabled && oldSelf.enabled) || !has(self.certManager)
+                        || !has(oldSelf.certManager) || (self.certManager.issuerRef.name
+                        == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind
+                        == oldSelf.certManager.issuerRef.kind)'
+                    - message: 'spec.tls.engine.certManager algorithm/size is immutable
+                        while engine TLS is enabled: under rotationPolicy:Never cert-manager
+                        will not regenerate the existing stable-name anchor key to
+                        match, wedging the certificate. Disable engine TLS or recreate
+                        the Instance to change the key parameters.'
+                      rule: '!(self.enabled && oldSelf.enabled) || !has(self.certManager)
+                        || !has(oldSelf.certManager) || ((self.certManager.algorithm
+                        == oldSelf.certManager.algorithm || oldSelf.certManager.algorithm
+                        == '''') && (self.certManager.size == oldSelf.certManager.size
+                        || oldSelf.certManager.size == 0))'
+                  gateway:
+                    description: |-
+                      Gateway configures TLS termination on the Envoy gateway's
+                      client-facing listener.
+
+                      The cert-manager key algorithm/size are immutable while gateway TLS stays
+                      enabled: the gateway serving Certificate has a stable Secret name under
+                      rotationPolicy:Never, so cert-manager reuses its existing key on reissue
+                      and will not regenerate it to match a changed algorithm/size — the
+                      Certificate wedges. A disable/re-enable (fresh key material) is permitted.
+                      The rule is field-scoped to the gateway listener (the shared
+                      TLSListenerSpec/CertManagerSpec types are not frozen struct-wide), skips a
+                      certManager⇄secretRef switch (has(...) guards), and the webhook re-checks
+                      it with a clearer message. Unlike the engine listener the gateway issuer is
+                      NOT frozen: reissuing the client cert under a new CA is a valid rotation
+                      (clients update their trust store) and reuses the same key, so it does not
+                      wedge.
+                    properties:
+                      certManager:
+                        description: |-
+                          CertManager configures the cert-manager Certificate used to
+                          provision this listener's server certificate. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          algorithm:
+                            default: ECDSA
+                            description: Algorithm is the private key algorithm.
+                            enum:
+                            - RSA
+                            - ECDSA
+                            type: string
+                          issuerRef:
+                            description: |-
+                              IssuerRef references the cert-manager Issuer or ClusterIssuer that
+                              signs the generated Certificate.
+                            properties:
+                              kind:
+                                default: ClusterIssuer
+                                description: |-
+                                  Kind is the referenced resource's kind. Issuer is namespaced (must
+                                  live in the same namespace as this FireboltInstance); ClusterIssuer
+                                  is cluster-scoped.
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
+                              name:
+                                description: Name is the name of the Issuer or ClusterIssuer.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          size:
+                            default: 384
+                            description: |-
+                              Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+                              ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
+                              matching the ECDSA algorithm default). The algorithm/size combination
+                              is validated at admission (see validateCertManagerKey).
+                            format: int32
+                            type: integer
+                        required:
+                        - issuerRef
+                        type: object
+                      clientCASecretRef:
+                        description: |-
+                          ClientCASecretRef enables mutual TLS on this listener: the server
+                          requires a client certificate and verifies it against the "ca.crt"
+                          bundle in the referenced Secret. The operator only reads this Secret
+                          (never creates or mutates it), and the listener stays not-ready until
+                          it exists and carries ca.crt.
+
+                          Currently honored only for spec.tls.gateway — the gateway verifies
+                          client certificates on its client-facing listener. Setting it on
+                          spec.tls.engine is rejected at admission (engine-side client-cert
+                          verification is not yet wired). Requires this listener's server TLS
+                          to be enabled.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      dnsNames:
+                        description: |-
+                          DNSNames lists additional Subject Alternative Names to include on
+                          the provisioned certificate, beyond whatever names the operator
+                          derives automatically.
+
+                          Only meaningful for spec.tls.gateway: the gateway's in-cluster
+                          Service DNS names are always included automatically, but the
+                          gateway has no operator-managed external entrypoint (no
+                          Ingress/LoadBalancer hostname visible to the operator — see
+                          TLSSpec's doc comment), so any name a client outside the cluster
+                          will actually present at the TLS handshake — a custom domain, an
+                          external load balancer's hostname — must be listed here
+                          explicitly, mirroring the sibling firebolt-instance-helm chart's
+                          tls.gateway.certManager.dnsNames.
+
+                          Ignored for spec.tls.engine: its SANs are fully derived from the
+                          namespace (see engineTLSWildcardDNSName) and cannot be extended,
+                          since every engine's routing Service already matches the
+                          namespace-wide wildcard.
+                        items:
+                          type: string
+                        type: array
+                      enabled:
+                        default: false
+                        description: Enabled turns on TLS for this listener.
+                        type: boolean
+                      secretRef:
+                        description: |-
+                          SecretRef supplies a pre-existing Kubernetes Secret holding this
+                          listener's certificate material instead of provisioning one via
+                          cert-manager — for a certificate issued by a CA the cluster has no
+                          cert-manager integration with. The Secret must carry "tls.crt" and
+                          "tls.key" (the standard kubernetes.io/tls keys); an engine listener
+                          additionally requires "ca.crt", since the gateway validates engine
+                          certificates against it when re-encrypting upstream (see
+                          EngineTLSStatus). The operator only reads this Secret; it never
+                          creates, mutates, or garbage-collects it. Provide exactly one of
+                          CertManager or SecretRef when Enabled is true.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                    x-kubernetes-validations:
+                    - message: 'spec.tls.gateway.certManager algorithm/size is immutable
+                        while gateway TLS is enabled: under rotationPolicy:Never cert-manager
+                        will not regenerate the existing stable-name key to match,
+                        wedging the certificate. Disable gateway TLS or recreate the
+                        Instance to change the key parameters.'
+                      rule: '!(self.enabled && oldSelf.enabled) || !has(self.certManager)
+                        || !has(oldSelf.certManager) || ((self.certManager.algorithm
+                        == oldSelf.certManager.algorithm || oldSelf.certManager.algorithm
+                        == '''') && (self.certManager.size == oldSelf.certManager.size
+                        || oldSelf.certManager.size == 0))'
+                type: object
             required:
             - gateway
             - metadata
@@ -17328,6 +17978,161 @@ spec:
             description: FireboltInstanceStatus defines the observed state of a Firebolt
               Instance.
             properties:
+              auth:
+                description: |-
+                  Auth reports the crypto material the operator has provisioned for
+                  Instance-wide auth (currently: JWT signing keys). Nil when
+                  spec.auth is unset or disabled.
+                properties:
+                  signingKeyGeneration:
+                    description: |-
+                      SigningKeyGeneration is a monotonically increasing counter the
+                      operator uses to mint each new signing key's ID (kid) as
+                      "signing-<N>", guaranteeing a fresh key never reuses an ID even
+                      after an earlier key has been fully removed from SigningKeys (at
+                      which point nothing in this status would otherwise remember it was
+                      ever used). Never decreases.
+                    type: integer
+                  signingKeys:
+                    description: |-
+                      SigningKeys lists every JWT signing key the operator is currently
+                      provisioning or retaining for this Instance — exactly one with
+                      Phase=Active, and, only while a rotation is in flight, one or more
+                      additional ValidationOnly/Removing keys. See SigningKeyPolicy's
+                      RotationInterval/RetainDuration for what drives a rotation, and
+                      SigningKeyPhase for the states a key passes through:
+
+                        1. A new key is created ValidationOnly (not yet used to sign)
+                           until every engine's ObservedAuthHash confirms it has rolled
+                           out signing_keys[] including the new key — only then is it
+                           safe to promote, because promoting any earlier would let a
+                           rolled engine sign tokens a not-yet-rolled engine cannot yet
+                           validate.
+                        2. Promotion flips the new key to Active and demotes the previous
+                           Active key to ValidationOnly (DemotedAt set), so tokens it
+                           already signed keep validating everywhere. Every engine still
+                           signs with the demoted key until it rolls onto this promoted
+                           config — this is not instantaneous, so the retain window
+                           cannot start counting yet.
+                        3. Once every engine's ObservedAuthHash confirms it has actually
+                           rolled onto the promoted config — meaning no engine anywhere
+                           can still be signing with the demoted key — RetireEligibleAt
+                           is stamped. This step exists specifically so RetainDuration
+                           measures from "provably stopped signing," not from "decided to
+                           stop signing": anchoring at DemotedAt instead would let the
+                           retain window elapse while a slow-rolling engine is still
+                           minting tokens with the demoted key, silently reopening the
+                           exact validation gap this whole rotation design exists to
+                           avoid.
+                        4. Once RetireEligibleAt+RetainDuration has elapsed, the demoted
+                           key moves to Removing — dropped from render immediately, but
+                           its Certificate/Secret are kept until every engine's
+                           ObservedAuthHash confirms the removal has rolled out too.
+                        5. Only then is the Removing key's Certificate deleted and its
+                           entry dropped from this list.
+
+                      A slice from the start (predating rotation) so this growth during a
+                      rollover window needed no status schema change.
+                    items:
+                      description: |-
+                        SigningKeyStatus records one JWT signing key the operator has
+                        provisioned for this Instance.
+                      properties:
+                        algorithm:
+                          description: |-
+                            Algorithm and Size record the cert-manager key algorithm and size this
+                            key was issued with — the resolved
+                            spec.auth.local.signingKeys.certManager values in effect when it was
+                            minted. Because the signing Certificate uses rotationPolicy:Never,
+                            cert-manager will not regenerate a key whose algorithm/size later
+                            changes; it awaits user intervention instead. The rotation state machine
+                            compares these against the current policy and, on a mismatch, mints a
+                            fresh NAMED key (new kid → new Secret) so new material is issued cleanly
+                            rather than leaving the engine fleet wedged on a key the issuer refuses
+                            to update. Empty/zero on a key minted before these fields existed; the
+                            controller adopts the current resolved policy as the baseline on the
+                            next reconcile.
+                          type: string
+                        createdAt:
+                          description: CreatedAt is when this key was provisioned.
+                          format: date-time
+                          type: string
+                        demotedAt:
+                          description: |-
+                            DemotedAt is when this key was demoted from Active, unset for a key
+                            that either still is Active or has never been Active (newly minted,
+                            not yet promoted) — used only to tell those two ValidationOnly
+                            sub-states apart. Deliberately NOT what RetainDuration counts from:
+                            engines keep signing with this key until they actually roll onto
+                            the promoted config, which happens after this moment, so anchoring
+                            the retain window here would let it elapse before every engine has
+                            even stopped using this key. See RetireEligibleAt.
+                          format: date-time
+                          type: string
+                        id:
+                          description: |-
+                            ID is the key identifier rendered as the JWT "kid" and as
+                            instance.auth.local.signing_keys[].id on every engine.
+                          type: string
+                        observedPublicKeyFingerprint:
+                          description: |-
+                            ObservedPublicKeyFingerprint witnesses the identity of this key's material
+                            under its STABLE kid: the hex SHA-256 of the SubjectPublicKeyInfo parsed
+                            from the key's tls.crt (see signingKeyPublicKeyFingerprint). Only the
+                            public key is fingerprinted — never the private key bytes, which would trip
+                            weak-sensitive-data-hashing static analysis. It keys off the public KEY
+                            rather than the Certificate revision because, under rotationPolicy:Never, a
+                            cert-only reissuance (an issuer-capped lifetime, or a manual `cmctl renew`)
+                            bumps Certificate.Status.Revision while reusing the private key — so a
+                            revision bump does NOT mean the key changed. The operator itself only ever
+                            re-issues by minting a NEW kid, so a fingerprint change on an EXISTING kid
+                            is a genuine, unexpected key replacement: a hazard, since the destroyed old
+                            key can no longer validate tokens it signed. The operator surfaces such a
+                            change as a Warning Event and re-records it here (FB-896 #4). Nil until
+                            first observed. A pointer (like the ObservedCertRevision it replaced) keeps
+                            SigningKeyStatus compact — a value string would push the struct past
+                            gocritic's rangeValCopy threshold for every loop that ranges these keys.
+                          type: string
+                        phase:
+                          description: |-
+                            Phase is this key's current role — see SigningKeyPhase. Unset
+                            (empty string) is treated as Active for compatibility with
+                            Instances that provisioned their one signing key before this field
+                            existed; the controller normalizes it to Active explicitly on the
+                            next reconcile.
+                          enum:
+                          - Active
+                          - ValidationOnly
+                          - Removing
+                          type: string
+                        retireEligibleAt:
+                          description: |-
+                            RetireEligibleAt is when every engine's ObservedAuthHash first
+                            confirmed it had rolled onto the config produced by this key's
+                            demotion — i.e. the earliest instant at which no engine anywhere
+                            could still be signing new tokens with this key. Unset until that
+                            confirmation happens. RetainDuration counts from here, not from
+                            DemotedAt: a token signed in the last instant before an engine
+                            rolls is only guaranteed to have expired by
+                            RetireEligibleAt+RetainDuration, not by DemotedAt+RetainDuration,
+                            since rolling out the promotion itself takes real time.
+                          format: date-time
+                          type: string
+                        secretName:
+                          description: |-
+                            SecretName is the cert-manager-managed Secret holding this key's
+                            PEM private key (data key "tls.key").
+                          type: string
+                        size:
+                          format: int32
+                          type: integer
+                      required:
+                      - createdAt
+                      - id
+                      - secretName
+                      type: object
+                    type: array
+                type: object
               conditions:
                 description: Conditions represent the latest available observations
                   of the Instance's state.
@@ -17386,12 +18191,90 @@ spec:
                   - type
                   type: object
                 type: array
+              engineTLS:
+                description: |-
+                  EngineTLS reports the crypto material the operator has provisioned
+                  for engine-listener TLS. Nil when spec.tls.engine is unset or
+                  disabled.
+                properties:
+                  createdAt:
+                    description: CreatedAt is when this certificate was provisioned.
+                    format: date-time
+                    type: string
+                  reencrypting:
+                    description: |-
+                      Reencrypting reports whether the gateway is currently re-encrypting
+                      gateway→engine traffic with TLS. It tracks the engine FLEET's observed
+                      protocol, not merely whether the certificate exists: on enable it turns
+                      true only once every engine has rolled onto a TLS-serving generation (so
+                      the gateway does not switch to TLS while engines still serve plaintext),
+                      and on disable this EngineTLSStatus is retained with Reencrypting=true
+                      until every engine has drained back to plaintext (so the gateway keeps
+                      the trust anchor and TLS while any engine still serves it). This narrows,
+                      but does not eliminate, the mixed-protocol window during a rollout — the
+                      gateway speaks one upstream protocol at a time. See engineUpstreamTLSReady.
+                    type: boolean
+                  secretName:
+                    description: |-
+                      SecretName is the cert-manager-managed Secret holding the engine
+                      listener's server certificate (data keys "tls.crt", "tls.key", and,
+                      when the issuer populates it, "ca.crt" — the trust anchor the
+                      gateway uses to verify engines when re-encrypting upstream).
+                    type: string
+                required:
+                - createdAt
+                - secretName
+                type: object
               gatewayEndpoint:
                 description: GatewayEndpoint is the resolved gateway Service address.
                 type: string
               gatewayReady:
                 description: GatewayReady indicates whether the gateway is healthy.
                 type: boolean
+              gatewayTLS:
+                description: |-
+                  GatewayTLS reports the crypto material the operator has provisioned
+                  for the gateway's downstream (client-facing) TLS listener. Nil when
+                  spec.tls.gateway is unset or disabled.
+                properties:
+                  clientCAFingerprint:
+                    description: |-
+                      ClientCAFingerprint is the SHA-256 fingerprint (hex) of the client CA's
+                      ca.crt that the mutual-TLS listener is currently serving — recorded so the
+                      controller can detect a client-CA *replacement* (CA-A→CA-B) that keeps the
+                      mode MutualTLS but retires trust in the old CA. Such a swap is a tightening
+                      transition even though the posture ordinal is unchanged, and must stage a
+                      fail-closed rollout so old pods stop accepting the retired CA's clients (see
+                      FB-896 #2). Empty for one-way TLS (no client CA) and while pending. ca.crt
+                      is a public certificate, so fingerprinting it raises no
+                      weak-sensitive-data-hashing concern.
+                    type: string
+                  createdAt:
+                    description: CreatedAt is when this certificate was provisioned.
+                    format: date-time
+                    type: string
+                  mode:
+                    description: |-
+                      Mode is the security posture this populated status represents —
+                      GatewayTLSModeOneWay ("TLS") or GatewayTLSModeMutual ("MutualTLS"). It
+                      records what the gateway is actually *serving* so the controller can tell
+                      a tightening transition (plaintext→TLS, one-way→mTLS) apart from a steady
+                      or loosening one and stage a fail-closed rollout only when tightening (see
+                      FB-896 #1). Empty on a status written before this field existed; treated
+                      as one-way TLS, its only possible prior meaning.
+                    type: string
+                  secretName:
+                    description: |-
+                      SecretName is the cert-manager-managed Secret holding the gateway's
+                      server certificate (data keys "tls.crt" and "tls.key"). Unlike
+                      EngineTLSStatus, no "ca.crt" is required: the gateway presents this
+                      certificate to clients but never uses it to authenticate a peer, so
+                      no CA-backed-issuer requirement applies here.
+                    type: string
+                required:
+                - createdAt
+                - secretName
+                type: object
               metadataEndpoint:
                 description: |-
                   MetadataEndpoint is the resolved Service address.
@@ -17409,6 +18292,22 @@ spec:
                 - Degraded
                 - Failed
                 type: string
+              rolledEngineTrustCAs:
+                description: |-
+                  RolledEngineTrustCAs lists the SHA-256 fingerprints (hex) of the engine
+                  CA certificates the gateway has been CONFIRMED to have rolled out into its
+                  upstream trusted_ca bundle — updated only once the gateway Deployment is
+                  fully serving the config that embeds the current bundle (see
+                  ensureEngineCABundle / gatewayServingCurrentConfig, FB-896 #4). The engine
+                  controller gates a blue-green generation's Service-selector cutover on its
+                  own generation certificate's CA fingerprint appearing here, so it never
+                  routes traffic to a generation the gateway cannot yet verify (which would
+                  make the engine unreachable after a CA rotation behind the immutable
+                  issuer). A public fingerprint, never key material. Nil/empty when engine
+                  upstream TLS is not engaged (nothing to trust).
+                items:
+                  type: string
+                type: array
             type: object
         required:
         - spec
