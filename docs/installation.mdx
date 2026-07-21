@@ -11,7 +11,20 @@ This page explains how to install the Firebolt Operator in a Kubernetes cluster.
 - Kubernetes 1.28 or later. The CRDs use CEL transition rules for field immutability.
 - Helm installed on the machine or automation that deploys the Firebolt Operator.
 - Access to the OCI Helm chart registry that hosts the Firebolt Operator charts.
+- Engine nodes that run Linux kernel 6.1 or later. See [Kernel requirement](#kernel-requirement).
 - Engine nodes that provide a locked-memory (`memlock`) limit of at least 8 GiB. See [Engine node requirements](#engine-node-requirements).
+
+## Kernel requirement
+
+The engine uses `io_uring` for asynchronous I/O, so every engine node must run Linux kernel 6.1 or later. On older kernels, such as 5.10, engines crash-loop at startup.
+
+Check the kernel version on an engine node:
+
+```bash
+uname -r
+```
+
+Any version 6.1 or later is enough. If a node runs an older kernel, move your engine nodes to a node image that ships kernel 6.1 or later. Most current node images from managed Kubernetes providers already meet this requirement.
 
 ## Engine node requirements
 
