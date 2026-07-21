@@ -73,10 +73,9 @@ func templateTestEngine(name, ns, instanceRef string, env []corev1.EnvVar) *comp
 // Without the controller-side gate the reserved entry would be appended
 // after the operator-injected var and the kubelet's last-wins env
 // semantics would let the user value override the operator's, handing
-// the engine a forged node identity (POD_INDEX) or runtime mode
-// (FIREBOLT_CORE_MODE). One subtest per reserved key so a future
-// addition to operatorOwnedEngineEnvKeys that the controller forgets to
-// cover trips here.
+// the engine a forged node identity (POD_INDEX) or runtime behavior.
+// One subtest per reserved key so a future addition to
+// operatorOwnedEngineEnvKeys that the controller forgets to cover trips here.
 func TestEngineReconcile_TemplateRejectedReservedEnvKey(t *testing.T) {
 	const (
 		ns       = "ns-a"
@@ -85,7 +84,6 @@ func TestEngineReconcile_TemplateRejectedReservedEnvKey(t *testing.T) {
 	)
 	for _, key := range []string{
 		computev1alpha1.EnginePodIndexEnvKey,
-		computev1alpha1.EngineCoreModeEnvKey,
 		computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
 	} {
 		t.Run(key, func(t *testing.T) {

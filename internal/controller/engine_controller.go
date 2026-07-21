@@ -337,12 +337,11 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// this branch is dead code. Webhook OFF (chart default): this is the
 	// only enforcement — without it a reserved engine env key set on
 	// spec.template.spec.containers[engine].env (POD_INDEX,
-	// FIREBOLT_CORE_MODE, FB_AWS_EC2_METADATA_CLIENT_ENABLED) flows
-	// through buildEngineContainerEnv after the operator-injected vars,
-	// and the kubelet's last-wins env semantics let the user value
-	// silently override the operator's — handing the engine a forged
-	// node identity or runtime mode. Runs before the resource-bound
-	// gate to mirror the webhook's validateTemplate→validateResources
+	// FB_AWS_EC2_METADATA_CLIENT_ENABLED) flows through buildEngineContainerEnv
+	// after the operator-injected vars, and the kubelet's last-wins env
+	// semantics let the user value silently override the operator's — handing
+	// the engine a forged node identity or runtime behavior. Runs before the
+	// resource-bound gate to mirror the webhook's validateTemplate→validateResources
 	// order. Refuse to render until the template is fixed; mirrors the
 	// FireboltInstance controller's validateInstanceTemplates gate.
 	if tplErrs := validateEngineTemplate(engine); len(tplErrs) > 0 {
@@ -825,10 +824,9 @@ func (r *FireboltEngineReconciler) validateMergedEngineResources(engine *compute
 // in the request path the list is empty by construction (admission
 // already rejected the apply). When the webhook is off — the Helm chart
 // default — this is the only place a reserved engine-container env key
-// (POD_INDEX, FIREBOLT_CORE_MODE, FB_AWS_EC2_METADATA_CLIENT_ENABLED),
-// a reserved volume-mount name, or any other operator-owned template
-// field is caught before buildEngineContainerEnv would append it after
-// the operator-injected vars.
+// (POD_INDEX, FB_AWS_EC2_METADATA_CLIENT_ENABLED), a reserved volume-mount
+// name, or any other operator-owned template field is caught before
+// buildEngineContainerEnv would append it after the operator-injected vars.
 //
 // Only the engine's own template is checked here; the referenced
 // FireboltEngineClass template is guarded separately by

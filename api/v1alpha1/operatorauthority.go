@@ -76,15 +76,14 @@ const GatewayContainerName = "envoy"
 const MetadataContainerName = "metadata"
 
 // Operator-injected environment variables on the engine container. These
-// keys carry pod-index plumbing (POD_INDEX) and AWS SDK + runtime mode
-// signals that the operator must control end to end: a user override
-// would either crash the engine or silently divert its identity. They
-// are rejected at admission time on FireboltEngineClass spec.template and would
-// be stripped if injected through another template channel.
+// keys carry pod-index plumbing (POD_INDEX) and AWS SDK behavior that
+// the operator must control end to end: a user override would either crash
+// the engine or silently divert its identity. They are rejected at admission
+// time on FireboltEngineClass spec.template and would be stripped if injected
+// through another template channel.
 const (
 	EnginePodIndexEnvKey                    = "POD_INDEX"
 	EngineAwsEC2MetadataClientEnabledEnvKey = "FB_AWS_EC2_METADATA_CLIENT_ENABLED"
-	EngineCoreModeEnvKey                    = "FIREBOLT_CORE_MODE"
 )
 
 // operatorOwnedEngineEnvKeys is the set of env names the operator injects on
@@ -93,7 +92,6 @@ const (
 var operatorOwnedEngineEnvKeys = []string{
 	EnginePodIndexEnvKey,
 	EngineAwsEC2MetadataClientEnabledEnvKey,
-	EngineCoreModeEnvKey,
 }
 
 // MetadataPostgresUsernameEnvKey and MetadataPostgresPasswordEnvKey are
