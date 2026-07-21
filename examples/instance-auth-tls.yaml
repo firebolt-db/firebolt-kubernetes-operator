@@ -1,0 +1,158 @@
+# FireboltInstance with authentication (native + OIDC) and TLS enabled.
+#
+# This is a reference/showcase example — it is NOT applied by the CI quickstart
+# smoke tests (unlike instance-full.yaml) because it has external prerequisites
+# that a bare cluster does not provide:
+#
+#   1. cert-manager installed, plus a ClusterIssuer (or namespaced Issuer)
+#      named "internal-ca" that can issue certificates. The operator creates
+#      Certificates only — it never creates the Issuer. A CA-backed issuer is
+#      required for engine TLS (the gateway trusts the engine cert via its
+#      ca.crt); an ACME issuer that does not populate ca.crt will not work for
+#      tls.engine. A self-signed-CA ClusterIssuer example is at the bottom.
+#   2. the admin-password Secret referenced below. The operator never
+#      generates the admin password; you supply it.
+#   3. a reachable OIDC provider at the discoveryURL below. The placeholder
+#      here (company.okta.com) will not resolve — replace it with your own.
+#
+# Signing keys and TLS certs are ALWAYS provisioned via cert-manager; there is
+# no bring-your-own-Secret option (unlike the sibling firebolt-instance-helm
+# chart).
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: firebolt-admin-credentials
+type: Opaque
+stringData:
+  # The operator never generates this — you supply it. Rotate by updating
+  # this Secret; the operator rolls the change out to every engine.
+  password: change-me-to-a-strong-password
+---
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltInstance
+metadata:
+  name: firebolt
+spec:
+  gateway:
+    replicas: 2
+
+  # Auth is Instance-wide: every engine in this Instance renders the same
+  # instance.auth.* config and shares the same JWT signing key, because
+  # packdb's embedded authorization server on each engine both issues and
+  # validates tokens.
+  auth:
+    enabled: true
+    # Clients that don't pick an authorization server explicitly default
+    # to this one. Must be "_local" or one of oidc.providers[].name.
+    preferredAuthorizationServer: okta
+    local:
+      passwordLogin: admin_only
+      admin:
+        name: firebolt
+        password:
+          name: firebolt-admin-credentials
+          key: password
+      signingAlgorithm: ES384
+      signingKeys:
+        certManager:
+          issuerRef:
+            name: internal-ca
+            kind: ClusterIssuer
+          algorithm: ECDSA
+          size: 384
+        # Optional: operator-owned rotation. Omit both fields to keep a
+        # single, permanent, non-rotating key (the default). When set,
+        # the operator mints a new key every rotationInterval and rolls
+        # it out via a two-phase promotion that never opens a validation
+        # gap; retainDuration must be at least maxTokenAge (packdb
+        # default: 1d) so a token signed the instant a key is demoted has
+        # fully expired before that key is removed.
+        rotationInterval: 720h # 30 days
+        retainDuration: 24h
+    oidc:
+      providers:
+        - name: okta
+          title: Okta
+          discoveryURL: https://company.okta.com/oauth2/default/.well-known/openid-configuration
+          usernameMapping: "{{ email }}"
+          jitProvisioning:
+            enabled: true
+            defaultRoles: [public]
+
+  # TLS certs are also cert-manager-only.
+  #
+  # tls.engine: enabling it replaces every engine's plaintext http-query
+  # listener with TLS-only on the same port, and the gateway automatically
+  # re-encrypts its upstream connection to engines using the same
+  # certificate's CA. Requires a CA-backed issuer (see prerequisite 1).
+  #
+  # KNOWN LIMITATION — toggling tls.engine on a fleet with live engines is not
+  # seamless. The engine listener is TLS-only-or-plaintext (never both) on one
+  # port, and the gateway uses a single upstream protocol for the whole fleet,
+  # so during the roll there is a transient window where already-switched
+  # engines and the not-yet-switched gateway (or vice versa) disagree on the
+  # protocol and queries can return 503 until the fleet converges. Prefer
+  # enabling/disabling engine TLS before scaling engines up, or during a
+  # maintenance window. (Steady-state operation and cert rotation are seamless.)
+  #
+  # The engine certManager.issuerRef is IMMUTABLE while engine TLS is enabled
+  # (enforced at the API server): moving per-generation engine certs to a new CA
+  # while the gateway still trusts the old anchor would break every upstream
+  # handshake mid-roll. Disable engine TLS (or recreate the Instance) to change
+  # it. Key algorithm/size may still be changed in place.
+  #
+  # tls.gateway: enabling it terminates TLS on the gateway's client-facing
+  # listener. The certificate always covers the gateway's in-cluster
+  # Service DNS names automatically; dnsNames below is only needed for
+  # names a client outside the cluster will present at the handshake (a
+  # custom domain, an external load balancer's hostname) — the gateway has
+  # no operator-managed external entrypoint, so the operator cannot infer
+  # those on its own. Omit dnsNames entirely for in-cluster-only access.
+  tls:
+    engine:
+      enabled: true
+      certManager:
+        issuerRef:
+          name: internal-ca
+          kind: ClusterIssuer
+    gateway:
+      enabled: true
+      certManager:
+        issuerRef:
+          name: internal-ca
+          kind: ClusterIssuer
+      dnsNames:
+        - firebolt.example.com
+---
+# Example prerequisite (prerequisite 1): a self-signed-CA ClusterIssuer named
+# "internal-ca". Uncomment and apply with cert-manager installed. This is a
+# minimal demo issuer — use your organization's real CA in production.
+#
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: internal-ca-root
+# spec:
+#   selfSigned: {}
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: internal-ca
+#   namespace: cert-manager
+# spec:
+#   isCA: true
+#   commonName: internal-ca
+#   secretName: internal-ca-tls
+#   issuerRef:
+#     name: internal-ca-root
+#     kind: ClusterIssuer
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: internal-ca
+# spec:
+#   ca:
+#     secretName: internal-ca-tls

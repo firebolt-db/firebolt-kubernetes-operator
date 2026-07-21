@@ -129,6 +129,23 @@ const (
 	// EngineRuntimeVolumeName is the emptyDir volume mounted at
 	// /run/firebolt for the engine's unix domain socket.
 	EngineRuntimeVolumeName = "runtime"
+	// EngineAuthAdminVolumeName is the projected Secret volume carrying
+	// the Instance admin password, present only when spec.auth is
+	// enabled. Mounted at AuthAdminMountPath on the engine container.
+	EngineAuthAdminVolumeName = "auth-admin"
+	// EngineAuthSigningVolumeNamePrefix names each provisioned signing
+	// key's Secret volume: EngineAuthSigningVolumeNamePrefix + key ID
+	// (e.g. "auth-signing-signing-1"), present only when spec.auth is
+	// enabled. One volume per key so a rotation in flight can mount the
+	// Active key and the one other key it is promoting or retiring at
+	// once, without a name collision. Mounted at
+	// AuthSigningMountPathBase + "/" + <key ID> on the engine container.
+	EngineAuthSigningVolumeNamePrefix = "auth-signing-"
+	// EngineTLSVolumeName is the projected Secret volume carrying the
+	// engine listener's TLS server certificate, present only when
+	// spec.tls.engine is enabled. Mounted at EngineTLSMountPath on the
+	// engine container.
+	EngineTLSVolumeName = "tls-engine"
 	// GatewayConfigVolumeName carries the operator-rendered Envoy
 	// config (envoy.yaml). Mounted at /etc/envoy on the Envoy
 	// container.
@@ -136,6 +153,24 @@ const (
 	// GatewayTmpVolumeName is the writable /tmp emptyDir the Envoy
 	// container needs alongside ReadOnlyRootFilesystem=true.
 	GatewayTmpVolumeName = "tmp"
+	// GatewayEngineCAVolumeName carries the "ca.crt" entry from the
+	// engine-listener TLS Secret, present only when spec.tls.engine is
+	// enabled. Mounted read-only on the Envoy container so the gateway
+	// can validate engine server certificates when re-encrypting
+	// gateway->engine traffic (see buildEnvoyConfigYAML's
+	// dynamic_forward_proxy transport_socket).
+	GatewayEngineCAVolumeName = "engine-ca"
+	// GatewayTLSVolumeName carries the gateway's downstream (client-facing)
+	// TLS server certificate, present only when spec.tls.gateway is
+	// enabled. Mounted read-only on the Envoy container; referenced by the
+	// listener's DownstreamTlsContext in buildEnvoyConfigYAML.
+	GatewayTLSVolumeName = "tls-gateway"
+	// GatewayClientCAVolumeName carries the "ca.crt" the gateway verifies
+	// client certificates against when mutual TLS is enabled on the
+	// client-facing listener (spec.tls.gateway.clientCASecretRef). Present
+	// only once gateway TLS is ready and a client CA is configured; mounted
+	// read-only on the Envoy container.
+	GatewayClientCAVolumeName = "client-ca"
 	// MetadataConfigVolumeName carries the operator-rendered Pensieve
 	// XML config. Mounted at /configs on the metadata container.
 	MetadataConfigVolumeName = "config"
@@ -151,10 +186,19 @@ const (
 // operatorOwnedEngineVolumeNames are the volume names the operator
 // renders on the engine StatefulSet's pod template. User templates may
 // not declare volumes or volumeMounts with these names.
+//
+// Signing-key volumes are deliberately absent from this list: rotation
+// mounts a dynamic, growing/shrinking set of "auth-signing-<kid>" volumes
+// (one per currently-tracked key), so no static enumeration of every
+// possible kid could ever be complete. isReservedVolumeMountName covers
+// them instead, via a prefix check against
+// EngineAuthSigningVolumeNamePrefix — see its doc comment.
 var operatorOwnedEngineVolumeNames = []string{
 	EngineConfigVolumeName,
 	EngineDataVolumeName,
 	EngineRuntimeVolumeName,
+	EngineAuthAdminVolumeName,
+	EngineTLSVolumeName,
 }
 
 // operatorOwnedGatewayVolumeNames are the volume names the operator
@@ -162,6 +206,9 @@ var operatorOwnedEngineVolumeNames = []string{
 var operatorOwnedGatewayVolumeNames = []string{
 	GatewayConfigVolumeName,
 	GatewayTmpVolumeName,
+	GatewayEngineCAVolumeName,
+	GatewayTLSVolumeName,
+	GatewayClientCAVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator
@@ -201,8 +248,8 @@ type EngineConfigOwnedSection struct {
 // across operator releases even when this list grows: users do not need to
 // chase the protected set in their CRs to keep them applying cleanly.
 var OperatorOwnedEngineConfigPaths = []EngineConfigOwnedSection{
-	{Section: "", Keys: []string{"schema_version"}},
-	{Section: "instance", Keys: []string{"id", "type", "multi_engine"}},
+	{Section: "", Keys: []string{"schema_version", "endpoints"}},
+	{Section: "instance", Keys: []string{"id", "type", "multi_engine", "auth"}},
 	{Section: "engine", Keys: []string{"id", "nodes", "termination_grace_period"}},
 }
 
@@ -595,7 +642,12 @@ func validateContainersAgainstRules(containers []corev1.Container, base *field.P
 				fmt.Sprintf("additional containers are not allowed on the %s pod template; only the %q container may be defined here",
 					rules.Component, rules.PrimaryContainerName)))
 		default:
-			// Sidecar with an allowed-sidecars ruleset: pass through.
+			// Sidecar with an allowed-sidecars ruleset: pass through, but
+			// still reject any volumeMount that names an operator-owned
+			// volume so a sidecar cannot mount the auth/TLS Secret volumes
+			// the operator renders at pod level (see
+			// validateReservedVolumeMounts).
+			errs = append(errs, validateReservedVolumeMounts(c, path, rules)...)
 		}
 	}
 	return errs
@@ -606,25 +658,52 @@ func validateContainersAgainstRules(containers []corev1.Container, base *field.P
 // container whose name collides with the primary container is still
 // rejected: the operator-rendered primary container would then live
 // alongside a same-named init container, and Kubernetes would never
-// admit such a pod.
+// admit such a pod. A permitted init container's volumeMounts are also
+// screened for operator-owned volume names (see validateReservedVolumeMounts).
 func validateInitContainersAgainstRules(initContainers []corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	for i := range initContainers {
+		c := &initContainers[i]
 		path := base.Index(i)
 		if !rules.AllowInitContainers {
 			errs = append(errs, field.Forbidden(path,
 				fmt.Sprintf("init containers are not allowed on the %s pod template", rules.Component)))
 			continue
 		}
-		if initContainers[i].Name == rules.PrimaryContainerName {
+		if c.Name == rules.PrimaryContainerName {
 			errs = append(errs, field.Forbidden(path.Child("name"),
 				fmt.Sprintf("init container name %q collides with the %s container; pick a different name",
 					rules.PrimaryContainerName, rules.Component)))
-		} else if slices.Contains(rules.ReservedContainerNames, initContainers[i].Name) {
+		} else if slices.Contains(rules.ReservedContainerNames, c.Name) {
 			errs = append(errs, field.Forbidden(path.Child("name"),
 				fmt.Sprintf("init container name %q is reserved by the %s operator; pick a different name",
-					initContainers[i].Name, rules.Component)))
+					c.Name, rules.Component)))
 		}
+		errs = append(errs, validateReservedVolumeMounts(c, path, rules)...)
+	}
+	return errs
+}
+
+// validateReservedVolumeMounts rejects any volumeMount on a user-supplied
+// sidecar or init container that names an operator-owned volume. The
+// operator renders those volumes (config / data / runtime and, when auth or
+// TLS is enabled, the auth-admin / auth-signing-<kid> / tls-engine Secret
+// volumes) at the pod level, so a sidecar or init container that mounts one
+// by name would gain access the pod-template model never grants — most
+// critically reading the admin credentials or JWT signing keys straight off
+// disk, a privilege-escalation path for a template author who cannot
+// otherwise read those Secrets. Reserved names are matched via
+// isReservedVolumeMountName so the dynamically-numbered auth-signing-<kid>
+// set is covered by prefix, exactly as the primary container's check is.
+func validateReservedVolumeMounts(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+	var errs field.ErrorList
+	for mi := range c.VolumeMounts {
+		if !isReservedVolumeMountName(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
+			continue
+		}
+		errs = append(errs, field.Forbidden(base.Child("volumeMounts").Index(mi).Child("name"),
+			fmt.Sprintf("volumeMount name %q is operator-owned and cannot be mounted by an additional container on the %s pod template",
+				c.VolumeMounts[mi].Name, rules.Component)))
 	}
 	return errs
 }
@@ -756,7 +835,7 @@ func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rul
 	}
 	if allowed.VolumeMounts {
 		for mi := range c.VolumeMounts {
-			if !isReservedKey(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
+			if !isReservedVolumeMountName(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
 				continue
 			}
 			errs = append(errs, field.Forbidden(base.Child("volumeMounts").Index(mi).Child("name"),
@@ -820,4 +899,19 @@ func isReservedKey(name string, reserved []string) bool {
 		}
 	}
 	return false
+}
+
+// isReservedVolumeMountName reports whether name is a container
+// volumeMount name the operator owns: either an exact match against
+// reserved, or a name starting with EngineAuthSigningVolumeNamePrefix.
+// The prefix check exists only for that one case: signing-key rotation
+// can mount any number of dynamically-numbered "auth-signing-<kid>"
+// volumes (one per currently-tracked key), so no static enumeration of
+// every possible kid — the way every other reserved name is a single
+// fixed string — could ever be complete.
+func isReservedVolumeMountName(name string, reserved []string) bool {
+	if strings.HasPrefix(name, EngineAuthSigningVolumeNamePrefix) {
+		return true
+	}
+	return isReservedKey(name, reserved)
 }

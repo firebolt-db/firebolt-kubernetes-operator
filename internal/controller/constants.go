@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	dockerref "github.com/distribution/reference"
@@ -68,6 +69,23 @@ const (
 	// independently.
 	AnnotationCustomEngineConfigHash = "firebolt.io/custom-engine-config-hash"
 
+	// AnnotationAuthHash records a content-hash of the auth-relevant
+	// fields from InstanceInfo.Auth (enabled/disabled, admin Secret
+	// name+key, each signing key's ID+SecretName). stsMatchesSpec
+	// compares against this to detect auth drift — e.g. auth just got
+	// enabled, or the admin/signing Secret a volume points at changed
+	// name — because that drift lives in corev1.Volume.VolumeSource
+	// (SecretName), a field VolumeMounts equality does not observe: two
+	// Volumes named identically but pointing at different Secrets
+	// produce byte-identical VolumeMounts.
+	AnnotationAuthHash = "firebolt.io/auth-hash"
+
+	// AnnotationEngineTLSHash records a content-hash of InstanceInfo.TLS
+	// (enabled/disabled plus the TLS Secret name). Same rationale as
+	// AnnotationAuthHash: the Secret-name drift it detects lives in
+	// corev1.Volume.VolumeSource, which VolumeMounts equality cannot see.
+	AnnotationEngineTLSHash = "firebolt.io/engine-tls-hash"
+
 	// AnnotationConfigHash carries a content-hash of the rendered config
 	// for the gateway and metadata Deployments. It is set on the pod
 	// template and serves two purposes: (1) any config change propagates
@@ -107,6 +125,25 @@ const (
 	SuffixMetadataPostgresCreds = "-metadata-postgres-creds" //nolint:gosec // resource name suffix, not a credential
 	// SuffixGateway is appended to form gateway Deployment/Service names.
 	SuffixGateway = "-gateway"
+	// SuffixAuthSigning is appended to form the name of the cert-manager
+	// Certificate (and its target Secret) holding the JWT signing
+	// keypair every engine in the Instance shares.
+	SuffixAuthSigning = "-auth-signing"
+	// SuffixEngineTLS is appended to form the name of the cert-manager
+	// Certificate (and its target Secret) holding the TLS server
+	// certificate every engine in the Instance shares.
+	SuffixEngineTLS = "-engine-tls"
+	// SuffixGatewayTLS is appended to form the name of the cert-manager
+	// Certificate (and its target Secret) holding the gateway's
+	// downstream (client-facing) TLS server certificate.
+	SuffixGatewayTLS = "-gateway-tls"
+	// SuffixEngineCABundle is appended to form the name of the
+	// operator-owned Secret holding the concatenated engine trust bundle the
+	// gateway mounts as trusted_ca: the union of every CA currently signing a
+	// live engine generation's certificate (plus the anchor). Unlike the other
+	// suffixed resources this is NOT a cert-manager Certificate — the operator
+	// assembles and writes it directly (see ensureEngineCABundle, FB-896 #4).
+	SuffixEngineCABundle = "-engine-ca-bundle"
 
 	// MetadataServicePort is the gRPC port the metadata service listens on.
 	MetadataServicePort = 7000
@@ -168,6 +205,29 @@ const (
 	// the --data-dir passed to the engine binary: the writable state root that
 	// holds persistent_data, diagnostic_data, and scratch.
 	DataMountPath = "/var/lib/firebolt"
+
+	// AuthSigningMountPathBase is the directory under which each
+	// provisioned JWT signing key is mounted, one subdirectory per key ID
+	// (AuthSigningMountPathBase + "/" + kid + "/tls.key"), so
+	// instance.auth.local.signing_keys[].private_key_path can address
+	// any one of them individually — needed once a future rotation
+	// feature mounts more than one key at a time.
+	AuthSigningMountPathBase = "/secrets/auth/signing"
+	// AuthAdminMountPath is the directory the admin password Secret is
+	// mounted at. The configured spec.auth.local.admin.password.key
+	// names the file within it.
+	AuthAdminMountPath = "/secrets/auth/admin"
+	// EngineTLSMountPath is the directory the engine-listener TLS
+	// Secret (tls.crt/tls.key/ca.crt) is mounted at (read-only). Must agree
+	// with engineTLSKeyPath's mount-path scheme and with EngineStartupScript's
+	// bundle-assembly paths.
+	EngineTLSMountPath = "/secrets/tls/engine"
+	// EngineTLSBundlePath is the writable path (under the runtime emptyDir
+	// mounted at /run/firebolt) where EngineStartupScript assembles the
+	// leaf+CA bundle packdb reads as its listener certificate_file — see
+	// engineTLSCertPath and FB-896 #2. It must NOT live under
+	// EngineTLSMountPath, which is a read-only Secret mount.
+	EngineTLSBundlePath = "/run/firebolt/engine-tls-bundle.crt"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
 	// VolumeClaimTemplates and the corresponding container VolumeMount.
 	DataVolumeName = "data"
@@ -323,8 +383,32 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
+# Engine TLS (FB-896 #2): packdb uses the listener certificate_file as BOTH the
+# served chain and its own client-side CA bundle for HTTPS startup checks, so it
+# must carry the leaf AND the issuing CA. A CA-backed cert-manager issuer splits
+# these across tls.crt (leaf) and ca.crt (issuer), so assemble a combined bundle
+# at a writable path (paths must match EngineTLSMountPath / EngineTLSBundlePath).
+# Guarded on file existence so a plaintext engine, which mounts neither, is
+# unaffected.
+if [ -f /secrets/tls/engine/tls.crt ] && [ -f /secrets/tls/engine/ca.crt ]; then
+  cat /secrets/tls/engine/tls.crt /secrets/tls/engine/ca.crt > /run/firebolt/engine-tls-bundle.crt
+fi
 exec /opt/firebolt/firebolt server --node "$POD_INDEX" --data-dir /var/lib/firebolt
 `
+
+// EngineHTTPQueryPort is packdb's http-query listener port (confirmed
+// against packdb's own default, programs/firebolt-core/FireboltCoreConfig.h
+// kHttpPort). Unauthenticated/plaintext today; once spec.tls.engine is
+// enabled this is the same port renumbered to TLS-only (packdb's
+// ApplyToLegacyConfig replaces the plaintext http_port default entirely
+// the instant any endpoints.http.listeners entry is rendered — see
+// buildConfigMap's renderEngineTLSListener). Extracted as a named
+// constant (rather than the three separate inline "3473" literals this
+// replaces) because a fourth call site — the TLS listener render — would
+// otherwise need to restate it; GetServicePorts's doc comment already
+// flagged the lack of a compile-time link to instance_gateway.go's Lua
+// :authority rewrite, which still hardcodes "3473" as its own literal.
+const EngineHTTPQueryPort int32 = 3473
 
 // GetServicePorts returns the externally-meaningful service ports for a
 // Firebolt engine. The aragog / shufflepuff / storage-manager / storage-
@@ -334,7 +418,7 @@ exec /opt/firebolt/firebolt server --node "$POD_INDEX" --data-dir /var/lib/fireb
 // never directly consumed by users or the gateway.
 func GetServicePorts() []corev1.ServicePort {
 	return []corev1.ServicePort{
-		{Name: "http-query", Port: 3473, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(3473)},
+		{Name: "http-query", Port: EngineHTTPQueryPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt32(EngineHTTPQueryPort)},
 		{Name: "health", Port: HealthPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(HealthPort)},
 		{Name: "metrics", Port: MetricsPort, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(MetricsPort)},
 	}
@@ -346,7 +430,7 @@ func GetServicePorts() []corev1.ServicePort {
 // the engine binary opens those listeners regardless.
 func GetContainerPorts() []corev1.ContainerPort {
 	return []corev1.ContainerPort{
-		{Name: "http-query", ContainerPort: 3473, Protocol: corev1.ProtocolTCP},
+		{Name: "http-query", ContainerPort: EngineHTTPQueryPort, Protocol: corev1.ProtocolTCP},
 		{Name: "health", ContainerPort: HealthPort, Protocol: corev1.ProtocolTCP},
 		{Name: "metrics", ContainerPort: MetricsPort, Protocol: corev1.ProtocolTCP},
 	}
@@ -366,7 +450,17 @@ const (
 	// listed in operatorOwnedPodVolumeNames so a user volume of this name is
 	// dropped at render and cannot collide with the operator's.
 	EngineWebWritableVolumeName = "nginx-writable-dir"
-	// EngineWebBackendURL is the local engine endpoint the UI talks to: the
-	// engine's http-query port (3473) on loopback within the same pod.
-	EngineWebBackendURL = "http://localhost:3473"
 )
+
+// engineWebBackendURL returns the local engine endpoint the web UI talks
+// to: the engine's http-query port (EngineHTTPQueryPort) on loopback
+// within the same pod. Scheme depends on tlsEnabled — see
+// buildEngineWebSidecar's doc comment for why this must track
+// renderEndpointsConfig's condition exactly.
+func engineWebBackendURL(tlsEnabled bool) string {
+	scheme := "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://localhost:%d", scheme, EngineHTTPQueryPort)
+}

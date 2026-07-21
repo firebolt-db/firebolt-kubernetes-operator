@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 func TestAwaitBoundPortReturnsPort(t *testing.T) {
@@ -59,6 +61,36 @@ func TestAwaitBoundPortPrefersParsedPortOverEarlyExit(t *testing.T) {
 	port, err := awaitBoundPort(context.Background(), portCh, stdoutClosed, time.Minute, []string{"port-forward"})
 	if err != nil || port != 51000 {
 		t.Fatalf("got (%d, %v), want (51000, nil) — a parsed port must win over early-exit", port, err)
+	}
+}
+
+func TestTLSEnabledPredicates(t *testing.T) {
+	on := &v1alpha1.TLSListenerSpec{Enabled: true}
+	off := &v1alpha1.TLSListenerSpec{Enabled: false}
+	withTLS := func(tls *v1alpha1.TLSSpec) *v1alpha1.FireboltInstance {
+		return &v1alpha1.FireboltInstance{Spec: v1alpha1.FireboltInstanceSpec{TLS: tls}}
+	}
+	cases := []struct {
+		name            string
+		inst            *v1alpha1.FireboltInstance
+		wantGw, wantEng bool
+	}{
+		{"nil instance", nil, false, false},
+		{"no tls block", &v1alpha1.FireboltInstance{}, false, false},
+		{"gateway tls on", withTLS(&v1alpha1.TLSSpec{Gateway: on}), true, false},
+		{"engine tls on", withTLS(&v1alpha1.TLSSpec{Engine: on}), false, true},
+		{"both on", withTLS(&v1alpha1.TLSSpec{Gateway: on, Engine: on}), true, true},
+		{"both present but disabled", withTLS(&v1alpha1.TLSSpec{Gateway: off, Engine: off}), false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := GatewayTLSEnabled(tc.inst); got != tc.wantGw {
+				t.Errorf("GatewayTLSEnabled = %v, want %v", got, tc.wantGw)
+			}
+			if got := EngineTLSEnabled(tc.inst); got != tc.wantEng {
+				t.Errorf("EngineTLSEnabled = %v, want %v", got, tc.wantEng)
+			}
+		})
 	}
 }
 

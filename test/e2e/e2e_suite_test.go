@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/test/testhelpers"
 )
 
 const (
@@ -217,6 +218,16 @@ var _ = SynchronizedBeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRD %s", crd)
 	}
 
+	By("Installing cert-manager and a CA ClusterIssuer for auth/TLS specs")
+	// Auth signing keys and engine/gateway TLS (FB-896) are provisioned as
+	// cert-manager Certificates, so the feature cannot be exercised without
+	// cert-manager + a CA-backed issuer in the cluster. The install is guarded
+	// so a persistent local kind cluster isn't reinstalled on every re-run.
+	if !testhelpers.IsCertManagerCRDsInstalled() {
+		Expect(testhelpers.InstallCertManager()).To(Succeed(), "Failed to install cert-manager")
+	}
+	Expect(testhelpers.EnsureCAClusterIssuer()).To(Succeed(), "Failed to provision the CA ClusterIssuer")
+
 	By("Cleaning up stale resources from previous runs")
 	cleanupStaleResources(ctx)
 
@@ -329,6 +340,12 @@ var _ = SynchronizedAfterSuite(func() {
 		if err != nil && !errors.IsNotFound(err) {
 			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete gateway-wake ClusterRole: %v\n", err)
 		}
+
+		By("Deleting the CA ClusterIssuer chain")
+		// cert-manager itself is left installed: the CI kind cluster is ephemeral,
+		// and on a persistent local cluster the InstallCertManager guard makes a
+		// leftover install harmless (and re-use fast).
+		testhelpers.DeleteCAClusterIssuer()
 	}
 })
 

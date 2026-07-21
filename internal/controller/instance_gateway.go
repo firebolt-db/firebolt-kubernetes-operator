@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -124,6 +125,36 @@ const (
 	// in-flight retries at once; still bounded so a pathological retry
 	// storm cannot consume the whole gateway.
 	gatewayMaxRetriesPerEngine = 256
+
+	// gatewayEngineCAMountPath is the directory the engine-listener TLS
+	// Secret's CA certificate is mounted at on the Envoy container,
+	// present only once engine TLS is enabled and ready (see
+	// engineUpstreamTLSReady). Referenced as the dynamic_forward_proxy
+	// cluster's trusted_ca in buildDFPUpstreamTLSTransportSocket.
+	gatewayEngineCAMountPath = "/etc/envoy/tls/engine-ca"
+
+	// engineTLSCASecretKey is the data key cert-manager writes the
+	// issuing CA certificate to in a Certificate's target Secret, when
+	// the issuer populates one (e.g. a CA-backed Issuer/ClusterIssuer —
+	// see cert-manager's Issuer.spec.ca doc comment, which documents
+	// "ca.crt" as the default key). Not a corev1-exported constant;
+	// cert-manager does not export one either.
+	engineTLSCASecretKey = "ca.crt"
+
+	// gatewayTLSMountPath is the directory the gateway's downstream
+	// (client-facing) TLS Secret is mounted at on the Envoy container,
+	// present only once gateway TLS is enabled and ready (see
+	// gatewayDownstreamTLSReady). Referenced as the client-facing
+	// listener's tls_certificates filenames in
+	// buildListenerDownstreamTLSTransportSocket.
+	gatewayTLSMountPath = "/etc/envoy/tls/gateway"
+
+	// gatewayClientCAMountPath is the directory the client-CA Secret is
+	// mounted at on the Envoy container when mutual TLS is enabled on the
+	// gateway's client-facing listener (spec.tls.gateway.clientCASecretRef).
+	// Its ca.crt is the trusted_ca in the listener's DownstreamTlsContext
+	// validation_context — see buildListenerDownstreamTLSTransportSocket.
+	gatewayClientCAMountPath = "/etc/envoy/tls/client-ca"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -192,6 +223,92 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
+// gatewayRolloutComplete reports whether the gateway Deployment has fully
+// rolled out its current pod template: every replica is on the latest template
+// (no old pods from a prior config remain) and is available. Unlike
+// isGatewayReady's ReadyReplicas > 0 — which an *old* pod satisfies mid-roll —
+// this is the signal that a config change has actually propagated to every
+// serving pod. Two features gate on it: the fail-closed→secure staging in
+// ensureGatewayTLS (so old insecure pods are gone before the secure listener is
+// reported ready — FB-896 #1) and the engine-CA trust-bundle expansion in
+// ensureEngineCABundle (so a newly-trusted CA is actually loaded by every
+// gateway pod before old-CA engine generations are allowed to retire —
+// FB-896 #4).
+//
+// Returns false (not an error) when the Deployment does not exist yet.
+func (r *FireboltInstanceReconciler) gatewayRolloutComplete(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
+// deploymentRolledOut reports whether every replica of dep is on its latest
+// pod template and available, with no surplus old-template pods lingering.
+// Pure so both gatewayRolloutComplete and gatewayFailClosedRolledOut share it.
+func deploymentRolledOut(dep *appsv1.Deployment) bool {
+	// Spec.Replicas defaults to 1 when unset, matching apps/v1 semantics; the
+	// operator always sets it explicitly (ensureGatewayDeployment), so this is
+	// only defensive.
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	// ObservedGeneration is compared against metadata.Generation so a status
+	// that predates the config write we just applied never reads as "rolled
+	// out". UpdatedReplicas == desired means every replica is on the newest
+	// template; Replicas == desired means no surplus old-template pods linger
+	// (MaxSurge can briefly push the total above desired mid-roll);
+	// AvailableReplicas == desired means they are all actually serving.
+	st := dep.Status
+	return st.ObservedGeneration >= dep.Generation &&
+		st.UpdatedReplicas == desired &&
+		st.Replicas == desired &&
+		st.AvailableReplicas == desired
+}
+
+// gatewayServingCurrentConfig reports whether the gateway is *actually serving*
+// the config that reflects the instance's current state right now — its running
+// pods are all on a pod template whose config-hash matches buildEnvoyConfigYAML
+// for the current instance, and that rollout is complete.
+//
+// The config-hash check is load-bearing, not redundant with
+// gatewayRolloutComplete: this may be evaluated BEFORE the gateway Deployment is
+// (re)applied in a reconcile, so the Deployment can still carry a previous
+// config that is itself "fully rolled out". Confirming the template's hash
+// matches the current desired config is what distinguishes "serving the current
+// config" from "serving a stale one that happens to be settled".
+//
+// Two callers rely on it: the staged tightening transition (FB-896 #1) invokes
+// it with Status.GatewayTLS already nil, so buildEnvoyConfigYAML yields the
+// fail-closed config and this answers "is the fail-closed rollout done?"; the
+// engine-trust-bundle publish step (FB-896 #4) invokes it in steady state, so
+// it answers "has the gateway rolled out the config embedding the current CA
+// bundle?" — the precondition for publishing Status.RolledEngineTrustCAs.
+func (r *FireboltInstanceReconciler) gatewayServingCurrentConfig(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	wantHash, err := r.gatewayConfigHash(ctx, instance, buildEnvoyConfigYAML(instance))
+	if err != nil {
+		return false, err
+	}
+	if dep.Spec.Template.Annotations[AnnotationConfigHash] != wantHash {
+		return false, nil
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
 // buildEnvoyConfigYAML generates the Envoy static config for the gateway.
 //
 // Routing model:
@@ -201,7 +318,7 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 //   - The Lua filter validates the engine name matches an RFC 1123 DNS label
 //     (so it cannot inject a path into :authority, cross namespaces, etc.),
 //     strips the routing-only query parameter before forwarding, and rewrites
-//     :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
+//     :authority to "<engine>-service.<instance-ns>.svc.cluster.local:<port>".
 //   - The dynamic_forward_proxy cluster resolves that hostname at request time.
 //     With the engine Service being headless, DNS returns the set of ready pod
 //     IPs directly, bypassing Cilium LB and its endpoint-propagation lag.
@@ -209,16 +326,235 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // This config is deliberately engine-set agnostic so the ConfigMap never has to
 // be regenerated in response to engine create/delete/scale events.
 //
-// WARNING: the port number "3473" in the :authority rewrite below is
-// hardcoded and MUST be kept in sync with the "http-query" service port
-// exposed by FireboltEngine (see GetServicePorts / GetContainerPorts in
-// constants.go). Changing the engine query port without also updating
-// this Lua string will silently break gateway -> engine routing: Envoy
-// will try to connect to an arbitrary, unused port and every request
-// will fail with a 503 from the dynamic_forward_proxy cluster. There is
-// no compile-time link between the two today; consider extracting a
-// shared constant if you need to change this port.
+// The port in the :authority rewrite below is EngineHTTPQueryPort, the same
+// constant backing the "http-query" service port exposed by FireboltEngine
+// (see GetServicePorts / GetContainerPorts in constants.go), so the two can't
+// drift apart at compile time.
+// engineUpstreamTLSReady reports whether the gateway should re-encrypt
+// gateway->engine traffic right now. It reads a single Status signal that the
+// instance controller (ensureEngineTLS in instance_tls.go) computes with full
+// engine-fleet awareness before this render runs: Status.EngineTLS.Reencrypting.
+//
+// Deliberately NOT gated on spec.tls.engine.Enabled: the enable and disable
+// transitions are asymmetric and both need fleet convergence, which only the
+// reconcile can evaluate. On enable, Reencrypting stays false until every
+// engine has rolled onto a TLS-serving generation (so the gateway does not
+// switch to TLS while engines still serve plaintext); on disable, ensureEngineTLS
+// retains Status.EngineTLS with Reencrypting=true until every engine has drained
+// back to plaintext (so the gateway keeps the trust anchor and TLS while any
+// engine still serves it). Keeping this a pure predicate over the pre-computed
+// Status keeps buildEnvoyConfigYAML a pure function of the FireboltInstance.
+func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Status.EngineTLS != nil && instance.Status.EngineTLS.Reencrypting
+}
+
+// buildDFPUpstreamTLSTransportSocket returns the dynamic_forward_proxy
+// cluster's transport_socket YAML block (indented to nest under the
+// cluster's other top-level keys — see buildEnvoyConfigYAML's %s
+// placeholder), or "" when engine TLS is not ready.
+//
+// Config approach verified against Envoy's own source
+// (extensions/clusters/dynamic_forward_proxy/cluster.cc): a
+// dynamic_forward_proxy Cluster's transport_socket is a full protobuf
+// field on the parent Cluster message, copied verbatim into every
+// per-authority sub-cluster sub_clusters_config synthesizes at runtime
+// (ClusterFactory::createClusterWithConfig does `config =
+// orig_cluster_config_` before overriding only name/cluster_type/
+// lb_policy/load_assignment) — so configuring TLS once here covers every
+// engine's sub-cluster with no per-authority enumeration needed.
+//
+// Uses a static match_typed_subject_alt_names suffix match against the
+// certificate's own SAN text, NOT Envoy's auto_sni/auto_san_validation
+// mechanism, for three reasons found during implementation research:
+//  1. auto_sni/auto_san_validation becomes a silent no-op (falls back to
+//     manually-set defaults only when upstream_http_protocol_options is
+//     entirely absent) the moment any typed_extension_protocol_options
+//     block is configured on the cluster, and the dynamic_forward_proxy
+//     cluster factory then refuses to load the cluster at all unless
+//     both are explicitly re-enabled — an easy trap to hit by adding
+//     unrelated HTTP-version config later.
+//  2. auto_sni/auto_san_validation are populated in the HTTP router
+//     filter's request path, which active health checks never traverse —
+//     so Option B's SAN check silently doesn't apply to health-check
+//     connections (chain verification via trusted_ca still does). The
+//     static matcher lives in validation_context alongside trusted_ca and
+//     applies uniformly to data-plane AND health-check connections.
+//  3. The certificate's SAN is a static, namespace-wide wildcard (see
+//     engineTLSWildcardDNSName in instance_tls.go) — matching against the
+//     certificate's own SAN text needs no per-authority hostname
+//     enumeration, which sub_clusters_config's dynamically-created,
+//     unbounded sub-cluster set would make impractical anyway.
+//
+// suffix (not exact) is required: an exact matcher would only match a
+// certificate whose SAN is literally the wildcard string
+// "*.<namespace>.svc.cluster.local" verbatim, never any real presented
+// hostname.
+func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !engineUpstreamTLSReady(instance) {
+		return ""
+	}
+	// Trailing newline is required, not cosmetic: buildEnvoyConfigYAML
+	// substitutes this directly before the next line's own text (no
+	// separator newline in the template), so that a disabled/not-ready
+	// instance (empty string here) renders byte-identical to the
+	// pre-TLS config — avoiding a spurious config-hash change, and
+	// therefore a gateway rollout, for every instance that never touches
+	// spec.tls.engine.
+	return fmt.Sprintf(`      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: %s/%s
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    suffix: ".%s.svc.cluster.local"
+`,
+		gatewayEngineCAMountPath, engineTLSCASecretKey, instance.Namespace)
+}
+
+// gatewayDownstreamTLSReady reports whether the gateway's client-facing
+// listener should terminate TLS: spec.tls.gateway is enabled AND the
+// instance controller has finished provisioning the certificate
+// (Status.GatewayTLS populated by ensureGatewayTLS in instance_tls.go).
+// Gating on Status (not just Spec) mirrors engineUpstreamTLSReady:
+// rendering certificate_chain/private_key file paths before the
+// corresponding Secret is mounted would reference files that don't exist
+// yet.
+func gatewayDownstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS != nil
+}
+
+// gatewayDownstreamTLSPending reports the fail-closed window: the operator
+// has been asked to terminate client TLS on the gateway (spec.tls.gateway
+// enabled) but the certificate is not provisioned yet (Status.GatewayTLS
+// nil). During this window buildEnvoyConfigYAML omits the client-facing
+// listener entirely rather than serve plaintext on the client port — see
+// buildFailClosedEnvoyConfigYAML. A gateway with TLS disabled is not
+// pending: it serves plaintext by design.
+func gatewayDownstreamTLSPending(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS == nil
+}
+
+// gatewayDesiredMode returns the security posture spec.tls.gateway asks the
+// client-facing listener to serve: GatewayTLSModeMutual when a client CA is
+// configured (mTLS), else GatewayTLSModeOneWay. Returns "" when gateway TLS is
+// unset or disabled (plaintext).
+func gatewayDesiredMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil || !instance.Spec.TLS.Gateway.Enabled {
+		return ""
+	}
+	if instance.Spec.TLS.Gateway.ClientCASecretRef != nil {
+		return computev1alpha1.GatewayTLSModeMutual
+	}
+	return computev1alpha1.GatewayTLSModeOneWay
+}
+
+// gatewayServedMode returns the posture the gateway is currently serving,
+// derived from Status.GatewayTLS (nil ⇒ plaintext/pending). A populated status
+// written before Mode existed (upgrade) reads as one-way TLS, its only prior
+// meaning.
+func gatewayServedMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Status.GatewayTLS == nil {
+		return ""
+	}
+	if instance.Status.GatewayTLS.Mode == "" {
+		return computev1alpha1.GatewayTLSModeOneWay
+	}
+	return instance.Status.GatewayTLS.Mode
+}
+
+// gatewayPostureLevel maps a posture to a strictness ordinal so the controller
+// can compare desired against served: plaintext(0) < one-way TLS(1) < mTLS(2).
+func gatewayPostureLevel(mode string) int {
+	switch mode {
+	case computev1alpha1.GatewayTLSModeMutual:
+		return 2
+	case computev1alpha1.GatewayTLSModeOneWay:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// gatewayPostureTightening reports whether the desired client-facing posture is
+// stricter than what the gateway currently serves — the only case that needs a
+// staged fail-closed rollout (FB-896 #1). Loosening (mTLS→one-way, TLS→off) and
+// steady state carry no fail-open risk and skip staging.
+func gatewayPostureTightening(instance *computev1alpha1.FireboltInstance) bool {
+	return gatewayPostureLevel(gatewayDesiredMode(instance)) > gatewayPostureLevel(gatewayServedMode(instance))
+}
+
+// gatewayClientCASecretRef returns the client-CA Secret reference configured
+// for mutual TLS on the gateway's client-facing listener, or nil when mTLS is
+// not configured.
+func gatewayClientCASecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Gateway.ClientCASecretRef
+}
+
+// buildListenerDownstreamTLSTransportSocket returns the client-facing
+// listener's filter_chain transport_socket YAML block (indented to nest
+// as a sibling of "filters:" within that filter_chain entry — see
+// buildEnvoyConfigYAML's %s placeholder), or "" when gateway TLS is not
+// ready.
+//
+// Trailing newline is required, not cosmetic, for the same reason as
+// buildDFPUpstreamTLSTransportSocket: an empty string here must render
+// byte-identical to the pre-TLS config so instances that never touch
+// spec.tls.gateway see no config-hash change — and therefore no gateway
+// rollout — when this feature ships.
+func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !gatewayDownstreamTLSReady(instance) {
+		return ""
+	}
+
+	// Mutual TLS: when a client CA is configured, verify inbound client
+	// certificates against it and refuse connections that present none. The
+	// validation_context nests inside common_tls_context (sibling of
+	// tls_certificates); require_client_certificate is a DownstreamTlsContext
+	// field (sibling of common_tls_context). Both stay absent otherwise, so a
+	// one-way-TLS gateway renders byte-identically to before this feature.
+	var validationContext, requireClientCert string
+	if gatewayClientCASecretRef(instance) != nil {
+		validationContext = fmt.Sprintf(`                validation_context:
+                  trusted_ca:
+                    filename: %s/%s
+`, gatewayClientCAMountPath, engineTLSCASecretKey)
+		requireClientCert = "              require_client_certificate: true\n"
+	}
+
+	return fmt.Sprintf(`          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: %s/%s
+                    private_key:
+                      filename: %s/%s
+%s%s`,
+		gatewayTLSMountPath, corev1.TLSCertKey,
+		gatewayTLSMountPath, corev1.TLSPrivateKeyKey,
+		validationContext, requireClientCert)
+}
+
 func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	// Fail closed while a requested client TLS certificate is still
+	// provisioning: serve no client-facing listener at all rather than
+	// plaintext (see buildFailClosedEnvoyConfigYAML and
+	// gatewayDownstreamTLSPending).
+	if gatewayDownstreamTLSPending(instance) {
+		return buildFailClosedEnvoyConfigYAML(instance)
+	}
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
@@ -393,7 +729,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                               headers:replace(":path", stripped_path)
                             end
                             headers:replace("x-firebolt-engine", engine)
-                            headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
+                            headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:%d")
                           end
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
@@ -490,7 +826,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
-    - name: stats_listener
+%s    - name: stats_listener
       address:
         socket_address:
           address: 0.0.0.0
@@ -512,13 +848,26 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                           route:
                             cluster: admin_stats
                 http_filters:
+                  # Always-present /healthz endpoint. The gateway's liveness
+                  # probe targets this listener (the metrics port), not the
+                  # client-facing listener, so the pod stays alive even while
+                  # the client listener is withheld during the fail-closed
+                  # TLS-provisioning window (see buildFailClosedEnvoyConfigYAML).
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
-      # Mirror the listener's per_connection_buffer_limit_bytes onto the
+%s      # Mirror the listener's per_connection_buffer_limit_bytes onto the
       # cluster so upstream connection buffers are sized identically. The
       # router consults the smaller of the two when deciding whether a
       # retry's request body fits, so leaving these in lockstep avoids a
@@ -685,17 +1034,91 @@ admin:
       address: 127.0.0.1
       port_value: %d
 `,
-		gatewayPerConnectionBufferLimitBytes, // listener: per_connection_buffer_limit_bytes
-		gatewayContainerPort,                 // listener: port_value
-		instance.Namespace,                   // Lua: :authority rewrite
-		instance.Spec.Gateway.MetricsPort,    // stats_listener: port_value
-		gatewayPerConnectionBufferLimitBytes, // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
-		gatewayMaxConnectionsPerEngine,       // circuit_breakers: max_connections
-		gatewayMaxPendingRequestsPerEngine,   // circuit_breakers: max_pending_requests
-		gatewayMaxRequestsPerEngine,          // circuit_breakers: max_requests
-		gatewayMaxRetriesPerEngine,           // circuit_breakers: max_retries
-		gatewayAdminPort,                     // admin_stats endpoint: port_value
-		gatewayAdminPort,                     // admin: port_value
+		gatewayPerConnectionBufferLimitBytes,                // listener: per_connection_buffer_limit_bytes
+		gatewayContainerPort,                                // listener: port_value
+		instance.Namespace,                                  // Lua: :authority rewrite
+		EngineHTTPQueryPort,                                 // Lua: :authority rewrite port
+		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
+		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
+		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
+		gatewayPerConnectionBufferLimitBytes,                // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayMaxConnectionsPerEngine,                      // circuit_breakers: max_connections
+		gatewayMaxPendingRequestsPerEngine,                  // circuit_breakers: max_pending_requests
+		gatewayMaxRequestsPerEngine,                         // circuit_breakers: max_requests
+		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
+		gatewayAdminPort,                                    // admin_stats endpoint: port_value
+		gatewayAdminPort,                                    // admin: port_value
+	)
+}
+
+// buildFailClosedEnvoyConfigYAML renders the gateway's Envoy config for the
+// fail-closed window (gatewayDownstreamTLSPending): client TLS was requested
+// but the certificate is not provisioned yet. The client-facing listener is
+// deliberately ABSENT — the client port refuses connections instead of
+// serving plaintext, and the readiness probe (which targets that port) keeps
+// the gateway NotReady until the certificate lands. Only the always-present
+// stats listener (serving /healthz for the liveness probe, plus
+// /stats/prometheus) and its admin backend remain, so the pod stays alive
+// through the wait. Once ensureGatewayTLS populates Status.GatewayTLS the full
+// config from buildEnvoyConfigYAML replaces this one and the gateway rolls.
+func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	return fmt.Sprintf(`static_resources:
+  listeners:
+    - name: stats_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: stats
+                route_config:
+                  name: stats_route
+                  virtual_hosts:
+                    - name: stats
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/stats/prometheus"
+                          route:
+                            cluster: admin_stats
+                http_filters:
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: admin_stats
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: admin_stats
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: %d
+`,
+		instance.Spec.Gateway.MetricsPort, // stats_listener: port_value
+		gatewayAdminPort,                  // admin_stats endpoint: port_value
+		gatewayAdminPort,                  // admin: port_value
 	)
 }
 
@@ -751,6 +1174,109 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	return applySSA(ctx, r.Client, desired)
 }
 
+// gatewayTLSSecretVersions returns a stable string incorporating the
+// ResourceVersion of every TLS Secret the gateway pod actually mounts by name,
+// folded into the gateway config hash so a Secret rotated in place — same
+// name, new bytes — rolls the gateway Deployment. Envoy loads these files only
+// at process start and the rendered config references them by name/mount, so
+// the config text alone never changes on an in-place rotation. ResourceVersion,
+// deliberately never the cert bytes: hashing key material would trip
+// weak-sensitive-data-hashing static analysis and buys nothing (RV already
+// changes on every write).
+//
+// The tracked set mirrors the pod-template mounts exactly, keyed off the same
+// predicates the mount logic uses (see effectiveGatewayPodTemplate):
+//   - the downstream server cert (Status.GatewayTLS) and — only once downstream
+//     TLS is READY — the mTLS client-CA, both gated on gatewayDownstreamTLSReady.
+//     During the fail-closed provisioning window (Status.GatewayTLS nil, and a
+//     bring-your-own client-CA that may not exist yet) neither is mounted, so
+//     neither is read: a hard Get on the not-yet-created client-CA here used to
+//     abort the whole gateway roll, so the fail-closed Deployment never came up
+//     and the prior plaintext/one-way-TLS listener stayed up (fail-open).
+//   - the upstream engine-CA anchor (Status.EngineTLS), gated on
+//     engineUpstreamTLSReady exactly like its mount, so an in-place engine-CA
+//     reissue rolls the gateway and Envoy reloads trusted_ca.
+//
+// A missing Secret is tolerated (skipped, not an error): it only means the hash
+// omits that entry until the Secret lands, and a later reconcile folds it in.
+// Returns "" when the gateway mounts no TLS Secret (plaintext or
+// fail-closed-pending), leaving the hash input untouched.
+func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
+	var names []string
+	if gatewayDownstreamTLSReady(instance) {
+		names = append(names, instance.Status.GatewayTLS.SecretName)
+		if ref := gatewayClientCASecretRef(instance); ref != nil {
+			names = append(names, ref.Name)
+		}
+	}
+	if engineUpstreamTLSReady(instance) {
+		// The gateway mounts the operator-assembled trust bundle, not the anchor
+		// Secret directly (see effectiveGatewayPodTemplate / ensureEngineCABundle),
+		// so fold the bundle's ResourceVersion: it changes whenever the trusted CA
+		// set changes (a generation added under a rotated CA, or an old CA pruned),
+		// rolling the gateway so Envoy reloads trusted_ca.
+		names = append(names, engineCABundleSecretName(instance.Name))
+	}
+	var parts []string
+	for _, name := range names {
+		var secret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret); err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
+			return "", fmt.Errorf("reading gateway TLS secret %s/%s for rollout hash: %w", instance.Namespace, name, err)
+		}
+		parts = append(parts, name+"="+secret.ResourceVersion)
+	}
+	return strings.Join(parts, ","), nil
+}
+
+// gatewayConfigHash returns the value stamped onto the gateway pod template's
+// AnnotationConfigHash: the rendered Envoy config folded with the
+// ResourceVersions of every TLS Secret the pod mounts (gatewayTLSSecretVersions),
+// so an in-place Secret rotation rolls the Deployment even when the config text
+// is unchanged. Shared by ensureGatewayDeployment (which stamps it) and
+// gatewayFailClosedRolledOut (which compares against it), so the two can never
+// disagree about what "the current config" hashes to.
+func (r *FireboltInstanceReconciler) gatewayConfigHash(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) (string, error) {
+	tlsVersions, err := r.gatewayTLSSecretVersions(ctx, instance)
+	if err != nil {
+		return "", err
+	}
+	configHashInput := envoyYAML
+	if tlsVersions != "" {
+		configHashInput = envoyYAML + "\x00" + tlsVersions
+	}
+	return contentHash(configHashInput), nil
+}
+
+// gatewayRollingUpdateStrategy picks the gateway Deployment's rollout strategy.
+// While the gateway is fail-closed pending a tighter posture
+// (gatewayDownstreamTLSPending — TLS enabled but Status.GatewayTLS not yet
+// populated: an enable, a one-way→mTLS or client-CA-swap staging step, or a
+// missing client-CA) it drops old pods to zero endpoints BEFORE new fail-closed
+// pods start (MaxUnavailable=100%, MaxSurge=0). Otherwise it uses the
+// zero-downtime default (MaxUnavailable=0, MaxSurge=25%).
+//
+// FB-896 #1: the client-facing Service has one selector and old Ready pods stay
+// endpoints under MaxUnavailable=0, so a plain rolling update to the fail-closed
+// config keeps the looser listener serving throughout the roll (fail-open).
+// Forcing old pods out first trades that for a brief reject-all
+// (connection-refused) window — the accepted posture for a deliberate tighten. A
+// fresh gateway (no old pods) sees only a harmless 0→N create; the subsequent
+// fail-closed→secure roll runs zero-downtime because fail-closed pods reject
+// during it, so there is no fail-open left to guard against.
+func gatewayRollingUpdateStrategy(instance *computev1alpha1.FireboltInstance) *appsv1.RollingUpdateDeployment {
+	if gatewayDownstreamTLSPending(instance) {
+		maxUnavailable := intstr.FromString("100%")
+		maxSurge := intstr.FromInt32(0)
+		return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+	}
+	maxUnavailable := intstr.FromInt32(0)
+	maxSurge := intstr.FromString("25%")
+	return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+}
+
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
@@ -763,10 +1289,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *gw.Replicas
 	}
 
-	configHash := contentHash(envoyYAML)
-
-	maxSurge := intstr.FromString("25%")
-	maxUnavailable := intstr.FromInt32(0)
+	configHash, err := r.gatewayConfigHash(ctx, instance, envoyYAML)
+	if err != nil {
+		return err
+	}
 
 	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
 
@@ -781,11 +1307,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &maxUnavailable,
-					MaxSurge:       &maxSurge,
-				},
+				Type:          appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: gatewayRollingUpdateStrategy(instance),
 			},
 			Template: podTemplate,
 		},
@@ -934,6 +1457,27 @@ exec 3<&- 3>&-
 sleep 8
 `, gatewayAdminPort)
 
+	// Both probes hit /healthz on the metrics port, NOT the client-facing
+	// port. Two independent reasons force this:
+	//
+	//   - Mutual TLS: when spec.tls.gateway.clientCASecretRef is set the
+	//     client listener sets require_client_certificate, so its TLS
+	//     handshake rejects any connection that presents no client cert —
+	//     and the kubelet's httpGet probe cannot present one. A probe against
+	//     the client listener would then fail forever, wedging the gateway
+	//     NotReady. The metrics port's stats listener is always plaintext.
+	//   - Fail-closed provisioning: while gateway TLS is requested but not
+	//     yet issued, the client listener is omitted entirely
+	//     (buildFailClosedEnvoyConfigYAML) and a probe there would get
+	//     connection-refused. The stats listener is always present.
+	//
+	// Drain still works: the preStop POST to /healthcheck/fail flips the
+	// health_check filter process-wide, so the stats listener's /healthz
+	// starts returning 503 and readiness drops — exactly as before, just on
+	// the metrics port. The client-facing security posture is unchanged: the
+	// client port serves TLS (mutual, when configured) or refuses connections
+	// while fail-closed, and Instance readiness gates on the separate
+	// GatewayTLSReady condition, not on this probe.
 	envoy := corev1.Container{
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
@@ -952,7 +1496,7 @@ sleep 8
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       15,
@@ -960,7 +1504,7 @@ sleep 8
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       2,
@@ -1002,9 +1546,81 @@ sleep 8
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
+	// Present only once engine TLS is enabled and ready — see
+	// buildDFPUpstreamTLSTransportSocket's matching gate. Sources the
+	// operator-assembled trust BUNDLE (ensureEngineCABundle, FB-896 #4), not the
+	// single anchor Secret: the bundle's ca.crt is the union of every live
+	// generation's CA, so the gateway keeps trusting engines across a CA
+	// rotation behind the immutable issuer name. Projected to just ca.crt (the
+	// bundle carries only that key anyway); envoy.yaml points solely at the
+	// ca.crt path, and no private key ever belongs in the gateway pod.
+	if engineUpstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayEngineCAVolumeName,
+			MountPath: gatewayEngineCAMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayEngineCAVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: engineCABundleSecretName(instance.Name),
+					Items: []corev1.KeyToPath{
+						{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+					},
+				},
+			},
+		})
+	}
+	// Present only once gateway TLS is enabled and ready — see
+	// gatewayDownstreamTLSReady's matching gate. Mounting the whole
+	// Secret (not just tls.crt/tls.key via Items) is fine: envoy.yaml
+	// only ever points at the tls.crt/tls.key paths, and there is nothing
+	// sensitive about any other key an issuer might add (e.g. ca.crt,
+	// which the gateway doesn't need for its own downstream cert here).
+	if gatewayDownstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayTLSVolumeName,
+			MountPath: gatewayTLSMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayTLSVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.GatewayTLS.SecretName},
+			},
+		})
+		// Mutual TLS: mount the client CA the listener verifies client
+		// certificates against, projected to ca.crt only. Gated together with
+		// the downstream cert (gatewayDownstreamTLSReady already requires the
+		// client-CA Secret to be present — see ensureGatewayTLSCertificate),
+		// and only when a client CA is configured — matching the
+		// validation_context in buildListenerDownstreamTLSTransportSocket.
+		if clientCA := gatewayClientCASecretRef(instance); clientCA != nil {
+			envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+				Name:      computev1alpha1.GatewayClientCAVolumeName,
+				MountPath: gatewayClientCAMountPath,
+				ReadOnly:  true,
+			})
+			operatorVolumes = append(operatorVolumes, corev1.Volume{
+				Name: computev1alpha1.GatewayClientCAVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: clientCA.Name,
+						Items: []corev1.KeyToPath{
+							{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+						},
+					},
+				},
+			})
+		}
+	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
-	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName)
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
+		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
+		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName,
+		computev1alpha1.GatewayClientCAVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {

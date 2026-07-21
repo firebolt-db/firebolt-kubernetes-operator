@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -73,6 +75,14 @@ type FireboltInstanceReconciler struct {
 	// Must be non-nil; use metrics.NoOpInstanceRecorder{} in tests.
 	MetricsRecorder metrics.InstanceRecorder
 
+	// EventRecorder emits Kubernetes Events on the FireboltInstance CR.
+	// Populated in SetupWithManager when nil; unit tests that exercise
+	// event-emitting paths inject an events.FakeRecorder. Nil is tolerated: the
+	// emit helpers no-op, so tests that do not care about events leave it unset.
+	// Mirrors FireboltEngineReconciler.EventRecorder; the operator's events RBAC
+	// grant (see engine_controller.go) covers both controllers.
+	EventRecorder events.EventRecorder
+
 	// NameFilter, when non-empty, restricts this reconciler to a single
 	// FireboltInstance by name. Requests for any other instance are dropped.
 	// Intended for E2E tests that run multiple isolated operator instances
@@ -105,6 +115,7 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
@@ -198,6 +209,47 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			gwTplErrs.ToAggregate())
 	}
 
+	// Step 0: Ensure Instance-wide auth (admin credentials preflight +
+	// JWT signing keypair). See ensureAuth's doc comment for why a
+	// failure here is logged rather than blocking Steps 1-4: neither
+	// PostgreSQL, metadata, nor the gateway read spec.auth, and engines
+	// gate their own reconcile on Status.Auth independently.
+	if err := r.ensureAuth(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure auth")
+	}
+
+	// Step 0.5: Ensure engine-listener TLS. Same failure-isolation
+	// reasoning as auth, with one difference: unlike auth, the gateway's
+	// rendered config DOES read Status.EngineTLS (to re-encrypt
+	// gateway->engine traffic once engine TLS is enabled — see
+	// buildEnvoyConfigYAML), so this must run before Step 4 below.
+	if err := r.ensureEngineTLS(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure engine TLS")
+	}
+
+	// Step 0.6: Ensure the gateway's downstream (client-facing) TLS
+	// certificate. Same failure-isolation and before-Step-4 ordering
+	// reasoning as Step 0.5: buildEnvoyConfigYAML and
+	// effectiveGatewayPodTemplate both read Status.GatewayTLS.
+	if err := r.ensureGatewayTLS(ctx, instance); err != nil {
+		log.Error(err, "Failed to ensure gateway TLS")
+	}
+
+	// Step 0.7: Assemble the gateway's engine trust bundle — the union of every
+	// live engine generation's CA plus the instance anchor — so the gateway
+	// keeps trusting engines across a CA rotation behind the (name-immutable)
+	// issuer (FB-896 #4). Reads Status.EngineTLS and the engine fleet; must run
+	// before Step 4 because the gateway pod mounts this bundle and folds its
+	// ResourceVersion into the config hash. Same failure-isolation as the TLS
+	// steps: a failure leaves the previous bundle in place rather than blocking.
+	// The returned fingerprints are published to Status.RolledEngineTrustCAs
+	// after Step 4, but only once the gateway has actually rolled the bundle out —
+	// and only when assembly succeeded (see the bundleErr guard there).
+	engineTrustCAFingerprints, bundleErr := r.ensureEngineCABundle(ctx, instance)
+	if bundleErr != nil {
+		log.Error(bundleErr, "Failed to ensure engine CA bundle")
+	}
+
 	// Step 1: Ensure PostgreSQL and metadata in the same reconcile pass.
 	// Postgres and metadata are not separate phases: the metadata service
 	// retries its DB connection internally for up to ~60s on startup, which
@@ -282,6 +334,10 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			"Provisioning", "gateway Deployment has no ready replicas yet")
 	}
 
+	// FB-896 #6: publishRolledEngineTrustCAs preserves the prior confirmed set
+	// when assembly failed (bundleErr != nil), rather than clobbering it with nil.
+	r.publishRolledEngineTrustCAs(ctx, instance, engineTrustCAFingerprints, bundleErr)
+
 	setInstanceReadyRollup(instance)
 	instance.Status.Phase = r.computePhase(instance)
 
@@ -290,6 +346,40 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// publishRolledEngineTrustCAs records, in Status.RolledEngineTrustCAs, the
+// engine CA fingerprints the gateway has CONFIRMED rolled out — so the engine's
+// blue-green cutover gate can verify a new generation's CA is trusted before
+// flipping its Service selector (FB-896 #4). The set is updated only once the
+// gateway is actually serving the config that embeds the current bundle
+// (gatewayServingCurrentConfig): mid-roll the old pods still serve the previous
+// (subset) bundle, so keeping the last-confirmed set is the safe floor. It is
+// cleared when engine upstream TLS is not engaged — the gate is then vacuous.
+//
+// bundleErr is the error from assembling the bundle (ensureEngineCABundle). When
+// it is non-nil the fingerprints are nil but the previous bundle Secret and
+// gateway Deployment may still match and be fully serving, so this preserves the
+// last-confirmed set rather than clobbering it — otherwise a transient assembly
+// error would wrongly block engine cutovers the gateway can still serve
+// (FB-896 #6). ensureEngineCABundle returns (nil, nil) when engine upstream TLS
+// is not engaged, so the clear-on-disable path below still runs in that case.
+func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Context, instance *computev1alpha1.FireboltInstance, fingerprints []string, bundleErr error) {
+	if bundleErr != nil {
+		return
+	}
+	if !engineUpstreamTLSReady(instance) {
+		instance.Status.RolledEngineTrustCAs = nil
+		return
+	}
+	serving, err := r.gatewayServingCurrentConfig(ctx, instance)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "checking gateway engine-trust-bundle rollout")
+		return
+	}
+	if serving {
+		instance.Status.RolledEngineTrustCAs = fingerprints
+	}
 }
 
 func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
@@ -302,6 +392,13 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 
 	deleteList := func(list client.ObjectList, kind string) {
 		if err := r.List(ctx, list, client.InNamespace(ns), matchLabels); err != nil {
+			if apimeta.IsNoMatchError(err) {
+				// The kind's CRD isn't installed on this cluster (e.g.
+				// cert-manager's Certificate against envtest, which has
+				// no cert-manager CRDs) — nothing of that kind could
+				// exist, so there is nothing to clean up.
+				return
+			}
 			log.Error(err, "Failed to list resources for cleanup", "kind", kind)
 			errs = append(errs, err)
 			return
@@ -320,6 +417,18 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&appsv1.DeploymentList{}, "Deployment")
 	deleteList(&corev1.ServiceList{}, "Service")
 	deleteList(&corev1.ConfigMapList{}, "ConfigMap")
+	// Certificate MUST be deleted before Secret: cert-manager's
+	// Certificate controller recreates its target Secret whenever that
+	// Secret goes missing while the Certificate still exists (cert-manager
+	// does not owner-reference the Secret to the Certificate unless
+	// --enable-certificate-owner-ref is set, which this operator does not
+	// require). Sweeping the Secret first would leave a window — between
+	// this sweep and the Certificate's later, asynchronous owner-reference
+	// GC — in which cert-manager recreates the signing-key Secret, now
+	// orphaned and carrying LabelInstance for an instance that no longer
+	// exists. Deleting the Certificate first stops that reconciliation
+	// before the Secret sweep runs.
+	deleteList(&certmanagerv1.CertificateList{}, "Certificate")
 	deleteList(&corev1.SecretList{}, "Secret")
 	deleteList(&corev1.PersistentVolumeClaimList{}, "PersistentVolumeClaim")
 	deleteList(&policyv1.PodDisruptionBudgetList{}, "PodDisruptionBudget")
@@ -354,6 +463,8 @@ func extractItems(list client.ObjectList) []client.Object {
 		return boxItems[corev1.Service, *corev1.Service](l.Items)
 	case *corev1.ConfigMapList:
 		return boxItems[corev1.ConfigMap, *corev1.ConfigMap](l.Items)
+	case *certmanagerv1.CertificateList:
+		return boxItems[certmanagerv1.Certificate, *certmanagerv1.Certificate](l.Items)
 	case *corev1.SecretList:
 		return boxItems[corev1.Secret, *corev1.Secret](l.Items)
 	case *corev1.PersistentVolumeClaimList:
@@ -525,15 +636,34 @@ func setInstanceCondition(
 // setInstanceReadyRollup recomputes InstanceConditionReady from the
 // per-component conditions. Ready is True iff every required component
 // condition is present AND True; otherwise False with the Reason/Message
-// of the FIRST not-True component in pipeline order (Metadata →
-// Gateway). Propagating the first blocker's Reason makes
+// of the FIRST not-True component in pipeline order (Metadata → Gateway →
+// EngineTLS → GatewayTLS). Propagating the first blocker's Reason makes
 // `kubectl describe fireboltinstance` surface the actual root cause on
 // the headline condition, so users do not have to scan every condition
 // to find the one that is False.
+//
+// EngineTLSReady and GatewayTLSReady are part of the roll-up (they report
+// True with reason "Disabled" when their feature is off, so they never
+// block a non-TLS instance). When TLS is requested the Instance must not
+// advertise Ready until the requested secure path is actually serving, not
+// merely provisioned:
+//   - EngineTLSReady is convergence-gated (FB-896 #4): True only once the
+//     engine fleet has rolled onto TLS and the gateway is re-encrypting
+//     upstream, so the Instance never reports Ready over a plaintext hop.
+//   - GatewayTLSReady is serving-gated (FB-896 #5): True only once the secure
+//     client-facing listener has actually rolled out, so the Instance never
+//     reports Ready while the client port still rejects.
+//
+// There is no deadlock — cert-manager issues the certificates independently,
+// and engines gate their own reconcile on the provisioned Status.EngineTLS
+// directly (resolveInstanceInfo), NOT on the convergence-gated EngineTLSReady
+// condition, so the enable ramp still produces the convergence that flips it.
 func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	components := []string{
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
+		computev1alpha1.InstanceConditionEngineTLSReady,
+		computev1alpha1.InstanceConditionGatewayTLSReady,
 	}
 	for _, c := range components {
 		cond := apimeta.FindStatusCondition(instance.Status.Conditions, c)
@@ -552,12 +682,12 @@ func setInstanceReadyRollup(instance *computev1alpha1.FireboltInstance) {
 	}
 	setInstanceCondition(instance, computev1alpha1.InstanceConditionReady,
 		metav1.ConditionTrue, "AllComponentsReady",
-		"metadata and gateway are ready")
+		"metadata, gateway, and TLS certificates are ready")
 }
 
 // computePhase derives the instance Phase from InstanceConditionReady,
 // which is itself the roll-up of the per-component conditions
-// (Postgres, Metadata, Gateway) computed by setInstanceReadyRollup.
+// (Metadata, Gateway, EngineTLS, GatewayTLS) computed by setInstanceReadyRollup.
 // The invariant is:
 //
 //	Phase == Ready  ⇔  InstanceConditionReady.Status == True
@@ -648,6 +778,9 @@ func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // custom controller name. Useful for E2E tests that spin up multiple in-process
 // reconcilers per suite and need unique metric names across them.
 func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name string) error {
+	if r.EventRecorder == nil {
+		r.EventRecorder = mgr.GetEventRecorder(name)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
 		Owns(&appsv1.StatefulSet{}).

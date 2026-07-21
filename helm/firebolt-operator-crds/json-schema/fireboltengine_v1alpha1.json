@@ -7560,6 +7560,22 @@
           "format": "date-time",
           "type": "string"
         },
+        "observedAuthHash": {
+          "description": "ObservedAuthHash is the auth content-hash (see the internal\nauthHash function) that this engine's current, stable generation\nwas last confirmed to match \u2014 copied from the running\nStatefulSet's own drift-detection annotation once a reconcile finds\nno drift. Empty when auth is disabled or no generation has\nstabilized yet.\n\nThis exists so the instance controller can tell, for its own\nsigning-key rotation state machine, whether every engine in an\nInstance has actually rolled onto a given signing-keys set \u2014\nwithout the instance controller needing to read engine\nStatefulSets directly or recompute engine-side rendering rules\nitself. It is intentionally the same hash already used to decide\nwhether an engine needs a new generation (see stsMatchesSpec /\nannotationsMatchSpec), just surfaced here as this engine's own\nobserved value of it.",
+          "type": "string"
+        },
+        "observedEngineServingCertFP": {
+          "description": "ObservedEngineServingCertFP is the fingerprint of the serving-certificate\ntls.crt the current stable generation was last confirmed on, recorded once\na reconcile finds the generation stable (FB-896 #1). ObservedEngineServingCertGen\nrecords which generation that fingerprint belongs to. computeStable treats a\nchanged fingerprint as an in-place re-issuance \u2014 and rolls a fresh\ngeneration so running pods stop serving the stale leaf \u2014 ONLY when the\nrecorded generation equals the current one. Every new generation issues its\nown certificate (a fresh key), so its fingerprint legitimately differs from\nthe prior generation's; without the generation guard, an ordinary\nspec-driven roll would look like a re-issuance and roll forever. A\ncoordinated re-issuance roll cuts over through the #4 trust-bundle gate.\nEmpty/zero when engine TLS is disabled or no generation has stabilized yet;\nfirst observation (empty fingerprint) records without rolling. tls.crt is a\npublic certificate.",
+          "type": "string"
+        },
+        "observedEngineServingCertGen": {
+          "description": "ObservedEngineServingCertGen is the generation ObservedEngineServingCertFP\nwas observed at \u2014 see that field. Zero when unset.",
+          "type": "integer"
+        },
+        "observedEngineTLSHash": {
+          "description": "ObservedEngineTLSHash is the engine-TLS content-hash (see the internal\ntlsHash function) that this engine's current, stable generation was last\nconfirmed to match \u2014 copied from the running StatefulSet's own\ndrift-detection annotation once a reconcile finds no drift. Empty when\nengine TLS is disabled or no generation has stabilized yet.\n\nThe instance controller reads this across the engine fleet to decide\nwhen the gateway may switch its upstream protocol: it re-encrypts to\nengines only once every engine has rolled onto a TLS-serving generation\n(this hash non-empty and matching), and keeps re-encrypting until every\nengine has drained back to plaintext (this hash empty everywhere). Same\nhash used to decide whether an engine needs a new generation (see\nstsMatchesSpec / annotationsMatchSpec), surfaced here as this engine's\nown observed value.",
+          "type": "string"
+        },
         "observedGeneration": {
           "description": "ObservedGeneration is the metadata.generation that was last fully reconciled to stable.",
           "format": "int64",

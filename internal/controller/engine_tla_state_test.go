@@ -83,7 +83,7 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 // (Previously this used the container image; the image moved out of
 // FireboltEngineSpec into FireboltEngineClass, so SA is the carrier now.)
 func tlaMakeSTS(spec *computev1alpha1.FireboltEngineSpec, gen, stsSpecVer int) *appsv1.StatefulSet {
-	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, nil)
+	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, InstanceInfo{}, nil)
 	sts.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", stsSpecVer)
 	return sts
 }

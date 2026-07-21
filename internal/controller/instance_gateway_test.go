@@ -17,15 +17,337 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
+
+// TestGatewayRolloutComplete covers the shared rollout-observation primitive
+// (FB-896 #1/#4): unlike isGatewayReady's ReadyReplicas > 0, it must report
+// true only when every replica is on the latest pod template and available —
+// i.e. no old pods from a prior (looser/less-trusting) config remain.
+func TestGatewayRolloutComplete(t *testing.T) {
+	sch := authTestScheme(t)
+	inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"}}
+
+	two := int32(2)
+	dep := func(mutate func(*appsv1.Deployment)) *appsv1.Deployment {
+		d := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixGateway, Namespace: "ns-1", Generation: 3},
+			Spec:       appsv1.DeploymentSpec{Replicas: &two},
+			Status: appsv1.DeploymentStatus{
+				ObservedGeneration: 3, UpdatedReplicas: 2, Replicas: 2, AvailableReplicas: 2,
+			},
+		}
+		if mutate != nil {
+			mutate(d)
+		}
+		return d
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*appsv1.Deployment)
+		want   bool
+	}{
+		{"fully rolled out", nil, true},
+		{"status predates spec write", func(d *appsv1.Deployment) { d.Status.ObservedGeneration = 2 }, false},
+		{"not all replicas updated", func(d *appsv1.Deployment) { d.Status.UpdatedReplicas = 1 }, false},
+		{"surplus old-template pods linger", func(d *appsv1.Deployment) { d.Status.Replicas = 3 }, false},
+		{"updated but not yet available", func(d *appsv1.Deployment) { d.Status.AvailableReplicas = 1 }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(dep(tc.mutate)).Build()
+			r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+			got, err := r.gatewayRolloutComplete(context.Background(), inst)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("gatewayRolloutComplete = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("deployment absent returns false without error", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		got, err := r.gatewayRolloutComplete(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got {
+			t.Error("gatewayRolloutComplete = true, want false when the Deployment does not exist")
+		}
+	})
+}
+
+// TestGatewayRollingUpdateStrategy covers FB-896 #1: while the gateway is
+// fail-closed pending a tighter posture (gatewayDownstreamTLSPending), the
+// rollout must drop old pods to zero endpoints before new ones start
+// (MaxUnavailable=100%, MaxSurge=0) so the looser listener cannot keep serving
+// during the roll (fail-open). Every other state — disabled, or already serving
+// a populated posture — keeps the zero-downtime default (MaxUnavailable=0,
+// MaxSurge=25%).
+func TestGatewayRollingUpdateStrategy(t *testing.T) {
+	enabledGateway := &computev1alpha1.TLSListenerSpec{
+		Enabled:   true,
+		SecretRef: &corev1.LocalObjectReference{Name: "gw-tls"},
+	}
+	cases := []struct {
+		name           string
+		spec           *computev1alpha1.TLSSpec
+		served         *computev1alpha1.GatewayTLSStatus
+		wantMaxUnavail string
+		wantMaxSurge   string
+	}{
+		{
+			name:           "pending fail-closed tighten drains old pods first",
+			spec:           &computev1alpha1.TLSSpec{Gateway: enabledGateway},
+			served:         nil, // Status.GatewayTLS nil while enabled ⇒ pending
+			wantMaxUnavail: "100%",
+			wantMaxSurge:   "0",
+		},
+		{
+			name:           "already serving secure ⇒ zero-downtime",
+			spec:           &computev1alpha1.TLSSpec{Gateway: enabledGateway},
+			served:         &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls", Mode: computev1alpha1.GatewayTLSModeOneWay},
+			wantMaxUnavail: "0",
+			wantMaxSurge:   "25%",
+		},
+		{
+			name:           "gateway TLS disabled ⇒ zero-downtime",
+			spec:           nil,
+			served:         nil,
+			wantMaxUnavail: "0",
+			wantMaxSurge:   "25%",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &computev1alpha1.FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+				Spec:       computev1alpha1.FireboltInstanceSpec{TLS: tc.spec},
+				Status:     computev1alpha1.FireboltInstanceStatus{GatewayTLS: tc.served},
+			}
+			s := gatewayRollingUpdateStrategy(inst)
+			if got := s.MaxUnavailable.String(); got != tc.wantMaxUnavail {
+				t.Errorf("MaxUnavailable = %q, want %q", got, tc.wantMaxUnavail)
+			}
+			if got := s.MaxSurge.String(); got != tc.wantMaxSurge {
+				t.Errorf("MaxSurge = %q, want %q", got, tc.wantMaxSurge)
+			}
+		})
+	}
+}
+
+// TestGatewayTLSSecretVersions covers FB-896 findings #2/#5/#6: an in-place
+// bring-your-own cert rotation must roll the gateway (#5); the fail-closed
+// provisioning window (mTLS configured, client-CA not yet present) must NOT
+// error and abort the roll (#2); and an in-place engine-CA reissue must roll
+// the gateway while re-encryption is active (#6). The tracked secret set
+// mirrors the pod-template mounts exactly.
+func TestGatewayTLSSecretVersions(t *testing.T) {
+	sch := authTestScheme(t)
+
+	// gwEnabled builds an instance with gateway TLS turned on in spec — the
+	// precondition gatewayDownstreamTLSReady checks alongside Status.GatewayTLS.
+	gwEnabled := func() *computev1alpha1.FireboltInstance {
+		return &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true}},
+			},
+		}
+	}
+	tlsSecret := func(name string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1"},
+			Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key"), "ca.crt": []byte("ca")},
+		}
+	}
+
+	t.Run("no gateway TLS returns empty", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"}}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("gatewayTLSSecretVersions = %q, want empty when the gateway mounts no TLS Secret", got)
+		}
+	})
+
+	t.Run("gateway TLS secret RV is included and changes on in-place rotation", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("gw-tls")).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := gwEnabled()
+		inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
+		before, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if before == "" {
+			t.Fatal("gatewayTLSSecretVersions returned empty for a configured gateway TLS secret")
+		}
+
+		var live corev1.Secret
+		if err := cli.Get(context.Background(), types.NamespacedName{Namespace: "ns-1", Name: "gw-tls"}, &live); err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		live.Data[corev1.TLSCertKey] = []byte("rotated-cert")
+		if err := cli.Update(context.Background(), &live); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		after, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if after == before {
+			t.Error("gatewayTLSSecretVersions did not change after in-place secret rotation; the gateway Deployment would never roll")
+		}
+	})
+
+	t.Run("#2 fail-closed pending: missing client-CA is tolerated, nothing folded", func(t *testing.T) {
+		// mTLS configured but neither the server cert (Status.GatewayTLS nil) nor
+		// the BYO client-CA Secret exists yet. The helper must return "" with NO
+		// error, so the fail-closed Deployment still rolls — the old code hard-Got
+		// the absent client-CA and aborted the whole gateway reconcile (fail-open).
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := gwEnabled()
+		inst.Spec.TLS.Gateway.ClientCASecretRef = &corev1.LocalObjectReference{Name: "client-ca"}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("fail-closed window must not error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("gatewayTLSSecretVersions = %q, want empty during the fail-closed window", got)
+		}
+	})
+
+	t.Run("#2 client-CA RV folded once downstream TLS is ready", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).
+			WithObjects(tlsSecret("gw-tls"), tlsSecret("client-ca")).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := gwEnabled()
+		inst.Spec.TLS.Gateway.ClientCASecretRef = &corev1.LocalObjectReference{Name: "client-ca"}
+		inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(got, "gw-tls=") || !strings.Contains(got, "client-ca=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want both server cert and client-CA folded", got)
+		}
+	})
+
+	t.Run("#6/#4 engine-CA bundle RV folded while re-encryption is active", func(t *testing.T) {
+		// The gateway mounts the assembled trust BUNDLE, not the anchor directly
+		// (FB-896 #4), so it is the bundle Secret's RV that must be folded.
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("inst-engine-ca-bundle")).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			},
+		}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(got, engineCABundleSecretName("inst")+"=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want the engine-CA bundle folded while re-encrypting", got)
+		}
+	})
+}
+
+// TestEngineFleetTLSState covers FB-896 finding #3: the gateway may only switch
+// its upstream protocol based on the engine fleet's OBSERVED serving state, not
+// on certificate existence. allOnTLS gates the enable ramp (switch to TLS only
+// when every engine has rolled onto it); anyOnTLS gates the disable drain (keep
+// TLS while any engine still serves it).
+func TestEngineFleetTLSState(t *testing.T) {
+	sch := authTestScheme(t)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+		},
+	}
+	onHash := tlsHash(&ResolvedEngineTLSInfo{SecretName: "inst-engine-tls"})
+	newEngine := func(name, ref, observed string) *computev1alpha1.FireboltEngine {
+		return &computev1alpha1.FireboltEngine{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1"},
+			Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: ref},
+			Status:     computev1alpha1.FireboltEngineStatus{ObservedEngineTLSHash: observed},
+		}
+	}
+	cases := []struct {
+		name             string
+		engines          []*computev1alpha1.FireboltEngine
+		wantAll, wantAny bool
+	}{
+		{"no engines is vacuously converged", nil, true, false},
+		{"all engines on TLS", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", onHash), newEngine("e2", "inst", onHash)}, true, true},
+		{"mixed fleet (mid-rollout)", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", onHash), newEngine("e2", "inst", "")}, false, true},
+		{"all engines plaintext (drained)", []*computev1alpha1.FireboltEngine{newEngine("e1", "inst", ""), newEngine("e2", "inst", "")}, false, false},
+		{"another instance's engine is ignored", []*computev1alpha1.FireboltEngine{newEngine("e1", "other-inst", onHash)}, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := fake.NewClientBuilder().WithScheme(sch)
+			for _, e := range tc.engines {
+				b = b.WithObjects(e)
+			}
+			r := &FireboltInstanceReconciler{Client: b.Build(), Scheme: sch}
+			allOn, anyOn, err := r.engineFleetTLSState(context.Background(), instance)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if allOn != tc.wantAll || anyOn != tc.wantAny {
+				t.Errorf("engineFleetTLSState = (all=%v, any=%v), want (all=%v, any=%v)", allOn, anyOn, tc.wantAll, tc.wantAny)
+			}
+		})
+	}
+}
+
+// TestEngineUpstreamTLSReady confirms the gateway render gates purely on the
+// pre-computed Reencrypting signal, not on certificate existence alone.
+func TestEngineUpstreamTLSReady(t *testing.T) {
+	cases := []struct {
+		name string
+		tls  *computev1alpha1.EngineTLSStatus
+		want bool
+	}{
+		{"no engine TLS status", nil, false},
+		{"cert provisioned but fleet not converged", &computev1alpha1.EngineTLSStatus{SecretName: "s"}, false},
+		{"fleet converged", &computev1alpha1.EngineTLSStatus{SecretName: "s", Reencrypting: true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &computev1alpha1.FireboltInstance{Status: computev1alpha1.FireboltInstanceStatus{EngineTLS: tc.tls}}
+			if got := engineUpstreamTLSReady(inst); got != tc.want {
+				t.Errorf("engineUpstreamTLSReady = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // TestBuildEnvoyConfigYAMLParses guards two invariants:
 //  1. The emitted Envoy static config is valid YAML (catches any
@@ -44,8 +366,9 @@ func TestBuildEnvoyConfigYAMLParses(t *testing.T) {
 		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
 	}
 
-	// Namespace must be baked into the :authority rewrite.
-	if !strings.Contains(got, "-service.ns-1.svc.cluster.local:3473") {
+	// Namespace and engine query port must be baked into the :authority rewrite.
+	wantAuthority := fmt.Sprintf("-service.ns-1.svc.cluster.local:%d", EngineHTTPQueryPort)
+	if !strings.Contains(got, wantAuthority) {
 		t.Errorf("emitted config does not contain the expected per-namespace :authority rewrite; got:\n%s", got)
 	}
 
@@ -266,6 +589,431 @@ func TestBuildEnvoyConfigYAMLCircuitBreakers(t *testing.T) {
 	}
 }
 
+// TestBuildEnvoyConfigYAML_EngineTLSDisabled_NoTransportSocket guards
+// that the dynamic_forward_proxy cluster stays plaintext (no
+// transport_socket key) when spec.tls.engine is unset — the status quo
+// this bundled TLS work must not silently change for existing instances.
+func TestBuildEnvoyConfigYAML_EngineTLSDisabled_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	dfp := dfpCluster(t, parsed)
+	if _, present := dfp["transport_socket"]; present {
+		t.Errorf("dynamic_forward_proxy cluster has transport_socket with engine TLS disabled: %v", dfp["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles
+// guards a real regression found during review: the transport_socket
+// %s-placeholder substitution must not leave a stray blank line (or any
+// other byte difference) when engine TLS is disabled, or
+// contentHash(envoyYAML) — and therefore AnnotationConfigHash — changes
+// for every existing non-TLS instance the moment this feature ships,
+// forcing a gateway rollout nobody asked for.
+func TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles(t *testing.T) {
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}
+	first := buildEnvoyConfigYAML(inst)
+	if strings.Contains(first, "CLUSTER_PROVIDED\n\n") {
+		t.Error("emitted config has a blank line after 'lb_policy: CLUSTER_PROVIDED'; " +
+			"buildDFPUpstreamTLSTransportSocket's empty-string case must not leave a stray newline")
+	}
+	// Rendering twice must be byte-for-byte stable, matching every other
+	// buildEnvoyConfigYAML invariant (TestBuildEnvoyConfigYAMLStableAcrossInstances).
+	if second := buildEnvoyConfigYAML(inst); first != second {
+		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSEnabledButNotReady_NoTransportSocket
+// pins down that buildDFPUpstreamTLSTransportSocket gates on
+// Status.EngineTLS (readiness), not just Spec.TLS.Engine.Enabled: a
+// transport_socket referencing an unmounted CA file would break every
+// upstream connection until the volume catches up.
+func TestBuildEnvoyConfigYAML_EngineTLSEnabledButNotReady_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		// Status.EngineTLS deliberately left nil: certificate not yet issued.
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	dfp := dfpCluster(t, parsed)
+	if _, present := dfp["transport_socket"]; present {
+		t.Errorf("dynamic_forward_proxy cluster has transport_socket before EngineTLS is ready: %v", dfp["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured pins
+// down the upstream TLS shape once engine TLS is ready: a
+// trusted_ca pointing at the mounted CA file, and a static
+// match_typed_subject_alt_names suffix matcher against the certificate's
+// namespace-wide wildcard SAN (see buildDFPUpstreamTLSTransportSocket's
+// doc comment for why this is a static suffix match rather than
+// auto_sni/auto_san_validation).
+func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+	dfp := dfpCluster(t, parsed)
+	ts, ok := dfp["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing transport_socket once EngineTLS is ready; keys = %v", keysOf(dfp))
+	}
+	if ts["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("transport_socket.name = %v, want envoy.transport_sockets.tls", ts["name"])
+	}
+	typedConfig, ok := ts["typed_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport_socket.typed_config missing or wrong type: %T", ts["typed_config"])
+	}
+	commonTLS, ok := typedConfig["common_tls_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
+	}
+	validationContext, ok := commonTLS["validation_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("common_tls_context.validation_context missing or wrong type: %T", commonTLS["validation_context"])
+	}
+	trustedCA, ok := validationContext["trusted_ca"].(map[string]any)
+	if !ok {
+		t.Fatalf("validation_context.trusted_ca missing or wrong type: %T", validationContext["trusted_ca"])
+	}
+	wantFilename := gatewayEngineCAMountPath + "/" + engineTLSCASecretKey
+	if trustedCA["filename"] != wantFilename {
+		t.Errorf("trusted_ca.filename = %v, want %v", trustedCA["filename"], wantFilename)
+	}
+	sans, ok := validationContext["match_typed_subject_alt_names"].([]any)
+	if !ok || len(sans) != 1 {
+		t.Fatalf("validation_context.match_typed_subject_alt_names = %v, want a 1-element array", validationContext["match_typed_subject_alt_names"])
+	}
+	san, ok := sans[0].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[0] = %v, want an object", sans[0])
+	}
+	if san["san_type"] != "DNS" {
+		t.Errorf("match_typed_subject_alt_names[0].san_type = %v, want DNS", san["san_type"])
+	}
+	matcher, ok := san["matcher"].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[0].matcher missing or wrong type: %T", san["matcher"])
+	}
+	wantSuffix := ".ns-1.svc.cluster.local"
+	if matcher["suffix"] != wantSuffix {
+		t.Errorf("matcher.suffix = %v, want %v (must be a suffix match, not exact — see doc comment)", matcher["suffix"], wantSuffix)
+	}
+}
+
+// TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsConfigured
+// covers the case a real "full TLS" deployment actually runs: engine TLS
+// (upstream, on the dynamic_forward_proxy cluster) and gateway TLS
+// (downstream, on the client-facing listener) enabled at once. Each is
+// covered in isolation by the tests above; this locks down that the two
+// %s placeholders — positioned at different points in the same
+// fmt.Sprintf template — don't clobber each other or drift out of
+// positional alignment with the rest of the argument list when someone
+// edits the template later. Mirrors the auth-and-engine-tls combined case
+// in TestBuildConfigMap_ConformsToPackdbSchema on the engine-config side.
+func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine:  &computev1alpha1.TLSListenerSpec{Enabled: true},
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+
+	dfp := dfpCluster(t, parsed)
+	upstreamTS, ok := dfp["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing transport_socket with both TLS features ready; keys = %v", keysOf(dfp))
+	}
+	if upstreamTS["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("upstream transport_socket.name = %v, want envoy.transport_sockets.tls", upstreamTS["name"])
+	}
+
+	fc := listenerFilterChain(t, parsed)
+	downstreamTS, ok := fc["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("client-facing listener missing transport_socket with both TLS features ready; keys = %v", keysOf(fc))
+	}
+	if downstreamTS["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("downstream transport_socket.name = %v, want envoy.transport_sockets.tls", downstreamTS["name"])
+	}
+
+	// Cross-check that each transport_socket points at ITS OWN secret's
+	// files, not the other one's — the clearest sign a positional-arg
+	// mixup would produce.
+	upstreamTyped := upstreamTS["typed_config"].(map[string]any)
+	upstreamCA := upstreamTyped["common_tls_context"].(map[string]any)["validation_context"].(map[string]any)["trusted_ca"].(map[string]any)
+	wantUpstreamCA := gatewayEngineCAMountPath + "/" + engineTLSCASecretKey
+	if upstreamCA["filename"] != wantUpstreamCA {
+		t.Errorf("upstream trusted_ca.filename = %v, want %v", upstreamCA["filename"], wantUpstreamCA)
+	}
+
+	downstreamTyped := downstreamTS["typed_config"].(map[string]any)
+	downstreamCert := downstreamTyped["common_tls_context"].(map[string]any)["tls_certificates"].([]any)[0].(map[string]any)
+	wantDownstreamChain := gatewayTLSMountPath + "/" + string(corev1.TLSCertKey)
+	if downstreamCert["certificate_chain"].(map[string]any)["filename"] != wantDownstreamChain {
+		t.Errorf("downstream certificate_chain.filename = %v, want %v",
+			downstreamCert["certificate_chain"].(map[string]any)["filename"], wantDownstreamChain)
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket guards
+// that the client-facing listener stays plaintext (no transport_socket
+// key on its filter_chain) when spec.tls.gateway is unset — the status
+// quo this feature must not silently change for existing instances.
+func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	fc := listenerFilterChain(t, parsed)
+	if _, present := fc["transport_socket"]; present {
+		t.Errorf("client-facing listener has transport_socket with gateway TLS disabled: %v", fc["transport_socket"])
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles
+// mirrors TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles:
+// the transport_socket %s-placeholder substitution must not leave a stray
+// blank line when gateway TLS is disabled, or contentHash(envoyYAML) —
+// and therefore AnnotationConfigHash — changes for every existing
+// non-TLS instance the moment this feature ships, forcing a gateway
+// rollout nobody asked for.
+func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles(t *testing.T) {
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}
+	first := buildEnvoyConfigYAML(inst)
+	if strings.Contains(first, "host_selection_retry_max_attempts: 5\n\n") {
+		t.Error("emitted config has a blank line after 'host_selection_retry_max_attempts: 5'; " +
+			"buildListenerDownstreamTLSTransportSocket's empty-string case must not leave a stray newline")
+	}
+	if !strings.Contains(first, "host_selection_retry_max_attempts: 5\n    - name: stats_listener") {
+		t.Error("emitted config does not have stats_listener immediately following the retry policy " +
+			"with no intervening blank line; got:\n" + first)
+	}
+	if second := buildEnvoyConfigYAML(inst); first != second {
+		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_FailsClosed pins
+// down the fail-closed behavior: when gateway TLS is requested but the
+// certificate is not provisioned yet (Status.GatewayTLS nil), the
+// client-facing listener is omitted entirely rather than served as
+// plaintext. Only the always-present stats listener (which answers /healthz
+// for the liveness probe) remains, so the pod stays alive while the
+// readiness probe — which targets the now-absent client port — keeps the
+// gateway NotReady until the certificate lands.
+func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_FailsClosed(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		// Status.GatewayTLS deliberately left nil: certificate not yet issued.
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+	names := listenerNames(t, parsed)
+	if slices.Contains(names, "listener") {
+		t.Errorf("client-facing listener present during the fail-closed window; want it omitted (no plaintext). listeners=%v", names)
+	}
+	if !slices.Contains(names, "stats_listener") {
+		t.Errorf("stats_listener missing from fail-closed config; the liveness probe needs its /healthz. listeners=%v", names)
+	}
+}
+
+// listenerNames returns the "name" of every listener in the emitted config.
+func listenerNames(t *testing.T, parsed map[string]any) []string {
+	t.Helper()
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	var names []string
+	for _, l := range listeners {
+		if name, _ := l.(map[string]any)["name"].(string); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured pins
+// down the downstream TLS shape once gateway TLS is ready: a
+// DownstreamTlsContext presenting the mounted certificate/key pair.
+func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+			},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+		},
+	})
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+	}
+	fc := listenerFilterChain(t, parsed)
+	ts, ok := fc["transport_socket"].(map[string]any)
+	if !ok {
+		t.Fatalf("client-facing listener missing transport_socket once GatewayTLS is ready; keys = %v", keysOf(fc))
+	}
+	if ts["name"] != "envoy.transport_sockets.tls" {
+		t.Errorf("transport_socket.name = %v, want envoy.transport_sockets.tls", ts["name"])
+	}
+	typedConfig, ok := ts["typed_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport_socket.typed_config missing or wrong type: %T", ts["typed_config"])
+	}
+	if wantType := "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext"; typedConfig["@type"] != wantType {
+		t.Errorf("typed_config[@type] = %v, want %v", typedConfig["@type"], wantType)
+	}
+	commonTLS, ok := typedConfig["common_tls_context"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
+	}
+	certs, ok := commonTLS["tls_certificates"].([]any)
+	if !ok || len(certs) != 1 {
+		t.Fatalf("common_tls_context.tls_certificates = %v, want a 1-element array", commonTLS["tls_certificates"])
+	}
+	cert, ok := certs[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0] = %v, want an object", certs[0])
+	}
+	chain, ok := cert["certificate_chain"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0].certificate_chain missing or wrong type: %T", cert["certificate_chain"])
+	}
+	wantChain := gatewayTLSMountPath + "/" + string(corev1.TLSCertKey)
+	if chain["filename"] != wantChain {
+		t.Errorf("certificate_chain.filename = %v, want %v", chain["filename"], wantChain)
+	}
+	key, ok := cert["private_key"].(map[string]any)
+	if !ok {
+		t.Fatalf("tls_certificates[0].private_key missing or wrong type: %T", cert["private_key"])
+	}
+	wantKey := gatewayTLSMountPath + "/" + string(corev1.TLSPrivateKeyKey)
+	if key["filename"] != wantKey {
+		t.Errorf("private_key.filename = %v, want %v", key["filename"], wantKey)
+	}
+}
+
+// TestBuildEnvoyConfigYAML_GatewayMutualTLS pins down the mTLS shape: when a
+// client CA is configured on a ready gateway listener, the DownstreamTlsContext
+// requires a client certificate and validates it against the mounted client-CA
+// bundle. Without one, neither field is emitted (one-way TLS renders
+// byte-identically to before this feature).
+func TestBuildEnvoyConfigYAML_GatewayMutualTLS(t *testing.T) {
+	build := func(clientCA *corev1.LocalObjectReference) map[string]any {
+		got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true, ClientCASecretRef: clientCA},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
+			},
+		})
+		var parsed map[string]any
+		if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+			t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
+		}
+		return listenerFilterChain(t, parsed)["transport_socket"].(map[string]any)["typed_config"].(map[string]any)
+	}
+
+	t.Run("client CA requires and validates client certs", func(t *testing.T) {
+		td := build(&corev1.LocalObjectReference{Name: "clients-ca"})
+		if req, _ := td["require_client_certificate"].(bool); !req {
+			t.Errorf("require_client_certificate = %v, want true", td["require_client_certificate"])
+		}
+		vc, ok := td["common_tls_context"].(map[string]any)["validation_context"].(map[string]any)
+		if !ok {
+			t.Fatal("common_tls_context.validation_context missing with a client CA configured")
+		}
+		want := gatewayClientCAMountPath + "/" + engineTLSCASecretKey
+		if got := vc["trusted_ca"].(map[string]any)["filename"]; got != want {
+			t.Errorf("trusted_ca.filename = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("no client CA keeps one-way TLS", func(t *testing.T) {
+		td := build(nil)
+		if _, present := td["require_client_certificate"]; present {
+			t.Error("require_client_certificate present without a client CA configured")
+		}
+		if _, present := td["common_tls_context"].(map[string]any)["validation_context"]; present {
+			t.Error("validation_context present without a client CA configured")
+		}
+	})
+}
+
+// listenerFilterChain returns the first filter_chain of the client-facing
+// "listener" (as opposed to the metrics-only "stats_listener", which
+// callers here never need).
+func listenerFilterChain(t *testing.T, parsed map[string]any) map[string]any {
+	t.Helper()
+	const listenerName = "listener"
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	for _, l := range listeners {
+		lm, _ := l.(map[string]any)
+		if name, _ := lm["name"].(string); name == listenerName {
+			chains := lm["filter_chains"].([]any)
+			return chains[0].(map[string]any)
+		}
+	}
+	t.Fatalf("listener %q not found in emitted config", listenerName)
+	return nil
+}
+
 // dfpCluster returns the parsed dynamic_forward_proxy cluster (the
 // top-level entry, not its typed_config). Callers needing the inner
 // typed_config use dfpClusterTypedConfig instead.
@@ -360,7 +1108,9 @@ func TestBuildEnvoyConfigYAMLStableAcrossInstances(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns-b"},
 	})
 	// Replacing the namespace-specific fragment in b should yield a.
-	normalised := strings.ReplaceAll(b, "-service.ns-b.svc.cluster.local:3473", "-service.ns-a.svc.cluster.local:3473")
+	bAuthority := fmt.Sprintf("-service.ns-b.svc.cluster.local:%d", EngineHTTPQueryPort)
+	aAuthority := fmt.Sprintf("-service.ns-a.svc.cluster.local:%d", EngineHTTPQueryPort)
+	normalised := strings.ReplaceAll(b, bAuthority, aAuthority)
 	if normalised != a {
 		t.Fatal("configs differ in more than the namespace-scoped authority rewrite; a and b should be structurally identical")
 	}

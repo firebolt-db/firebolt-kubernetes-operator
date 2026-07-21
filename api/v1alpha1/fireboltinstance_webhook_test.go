@@ -18,11 +18,14 @@ package v1alpha1
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 )
 
@@ -87,6 +90,224 @@ func TestValidateUpdate_AllowsSameID(t *testing.T) {
 	_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
 	if err != nil {
 		t.Errorf("ValidateUpdate: unexpected error: %v", err)
+	}
+}
+
+// TestValidateUpdate_ImmutableFields covers FB-896 round-4 #1 and #5: the JWT
+// signing algorithm and signing-key size are immutable while auth stays
+// enabled (packdb cannot serve two key curves at once), and the engine TLS
+// issuer is immutable while engine TLS stays enabled (reissuing under a new CA
+// would break the gateway's trust anchor mid-roll). A change made across a
+// disable/re-enable is permitted (fresh key material, no overlap).
+func TestValidateUpdate_ImmutableFields(t *testing.T) {
+	v := &FireboltInstanceCustomValidator{}
+	authEnabled := func(alg, keyAlg string, size int32) *AuthSpec {
+		return &AuthSpec{
+			Enabled: true,
+			Local: &LocalAuthSpec{
+				Admin:            validAdminSpec(),
+				SigningAlgorithm: alg,
+				SigningKeys: &SigningKeyPolicy{
+					CertManager: CertManagerSpec{
+						IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+						Algorithm: keyAlg,
+						Size:      size,
+					},
+				},
+			},
+		}
+	}
+	engineTLS := func(issuer string, size int32) *TLSSpec {
+		return &TLSSpec{
+			Engine: &TLSListenerSpec{
+				Enabled: true,
+				CertManager: &CertManagerSpec{
+					IssuerRef: CertManagerIssuerRef{Name: issuer, Kind: "ClusterIssuer"},
+					Algorithm: "ECDSA",
+					Size:      size,
+				},
+			},
+		}
+	}
+	gatewayTLS := func(alg string, size int32) *TLSSpec {
+		return &TLSSpec{
+			Gateway: &TLSListenerSpec{
+				Enabled: true,
+				CertManager: &CertManagerSpec{
+					IssuerRef: CertManagerIssuerRef{Name: "gw-ca", Kind: "ClusterIssuer"},
+					Algorithm: alg,
+					Size:      size,
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		mutate        func(oldInst, newInst *FireboltInstance)
+		wantErrSubstr string // "" => expect no error
+	}{
+		{
+			name: "signingAlgorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+				n.Spec.Auth = authEnabled("ES256", "ECDSA", 256)
+			},
+			wantErrSubstr: "signingAlgorithm",
+		},
+		{
+			name: "signing key size change rejected (RSA family unchanged)",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("RS256", "RSA", 2048)
+				n.Spec.Auth = authEnabled("RS256", "RSA", 4096)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "unchanged auth allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+				n.Spec.Auth = authEnabled("ES384", "ECDSA", 384)
+			},
+		},
+		{
+			name: "change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.Auth = &AuthSpec{Enabled: false}
+				n.Spec.Auth = authEnabled("ES256", "ECDSA", 256)
+			},
+		},
+		{
+			name: "engine TLS issuerRef change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-2", 384)
+			},
+			wantErrSubstr: "issuerRef",
+		},
+		{
+			name: "engine TLS key size change rejected (issuer unchanged)",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-1", 256)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "engine TLS key algorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = engineTLS("ca-1", 384)
+				n.Spec.TLS = engineTLS("ca-1", 2048)
+				n.Spec.TLS.Engine.CertManager.Algorithm = "RSA"
+			},
+			wantErrSubstr: "algorithm",
+		},
+		{
+			name: "engine TLS alg/size change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Engine: &TLSListenerSpec{Enabled: false}}
+				n.Spec.TLS = engineTLS("ca-1", 256)
+			},
+		},
+		{
+			name: "engine TLS legacy-empty algorithm/size to explicit default allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Engine: &TLSListenerSpec{
+					Enabled: true,
+					CertManager: &CertManagerSpec{
+						IssuerRef: CertManagerIssuerRef{Name: "ca-1", Kind: "ClusterIssuer"},
+					},
+				}}
+				n.Spec.TLS = engineTLS("ca-1", 384)
+			},
+		},
+		{
+			name: "gateway TLS key size change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = gatewayTLS("ECDSA", 384)
+				n.Spec.TLS = gatewayTLS("ECDSA", 256)
+			},
+			wantErrSubstr: "size",
+		},
+		{
+			name: "gateway TLS key algorithm change rejected",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = gatewayTLS("ECDSA", 384)
+				n.Spec.TLS = gatewayTLS("RSA", 2048)
+			},
+			wantErrSubstr: "algorithm",
+		},
+		{
+			name: "gateway TLS alg/size change across disable/re-enable allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{Enabled: false}}
+				n.Spec.TLS = gatewayTLS("RSA", 2048)
+			},
+		},
+		{
+			name: "gateway TLS legacy-empty algorithm/size to explicit default allowed",
+			mutate: func(o, n *FireboltInstance) {
+				o.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
+					Enabled: true,
+					CertManager: &CertManagerSpec{
+						IssuerRef: CertManagerIssuerRef{Name: "gw-ca", Kind: "ClusterIssuer"},
+					},
+				}}
+				n.Spec.TLS = gatewayTLS("ECDSA", 384)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldInst := &FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}
+			newInst := &FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}
+			tc.mutate(oldInst, newInst)
+			_, err := v.ValidateUpdate(context.Background(), oldInst, newInst)
+			if tc.wantErrSubstr == "" {
+				if err != nil {
+					t.Fatalf("ValidateUpdate: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateUpdate: expected error containing %q, got nil", tc.wantErrSubstr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("ValidateUpdate error = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
+}
+
+// TestValidatePodTemplate_GatewayClientCAVolumeReserved covers FB-896 round-4
+// #7: "client-ca" is an operator-rendered gateway volume, so a user sidecar
+// may not mount it by that name. Before it joined operatorOwnedGatewayVolumeNames
+// the template passed admission, then the volume was silently dropped at render
+// (mTLS off) or resolved to the operator's CA (mTLS on).
+func TestValidatePodTemplate_GatewayClientCAVolumeReserved(t *testing.T) {
+	template := &corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: GatewayContainerName},
+				{
+					Name:         "extra",
+					VolumeMounts: []corev1.VolumeMount{{Name: GatewayClientCAVolumeName, MountPath: "/x"}},
+				},
+			},
+		},
+	}
+	errs := ValidatePodTemplate(template, field.NewPath("spec", "gateway", "template"), GatewayPodTemplateRules)
+	if len(errs) == 0 {
+		t.Fatalf("expected rejection for a sidecar mounting the reserved %q volume", GatewayClientCAVolumeName)
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), GatewayClientCAVolumeName) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("errors %v do not mention the reserved volume %q", errs, GatewayClientCAVolumeName)
 	}
 }
 
@@ -296,6 +517,829 @@ func TestValidateExternalPostgres(t *testing.T) {
 			}
 			if !tc.wantError && err != nil {
 				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// validAdminSpec returns an AdminSpec that satisfies validateLocalAuth on
+// its own, so individual test cases below only need to override the one
+// field under test.
+func validAdminSpec() AdminSpec {
+	return AdminSpec{
+		Password: corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"},
+			Key:                  "password",
+		},
+	}
+}
+
+// validSigningKeys returns a SigningKeyPolicy whose cert-manager key leaves
+// Algorithm/Size empty, so validation treats them as the CRD defaults
+// (ECDSA / P-384) — compatible with the default (empty-string)
+// SigningAlgorithm of ES384.
+func validSigningKeys() *SigningKeyPolicy {
+	return &SigningKeyPolicy{
+		CertManager: CertManagerSpec{
+			IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+		},
+	}
+}
+
+func TestValidateAuth(t *testing.T) {
+	tests := []struct {
+		name      string
+		auth      *AuthSpec
+		wantError bool
+	}{
+		{
+			name:      "nil auth is valid",
+			auth:      nil,
+			wantError: false,
+		},
+		{
+			name:      "disabled with nothing else set is valid",
+			auth:      &AuthSpec{Enabled: false},
+			wantError: false,
+		},
+		{
+			name: "disabled with local set is rejected",
+			auth: &AuthSpec{
+				Enabled: false,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: true,
+		},
+		{
+			name: "disabled with oidc set is rejected",
+			auth: &AuthSpec{
+				Enabled: false,
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "disabled with preferredAuthorizationServer set is rejected",
+			auth: &AuthSpec{
+				Enabled:                      false,
+				PreferredAuthorizationServer: "_local",
+			},
+			wantError: true,
+		},
+		{
+			name:      "enabled with no local is rejected (admin required)",
+			auth:      &AuthSpec{Enabled: true},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no admin password name is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       AdminSpec{Password: corev1.SecretKeySelector{Key: "password"}},
+					SigningKeys: validSigningKeys(),
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no admin password key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       AdminSpec{Password: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "admin-creds"}}},
+					SigningKeys: validSigningKeys(),
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with local but no signingKeys is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec()},
+			},
+			wantError: true,
+		},
+		{
+			name: "enabled with fully populated local is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "ES384 (default) with default (ECDSA) cert-manager key is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "RS256 with ECDSA cert-manager key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "RS256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with RSA cert-manager key is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "RSA",
+							Size:      2048, // valid RSA size, so only the algorithm mismatch trips
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with the default P-384 key is rejected (JOSE requires P-256)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							// Size left empty → defaults to P-384, which does not
+							// match ES256's required P-256 curve.
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ES256 with a P-256 key is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      256,
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "ES512 with a P-521 key is valid (the 512↔521 pairing)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES512",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      521,
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "ES512 with a P-384 key is rejected (curve mismatch)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES512",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      384,
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "RSA signing key with an ECDSA-shaped size is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "RS256",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "RSA",
+							Size:      384, // below the 2048-bit RSA floor
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ECDSA signing key with an RSA-shaped size is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES384",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      2048, // not a valid ECDSA curve size
+						},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "ECDSA signing key with curve size 384 is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:            validAdminSpec(),
+					SigningAlgorithm: "ES384",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager: CertManagerSpec{
+							IssuerRef: CertManagerIssuerRef{Name: "internal-ca"},
+							Algorithm: "ECDSA",
+							Size:      384,
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer=_local is valid",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "_local",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer matching a configured oidc provider is valid",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "okta",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: false,
+		},
+		{
+			name: "preferredAuthorizationServer naming an unconfigured server is rejected",
+			auth: &AuthSpec{
+				Enabled:                      true,
+				PreferredAuthorizationServer: "no-such-provider",
+				Local:                        &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+			},
+			wantError: true,
+		},
+		{
+			name: "local jwt durations in packdb's Go-style+days grammar are valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					SigningKeys:        validSigningKeys(),
+					TokenExpiry:        "1h",
+					MaxTokenAge:        "1d",
+					ClockSkewTolerance: "30s",
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "unparseable local jwt duration is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					TokenExpiry: "1hr", // not a valid Go/packdb duration unit
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc.jwt duration fields validated the same way as local's",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{
+					JWT: &OIDCJWTSpec{ClockSkewTolerance: "not-a-duration"},
+					Providers: []OIDCProviderSpec{
+						{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc provider jwks.cacheTTL and discovery.refreshInterval accept packdb's days unit",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						JWKS:      &OIDCJWKSSpec{CacheTTL: "1d"},
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "1d"},
+					},
+				}},
+			},
+			wantError: false,
+		},
+		{
+			name: "oidc provider discovery.refreshInterval of zero is rejected " +
+				"(packdb's AuthConfig::Validate rejects non-positive refresh_interval)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "0s"},
+					},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "oidc provider discovery.refreshInterval negative is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{
+						Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}",
+						Discovery: &OIDCDiscoverySpec{RefreshInterval: "-1h"},
+					},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "duplicate oidc provider names are rejected " +
+				"(packdb's IssuerRegistry::registerRemote throws on the second registration)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{
+					{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					{Name: "okta", DiscoveryURL: "https://second.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "rotationInterval without retainDuration is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration without rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:    validSigningKeys().CertManager,
+						RetainDuration: &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration shorter than the default 1-day maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration shorter than an explicit maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					MaxTokenAge: "2d",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // < 2d
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "retainDuration exactly maxTokenAge is rejected (short by the clock-skew tolerance)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // == default maxTokenAge, < maxTokenAge + 30s
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "rotationInterval with retainDuration at least maxTokenAge + default clock skew is valid",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24*time.Hour + 30*time.Second}, // == maxTokenAge + default 30s skew
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "explicit clockSkewTolerance widens the retainDuration floor",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					ClockSkewTolerance: "5m",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24*time.Hour + 30*time.Second}, // < maxTokenAge + 5m
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "explicit zero clockSkewTolerance keeps the floor at exactly maxTokenAge",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:              validAdminSpec(),
+					ClockSkewTolerance: "0s",
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour}, // == maxTokenAge, skew 0
+					},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "zero rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: 0},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "negative rotationInterval is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin: validAdminSpec(),
+					SigningKeys: &SigningKeyPolicy{
+						CertManager:      validSigningKeys().CertManager,
+						RotationInterval: &metav1.Duration{Duration: -time.Hour},
+						RetainDuration:   &metav1.Duration{Duration: 24 * time.Hour},
+					},
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "negative local maxTokenAge is rejected (a negative floor would defeat the rotation retain-duration check)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					MaxTokenAge: "-1d",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "zero local tokenExpiry is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local: &LocalAuthSpec{
+					Admin:       validAdminSpec(),
+					SigningKeys: validSigningKeys(),
+					TokenExpiry: "0s",
+				},
+			},
+			wantError: true,
+		},
+		{
+			name: "negative oidc.jwt maxTokenAge is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{
+					JWT: &OIDCJWTSpec{MaxTokenAge: "-1h"},
+					Providers: []OIDCProviderSpec{
+						{Name: "okta", DiscoveryURL: "https://okta.example.com/.well-known/openid-configuration", UsernameMapping: "{{ email }}"},
+					},
+				},
+			},
+			wantError: true,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					Auth: tc.auth,
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateTLS(t *testing.T) {
+	tests := []struct {
+		name      string
+		tls       *TLSSpec
+		wantError bool
+	}{
+		{
+			name:      "nil tls is valid",
+			tls:       nil,
+			wantError: false,
+		},
+		{
+			name:      "engine disabled with nothing else set is valid",
+			tls:       &TLSSpec{Engine: &TLSListenerSpec{Enabled: false}},
+			wantError: false,
+		},
+		{
+			name:      "engine enabled with no certManager is rejected",
+			tls:       &TLSSpec{Engine: &TLSListenerSpec{Enabled: true}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with certManager but no issuer name is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with issuer name is valid",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+			}},
+			wantError: false,
+		},
+		{
+			// FB-896 #1: engine bring-your-own Secret is no longer supported —
+			// the operator must issue per-generation certificates whose SANs
+			// cover the engine pod hostnames.
+			name: "engine enabled with secretRef is rejected (BYO not supported for the engine listener)",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: "my-engine-tls"},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with both certManager and secretRef is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				SecretRef:   &corev1.LocalObjectReference{Name: "my-engine-tls"},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine enabled with secretRef but empty name is rejected",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{},
+			}},
+			wantError: true,
+		},
+		{
+			name:      "gateway disabled with nothing else set is valid",
+			tls:       &TLSSpec{Gateway: &TLSListenerSpec{Enabled: false}},
+			wantError: false,
+		},
+		{
+			name:      "gateway enabled with no certManager is rejected",
+			tls:       &TLSSpec{Gateway: &TLSListenerSpec{Enabled: true}},
+			wantError: true,
+		},
+		{
+			name: "gateway enabled with certManager but no issuer name is rejected",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "gateway enabled with issuer name is valid even without explicit dnsNames",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:     true,
+				CertManager: &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+			}},
+			wantError: false,
+		},
+		{
+			// Gateway bring-your-own Secret stays supported (unlike the engine
+			// listener): the gateway presents its own cert to clients and its
+			// SANs are the user's concern, not per-generation pod hostnames.
+			name: "gateway enabled with secretRef is valid",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: "my-gateway-tls"},
+			}},
+			wantError: false,
+		},
+		{
+			name: "gateway mutual TLS with a named client CA is valid",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{Name: "clients-ca"},
+			}},
+			wantError: false,
+		},
+		{
+			name: "gateway mutual TLS with an empty client-CA name is rejected",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{},
+			}},
+			wantError: true,
+		},
+		{
+			name: "engine mutual TLS is rejected (only gateway supports it)",
+			tls: &TLSSpec{Engine: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{Name: "clients-ca"},
+			}},
+			wantError: true,
+		},
+	}
+
+	v := &FireboltInstanceCustomValidator{}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			inst := &FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+				Spec: FireboltInstanceSpec{
+					TLS: tc.tls,
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), inst)
+			if tc.wantError && err == nil {
+				t.Error("ValidateCreate: expected error, got nil")
+			}
+			if !tc.wantError && err != nil {
+				t.Errorf("ValidateCreate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestParsePackdbDuration pins down the grammar against packdb's actual
+// duration parser (src/Common/Configuration/Unit/Duration.cpp): Go's
+// time.ParseDuration grammar plus a "d" (days) unit that Go's standard
+// library doesn't support, and — like packdb's multi-component tokenizer — "d"
+// combined with the standard units in any order (e.g. "1d12h"). Every duration
+// default in packdb's own schema (application-config.schema.json) uses "d" for
+// values of a day or more (e.g. instance.auth.local.jwt.max_token_age "1d").
+func TestParsePackdbDuration(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "plain Go duration passes through", in: "30s", want: 30 * time.Second},
+		{name: "hours", in: "1h", want: time.Hour},
+		{name: "Go multi-component still works", in: "1h30m", want: time.Hour + 30*time.Minute},
+		{name: "single day", in: "1d", want: 24 * time.Hour},
+		{name: "multiple days", in: "7d", want: 7 * 24 * time.Hour},
+		{name: "fractional days", in: "0.5d", want: 12 * time.Hour},
+		{name: "negative days", in: "-1d", want: -24 * time.Hour},
+		{name: "days then hours", in: "1d12h", want: 36 * time.Hour},
+		{name: "hours then days", in: "12h1d", want: 36 * time.Hour},
+		{name: "days then minutes", in: "1d30m", want: 24*time.Hour + 30*time.Minute},
+		{name: "fractional days multi-component", in: "1.5d", want: 36 * time.Hour},
+		{name: "negative multi-component with days", in: "-1d12h", want: -36 * time.Hour},
+		{name: "empty string is invalid", in: "", wantErr: true},
+		{name: "bare number with no unit is invalid", in: "5", wantErr: true},
+		{name: "bogus unit is invalid", in: "1hr", wantErr: true},
+		{name: "bogus unit inside a day-component string is invalid", in: "1d1hr", wantErr: true},
+		{name: "bare d with no number is invalid", in: "d", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePackdbDuration(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("parsePackdbDuration(%q) = %v, want error", tc.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePackdbDuration(%q): unexpected error: %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("parsePackdbDuration(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -619,4 +1663,31 @@ func indexOf(haystack, needle string) int {
 
 func resourceMustParse(s string) resource.Quantity {
 	return resource.MustParse(s)
+}
+
+// TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor is a
+// direct regression for the negative-duration finding: even if a non-positive
+// MaxTokenAge reached validateSigningKeyRotation (it is now rejected upstream
+// by validatePositiveDurationField, but this cross-check must not depend on
+// that), the retain-duration floor must fall back to packdbDefaultMaxTokenAge
+// rather than adopt the bad value — otherwise a "-1d" floor would approve a
+// retainDuration far shorter than a real token's lifetime.
+func TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor(t *testing.T) {
+	base := field.NewPath("spec", "auth", "local", "signingKeys")
+	for _, mta := range []string{"-1d", "0s"} {
+		local := &LocalAuthSpec{
+			Admin:       validAdminSpec(),
+			MaxTokenAge: mta,
+			SigningKeys: &SigningKeyPolicy{
+				CertManager:      validSigningKeys().CertManager,
+				RotationInterval: &metav1.Duration{Duration: 30 * 24 * time.Hour},
+				// 1h < the 24h default floor: must be rejected because the bad
+				// MaxTokenAge is ignored, not treated as the (negative/zero) floor.
+				RetainDuration: &metav1.Duration{Duration: time.Hour},
+			},
+		}
+		if errs := validateSigningKeyRotation(local, base); len(errs) == 0 {
+			t.Errorf("maxTokenAge=%q: expected retainDuration rejected against the default floor, got no error", mta)
+		}
+	}
 }
