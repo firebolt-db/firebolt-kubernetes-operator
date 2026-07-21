@@ -128,12 +128,12 @@ Code is not done until it is covered by tests where tests are reasonable.
 
 Every change is tracked and lands through a branch and a pull request -- no exceptions.
 
-- **A documented issue comes first.** Every task MUST have a corresponding issue before any work starts -- a Linear ticket or a GitHub issue. If none exists, create one. No issue, no work.
+- **A documented issue comes first.** Every implementation task MUST have a corresponding issue before any work starts -- a Linear ticket or a GitHub issue. If none exists, create one. No issue, no work.
 - **Never touch `main` directly.** You MUST NEVER work in, commit to, or push to `main`. All work happens on a feature branch and merges via a reviewed PR. `main` is only ever advanced by merging a PR or by the release automation (release-please merging a release PR, and the `sync-chart-appversion` job's `chore(deps)` appVersion commit).
 - **Branch names tie the branch to its issue**, so work is traceable. Prefix the branch with the tracker identifier:
   - Linear: `FB-<number>-<short-kebab-description>` (e.g. `FB-<number>-pods-not-ready-message`).
   - GitHub issue: `<issue-number>-<short-kebab-description>`.
-  - Branch off the latest `main`, not off another in-flight feature branch.
+  - Branch off the latest `main`, not off another in-flight feature branch unless instructed.
 - **PRs follow the template.** Pull requests MUST follow [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md): fill in **Background** (replace the whole `<ISSUE-REF>` placeholder with the actual reference — a Linear ticket like `FB-123` or a GitHub issue like `#123` — followed by `:` and the one-sentence why, e.g. `FB-123: switch to blue-green cutover because rolling restarts dropped queries`; do NOT keep the literal `<ISSUE-REF>` token), **Summary** (what changes and what it means going forward), and **Test Plan**. Re-check the template before opening a PR in case it has changed.
 - **Conventional-commit subjects drive releases.** [release-please](release-please-config.json) opens release PRs on `main` that accumulate conventional commits for the app (`version.txt`) and each Helm chart (`helm/firebolt-operator`, `helm/firebolt-operator-crds`). Merging a release PR creates the GitHub release and tag. Every commit subject MUST follow the format in "Commit conventions" (under Project-specific rules below).
 
