@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.0...firebolt-operator-v0.4.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **controller:** stop injecting core mode env (FB-1860) ([#74](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/74)) ([7f912e6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7f912e68e9678795d3e9bcf7192cc1653713acbb))
+
 ## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.2...firebolt-operator-v0.4.0) (2026-07-20)
 
 
