@@ -27,6 +27,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
@@ -59,6 +60,13 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(computev1alpha1.AddToScheme(scheme))
+	// Registered so the instance controller can apply cert-manager
+	// Certificate objects (the JWT signing keypair, and later TLS certs)
+	// through the same typed client as every other resource it manages.
+	// The operator does not run cert-manager's own controllers — it only
+	// creates Certificates and reads the Secrets cert-manager produces —
+	// so no other cert-manager scheme registration is needed here.
+	utilruntime.Must(certmanagerv1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }

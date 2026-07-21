@@ -20,9 +20,11 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -131,6 +133,8 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengineclasses/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
@@ -498,6 +502,46 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		}
 	}
 
+	// Per-generation engine TLS Certificates and their cert-manager-derived
+	// Secrets carry LabelEngine. The Certificate is owner-referenced to the
+	// engine so Kubernetes GC would eventually remove it, but cert-manager does
+	// not owner-reference the derived Secret, so without this explicit sweep the
+	// per-generation TLS Secret orphans once the engine is gone. Delete both by
+	// label, Certificate before Secret (a live Certificate recreates a deleted
+	// target Secret — see instance_controller.go's reconcileDelete). The
+	// Certificate List tolerates the Certificate kind being unavailable to this
+	// client (certKindUnavailable) — either its CRD isn't installed or the type
+	// isn't in the client scheme — in which case no such certs/secrets exist.
+	certList := &certmanagerv1.CertificateList{}
+	if err := r.List(ctx, certList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		if !certKindUnavailable(err) {
+			log.Error(err, "Failed to list Certificates for cleanup")
+			errs = append(errs, err)
+		}
+	} else {
+		for i := range certList.Items {
+			log.Info("Deleting Certificate", "name", certList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &certList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Certificate", "name", certList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	secretList := &corev1.SecretList{}
+	if err := r.List(ctx, secretList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		log.Error(err, "Failed to list Secrets for cleanup")
+		errs = append(errs, err)
+	} else {
+		for i := range secretList.Items {
+			log.Info("Deleting Secret", "name", secretList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &secretList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Secret", "name", secretList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
@@ -513,6 +557,20 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 
 	log.Info("Finalizer removed, deletion complete")
 	return nil
+}
+
+// certKindUnavailable reports whether a List/Get for cert-manager Certificates
+// failed only because the Certificate kind is unavailable to this client —
+// either its CRD isn't installed (IsNoMatchError, e.g. envtest, which installs
+// no cert-manager CRDs) or the type isn't registered in the client's scheme
+// (IsNotRegisteredError, e.g. a fake-client unit test with a minimal scheme).
+// Both mean no Certificates can exist for this client, so there is nothing to
+// reclaim. In production the operator registers certmanagerv1 and, wherever
+// engine TLS is used, cert-manager is installed — so neither fires, and a
+// genuinely missing registration would already have failed Certificate creation
+// (ensureEngineTLSCert) loudly, long before deletion.
+func certKindUnavailable(err error) bool {
+	return apimeta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err)
 }
 
 // appendExternalFinalizer adds obj to the report iff it carries one or
@@ -1122,8 +1180,12 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
-// spec.instanceRef and returns its metadata endpoint and instance ID.
-// Reconciliation is blocked until the instance exists and has both fields populated.
+// spec.instanceRef and returns its metadata endpoint, instance ID, and (when
+// auth is enabled) the resolved auth config. Reconciliation is blocked until
+// the instance exists, has both the endpoint and ID populated, and — when
+// spec.auth.enabled — has finished provisioning auth (see the Auth gating
+// below), so an engine pod is never scheduled with a volumeMount pointing at
+// a Secret that doesn't exist yet.
 func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (InstanceInfo, error) {
 	inst := &computev1alpha1.FireboltInstance{}
 	key := types.NamespacedName{Name: engine.Spec.InstanceRef, Namespace: engine.Namespace}
@@ -1141,10 +1203,142 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no instance ID yet", inst.Name)
 	}
 
-	return InstanceInfo{
+	info := InstanceInfo{
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
 		InstanceID:       inst.Spec.ID,
-	}, nil
+	}
+
+	if inst.Spec.Auth != nil && inst.Spec.Auth.Enabled {
+		// Gate on the instance controller's own combined readiness signal
+		// (admin password Secret exists + signing key issued —
+		// InstanceConditionAuthReady, set in instance_auth.go's
+		// ensureAuth) rather than re-deriving readiness here. The
+		// Status.Auth nil/empty check is defense-in-depth against a
+		// stale/racy condition rather than the primary gate.
+		ready := apimeta.IsStatusConditionTrue(inst.Status.Conditions, computev1alpha1.InstanceConditionAuthReady)
+		if !ready || inst.Status.Auth == nil || len(inst.Status.Auth.SigningKeys) == 0 {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has auth enabled but it is not ready yet", inst.Name)
+		}
+		if inst.Spec.Auth.Local == nil {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has auth enabled but spec.auth.local is unset", inst.Name)
+		}
+
+		// Re-verify every Secret this engine's pod is about to mount
+		// exists right now, mirroring checkExternalPostgresSecret's
+		// reasoning: AuthReady only proves these Secrets existed as of
+		// the instance controller's last reconcile. Without this,
+		// a Secret deleted in the gap would surface only as a pod stuck
+		// in ContainerCreating, with the root cause invisible on the
+		// FireboltEngine CR.
+		admin := inst.Spec.Auth.Local.Admin.Password
+		adminRV, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret")
+		if err != nil {
+			return InstanceInfo{}, err
+		}
+		// Filtered through signingKeysForRender (Active + at most one
+		// other, Removing excluded) rather than the raw status list: a
+		// Removing key's Secret is deleted once every engine has
+		// confirmed it no longer needs it (see deleteSigningKey), and
+		// this engine's pod will never mount it either way — checking its
+		// existence here would only produce a spurious failure during
+		// that window.
+		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
+		signingFPs := make(map[string]string, len(renderKeys))
+		for _, k := range renderKeys {
+			// Capture the signing key's public-key fingerprint (not its bytes)
+			// and fold it into authHash so a genuine same-kid key replacement
+			// rolls the fleet, while a cert-only reissuance that reuses the key
+			// does not — see ResolvedAuthInfo.SigningKeyFingerprints.
+			// enginesConvergedOn performs the identical read so the rotation gate
+			// stays matchable. The read also confirms tls.key is present, the same
+			// existence gate the previous ResourceVersion read provided.
+			fp, err := signingKeyFingerprint(ctx, r.Client, engine.Namespace, k.SecretName)
+			if err != nil {
+				return InstanceInfo{}, err
+			}
+			signingFPs[k.ID] = fp
+		}
+
+		info.Auth = &ResolvedAuthInfo{
+			Spec:                   inst.Spec.Auth,
+			SigningKeys:            renderKeys,
+			AdminSecretVersion:     adminRV,
+			SigningKeyFingerprints: signingFPs,
+		}
+	}
+
+	if inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled {
+		// FB-896 #4: unblock the engine roll on the PROVISIONED fact — the anchor
+		// Secret recorded in Status.EngineTLS (written only once the anchor cert is
+		// Ready, in ensureEngineTLSCertificate) — NOT on
+		// InstanceConditionEngineTLSReady. That condition is now convergence-gated
+		// (True only once the whole fleet is re-encrypting), so gating the roll on
+		// it would deadlock the enable ramp: engines would never roll onto TLS, the
+		// fleet would never converge, and the condition would never flip True. Then
+		// re-verify the Secret this engine's pod is about to mount exists right now.
+		if inst.Status.EngineTLS == nil {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has engine TLS enabled but it is not provisioned yet", inst.Name)
+		}
+		secretName := inst.Status.EngineTLS.SecretName
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSCertKey, "engine TLS secret"); err != nil {
+			return InstanceInfo{}, err
+		}
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSPrivateKeyKey, "engine TLS secret"); err != nil {
+			return InstanceInfo{}, err
+		}
+
+		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
+
+		// Read the current generation's serving-certificate Secret once. It drives
+		// two independent signals below: its tls.crt is the FB-896 #1 serving-cert
+		// drift fingerprint (a cert-manager re-issuance of the served leaf must
+		// roll a new generation, since packdb reads the cert only at startup), and
+		// its ca.crt is the FB-896 #4 trust-bundle cutover gate. A NotFound is
+		// benign — the fresh generation's cert is not written yet, or engine TLS
+		// was just enabled — leaving both signals at their empty/vacuous default.
+		gen := engine.Status.CurrentGeneration
+		var genSecret corev1.Secret
+		genSecretName := genResourceName(engine.Name, gen, SuffixEngineTLS)
+		genErr := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: genSecretName}, &genSecret)
+		if genErr != nil && !errors.IsNotFound(genErr) {
+			return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s: %w", gen, genSecretName, genErr)
+		}
+		if genErr == nil {
+			if crt := genSecret.Data[corev1.TLSCertKey]; len(crt) > 0 {
+				info.TLS.ServingCertFP = caFingerprint(string(crt))
+			}
+		}
+
+		// FB-896 #4 cutover gate: the gateway must already trust THIS engine's
+		// current-generation certificate CA before its Service selector may flip
+		// to that generation (see computeCreating). Confirm the generation cert's
+		// CA fingerprint appears in the set the gateway has confirmed-rolled-out
+		// (inst.Status.RolledEngineTrustCAs), using the same fingerprint the
+		// instance controller publishes with.
+		//
+		// The gate is VACUOUS until the gateway actually re-encrypts upstream
+		// (engineUpstreamTLSReady, i.e. Status.EngineTLS.Reencrypting). Before
+		// that the gateway talks plaintext to engines and verifies no certificate,
+		// so a cutover endangers nothing — and gating here would DEADLOCK the
+		// initial enable ramp: info.TLS is set the moment the anchor is ready
+		// (InstanceConditionEngineTLSReady), but Reencrypting only flips true once
+		// the fleet has cut over to TLS, and the trust bundle is only published
+		// once the gateway re-encrypts. Requiring trust before the first cutover
+		// would prevent the very convergence that produces the trust. Once the
+		// gateway IS re-encrypting, the check is strict per generation: a
+		// missing/keyless generation Secret, or a CA not yet in the rolled set
+		// (e.g. just after a CA rotation), leaves this false and the cutover
+		// simply waits. Same-CA rollouts find their CA already present.
+		if !engineUpstreamTLSReady(inst) {
+			info.EngineTrustBundleReady = true
+		} else if genErr == nil {
+			if ca := genSecret.Data[engineTLSCASecretKey]; len(ca) > 0 {
+				info.EngineTrustBundleReady = slices.Contains(inst.Status.RolledEngineTrustCAs, caFingerprint(string(ca)))
+			}
+		}
+	}
+
+	return info, nil
 }
 
 func genResourceName(engineName string, gen int, suffix string) string {
