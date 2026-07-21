@@ -96,6 +96,63 @@ the class.
 - FireboltEngineClass is **namespaced** rather than cluster-scoped, unlike `StorageClass` / `IngressClass` / `GatewayClass`, because its template carries namespace-resolved identifiers: `serviceAccountName`, `volumes[*].secret/configMap/persistentVolumeClaim` references, and typically per-tenant IAM annotations. Kubernetes resolves those names in the engine's own namespace at pod-admission time, so co-locating the class and its consumer engines avoids the silent-divergence trap a cluster-scoped class would have created. For example, an identical SA name in different namespaces could have different IAM bindings with no admission error.
 - `FireboltEngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines in the same namespace referencing the class) for user-facing visibility. The FireboltEngineClass validating webhook refuses deletion by listing referencing engines live from the API server, scoped to the class's namespace, at admission time rather than trusting the cached count. `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
 
+## Authentication, TLS, and signing-key rotation
+
+Authentication and TLS are Instance-wide policies that the Firebolt Operator provisions in dedicated reconcile steps, each isolated from Postgres, the Metadata Service, and the Gateway so a failure in one never blocks the others. Each step surfaces its outcome through its own status condition (`AuthReady`, `EngineTLSReady`, `GatewayTLSReady`). Engines gate their own reconcile on the Instance's `Status` fields directly (`Status.Auth`, `Status.EngineTLS`), never on the top-level `Ready` roll-up, so a still-provisioning security feature delays only the Engines that depend on it.
+
+### Authentication model
+
+`spec.auth` configures authentication for every Engine in the Instance, not per Engine. Each Engine runs packdb's embedded `_local` authorization server, which both issues and validates JWTs, so every Engine must run byte-identical `instance.auth.*` config, including the same signing keys, or a token minted by one Engine fails validation on another. The Firebolt Operator resolves `spec.auth` once per Instance and renders the result into every Engine's `config.yaml` from that single source.
+
+The model combines two authorization servers:
+
+- Native local login through `spec.auth.local`: an admin username and password, plus the JWT signing parameters shared by all Engines.
+- Optional OIDC bearer-token validation through `spec.auth.oidc`: one or more trusted identity providers whose tokens Engines accept. packdb validates tokens against each provider's published keys; it never initiates a login flow itself.
+
+The Firebolt Operator provisions the crypto material auth needs. It runs an admin-password preflight that verifies the user-supplied password Secret exists and carries its key, and never generates an admin password, because a credential the user never sees is not usable. It provisions the shared JWT signing keypair through cert-manager. Both are mounted into every Engine pod and rendered as `instance.auth.admin.password_file` and `instance.auth.local.signing_keys[]`, so no plaintext password or private key appears in the rendered config.
+
+`AuthReady` is deliberately excluded from the top-level Instance `Ready` roll-up: auth provisioning has no bearing on whether the Metadata Service or Gateway are usable. `EngineTLSReady` and `GatewayTLSReady`, by contrast, are folded into `Ready`, so the Instance never advertises a secure posture it has not yet reached.
+
+### Engine-listener TLS
+
+`spec.tls.engine` terminates TLS on each Engine's query listener. TLS replaces plaintext on the same port (3473): the Engine serves a single listener, not a dual plaintext-and-TLS pair. The Gateway then re-encrypts upstream to Engines, verifying each one against the Engine CA trust bundle.
+
+The Gateway routes all Engine traffic through one `dynamic_forward_proxy` cluster whose `transport_socket` Envoy copies verbatim into every per-authority sub-cluster it synthesizes. Upstream TLS is therefore fleet-wide: the Gateway cannot speak TLS to one Engine and plaintext to another. Because of that, the upstream switch (`Status.EngineTLS.Reencrypting`) flips only once every Engine has converged onto a TLS-serving generation. Disable is symmetric: the Firebolt Operator retains the trust anchor and keeps re-encrypting until every Engine has drained back to plaintext.
+
+`EngineTLSReady` is convergence-gated, reporting `True` only once the whole fleet re-encrypts. Engines still roll onto TLS on the provisioned fact alone (`Status.EngineTLS` populated), not on the condition. Gating the Engine roll on the condition would deadlock the enable ramp, because the roll is what produces the convergence the condition waits for.
+
+### Gateway downstream TLS and fail-closed posture
+
+`spec.tls.gateway` terminates client-facing TLS on the Envoy listener; adding a client CA through `clientCASecretRef` upgrades the listener to mutual TLS.
+
+On a tightening transition (plaintext to TLS, one-way to mutual TLS, or a client-CA swap), the Firebolt Operator serves fail-closed rather than risk a fail-open window. It clears `Status.GatewayTLS`, omits the client-facing listener entirely, and drains the old looser pods before any new secure pod starts (`MaxUnavailable=100%`, `MaxSurge=0`). The client port rejects all connections for a brief window during the transition, but the Gateway is never fail-open. Liveness and readiness probes ride the always-plaintext metrics port, so pods stay alive through the fail-closed wait. Loosening and steady-state transitions carry no fail-open risk and skip staging.
+
+### Signing-key rotation
+
+When `spec.auth.local.signingKeys.rotationInterval` is set, the Firebolt Operator runs its own coordinated rotation instead of relying on cert-manager's renewal schedule. The state machine advances at most one step per reconcile:
+
+```text
+mint → (converge) → promote → (converge) → RetireEligibleAt → retain → Removing → (converge) → delete
+```
+
+A new key is minted in a validate-only role first, used to validate tokens but not yet to sign them. Every irreversible step is gated on fleet convergence: each Engine's `Status.observedAuthHash` must equal the Instance-computed `authHash`. A key is never promoted or removed until the whole fleet confirms it has rolled onto the configuration that includes (or excludes) that key. Promoting earlier would let a rolled Engine sign tokens a not-yet-rolled Engine cannot validate.
+
+`RetireEligibleAt` anchors the retain window at post-promotion convergence, not at demotion. Every Engine keeps signing with the demoted key until it rolls onto the promoted configuration, so `retainDuration` must measure from the instant no Engine can still be signing with the key, not from the instant the key was demoted.
+
+The Firebolt Operator ships with the validating webhook off by default, so it does not lean on admission alone. Every `ValidateAuth` and `ValidateTLS` invariant has a controller-side re-check, and the transition-immutability invariants (such as a frozen signing algorithm or engine issuer while TLS stays enabled) have CRD CEL twins that hold at the API server regardless.
+
+### Trust-bundle cutover
+
+The Gateway's Engine trust bundle is the union of the CA certificate behind every live Engine generation's TLS Secret. Because the CA material behind an issuer can rotate even though the issuer name is immutable, an older live generation may carry a different CA than a newer one; trusting the union lets the Gateway verify both during the overlap. The bundle is reassembled from live generations every reconcile, so a CA drops out on its own once the last generation using it retires, with no separate convergence bookkeeping.
+
+A generation's Service selector may not flip to that generation until the Gateway confirms it trusts the generation's CA, that is, until the CA's fingerprint appears in `Status.RolledEngineTrustCAs`. The gate is vacuous until the Gateway actually re-encrypts upstream, because before that the Gateway talks plaintext and verifies nothing.
+
+### Known limitation: transient outage when toggling engine TLS
+
+Enabling or disabling engine TLS on an already-running, traffic-serving fleet has a transient Gateway-to-Engine outage window. Because Engines serve TLS only on the single query port, and the Gateway's upstream protocol is fleet-wide and rolled in a separate step, an Engine that has cut over ahead of the fleet is briefly unreachable from the not-yet-switched Gateway, and the reverse holds on disable.
+
+This window is bounded to the transition of a deliberate admin operation, and engine TLS is a new opt-in feature, so plaintext deployments see no regression. A fully hitless transition would require dual-listener (plaintext and TLS) support on the Engine side in packdb, which is outside the Firebolt Operator's scope.
+
 ## Design principles
 
 The Firebolt Operator uses a **level-triggered** (not edge-triggered) reconciliation model. Each invocation of `Reconcile` reads the full desired state (`.spec`) and the full observed state (cluster resources), computes the delta, and applies it. The reconciler does not depend on knowing _what changed_. It only depends on _what is_.
