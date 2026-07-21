@@ -244,13 +244,6 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 			wantField: "spec.template.spec.containers[0].env[0].name",
 		},
 		{
-			name: "engine container reserved env FIREBOLT_CORE_MODE",
-			mutate: func(ec *FireboltEngineClass) {
-				ec.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{{Name: EngineCoreModeEnvKey, Value: "0"}}
-			},
-			wantField: "spec.template.spec.containers[0].env[0].name",
-		},
-		{
 			name: "duplicate engine container",
 			mutate: func(ec *FireboltEngineClass) {
 				ec.Spec.Template.Spec.Containers = append(ec.Spec.Template.Spec.Containers, corev1.Container{

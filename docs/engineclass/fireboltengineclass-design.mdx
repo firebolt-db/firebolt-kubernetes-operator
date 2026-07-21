@@ -47,7 +47,7 @@ on the resolved value):
 | engine container `image` / `imagePullPolicy` | engine template > class > Firebolt Operator default. The default pull policy follows the Kubernetes tag rule (`Always` for `:latest` or an untagged image, `IfNotPresent` otherwise), with the mutable `dev` tag treated like `latest`. |
 | engine container `resources` | engine template wins wholesale if it carries any requests/limits/claims, else class fills in (no field-level merge) |
 | engine container `securityContext` | engine template wins if non-nil, else class |
-| engine container `env` | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`, `FIREBOLT_CORE_MODE`) first. Class env then engine env appended in that order (reserved keys rejected at admission) |
+| engine container `env` | Firebolt Operator-injected vars (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`) first. Class env then engine env appended in that order (reserved keys rejected at admission) |
 | engine container `envFrom` | class slice + engine slice, concatenated |
 | engine container `volumeMounts` | Firebolt Operator-owned mounts first. Class mounts then engine mounts appended in that order. Mounts colliding with operator volume names are dropped |
 | engine container `lifecycle` | engine template wins if non-nil, else class |

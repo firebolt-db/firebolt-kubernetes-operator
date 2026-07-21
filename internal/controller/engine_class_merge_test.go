@@ -441,13 +441,12 @@ func TestBuildStatefulSet_MergesClassEngineContainerFields(t *testing.T) {
 	engine := sts.Spec.Template.Spec.Containers[0]
 
 	// Operator env vars must come first; the class entry follows.
-	if len(engine.Env) < 4 || engine.Env[len(engine.Env)-1].Name != "DATABASE_URL" {
+	if len(engine.Env) < 3 || engine.Env[len(engine.Env)-1].Name != "DATABASE_URL" {
 		t.Errorf("engine Env = %+v, want operator vars then DATABASE_URL last", engine.Env)
 	}
-	for _, e := range engine.Env[:3] {
+	for _, e := range engine.Env[:2] {
 		if e.Name != computev1alpha1.EnginePodIndexEnvKey &&
-			e.Name != computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey &&
-			e.Name != computev1alpha1.EngineCoreModeEnvKey {
+			e.Name != computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey {
 			t.Errorf("operator env var displaced from leading position: %s", e.Name)
 		}
 	}

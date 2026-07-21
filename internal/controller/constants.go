@@ -315,9 +315,6 @@ func resolveContainerImagePullPolicy(image string, policy corev1.PullPolicy) cor
 // `firebolt server` is the engine image's unified entrypoint; the binary lives
 // at /opt/firebolt/firebolt (read-only payload) and the writable state root is
 // passed as --data-dir /var/lib/firebolt.
-// FIREBOLT_CORE_MODE=1 (set as a container env var) selects the firebolt-core
-// code path so the operator-rendered config (config.yaml at the data-dir root)
-// is treated as authoritative and not rewritten at startup.
 const EngineStartupScript = `
 set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then

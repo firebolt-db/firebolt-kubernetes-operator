@@ -1634,11 +1634,11 @@ func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInf
 
 // effectiveEngineEnv concatenates env vars declared on the engine
 // container of both the class template and the engine spec's
-// template — class first, engine after. Reserved keys (POD_INDEX,
-// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE) on either
-// surface are rejected before this runs: the validating webhook gates
-// them at admission, and the always-on controller backstops re-run the
-// same rules every reconcile (the engine template via
+// template — class first, engine after. Reserved keys (POD_INDEX and
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED) on either surface are rejected before
+// this runs: the validating webhook gates them at admission, and the
+// always-on controller backstops re-run the same rules every reconcile (the
+// engine template via
 // validateEngineTemplate, the class template via the class's
 // Ready=False/OperatorOwnedFieldSet condition read in
 // resolveFireboltEngineClassInfo). A rejected engine never reaches the
@@ -1772,8 +1772,8 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 
 // buildEngineContainerEnv returns the env stamped on the rendered
 // engine container: operator-injected vars first (POD_INDEX,
-// FB_AWS_EC2_METADATA_CLIENT_ENABLED, FIREBOLT_CORE_MODE), then class
-// then engine user-supplied entries in that order. Shared between
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED), then class then engine user-supplied
+// entries in that order. Shared between
 // buildStatefulSet (write path) and engineContainerExtraFieldsMatch
 // (drift comparator) so a future env injection or reordering lands
 // in both at once.
@@ -1793,14 +1793,6 @@ func buildEngineContainerEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo
 		{
 			Name:  computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
 			Value: "true",
-		},
-		// Selects the firebolt-core code path inside the unified
-		// `firebolt` binary: the operator-rendered config
-		// (config.yaml at the data-dir root) is honored as-is and
-		// not rewritten at startup.
-		{
-			Name:  computev1alpha1.EngineCoreModeEnvKey,
-			Value: "1",
 		},
 	}
 	return append(out, effectiveEngineEnv(spec, classInfo)...)
