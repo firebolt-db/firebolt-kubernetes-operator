@@ -537,3 +537,116 @@ jobs:
           if [ "$CRDS_RELEASED" = "true" ]; then
             publish_chart helm/firebolt-operator-crds firebolt-operator-crds
           fi
+
+  # After publishing a new operator image version, open or refresh a firecelld
+  # PR that bumps every baseline-operator pin (defaults, examples, docs, and
+  # e2e/helm suite constants) to that released operator version.
+  bump-firecelld-baseline:
+    needs:
+      - release-please
+      - release-app
+    if: needs.release-please.outputs.app_release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TARGET_REPO: firebolt-analytics/firecelld
+      TARGET_PR_BRANCH: release-please/bump-operator-baseline
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          show-progress: "false"
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.app_tag_name }}
+
+      - name: Read released operator version
+        id: released
+        run: |
+          VERSION="$(tr -d '[:space:]' < version.txt)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read released version from version.txt" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          client-id: ${{ secrets.GH_APP_FB_DB_CI_WRITER_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_FB_DB_CI_WRITER_APP_KEY_PEM }}
+          owner: firebolt-analytics
+          repositories: firecelld
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: firebolt-analytics/firecelld
+          token: ${{ steps.app-token.outputs.token }}
+          path: firecelld
+          show-progress: "false"
+          persist-credentials: false
+
+      - name: Bump firecelld baseline pins
+        working-directory: firecelld
+        env:
+          VERSION: ${{ steps.released.outputs.version }}
+        run: |
+          python3 - "$VERSION" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          replacements = [
+              ("Makefile", r"(?m)^(LOCAL_OPERATOR_VERSION \?= ).+$", rf"\g<1>{version}", "Makefile LOCAL_OPERATOR_VERSION"),
+              ("README.md", r"(?m)^(\s*--set instanceOperator\.baselineVersion=).+$", rf"\g<1>{version} \\", "README baseline flag"),
+              ("examples/fireboltcell.yaml", r'(?m)^(\s*baselineVersion:\s*").+(")$', rf'\g<1>{version}\g<2>', "example FireboltCell baseline"),
+              ("docs/CURSOR_CLOUD_SETUP.md", r"(?m)(baseline `)[^`]+(`\))", rf"\g<1>{version}\g<2>", "Cursor Cloud doc baseline"),
+              ("test/e2e/lifecycle_test.go", r'(?m)^(\s*operatorChartVersion = ").+(")$', rf'\g<1>{version}\g<2>', "e2e operator chart version"),
+              ("test/helm/helm_test.go", r'(?m)^(const operatorChartVersion = ").+(")$', rf'\g<1>{version}\g<2>', "helm operator chart version"),
+          ]
+
+          for rel_path, pattern, replacement, label in replacements:
+              path = pathlib.Path(rel_path)
+              original = path.read_text()
+              updated, count = re.subn(pattern, replacement, original)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 replacement in {rel_path}, got {count}")
+              if updated != original:
+                  path.write_text(updated)
+          PY
+
+      - name: Commit, push, and create or refresh PR
+        working-directory: firecelld
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.released.outputs.version }}
+        run: |
+          git config user.email "ci-gitops[bot]@users.noreply.github.com"
+          git config user.name "ci-gitops[bot]"
+
+          git checkout -B "$TARGET_PR_BRANCH"
+          git add Makefile README.md examples/fireboltcell.yaml docs/CURSOR_CLOUD_SETUP.md \
+            test/e2e/lifecycle_test.go test/helm/helm_test.go
+
+          if git diff --cached --quiet; then
+            echo "firecelld already pins baseline ${VERSION}; nothing to do" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          TITLE="chore(deps): bump firebolt-operator baseline pins to ${VERSION}"
+          git commit -m "$TITLE"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPO}.git"
+          git push --force "$REMOTE" "$TARGET_PR_BRANCH"
+
+          BODY="Auto-bump on the firebolt-operator release to \`${VERSION}\`: update firecelld baseline operator pins in defaults, examples, docs, and e2e/helm tests.
+
+          Opened by firebolt-kubernetes-operator's release workflow (bump-firecelld-baseline in release-main.yaml)."
+          open_pr="$(gh api "repos/${TARGET_REPO}/pulls?state=open&head=firebolt-analytics:${TARGET_PR_BRANCH}" --jq '.[0].number // empty')"
+          if [ -z "$open_pr" ]; then
+            gh pr create --repo "$TARGET_REPO" --title "$TITLE" --body "$BODY" \
+              --base main --head "$TARGET_PR_BRANCH"
+          else
+            gh pr edit "$open_pr" --repo "$TARGET_REPO" --title "$TITLE" --body "$BODY"
+          fi
