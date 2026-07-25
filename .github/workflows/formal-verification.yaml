@@ -38,7 +38,7 @@ jobs:
           printf '%s\n' "${files:-<none>}"
           if [ -z "${files}" ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-[a-z-]*state-tests\.py$|_tla_states_data_test\.go$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -90,23 +90,36 @@ jobs:
             -config formal/FireboltInstance.cfg \
             formal/FireboltInstance.tla
 
-      - name: Verify Phase 3 state-cover fixture is up to date
+      - name: Run TLC — SigningKeyRotation
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/SigningKeyRotation.cfg \
+            formal/SigningKeyRotation.tla
+
+      - name: Run TLC — SigningKeyRotation naive anchor must still fail
+        run: |
+          # Requires TLC's specific violation line rather than a non-zero exit:
+          # a parse error or OOM also exits non-zero and would otherwise pass.
+          out="$(java -cp tla2tools.jar tlc2.TLC -workers 2 -nowarning \
+            -config formal/SigningKeyRotationNaive.cfg \
+            formal/SigningKeyRotation.tla 2>&1 || true)"
+          if echo "$out" | grep -q 'Invariant NoValidationGap is violated'; then
+            echo "OK: the naive retain-window anchor still violates NoValidationGap"
+          else
+            echo "::error::SigningKeyRotationNaive.cfg no longer produces the expected NoValidationGap violation"
+            echo "$out" | tail -40
+            exit 1
+          fi
+
+      - name: Verify state-cover fixtures are up to date
         run: |
           # Reuse the cached tla2tools.jar at the location the Makefile expects.
           mkdir -p bin
           cp tla2tools.jar bin/tla2tools.jar
-          java -cp bin/tla2tools.jar tlc2.TLC -workers 2 \
-            -config formal/FireboltEngine.cfg \
-            -dump dot,actionlabels formal/FireboltEngine.dot \
-            formal/FireboltEngine.tla
-          python3 scripts/gen-tla-state-tests.py \
-            --dot formal/FireboltEngine.dot \
-            --out internal/controller/engine_tla_states_data_test.go
-          if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then
-            echo "::error::TLA+ state-cover fixture is stale; run 'make formal-gen' and commit"
-            git --no-pager diff -- internal/controller/engine_tla_states_data_test.go
-            exit 1
-          fi
+          # formal-verify regenerates every fixture and diffs them all, so CI and
+          # the Makefile cannot disagree about which specs are covered.
+          make formal-verify
 
   # Single stable required-check name for branch protection. Keeping the
   # required name "TLC model checker" on this gate (the worker job is now
