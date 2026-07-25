@@ -366,6 +366,23 @@ tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
 formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/SigningKeyRotation.cfg formal/SigningKeyRotation.tla
+
+.PHONY: formal-check-counterexample
+formal-check-counterexample: tla2tools ## Assert the naive retain-window anchor still violates NoValidationGap.
+	@# Requires TLC's specific violation line, not merely a non-zero exit: TLC also
+	@# exits non-zero on a parse error, a missing constant, or OOM, any of which
+	@# would otherwise make a broken spec look like a passing counterexample.
+	@out=$$(java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -nowarning \
+		-config formal/SigningKeyRotationNaive.cfg formal/SigningKeyRotation.tla 2>&1 || true); \
+	if echo "$$out" | grep -q "Invariant NoValidationGap is violated"; then \
+		echo "OK: the naive retain-window anchor still violates NoValidationGap"; \
+	else \
+		echo "ERROR: SigningKeyRotationNaive.cfg no longer produces the expected NoValidationGap violation." >&2; \
+		echo "       Either the shipped convergence gate was weakened, or the model stopped expressing the hazard." >&2; \
+		echo "$$out" | tail -40 >&2; \
+		exit 1; \
+	fi
 
 .PHONY: formal-dump
 formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
@@ -377,6 +394,10 @@ formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.d
 		-config formal/FireboltInstance.cfg \
 		-dump dot,actionlabels formal/FireboltInstance.dot \
 		formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/SigningKeyRotation.cfg \
+		-dump dot,actionlabels formal/SigningKeyRotation.dot \
+		formal/SigningKeyRotation.tla
 
 .PHONY: formal-gen
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
@@ -386,10 +407,13 @@ formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from th
 	python3 scripts/gen-tla-instance-state-tests.py \
 		--dot formal/FireboltInstance.dot \
 		--out internal/controller/instance_tla_states_data_test.go
+	python3 scripts/gen-tla-rotation-state-tests.py \
+		--dot formal/SigningKeyRotation.dot \
+		--out internal/controller/rotation_tla_states_data_test.go
 
 .PHONY: formal-verify
 formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
-	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go internal/controller/rotation_tla_states_data_test.go; do \
 		if ! git diff --quiet -- "$$f"; then \
 			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
 			git --no-pager diff -- "$$f"; \
