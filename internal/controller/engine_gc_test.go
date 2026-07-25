@@ -18,14 +18,18 @@ package controller
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -125,6 +129,63 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 	// Cluster service (no generation label) should still exist.
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: clusterSvc.Name, Namespace: ns}, &corev1.Service{}); err != nil {
 		t.Errorf("cluster service should not have been deleted: %v", err)
+	}
+}
+
+// TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets covers FB-896 round-4
+// #4: per-generation engine TLS Certificates and their cert-manager-derived
+// Secrets (both carrying LabelEngine + LabelGeneration) must be swept on the
+// same keepGens schedule as STS/Svc/CM — reclaiming abandoned generations while
+// preserving the current AND the draining generation (whose pods still mount the
+// secret).
+func TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+	_ = certmanagerv1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	mk := func(gen int) (*certmanagerv1.Certificate, *corev1.Secret) {
+		name := genResourceName(engineName, gen, SuffixEngineTLS)
+		labels := map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)}
+		return &certmanagerv1.Certificate{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}},
+			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}}
+	}
+	c1, s1 := mk(1) // orphaned
+	c2, s2 := mk(2) // draining — must be preserved
+	c3, s3 := mk(3) // current — must be preserved
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c1, s1, c2, s2, c3, s3).Build()
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+
+	drain := 2
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		Status: computev1alpha1.FireboltEngineStatus{
+			CurrentGeneration: 3, ActiveGeneration: 3, DrainingGeneration: &drain,
+		},
+	}
+	r.gcOrphanedResources(context.Background(), engine)
+
+	gone := func(name string, obj client.Object) bool {
+		return errors.IsNotFound(fc.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, obj))
+	}
+	if !gone(c1.Name, &certmanagerv1.Certificate{}) {
+		t.Error("orphaned Certificate (gen 1) should have been deleted")
+	}
+	if !gone(s1.Name, &corev1.Secret{}) {
+		t.Error("orphaned Secret (gen 1) should have been deleted")
+	}
+	for _, obj := range []client.Object{c2, c3} {
+		if gone(obj.GetName(), &certmanagerv1.Certificate{}) {
+			t.Errorf("Certificate %q for a kept generation must be preserved", obj.GetName())
+		}
+	}
+	for _, obj := range []client.Object{s2, s3} {
+		if gone(obj.GetName(), &corev1.Secret{}) {
+			t.Errorf("Secret %q for a kept generation must be preserved", obj.GetName())
+		}
 	}
 }
 
