@@ -19,6 +19,7 @@ package controller
 import (
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,6 +61,12 @@ type EngineReconcileResult struct {
 	EnsureHeadlessSvc *corev1.Service
 	EnsureStatefulSet *appsv1.StatefulSet
 	EnsureClusterSvc  *corev1.Service
+
+	// EnsureEngineTLSCert is the per-generation engine TLS server Certificate
+	// (FB-896 #1), set only when engine TLS is enabled. cert-manager issues its
+	// Secret, which the generation's StatefulSet mounts and serves. nil when
+	// engine TLS is disabled.
+	EnsureEngineTLSCert *certmanagerv1.Certificate
 
 	DeleteResources []client.Object
 

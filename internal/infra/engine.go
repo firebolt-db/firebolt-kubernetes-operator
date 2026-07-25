@@ -185,6 +185,19 @@ func (c *Client) ListEngineObjects(ctx context.Context, filterInstance string) (
 	return filtered, nil
 }
 
+// GetEngine fetches a single FireboltEngine by name (one `kubectl get`).
+func (c *Client) GetEngine(ctx context.Context, name string) (*v1alpha1.FireboltEngine, error) {
+	out, err := c.kubectl.getNamed(c.namespace, resourceEngine, name).Capture(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var eng v1alpha1.FireboltEngine
+	if err := json.Unmarshal([]byte(out), &eng); err != nil {
+		return nil, fmt.Errorf("parsing FireboltEngine %q: %w", name, err)
+	}
+	return &eng, nil
+}
+
 // ListEngines lists FireboltEngines in the namespace, optionally filtered by
 // spec.instanceRef, as one-line summaries.
 func (c *Client) ListEngines(ctx context.Context, filterInstance string) ([]EngineSummary, error) {
