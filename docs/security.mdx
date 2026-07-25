@@ -167,7 +167,44 @@ the validating webhook (see "Resource bounds" below). The bounds
 protect a namespace from accidentally admitting an engine whose
 requests would starve sibling workloads at scheduling time.
 
+## Authentication and transport encryption
+
+Both are opt-in and Instance-wide. Neither is configured per Engine: every Engine in an Instance runs the same authentication configuration, because each one both issues and validates JWTs and a token minted by one must validate on another. See [architecture](./architecture) for the provisioning model.
+
+### Authentication
+
+`spec.auth` layers two authorization servers:
+
+- **The local user store**, always present when auth is enabled. It holds the Instance admin plus any users created through SQL, and backs password login through the Engine's embedded authorization server.
+- **OIDC bearer validation** through `spec.auth.oidc`, optional. Engines accept JWTs issued by the trusted providers you configure. Engines validate those tokens; they never run a login flow themselves, so no client secret for your identity provider is ever held by the Instance.
+
+**The Firebolt Operator never generates the admin password.** It is supplied through a Secret you create, referenced by `spec.auth.local.admin.password`. A credential the operator invented and you never saw would not be usable, so the reconcile preflights the Secret's existence and reports `AuthReady=False/AdminSecretMissing` rather than inventing one. The password is mounted into each Engine as a file and referenced by path, so no plaintext credential appears in a rendered config.
+
+The shared JWT signing keypair is provisioned through cert-manager against an `Issuer` or `ClusterIssuer` you supply. Signing keys are cert-manager-only — unlike TLS, there is no bring-your-own `secretRef` path — and the private key is mounted by path, never inlined.
+
+### Engine and Gateway TLS
+
+`spec.tls.engine` terminates TLS on each Engine's query listener; `spec.tls.gateway` terminates client-facing TLS on the Gateway. Both accept either a cert-manager issuer or a `secretRef` to a certificate you manage yourself.
+
+Two properties are worth knowing before you enable them:
+
+- **TLS replaces plaintext on the same port; it does not add a second listener.** An Engine serving TLS is not reachable in plaintext. Enabling or disabling Engine TLS on a fleet already serving traffic therefore has a brief Gateway-to-Engine outage window — see the transient-outage note in [architecture](./architecture).
+- **Tightening the Gateway's posture is fail-closed.** Going from plaintext to TLS, from one-way to mutual TLS, or swapping the client CA withholds the client-facing listener and drains the old, looser pods before any secure pod serves. The client port refuses connections for that window rather than briefly accepting clients the new posture is meant to reject. Liveness and readiness probes ride the always-plaintext metrics port, so pods stay alive through it.
+
+Adding `clientCASecretRef` upgrades the Gateway listener to mutual TLS, verifying client certificates against that CA. Loosening transitions carry no fail-open risk and are not staged.
+
 ## What the Firebolt Operator does not enforce
+
+### Pod-template authors can mount other Secrets in the namespace
+
+A `FireboltEngine`, `FireboltEngineClass`, or `FireboltInstance` pod template may declare volumes and sidecar containers, and a volume may reference any Secret in that namespace. **Treat edit rights on those templates as equivalent to read rights on the namespace's Secrets**, and scope RBAC accordingly: someone who can edit a template can mount a Secret and read it from a sidecar whose image and command they control, without any `get secrets` permission.
+
+The operator's own auth and TLS Secrets are excluded from this. Every route a template has to them is covered, and the checks match the Secret being *referenced* rather than the name the author gave it, so renaming evades nothing:
+
+- A **volume** whose source reaches one — including through a `projected` source — is dropped from the rendered pod and reported on the component's condition. It is reported rather than refused on purpose: the kubelet re-syncs a Secret volume for the life of the pod, so a volume that named a not-yet-existing Secret starts yielding real key material once the operator creates it. The remedy is to replace the pod, and refusing to render would freeze the Engine on the very generation holding the exposed volume.
+- A **container** that reads one into its environment, through `env[].valueFrom.secretKeyRef` or `envFrom[].secretRef`, is refused outright. An env reference resolves once when the pod starts and is never re-synced, so declining to render is a complete remedy.
+
+Both apply to the primary container, sidecars, and init containers, and to a referenced `FireboltEngineClass` template as well as the resource's own.
 
 ### Network isolation between pods
 
@@ -361,6 +398,21 @@ store) are referenced by name on the FireboltInstance / FireboltEngine
 spec and resolved at reconcile time. The Firebolt Operator never reads or
 materializes a user-supplied secret's value into its own status,
 events, or logs.
+
+When auth or TLS is enabled, these additional Secrets exist:
+
+| Secret | Origin | Held by | Rotation |
+|---|---|---|---|
+| Admin password | You create it; referenced by `spec.auth.local.admin.password` | Every Engine, mounted read-only by path | Yours to rotate. Editing the Secret rolls the fleet onto the new value. |
+| JWT signing keys | cert-manager, one per key generation | Every Engine, mounted read-only by path | Operator-coordinated when `rotationInterval` is set; otherwise a single permanent key. |
+| Engine TLS certificate | cert-manager, or your own via `secretRef` | Engine pods, plus its CA in the Gateway's trust bundle | cert-manager's own renewal, per generation. |
+| Gateway TLS certificate | cert-manager, or your own via `secretRef` | Gateway pods | cert-manager's own renewal. |
+| Gateway client CA | You create it; referenced by `clientCASecretRef` | Gateway pods (public certificate only) | Yours. A swap is treated as a tightening transition. |
+
+The operator reads a signing key's public-key fingerprint to detect key
+replacement, and a Secret's `resourceVersion` to detect an in-place password
+change. Neither the private key nor the password value is ever written to
+status, events, or logs.
 
 ## See also
 

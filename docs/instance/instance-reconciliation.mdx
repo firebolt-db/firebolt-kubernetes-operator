@@ -30,7 +30,7 @@ The `FireboltInstanceReconciler` manages the infrastructure that engines depend 
 
 ### Reconcile steps
 
-Each `Reconcile` call runs through four sequential steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist).
+Each `Reconcile` call runs through four sequential component steps. If any step fails, the reconciler requeues after a short delay and retries from the beginning (earlier steps are idempotent and effectively no-ops when resources already exist). Three further steps provision the Instance-wide security policies ahead of the components that read them, and are [isolated from this chain](#security-provisioning-steps).
 
 | Step | Description | Implementation |
 |---|---|---|
@@ -38,6 +38,20 @@ Each `Reconcile` call runs through four sequential steps. If any step fails, the
 | 2. Ensure metadata service | Creates ConfigMap (XML config), Deployment (with config and credentials volume mounts), and ClusterIP Service for the metadata service. The Deployment's pod template is produced by `effectiveMetadataPodTemplate`, which merges `spec.metadata.template` (a user-supplied `PodTemplateSpec`) with Firebolt Operator-rendered fields. See [Component pod templates](#component-pod-templates) below. The XML config includes `<default_account_id>` set to `spec.id`. The metadata service uses this to provision the account on startup. The pod runs as the metadata image's built-in non-root `dedicated-pensieve` user (UID 1111) with read-only root filesystem, all Linux capabilities dropped, `RuntimeDefault` seccomp, an emptyDir backing `/tmp`, and `automountServiceAccountToken: false` (pensieve does not call the Kubernetes API). All resources use the `{instance}-metadata` naming convention. | `instance_metadata.go` |
 | 3. Check metadata readiness | Waits for the metadata service Deployment to have at least one ready replica before proceeding. | `instance_controller.go` |
 | 4. Ensure Gateway | Creates ConfigMap (Envoy YAML config), Deployment (with security context, probes, config volume), ClusterIP Service, and PodDisruptionBudget for the Envoy gateway proxy. The Deployment's pod template is produced by `effectiveGatewayPodTemplate`, which merges `spec.gateway.template` with Firebolt Operator-rendered fields. See [Component pod templates](#component-pod-templates) below. All resources use the `{instance}-gateway` naming convention. | `instance_gateway.go` |
+
+### Security provisioning steps
+
+Auth and TLS are Instance-wide policies rather than components, and they run in their own steps before the components that consume their output:
+
+| Step | Runs before | Description | Implementation |
+|---|---|---|---|
+| Ensure auth | Engines | Preflights the user-supplied admin-password Secret, provisions the shared JWT signing keypair through cert-manager, and advances at most one signing-key rotation step. Records the result in `status.auth`. | `instance_auth.go` |
+| Ensure engine TLS | Gateway | Provisions the engine-listener certificate and assembles the Gateway's Engine CA trust bundle. Records the result in `status.engineTLS`. | `instance_tls.go` |
+| Ensure Gateway TLS | Gateway | Provisions the Gateway's client-facing certificate, staging a fail-closed rollout on any tightening posture transition. Records the result in `status.gatewayTLS`. | `instance_tls.go` |
+
+**These steps are isolated from the component chain in both directions.** A failure here is logged and the reconcile continues, because none of PostgreSQL, the metadata service, or the Gateway reads `spec.auth` — an Instance with misconfigured auth should still bring up a usable metadata service and Gateway. The signal is the step's own condition (`AuthReady`, `EngineTLSReady`, `GatewayTLSReady`), not the reconcile's return value.
+
+Engines gate their own reconcile on the provisioned facts in `status.auth` and `status.engineTLS` directly, never on the top-level `Ready` roll-up, so a still-provisioning security feature delays only the Engines that depend on it. `EngineTLSReady` in particular is convergence-gated — `True` only once the whole fleet re-encrypts — so gating the Engine roll on the condition instead of on the status would deadlock an enable ramp: the roll is what produces the convergence the condition waits for.
 
 ### Instance lifecycle phases
 

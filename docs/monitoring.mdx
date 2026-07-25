@@ -109,9 +109,21 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | Metric | Type | Labels | Updated | Description |
 |---|---|---|---|---|
 | `firebolt_instance_status_phase` | Gauge | `namespace`, `name`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `Provisioning`, `Ready`, `Degraded`, `Failed`. |
-| `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `MetadataReady`, `GatewayReady`. |
+| `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `MetadataReady`, `GatewayReady`, `AuthReady`, `EngineTLSReady`, `GatewayTLSReady`. |
 | `firebolt_instance_info` | Gauge | `namespace`, `name`, `id`, `postgres_mode` | Every reconcile | Always 1. Carries static metadata: instance ID and postgres mode (`internal` or `external`). |
 | `firebolt_instance_last_reconciled_timestamp` | Gauge | `namespace`, `name` | Every reconcile | Unix timestamp of the last successful reconcile. |
+
+### JWT signing-key rotation metrics
+
+Present on every FireboltInstance, and flat zero on one that does not use auth.
+
+| Metric | Type | Labels | Updated | Description |
+|---|---|---|---|---|
+| `firebolt_instance_signing_key_generation` | Gauge | `namespace`, `name` | Every reconcile | Monotonic signing-key generation counter. Increments once per completed mint, so a rotation that ran stays visible afterwards. |
+| `firebolt_instance_signing_keys` | Gauge | `namespace`, `name`, `phase` | Every reconcile | Keys currently tracked, by phase (`Active`, `ValidationOnly`, `Removing`). Exactly one `Active`; a non-zero `ValidationOnly` or `Removing` means a rotation is in flight. |
+| `firebolt_instance_signing_key_rotation_pending_step` | Gauge | `namespace`, `name`, `step` | Every reconcile | 1 for the rotation step awaiting engine convergence, 0 for the others. All zero when nothing is waiting. Steps: `AwaitingPromotion`, `AwaitingRetireAnchor`, `AwaitingRemoval`. |
+| `firebolt_instance_signing_key_rotation_pending_seconds` | Gauge | `namespace`, `name` | Every reconcile | How long the pending step has been waiting, 0 when none is. Rotation gates park indefinitely by design, so **duration**, not existence, is what separates a normal engine roll from a stuck fleet. |
+| `firebolt_instance_signing_key_rotation_lagging_engines` | Gauge | `namespace`, `name` | Every reconcile | Engines whose observed auth hash has not converged for the pending step. The true total, not the truncated name list in `status.auth.laggingEngines`. |
 
 ### Label glossary
 
@@ -122,6 +134,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | `instance` | Name of the parent FireboltInstance (from `spec.instanceRef` on engines) |
 | `phase` | Current lifecycle phase |
 | `type` | Condition type (e.g., `Ready`, `MetadataReady`) |
+| `step` | Signing-key rotation step awaiting engine convergence |
 | `id` | Stable instance ID (ULID) |
 | `postgres_mode` | `internal` (Firebolt Operator-managed) or `external` (user-provided) |
 
@@ -170,8 +183,51 @@ Fleet overview (ready engines per instance):
 count by (namespace, instance) (firebolt_engine_status_condition{type="Ready"} == 1)
 ```
 
+Signing-key rotation stalled for more than 30 minutes:
+
+```promql
+firebolt_instance_signing_key_rotation_pending_seconds > 1800
+```
+
+Which step, and how many engines it is waiting for:
+
+```promql
+firebolt_instance_signing_key_rotation_pending_step == 1
+firebolt_instance_signing_key_rotation_lagging_engines > 0
+```
+
+A rotation is in flight (more than one key tracked):
+
+```promql
+sum by (namespace, name) (firebolt_instance_signing_keys) > 1
+```
+
+### Alerting on a stalled rotation
+
+Every irreversible rotation step waits for the whole engine fleet to converge, and waits indefinitely — parking is the safe behaviour, so a stuck rotation raises no error and leaves `AuthReady` `True`. That makes elapsed time the signal worth alerting on. A normal rotation parks each gate only for as long as one engine roll takes, so a threshold well above your rollout time separates the two:
+
+```yaml
+- alert: FireboltSigningKeyRotationStalled
+  expr: firebolt_instance_signing_key_rotation_pending_seconds > 1800
+  for: 10m
+  labels:
+    severity: warning
+  annotations:
+    summary: >-
+      Signing-key rotation on {{ $labels.namespace }}/{{ $labels.name }} has not
+      advanced for over 30 minutes.
+    description: >-
+      An engine has not converged on the current auth configuration. Check
+      status.auth.pendingRotationStep and status.auth.laggingEngines on the
+      FireboltInstance, then the named engines' own conditions.
+```
+
+The operator also emits a `SigningKeyRotationStalled` Warning Event once a step has been parked past its own threshold. The Event message is deliberately stable across reconciles so the API server aggregates the repeats into one Event with a count, rather than one Event per requeue.
+
 ### Cardinality
 
-Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 10 series (4 phases + 4 conditions + 1 info + 1 timestamp). For a cluster with 10 instances and 50 engines, expect roughly 850 series from the Firebolt Operator. This is negligible for any Prometheus deployment.
+Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 20 series (4 phases + 6 conditions + 1 info + 1 timestamp + 3 signing-key phases + 3 rotation steps + 3 scalar rotation gauges). For a cluster with 10 instances and 50 engines, expect roughly 950 series from the Firebolt Operator. This is negligible for any Prometheus deployment.
+
+The `phase` and `step` labels on the signing-key metrics are bounded enumerations written on every pass, including zeros, so they add a fixed handful of series per Instance and never grow with rotation count.
 
 Metric label sets are cleaned up when CRs are deleted, so terminated engines do not leave stale series.
