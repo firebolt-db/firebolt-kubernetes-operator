@@ -694,6 +694,30 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 	if !ok {
 		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
 	}
+	// Every ECDSA curve ValidateTLS accepts must be offered. Envoy defaults to
+	// X25519 and P-256 only, so a P-384 engine certificate — the operator's own
+	// default size — is rejected by BoringSSL with BAD_ECC_CERT and the gateway
+	// cannot reach any engine. This is the assertion that keeps that regression
+	// from coming back silently.
+	tlsParams, ok := commonTLS["tls_params"].(map[string]any)
+	if !ok {
+		t.Fatalf("common_tls_context.tls_params missing or wrong type: %T", commonTLS["tls_params"])
+	}
+	curves, ok := tlsParams["ecdh_curves"].([]any)
+	if !ok {
+		t.Fatalf("tls_params.ecdh_curves missing or wrong type: %T", tlsParams["ecdh_curves"])
+	}
+	var curveNames []string
+	for _, c := range curves {
+		curveNames = append(curveNames, fmt.Sprint(c))
+	}
+	for _, want := range []string{"P-256", "P-384", "P-521"} {
+		if !slices.Contains(curveNames, want) {
+			t.Errorf("ecdh_curves %v omits %s, which ValidateTLS accepts as an engine key size",
+				curveNames, want)
+		}
+	}
+
 	validationContext, ok := commonTLS["validation_context"].(map[string]any)
 	if !ok {
 		t.Fatalf("common_tls_context.validation_context missing or wrong type: %T", commonTLS["validation_context"])

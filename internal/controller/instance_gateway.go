@@ -389,6 +389,15 @@ func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
 // certificate whose SAN is literally the wildcard string
 // "*.<namespace>.svc.cluster.local" verbatim, never any real presented
 // hostname.
+//
+// ecdh_curves must be set explicitly and must list every curve an engine
+// certificate may use. Envoy defaults to X25519 and P-256 only, so BoringSSL
+// rejects a P-384 engine certificate — the operator's own default size — with
+// BAD_ECC_CERT, and the gateway cannot reach any engine. ValidateTLS accepts
+// ECDSA sizes 256, 384 and 521, so all three curves belong here; RSA
+// certificates are unaffected, since for them these curves only govern key
+// exchange. Adding a curve here is safe (the peer picks from the offered set)
+// and omitting one is not, so this list must grow with the accepted sizes.
 func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
 	if !engineUpstreamTLSReady(instance) {
 		return ""
@@ -405,6 +414,8 @@ func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstan
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
           common_tls_context:
+            tls_params:
+              ecdh_curves: [X25519, P-256, P-384, P-521]
             validation_context:
               trusted_ca:
                 filename: %s/%s
