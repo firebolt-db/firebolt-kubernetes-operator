@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -154,6 +155,13 @@ func StartOperator(instanceName string, opts ...EngineOperatorOption) (*Operator
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
+	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
@@ -1546,6 +1554,13 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
+	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
@@ -1643,6 +1658,13 @@ func StartClassOperator() (*ClassOperator, error) {
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
+	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
@@ -1706,6 +1728,14 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 // the host, where kind pod IPs are unreachable, so specs that exercise the
 // drain check or autoStop scrape must use MetricScrapeModeApiserverProxy.
 func createInstance(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode) error {
+	return createInstanceWithMutate(ctx, name, metadataImage, metadataTag, scrapeMode, nil)
+}
+
+// createInstanceWithMutate builds the standard FireboltInstance and, when mutate
+// is non-nil, applies it immediately before the API write — the idiom createEngine
+// already uses for engines. Specs use this to enable Auth/TLS on an
+// otherwise-standard instance without duplicating the base spec.
+func createInstanceWithMutate(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode, mutate func(*computev1alpha1.FireboltInstance)) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -1759,6 +1789,9 @@ func createInstance(ctx context.Context, name, metadataImage, metadataTag string
 		},
 	}
 
+	if mutate != nil {
+		mutate(instance)
+	}
 	return cl.Create(ctx, instance)
 }
 
@@ -1851,7 +1884,15 @@ type TestInstanceLifecycle struct {
 // handle that TeardownTestInstance consumes. Engine-operator options (e.g.
 // WithGC) are forwarded to the engine operator it starts.
 func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
-	return setupTestInstance(ctx, name, "", opts...)
+	return setupTestInstance(ctx, name, "", nil, opts...)
+}
+
+// SetupTestInstanceWithMutate is SetupTestInstance with a mutate hook applied to
+// the FireboltInstance before creation (e.g. to enable spec.auth / spec.tls).
+// The instance must still reach the Ready phase — note EngineTLS/GatewayTLS roll
+// into Ready but AuthReady does not, so assert AuthReady separately.
+func SetupTestInstanceWithMutate(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltInstance), opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+	return setupTestInstance(ctx, name, "", mutate, opts...)
 }
 
 // SetupTestInstanceWithScrapeMode is SetupTestInstance with an explicit
@@ -1860,15 +1901,15 @@ func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorO
 // in-process operator scrapes pod metrics from the host, where kind pod IPs
 // (the PodIP default) are unreachable.
 func SetupTestInstanceWithScrapeMode(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
-	return setupTestInstance(ctx, name, scrapeMode, opts...)
+	return setupTestInstance(ctx, name, scrapeMode, nil, opts...)
 }
 
-func setupTestInstance(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+func setupTestInstance(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, mutate func(*computev1alpha1.FireboltInstance), opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
 	instanceOp, err := StartInstanceOperator(name)
 	if err != nil {
 		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
 	}
-	if err := createInstance(ctx, name, metadataImage, metadataTag, scrapeMode); err != nil {
+	if err := createInstanceWithMutate(ctx, name, metadataImage, metadataTag, scrapeMode, mutate); err != nil {
 		instanceOp.Stop()
 		return nil, fmt.Errorf("create instance %s: %w", name, err)
 	}
@@ -2240,6 +2281,9 @@ func getCRDClient() (client.Client, error) {
 		return nil, err
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 
