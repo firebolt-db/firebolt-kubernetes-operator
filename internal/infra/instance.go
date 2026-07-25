@@ -42,21 +42,70 @@ func (c *Client) GetInstance(ctx context.Context, name string) (*v1alpha1.Firebo
 	return &inst, nil
 }
 
-// GatewayTLSEnabled reports whether inst terminates TLS on its Envoy gateway's
-// client-facing listener — so a port-forward to the gateway Service speaks
-// https, not http. Gateway TLS terminates on the same forwarded port (there is
-// no separate plaintext port), so this is the sole determinant of the scheme.
-func GatewayTLSEnabled(inst *v1alpha1.FireboltInstance) bool {
-	return inst != nil && inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil && inst.Spec.TLS.Gateway.Enabled
+// Schemes a port-forward can advertise. SchemeUnknown prints a
+// protocol-neutral endpoint instead of asserting a scheme the target may not
+// accept.
+const (
+	SchemeHTTPS   = "https"
+	SchemeHTTP    = "http"
+	SchemeUnknown = ""
+)
+
+// GatewayServingScheme reports the scheme a port-forward to inst's gateway
+// client listener should advertise: https while that listener serves TLS, http
+// while it serves plaintext, SchemeUnknown while it serves neither.
+//
+// Read from status rather than spec: status.gatewayTLS is populated only once
+// the listener serves that posture, and stays cleared for the whole fail-closed
+// window while the posture is being tightened. One window still reports http
+// early — disabling gateway TLS clears the status before the TLS-serving pods
+// have drained.
+func GatewayServingScheme(inst *v1alpha1.FireboltInstance) string {
+	switch {
+	case inst == nil:
+		return SchemeUnknown
+	case inst.Status.GatewayTLS != nil:
+		return SchemeHTTPS
+	case gatewayTLSRequested(inst):
+		return SchemeUnknown
+	default:
+		return SchemeHTTP
+	}
 }
 
-// EngineTLSEnabled reports whether inst's engines terminate TLS on their query
-// listener — so a port-forward to an engine Service speaks https, not http.
-// Engine TLS replaces the plaintext listener on the same port, so this alone
-// determines the scheme. TLS lives on the owning Instance (engines carry no TLS
-// spec), reached via FireboltEngine.Spec.InstanceRef.
-func EngineTLSEnabled(inst *v1alpha1.FireboltInstance) bool {
-	return inst != nil && inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled
+// EngineFleetServingScheme reports the scheme a port-forward to any engine's
+// query listener should advertise, on the same three-valued contract as
+// GatewayServingScheme. TLS is configured on the owning Instance, reached from
+// an engine via spec.instanceRef.
+//
+// The answer is deliberately fleet-wide: status.engineTLS.reencrypting turns
+// true only after every engine has rolled onto TLS and stays true until every
+// engine has rolled back off, so both steady states are unambiguous and every
+// mid-rollout state reports SchemeUnknown rather than a scheme that holds for
+// only part of the fleet. A per-engine answer would need what the engine's
+// active generation serves, which no status field exposes.
+func EngineFleetServingScheme(inst *v1alpha1.FireboltInstance) string {
+	switch {
+	case inst == nil:
+		return SchemeUnknown
+	case engineTLSRequested(inst):
+		if inst.Status.EngineTLS != nil && inst.Status.EngineTLS.Reencrypting {
+			return SchemeHTTPS
+		}
+		return SchemeUnknown
+	case inst.Status.EngineTLS != nil:
+		return SchemeUnknown
+	default:
+		return SchemeHTTP
+	}
+}
+
+func gatewayTLSRequested(inst *v1alpha1.FireboltInstance) bool {
+	return inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil && inst.Spec.TLS.Gateway.Enabled
+}
+
+func engineTLSRequested(inst *v1alpha1.FireboltInstance) bool {
+	return inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled
 }
 
 // ListInstances lists FireboltInstances in the namespace as one-line summaries.
