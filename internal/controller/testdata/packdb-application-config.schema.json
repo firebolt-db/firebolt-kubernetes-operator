@@ -1,0 +1,851 @@
+{
+  "$id": "https://docs.firebolt.io/schemas/application-config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "data_source_encryption": {
+      "additionalProperties": false,
+      "properties": {
+        "decrypted_cache_timeout_ms": {
+          "default": 600000,
+          "description": "How long, in milliseconds, a decrypted data-source credential is cached in memory.",
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Encrypt external data-source credentials with KMS before storing them in the metadata service.",
+          "type": "boolean"
+        },
+        "kms_arn": {
+          "default": "",
+          "description": "ARN of the KMS key used to encrypt data-source credentials.",
+          "type": "string"
+        },
+        "local_kms_access_key": {
+          "default": "",
+          "description": "Access key for the local KMS service. Required when 'use_local_kms' is true.",
+          "type": "string"
+        },
+        "local_kms_endpoint": {
+          "default": "",
+          "description": "Endpoint URL of the local KMS service. Required when 'use_local_kms' is true.",
+          "type": "string"
+        },
+        "local_kms_secret_key": {
+          "default": "",
+          "description": "Secret key for the local KMS service. Required when 'use_local_kms' is true.",
+          "type": "string"
+        },
+        "skip_s3_access_check": {
+          "default": false,
+          "description": "Skip validating S3 access when creating an external location or table. Useful when credentials are placeholders.",
+          "type": "boolean"
+        },
+        "use_local_kms": {
+          "default": false,
+          "description": "Use a local KMS-compatible endpoint (e.g. localstack) instead of AWS KMS. Intended for self-deployed and test environments.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "endpoints": {
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "additionalProperties": false,
+          "properties": {
+            "listeners": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "tls": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "certificate_file": {
+                        "type": "string"
+                      },
+                      "private_key_file": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "postgres": {
+          "additionalProperties": false,
+          "properties": {
+            "listeners": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "tls": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "certificate_file": {
+                        "type": "string"
+                      },
+                      "private_key_file": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "unix_socket_only": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "engine": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_vacuum": {
+          "additionalProperties": false,
+          "properties": {
+            "assessment_frequency": {
+              "type": "integer"
+            },
+            "debug_sleep_before_commit_ms": {
+              "type": "integer"
+            },
+            "debug_sleep_in_merge_loop_ms": {
+              "type": "integer"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "max_tablet_bytes": {
+              "type": "string"
+            },
+            "max_tablets_in_job": {
+              "type": "integer"
+            },
+            "memory_allowance": {
+              "type": "number"
+            },
+            "min_bad_tablets_threshold": {
+              "type": "integer"
+            },
+            "num_workers_per_node": {
+              "type": "integer"
+            },
+            "run_on_first_dml": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "cluster_id": {
+          "type": "string"
+        },
+        "cluster_ordinal": {
+          "type": "integer"
+        },
+        "eviction": {
+          "additionalProperties": false,
+          "properties": {
+            "max_tablets_per_mb_of_total_memory": {
+              "default": 1.5,
+              "type": "number"
+            },
+            "prefetch_space_ratio_threshold": {
+              "default": 0.13,
+              "type": "number"
+            },
+            "tablet_eviction_soft_threshold": {
+              "default": 0.4,
+              "type": "number"
+            },
+            "tablet_eviction_threshold": {
+              "default": 0.2,
+              "type": "number"
+            },
+            "tablet_min_ttl_before_memory_eviction_seconds": {
+              "default": 1800,
+              "type": "integer"
+            },
+            "tablet_ttl_before_full_eviction_seconds": {
+              "default": 21600,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "id": {
+          "default": "default-engine-id",
+          "type": "string"
+        },
+        "listen_host": {
+          "type": "string"
+        },
+        "max_server_memory_usage": {
+          "default": "0B",
+          "type": "string"
+        },
+        "max_server_memory_usage_headroom_bytes": {
+          "default": "0B",
+          "type": "string"
+        },
+        "max_server_memory_usage_to_ram_ratio": {
+          "default": 0.9,
+          "type": "number"
+        },
+        "metrics_collection_frequency_per_minute": {
+          "default": 12,
+          "type": "integer"
+        },
+        "query_cache_memory_fraction": {
+          "default": 0.2,
+          "type": "number"
+        },
+        "multi_cluster": {
+          "additionalProperties": false,
+          "properties": {
+            "broadcast_endpoint": {
+              "type": "string"
+            },
+            "broadcast_ssl_enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "broadcast_tuple_limit_per_engine_cluster": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "broadcast_endpoint"
+          ],
+          "type": "object"
+        },
+        "nodes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "aragog_port": {
+                "default": 5678,
+                "type": "integer"
+              },
+              "health_check_port": {
+                "default": 8122,
+                "type": "integer"
+              },
+              "host": {
+                "type": "string"
+              },
+              "prometheus_port": {
+                "default": 9090,
+                "type": "integer"
+              },
+              "shufflepuff_port": {
+                "default": 16000,
+                "type": "integer"
+              },
+              "storage_agent_port": {
+                "default": 3434,
+                "type": "integer"
+              },
+              "storage_manager_port": {
+                "default": 1717,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "host"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "termination_grace_period": {
+          "default": "1m",
+          "type": "string"
+        },
+        "vector_index_cache_memory_fraction": {
+          "default": 0.5,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "execution": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_controller": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": false,
+              "type": "boolean"
+            },
+            "max_concurrent_admitted_queries": {
+              "default": 100,
+              "type": "integer"
+            },
+            "max_required_relative_memory_for_retry": {
+              "default": 0.75,
+              "type": "number"
+            },
+            "max_retries_per_query": {
+              "default": 3,
+              "type": "integer"
+            },
+            "reduce_required_memory_after_seconds_at_front_of_queue": {
+              "default": 10,
+              "type": "integer"
+            },
+            "seconds_between_no_admission_warnings": {
+              "default": 3600,
+              "type": "integer"
+            },
+            "seconds_until_no_admission_warning": {
+              "default": 300,
+              "type": "integer"
+            },
+            "total_memory_tracker_hard_limit_ratio": {
+              "default": 0.9,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "ai_mutations_mode": {
+          "default": "reevaluate",
+          "type": "string"
+        },
+        "allow_amazon_bedrock": {
+          "default": true,
+          "type": "boolean"
+        },
+        "enable_distributed_shuffle": {
+          "default": true,
+          "type": "boolean"
+        },
+        "hybrid_headers_format_version": {
+          "default": 3,
+          "type": "integer"
+        },
+        "hybrid_headers_primary_index_compression_level": {
+          "default": 2,
+          "type": "integer"
+        },
+        "hybrid_headers_primary_index_compression_method": {
+          "default": "BROTLI",
+          "type": "string"
+        },
+        "max_threads": {
+          "default": 0,
+          "type": "integer"
+        },
+        "merge_committed_tablets": {
+          "default": true,
+          "type": "boolean"
+        },
+        "min_bytes_for_wide_part": {
+          "default": 104857600,
+          "type": "integer"
+        },
+        "regexp_cache_max_keys": {
+          "default": 10000,
+          "type": "integer"
+        },
+        "storage_manager_cache_tablets_on_proxy": {
+          "default": true,
+          "type": "boolean"
+        },
+        "umask": {
+          "description": "Octal file-mode creation mask for the process. Defaults to '0007' (owner + group, no access for others), which keeps runtime-created files group-accessible for the OpenShift arbitrary-UID model. Use '0077' for owner-only.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "instance": {
+      "additionalProperties": false,
+      "properties": {
+        "account_name": {
+          "default": "default-account",
+          "type": "string"
+        },
+        "auth": {
+          "additionalProperties": false,
+          "properties": {
+            "admin": {
+              "additionalProperties": false,
+              "description": "The Instance admin — required when auth is enabled.",
+              "properties": {
+                "name": {
+                  "default": "firebolt",
+                  "description": "Admin username (default: \"firebolt\")",
+                  "type": "string"
+                },
+                "password_env": {
+                  "description": "Environment variable name to read the password from at startup",
+                  "type": "string"
+                },
+                "password_file": {
+                  "description": "Absolute path to a file containing the password; trailing newline trimmed",
+                  "type": "string"
+                },
+                "password_value": {
+                  "description": "Password literal (development use only)",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "enabled": {
+              "default": false,
+              "description": "Whether authentication is enabled",
+              "type": "boolean"
+            },
+            "local": {
+              "additionalProperties": false,
+              "description": "Embedded Authorization Server internals (signing keys, algorithm, JWT parameters). Defaulted; the operator-facing schema treats this block as optional.",
+              "properties": {
+                "jwt": {
+                  "additionalProperties": false,
+                  "description": "JWT parameters for the embedded Authorization Server",
+                  "properties": {
+                    "clock_skew_tolerance": {
+                      "default": "30s",
+                      "description": "Clock skew tolerance for JWT temporal claim validation",
+                      "type": "string"
+                    },
+                    "max_token_age": {
+                      "default": "1d",
+                      "description": "Maximum token age based on iat claim",
+                      "type": "string"
+                    },
+                    "token_expiry": {
+                      "default": "1h",
+                      "description": "Token lifetime for issued access tokens",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "signing_algorithm": {
+                  "default": "RS256",
+                  "description": "Signing algorithm for issued tokens",
+                  "type": "string"
+                },
+                "signing_keys": {
+                  "description": "Signing key entries. Empty => dev auto-generate mode.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "Key identifier",
+                        "type": "string"
+                      },
+                      "private_key_path": {
+                        "description": "Filesystem path to PEM private key",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "private_key_path"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "oidc": {
+              "additionalProperties": false,
+              "description": "OIDC authentication configuration.",
+              "properties": {
+                "jwt": {
+                  "additionalProperties": false,
+                  "description": "JWT parameters",
+                  "properties": {
+                    "clock_skew_tolerance": {
+                      "default": "30s",
+                      "description": "Clock skew tolerance for JWT temporal claim validation",
+                      "type": "string"
+                    },
+                    "max_token_age": {
+                      "default": "1d",
+                      "description": "Maximum token age based on iat claim",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "providers": {
+                  "description": "Trusted OIDC providers. At least one entry when `oidc:` is present.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "audience": {
+                        "description": "Expected `aud` claim for tokens minted by this provider. When omitted, the engine's canonical Instance URL is used.",
+                        "type": "string"
+                      },
+                      "discovery": {
+                        "additionalProperties": false,
+                        "description": "Discovery document refresh configuration",
+                        "properties": {
+                          "refresh_interval": {
+                            "default": "1d",
+                            "description": "OpenID Configuration document refresh interval",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "discovery_url": {
+                        "description": "OpenID Connect Discovery endpoint URL",
+                        "type": "string"
+                      },
+                      "jit_provisioning": {
+                        "additionalProperties": false,
+                        "description": "JIT (Just-In-Time) provisioning: auto-create users on first login",
+                        "properties": {
+                          "default_roles": {
+                            "description": "Roles assigned to JIT-provisioned users. Defaults to [public] when omitted (also the typical single-element value at launch); the array shape is forward-compatible with future role-additivity semantics.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "enabled": {
+                            "default": false,
+                            "description": "Whether just-in-time user provisioning is enabled",
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "jwks": {
+                        "additionalProperties": false,
+                        "description": "JWKS cache configuration",
+                        "properties": {
+                          "cache_ttl": {
+                            "default": "1h",
+                            "description": "JWKS document cache TTL",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "name": {
+                        "description": "Provider name / machine identifier (used in ?authorization_server=<name> and CLI flags)",
+                        "type": "string"
+                      },
+                      "title": {
+                        "description": "Human-readable label shown by interactive UIs. Defaults to `name` when omitted.",
+                        "type": "string"
+                      },
+                      "username_mapping": {
+                        "description": "Username mapping template (e.g. \"{{ email }}\", \"{{ sub }}\", \"{{ iss }}|{{ sub }}\")",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "discovery_url",
+                      "name",
+                      "username_mapping"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "password_login": {
+              "default": "admin_only",
+              "description": "Default PASSWORD_LOGIN policy: admin_only (default) or any_user. Ignored when oidc is absent.",
+              "type": "string"
+            },
+            "preferred_authorization_server": {
+              "description": "Name of the authorization server clients should use by default when the connection does not select one explicitly. Must name a configured server: the embedded '_local' server or an oidc.providers[].name. Advisory to clients; surfaced as preferredAuthorizationServer in /.well-known/firebolt.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "id": {
+          "default": "01KP98J0000000000000000000",
+          "type": "string"
+        },
+        "multi_engine": {
+          "additionalProperties": false,
+          "properties": {
+            "metadata_endpoint": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "metadata_endpoint"
+          ],
+          "type": "object"
+        },
+        "organization_id": {
+          "default": "01KP98J0000000000000000001",
+          "type": "string"
+        },
+        "organization_name": {
+          "default": "default-org",
+          "type": "string"
+        },
+        "type": {
+          "default": "single_engine",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "logging": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "level": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "level",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "format": {
+          "default": "json",
+          "type": "string"
+        },
+        "level": {
+          "default": "info",
+          "type": "string"
+        },
+        "sinks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              },
+              "level": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "otel": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "endpoint": {
+          "default": "",
+          "type": "string"
+        },
+        "protocol": {
+          "default": "http/protobuf",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "planner": {
+      "additionalProperties": false,
+      "properties": {
+        "automated_column_statistics": {
+          "additionalProperties": false,
+          "properties": {
+            "cache_max_size_bytes": {
+              "default": 104857600,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "query_log": {
+      "additionalProperties": false,
+      "properties": {
+        "kafka_brokers": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "storage": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_collect_garbage": {
+          "default": false,
+          "type": "boolean"
+        },
+        "allow_local_file_system_access": {
+          "default": true,
+          "type": "boolean"
+        },
+        "api_scheme": {
+          "type": "string"
+        },
+        "aws": {
+          "additionalProperties": false,
+          "properties": {
+            "intermediary_access_role": {
+              "type": "string"
+            },
+            "region": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "azure": {
+          "additionalProperties": false,
+          "properties": {
+            "intermediary_service_principal_client_id": {
+              "type": "string"
+            },
+            "storage_account_name": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "bucket_name": {
+          "type": "string"
+        },
+        "collect_garbage_limit_per_query": {
+          "default": 0,
+          "type": "integer"
+        },
+        "default_s3_endpoint_override": {
+          "type": "string"
+        },
+        "download_chunk_prefetch_max_threads": {
+          "default": 96,
+          "type": "integer"
+        },
+        "enable_managed_location": {
+          "default": false,
+          "type": "boolean"
+        },
+        "gc_ttl_seconds": {
+          "default": 604800,
+          "type": "integer"
+        },
+        "gcp": {
+          "additionalProperties": false,
+          "properties": {
+            "intermediary_service_account_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "minio": {
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "endpoint"
+          ],
+          "type": "object"
+        },
+        "type": {
+          "default": "s3",
+          "type": "string"
+        },
+        "upload_max_tries": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version"
+  ],
+  "title": "Firebolt engine configuration",
+  "type": "object"
+}

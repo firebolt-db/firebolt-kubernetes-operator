@@ -255,6 +255,27 @@ func TestEffectiveCustomEngineConfig_StripsOperatorPathsFromBothLayers(t *testin
 	}
 }
 
+// TestEffectiveCustomEngineConfig_StripsInstanceAuth pins down FB-896's
+// Phase 1D lockdown: instance.auth is an Instance-wide policy resolved
+// once per Instance (every engine must share byte-identical signing
+// keys), so a per-engine customEngineConfig override must never survive
+// the strip — from either the class layer or the engine layer.
+func TestEffectiveCustomEngineConfig_StripsInstanceAuth(t *testing.T) {
+	classInfo := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
+		s.CustomEngineConfig = jsonRaw(`{"instance":{"auth":{"enabled":false}}}`)
+	})
+	spec := &computev1alpha1.FireboltEngineSpec{
+		CustomEngineConfig: jsonRaw(`{"instance":{"auth":{"enabled":false,"admin":{"name":"attacker"}}}}`),
+	}
+
+	merged := effectiveCustomEngineConfig(spec, classInfo)
+	if instance, present := merged["instance"].(map[string]interface{}); present {
+		if _, authSet := instance["auth"]; authSet {
+			t.Errorf("operator-owned instance.auth must be stripped, got %v", instance["auth"])
+		}
+	}
+}
+
 func TestCustomEngineConfigHash_ReflectsClassLayer(t *testing.T) {
 	bare := &computev1alpha1.FireboltEngineSpec{}
 	classA := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
@@ -332,7 +353,7 @@ func TestBuildStatefulSet_InheritsClassStorageBackend(t *testing.T) {
 	})
 	engine := &computev1alpha1.FireboltEngineSpec{InstanceRef: "i", Replicas: 1}
 
-	sts := buildStatefulSet(engine, testEngineName, testNamespace, 0, classInfo)
+	sts := buildStatefulSet(engine, testEngineName, testNamespace, 0, InstanceInfo{}, classInfo)
 	if len(sts.Spec.VolumeClaimTemplates) != 1 {
 		t.Fatalf("expected 1 VolumeClaimTemplate from inherited class PVC, got %d", len(sts.Spec.VolumeClaimTemplates))
 	}

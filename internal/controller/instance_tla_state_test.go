@@ -96,6 +96,12 @@ func materializeTLAInstanceState(s tlaInstanceState) *instanceSim {
 		writeAvailCondition(m.instance,
 			computev1alpha1.InstanceConditionGatewayReady,
 			s.GatewayAvail)
+		// The model abstracts away TLS: represent a TLS-disabled instance
+		// (conditions True/"Disabled") so they never gate the roll-up.
+		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionEngineTLSReady,
+			metav1.ConditionTrue, "Disabled", "")
+		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionGatewayTLSReady,
+			metav1.ConditionTrue, "Disabled", "")
 		setInstanceReadyRollup(m.instance)
 	}
 	return m
@@ -169,6 +175,8 @@ func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 		for _, c := range []string{
 			computev1alpha1.InstanceConditionMetadataReady,
 			computev1alpha1.InstanceConditionGatewayReady,
+			computev1alpha1.InstanceConditionEngineTLSReady,
+			computev1alpha1.InstanceConditionGatewayTLSReady,
 		} {
 			cond := apimeta.FindStatusCondition(s.Conditions, c)
 			if cond == nil || cond.Status != metav1.ConditionTrue {
