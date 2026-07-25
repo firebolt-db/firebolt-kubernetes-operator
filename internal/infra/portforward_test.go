@@ -64,31 +64,68 @@ func TestAwaitBoundPortPrefersParsedPortOverEarlyExit(t *testing.T) {
 	}
 }
 
-func TestTLSEnabledPredicates(t *testing.T) {
-	on := &v1alpha1.TLSListenerSpec{Enabled: true}
-	off := &v1alpha1.TLSListenerSpec{Enabled: false}
-	withTLS := func(tls *v1alpha1.TLSSpec) *v1alpha1.FireboltInstance {
-		return &v1alpha1.FireboltInstance{Spec: v1alpha1.FireboltInstanceSpec{TLS: tls}}
+// instWith builds an instance whose gateway/engine TLS spec is on or off and
+// whose status carries (or omits) the matching observed-serving records.
+func instWith(gwOn, engOn bool, gwStatus *v1alpha1.GatewayTLSStatus, engStatus *v1alpha1.EngineTLSStatus) *v1alpha1.FireboltInstance {
+	return &v1alpha1.FireboltInstance{
+		Spec: v1alpha1.FireboltInstanceSpec{TLS: &v1alpha1.TLSSpec{
+			Gateway: &v1alpha1.TLSListenerSpec{Enabled: gwOn},
+			Engine:  &v1alpha1.TLSListenerSpec{Enabled: engOn},
+		}},
+		Status: v1alpha1.FireboltInstanceStatus{GatewayTLS: gwStatus, EngineTLS: engStatus},
 	}
+}
+
+func TestGatewayServingScheme(t *testing.T) {
+	serving := &v1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
 	cases := []struct {
-		name            string
-		inst            *v1alpha1.FireboltInstance
-		wantGw, wantEng bool
+		name string
+		inst *v1alpha1.FireboltInstance
+		want string
 	}{
-		{"nil instance", nil, false, false},
-		{"no tls block", &v1alpha1.FireboltInstance{}, false, false},
-		{"gateway tls on", withTLS(&v1alpha1.TLSSpec{Gateway: on}), true, false},
-		{"engine tls on", withTLS(&v1alpha1.TLSSpec{Engine: on}), false, true},
-		{"both on", withTLS(&v1alpha1.TLSSpec{Gateway: on, Engine: on}), true, true},
-		{"both present but disabled", withTLS(&v1alpha1.TLSSpec{Gateway: off, Engine: off}), false, false},
+		{"nil instance", nil, SchemeUnknown},
+		{"no tls block at all", &v1alpha1.FireboltInstance{}, SchemeHTTP},
+		{"steady plaintext", instWith(false, false, nil, nil), SchemeHTTP},
+		{"steady tls", instWith(true, false, serving, nil), SchemeHTTPS},
+		// The fail-closed window of a tightening transition: cert requested but
+		// the client listener is withheld, so neither scheme is truthful.
+		{"tightening, fail-closed", instWith(true, false, nil, nil), SchemeUnknown},
+		// A stale status left behind after the spec was disabled still means the
+		// listener is serving TLS right now.
+		{"disable, status not yet cleared", instWith(false, false, serving, nil), SchemeHTTPS},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := GatewayTLSEnabled(tc.inst); got != tc.wantGw {
-				t.Errorf("GatewayTLSEnabled = %v, want %v", got, tc.wantGw)
+			if got := GatewayServingScheme(tc.inst); got != tc.want {
+				t.Errorf("GatewayServingScheme = %q, want %q", got, tc.want)
 			}
-			if got := EngineTLSEnabled(tc.inst); got != tc.wantEng {
-				t.Errorf("EngineTLSEnabled = %v, want %v", got, tc.wantEng)
+		})
+	}
+}
+
+func TestEngineFleetServingScheme(t *testing.T) {
+	converged := &v1alpha1.EngineTLSStatus{SecretName: "eng-tls", Reencrypting: true}
+	provisioned := &v1alpha1.EngineTLSStatus{SecretName: "eng-tls"}
+	cases := []struct {
+		name string
+		inst *v1alpha1.FireboltInstance
+		want string
+	}{
+		{"nil instance", nil, SchemeUnknown},
+		{"no tls block at all", &v1alpha1.FireboltInstance{}, SchemeHTTP},
+		{"steady plaintext", instWith(false, false, nil, nil), SchemeHTTP},
+		{"steady tls, fleet converged", instWith(false, true, nil, converged), SchemeHTTPS},
+		// Enable ramp: cert issued but some engines still serve plaintext.
+		{"enabling, cert issued, fleet not converged", instWith(false, true, nil, provisioned), SchemeUnknown},
+		{"enabling, nothing provisioned yet", instWith(false, true, nil, nil), SchemeUnknown},
+		// Disable drain: the status is retained until every engine has rolled
+		// back off TLS, so it is the signal that the drain is still running.
+		{"disabling, drain in progress", instWith(false, false, nil, converged), SchemeUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EngineFleetServingScheme(tc.inst); got != tc.want {
+				t.Errorf("EngineFleetServingScheme = %q, want %q", got, tc.want)
 			}
 		})
 	}
