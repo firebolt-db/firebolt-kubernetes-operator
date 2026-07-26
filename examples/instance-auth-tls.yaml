@@ -15,19 +15,25 @@
 #   3. a reachable OIDC provider at the discoveryURL below. The placeholder
 #      here (company.okta.com) will not resolve — replace it with your own.
 #
-# Signing keys and TLS certs are ALWAYS provisioned via cert-manager; there is
-# no bring-your-own-Secret option (unlike the sibling firebolt-instance-helm
-# chart).
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: firebolt-admin-credentials
-type: Opaque
-stringData:
-  # The operator never generates this — you supply it. Rotate by updating
-  # this Secret; the operator rolls the change out to every engine.
-  password: change-me-to-a-strong-password
+# Signing keys and engine TLS certs are ALWAYS provisioned via cert-manager;
+# only the gateway listener accepts a bring-your-own secretRef.
+#
+# NOTE ON ISSUERS: for brevity this example points every certificate at one
+# "internal-ca" ClusterIssuer. Do not copy that into production. The gateway
+# verifies engines against the ENGINE issuer's CA, so anything else that can
+# obtain a certificate from that same issuer for a matching name is, to the
+# gateway, indistinguishable from an engine. Use a separate issuer per purpose:
+# JWT signing, engine server certs, gateway server certs, and the client CA.
+#   4. the admin-password Secret, created out-of-band so no credential is ever
+#      committed to git. This example deliberately does NOT ship a Secret
+#      manifest: applying one straight from a repository is how a placeholder
+#      password reaches a running instance.
+#
+#        kubectl create secret generic firebolt-admin-credentials \
+#          --from-literal=password="$(openssl rand -base64 32)"
+#
+#      The operator never generates this — you supply it. Rotate by updating
+#      the Secret; the operator rolls the change out to every engine.
 ---
 apiVersion: compute.firebolt.io/v1alpha1
 kind: FireboltInstance
@@ -79,7 +85,11 @@ spec:
         - name: okta
           title: Okta
           discoveryURL: https://company.okta.com/oauth2/default/.well-known/openid-configuration
-          usernameMapping: "{{ email }}"
+          # Incorporates the issuer, not just the email. A mapping that is not
+          # provider-unique lets an identity from one provider resolve onto
+          # another provider's Firebolt user; admission rejects a bare claim
+          # once a second provider is configured.
+          usernameMapping: "{{ iss }}|{{ sub }}"
           jitProvisioning:
             enabled: true
             defaultRoles: [public]

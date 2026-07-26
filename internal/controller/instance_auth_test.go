@@ -139,9 +139,9 @@ func TestBuildSigningCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testing.
 		t.Errorf("RotationPolicy = %q, want Never (packdb only reads signing keys at startup)", pk.RotationPolicy)
 	}
 
-	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != authSigningCertDuration {
+	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != DefaultCertDurationSigning {
 		t.Errorf("Duration = %v, want %v (must be effectively-static so cert-manager never auto-renews)",
-			cert.Spec.Duration, authSigningCertDuration)
+			cert.Spec.Duration, DefaultCertDurationSigning)
 	}
 
 	if cert.Spec.IssuerRef.Name != "internal-ca" {
@@ -669,7 +669,7 @@ var convergenceSigningCertPEM = mustGenSigningCertPEM()
 // both tls.key (the existence gate) and a parseable tls.crt.
 func signingSecretForConvergence() *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixAuthSigning, Namespace: "ns-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: "inst" + SuffixAuthSigning, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: "inst" + SuffixAuthSigning}},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte("fake-signing-pem"),
 			corev1.TLSCertKey:       convergenceSigningCertPEM,
@@ -849,7 +849,7 @@ func TestEnginesConvergedOn(t *testing.T) {
 func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string) *corev1.Secret {
 	name := signingCertificateName(instance.Name, kid)
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}},
 		Data: map[string][]byte{
 			// A parseable tls.crt alongside the (fake) tls.key so the FB-896 #4
 			// public-key fingerprint fold can read a real public key. Seeded once
@@ -938,7 +938,7 @@ func TestApplySigningCertificate_RegenerationUnderStableKidWarns(t *testing.T) {
 	keyA := newSigningKey(t)
 	secretName := signingCertificateName(instance.Name, AuthSigningKeyID)
 	if err := cli.Create(ctx, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: "ns-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: secretName}},
 		Data: map[string][]byte{
 			corev1.TLSPrivateKeyKey: []byte("fake-key-pem"),
 			corev1.TLSCertKey:       signingCertForKey(t, keyA, 1),

@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -174,7 +176,7 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 	}
 	tlsSecret := func(name string) *corev1.Secret {
 		return &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}},
 			Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key"), "ca.crt": []byte("ca")},
 		}
 	}
@@ -730,9 +732,13 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 	if trustedCA["filename"] != wantFilename {
 		t.Errorf("trusted_ca.filename = %v, want %v", trustedCA["filename"], wantFilename)
 	}
+	// Two matchers, not one namespace-wide suffix: the stable routing Service name
+	// and the per-generation headless wildcard. The old ".<ns>.svc.cluster.local"
+	// suffix accepted ANY certificate the shared issuer signed for ANY name in the
+	// namespace, which authenticates "some workload here" rather than "an engine".
 	sans, ok := validationContext["match_typed_subject_alt_names"].([]any)
-	if !ok || len(sans) != 1 {
-		t.Fatalf("validation_context.match_typed_subject_alt_names = %v, want a 1-element array", validationContext["match_typed_subject_alt_names"])
+	if !ok || len(sans) != 2 {
+		t.Fatalf("validation_context.match_typed_subject_alt_names = %v, want a 2-element array", validationContext["match_typed_subject_alt_names"])
 	}
 	san, ok := sans[0].(map[string]any)
 	if !ok {
@@ -745,9 +751,39 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 	if !ok {
 		t.Fatalf("match_typed_subject_alt_names[0].matcher missing or wrong type: %T", san["matcher"])
 	}
-	wantSuffix := ".ns-1.svc.cluster.local"
+	wantSuffix := SuffixService + ".ns-1.svc.cluster.local"
 	if matcher["suffix"] != wantSuffix {
-		t.Errorf("matcher.suffix = %v, want %v (must be a suffix match, not exact — see doc comment)", matcher["suffix"], wantSuffix)
+		t.Errorf("matcher.suffix = %v, want %v (the stable routing Service name, not any name in the namespace)",
+			matcher["suffix"], wantSuffix)
+	}
+
+	// The second matcher covers the per-generation headless wildcard the engine's
+	// own certificate carries (buildGenEngineTLSCertificate).
+	genSAN, ok := sans[1].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[1] = %v, want an object", sans[1])
+	}
+	genMatcher, ok := genSAN["matcher"].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[1].matcher missing or wrong type: %T", genSAN["matcher"])
+	}
+	re, ok := genMatcher["safe_regex"].(map[string]any)
+	if !ok {
+		t.Fatalf("match_typed_subject_alt_names[1].matcher.safe_regex missing or wrong type: %T", genMatcher["safe_regex"])
+	}
+	rx, ok := re["regex"].(string)
+	if !ok {
+		t.Fatalf("safe_regex.regex missing or wrong type: %T", re["regex"])
+	}
+	compiled, err := regexp.Compile(rx)
+	if err != nil {
+		t.Fatalf("safe_regex.regex %q does not compile: %v", rx, err)
+	}
+	if want := "eng-g3-hl.ns-1.svc.cluster.local"; !compiled.MatchString(want) {
+		t.Errorf("regex %q does not match a real per-generation headless SAN %q", rx, want)
+	}
+	if reject := "evil.ns-1.svc.cluster.local"; compiled.MatchString(reject) {
+		t.Errorf("regex %q matches an arbitrary in-namespace name %q", rx, reject)
 	}
 }
 

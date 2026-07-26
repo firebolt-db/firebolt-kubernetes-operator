@@ -59,8 +59,12 @@ func TestBuildGenEngineTLSCertificate_SANs(t *testing.T) {
 	if want := genResourceName(testEngineName, 0, SuffixEngineTLS); cert.Spec.SecretName != want {
 		t.Errorf("SecretName = %q, want per-generation %q", cert.Spec.SecretName, want)
 	}
-	if cert.Spec.PrivateKey.RotationPolicy != certmanagerv1.RotationPolicyNever {
-		t.Errorf("RotationPolicy = %v, want Never", cert.Spec.PrivateKey.RotationPolicy)
+	// Always, not Never: a reissue must mint fresh key material rather than reuse
+	// whatever key already sits in the target Secret. computeStable rolls the
+	// generation when the serving cert's fingerprint changes, so the new key
+	// reaches running pods.
+	if cert.Spec.PrivateKey.RotationPolicy != certmanagerv1.RotationPolicyAlways {
+		t.Errorf("RotationPolicy = %v, want Always", cert.Spec.PrivateKey.RotationPolicy)
 	}
 	if cert.Spec.PrivateKey.Algorithm != certmanagerv1.ECDSAKeyAlgorithm || cert.Spec.PrivateKey.Size != 384 {
 		t.Errorf("private key = %v/%d, want ECDSA/384", cert.Spec.PrivateKey.Algorithm, cert.Spec.PrivateKey.Size)
@@ -330,7 +334,7 @@ func engineTLSEnabledInstanceFixture(tlsReady bool, engineTLS *computev1alpha1.E
 
 func engineTLSSecretFixture() *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-instance-engine-tls", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-instance-engine-tls", Namespace: testNamespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: "test-instance-engine-tls"}},
 		Data: map[string][]byte{
 			corev1.TLSCertKey:       []byte("fake-cert"),
 			corev1.TLSPrivateKeyKey: []byte("fake-key"),
@@ -438,7 +442,7 @@ func TestResolveInstanceInfo_PopulatesServingCertFP(t *testing.T) {
 	engine.Status.CurrentGeneration = 3
 	certPEM := []byte("current-generation-serving-cert")
 	genSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: genResourceName("e", 3, SuffixEngineTLS)}},
 		Data:       map[string][]byte{corev1.TLSCertKey: certPEM},
 	}
 	inst := engineTLSEnabledInstanceFixture(true, &computev1alpha1.EngineTLSStatus{SecretName: "test-instance-engine-tls"})
@@ -467,7 +471,7 @@ func TestResolveInstanceInfo_EngineTrustBundleGate(t *testing.T) {
 	engine := engineForAuthFixture()
 	engine.Status.CurrentGeneration = 3
 	genSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: genResourceName("e", 3, SuffixEngineTLS), Namespace: testNamespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: genResourceName("e", 3, SuffixEngineTLS)}},
 		Data:       map[string][]byte{engineTLSCASecretKey: []byte("gen-ca-3")},
 	}
 
