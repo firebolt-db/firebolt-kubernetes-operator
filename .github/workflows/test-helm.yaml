@@ -124,20 +124,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install kind v0.31.0
+      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv; the helper
+      # refuses to write ./kind unless the digest matches.
+      - name: Install kind
         run: |
-          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-$(go env GOARCH)"
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          scripts/ci/fetch-verified.sh kind ./kind
+          sudo install -m 0755 ./kind /usr/local/bin/kind
+          rm -f ./kind
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - name: Install yq
-        env:
-          YQ_VERSION: v4.44.3
         run: |
-          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          scripts/ci/fetch-verified.sh yq ./yq
+          sudo install -m 0755 ./yq /usr/local/bin/yq
+          rm -f ./yq
           yq --version
 
       - name: Prepare Kind cluster and workload images

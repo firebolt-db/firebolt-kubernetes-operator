@@ -76,7 +76,6 @@ jobs:
     if: needs.detect.outputs.docs_only != 'true'
     runs-on: ubuntu-16core-64gb-600ssd-amd64
     permissions:
-      id-token: write
       contents: read
       packages: read
     strategy:
@@ -182,11 +181,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install kind v0.31.0
+      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv; the helper
+      # refuses to write ./kind unless the digest matches.
+      - name: Install kind
         run: |
-          curl -Lo ./kind "https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-$(go env GOARCH)"
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          scripts/ci/fetch-verified.sh kind ./kind
+          sudo install -m 0755 ./kind /usr/local/bin/kind
+          rm -f ./kind
 
       - name: Verify kind installation
         run: kind version
