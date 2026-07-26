@@ -184,7 +184,7 @@ The shared JWT signing keypair is provisioned through cert-manager against an `I
 
 ### Engine and Gateway TLS
 
-`spec.tls.engine` terminates TLS on each Engine's query listener; `spec.tls.gateway` terminates client-facing TLS on the Gateway. Both accept either a cert-manager issuer or a `secretRef` to a certificate you manage yourself.
+`spec.tls.engine` terminates TLS on each Engine's query listener; `spec.tls.gateway` terminates client-facing TLS on the Gateway. The Gateway listener accepts either a cert-manager issuer or a `secretRef` to a certificate you manage yourself. The Engine listener is cert-manager-only: the operator issues a certificate per Engine generation so the SANs cover that generation's pod hostnames, which a static Secret cannot do.
 
 Two properties are worth knowing before you enable them:
 
@@ -193,15 +193,22 @@ Two properties are worth knowing before you enable them:
 
 Adding `clientCASecretRef` upgrades the Gateway listener to mutual TLS, verifying client certificates against that CA. Loosening transitions carry no fail-open risk and are not staged.
 
+Two things about mutual TLS are worth stating plainly, because the operator cannot enforce them for you:
+
+- **Verification is CA-scoped, not identity-scoped.** Any certificate the configured CA signed is accepted. Point `clientCASecretRef` at a CA dedicated to this purpose, not at a broad organizational CA that already signs certificates for unrelated workloads.
+- **Prefer a separate issuer per purpose.** The signing keypair, the Engine listener, the Gateway listener, and the client CA should not all chain to one issuer. The Gateway verifies Engines against the Engine issuer's CA, so anything else able to obtain a certificate from that same issuer for a matching name is, to the Gateway, indistinguishable from an Engine.
+
+`crlSecretRef` on either listener supplies a revocation list the Gateway checks alongside the trust anchor, so a compromised certificate can be rejected before it expires. Certificate lifetimes are bounded by default, which limits how long a leaked key stays usable but does not end it — a CRL is the only way to cut it short.
+
 ## What the Firebolt Operator does not enforce
 
 ### Pod-template authors can mount other Secrets in the namespace
 
 A `FireboltEngine`, `FireboltEngineClass`, or `FireboltInstance` pod template may declare volumes and sidecar containers, and a volume may reference any Secret in that namespace. **Treat edit rights on those templates as equivalent to read rights on the namespace's Secrets**, and scope RBAC accordingly: someone who can edit a template can mount a Secret and read it from a sidecar whose image and command they control, without any `get secrets` permission.
 
-The operator's own auth and TLS Secrets are excluded from this. Every route a template has to them is covered, and the checks match the Secret being *referenced* rather than the name the author gave it, so renaming evades nothing:
+The operator's own auth and TLS Secrets are excluded from this. The protected set is **Instance-wide** — every template is screened against every operator-managed Secret in the Instance, not only the ones its own pod mounts, so a Gateway template cannot reach a signing key and one Engine cannot reach another's serving key. The checks match the Secret being *referenced* rather than the name the author gave it, so renaming evades nothing:
 
-- A **volume** whose source reaches one — including through a `projected` source — is dropped from the rendered pod and reported on the component's condition. It is reported rather than refused on purpose: the kubelet re-syncs a Secret volume for the life of the pod, so a volume that named a not-yet-existing Secret starts yielding real key material once the operator creates it. The remedy is to replace the pod, and refusing to render would freeze the Engine on the very generation holding the exposed volume.
+- A **volume** whose source reaches one — including through a `projected` source — is dropped from the rendered pod and reported as a Warning Event on the resource. It is reported rather than refused on purpose: the kubelet re-syncs a Secret volume for the life of the pod, so a volume that named a not-yet-existing Secret starts yielding real key material once the operator creates it. The remedy is to replace the pod, and refusing to render would freeze the Engine on the very generation holding the exposed volume.
 - A **container** that reads one into its environment, through `env[].valueFrom.secretKeyRef` or `envFrom[].secretRef`, is refused outright. An env reference resolves once when the pod starts and is never re-synced, so declining to render is a complete remedy.
 
 Both apply to the primary container, sidecars, and init containers, and to a referenced `FireboltEngineClass` template as well as the resource's own.
@@ -405,8 +412,8 @@ When auth or TLS is enabled, these additional Secrets exist:
 |---|---|---|---|
 | Admin password | You create it; referenced by `spec.auth.local.admin.password` | Every Engine, mounted read-only by path | Yours to rotate. Editing the Secret rolls the fleet onto the new value. |
 | JWT signing keys | cert-manager, one per key generation | Every Engine, mounted read-only by path | Operator-coordinated when `rotationInterval` is set; otherwise a single permanent key. |
-| Engine TLS certificate | cert-manager, or your own via `secretRef` | Engine pods, plus its CA in the Gateway's trust bundle | cert-manager's own renewal, per generation. |
-| Gateway TLS certificate | cert-manager, or your own via `secretRef` | Gateway pods | cert-manager's own renewal. |
+| Engine TLS certificate | cert-manager (no `secretRef` for this listener) | Engine pods, plus its CA in the Gateway's trust bundle | cert-manager renewal on a bounded lifetime (90 days by default, `certManager.duration`). A reissue rolls a fresh Engine generation. |
+| Gateway TLS certificate | cert-manager, or your own via `secretRef` | Gateway pods | cert-manager renewal on the same bounded default. A reissue rolls the Gateway Deployment. |
 | Gateway client CA | You create it; referenced by `clientCASecretRef` | Gateway pods (public certificate only) | Yours. A swap is treated as a tightening transition. |
 
 The operator reads a signing key's public-key fingerprint to detect key

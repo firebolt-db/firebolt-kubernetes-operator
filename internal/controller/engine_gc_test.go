@@ -150,7 +150,7 @@ func TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets(t *testing.T) {
 		name := genResourceName(engineName, gen, SuffixEngineTLS)
 		labels := map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)}
 		return &certmanagerv1.Certificate{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}},
-			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}}
+			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels, Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}}}
 	}
 	c1, s1 := mk(1) // orphaned
 	c2, s2 := mk(2) // draining — must be preserved

@@ -38,7 +38,6 @@ type tlaRotationTestCase struct {
 	Closure []int
 }
 
-
 // 19 unique reachable TLA+ states, projected.
 var tlaRotationStatePool = []tlaRotationState{
 	{[]tlaRotationKey{{"absent", false, false, false}, {"absent", false, false, false}, {"active", false, false, false}}, 2, true},

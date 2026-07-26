@@ -537,7 +537,7 @@ func TestAppendUserPodVolumes_OperatorReservedNamesWin(t *testing.T) {
 		},
 	}))
 
-	got := appendUserPodVolumes(operator, testSpec(), classInfo)
+	got := appendUserPodVolumes(operator, testSpec(), InstanceInfo{}, classInfo)
 	if len(got) != 3 {
 		t.Fatalf("got %d volumes, want 3 (2 operator + 1 non-colliding class)", len(got))
 	}
@@ -578,7 +578,7 @@ func TestAppendUserPodVolumes_PVCBackendDropsCollidingData(t *testing.T) {
 		},
 	}))
 
-	got := appendUserPodVolumes(operator, testSpec(), classInfo)
+	got := appendUserPodVolumes(operator, testSpec(), InstanceInfo{}, classInfo)
 	for _, v := range got {
 		if v.Name == DataVolumeName {
 			t.Fatalf("PVC backend: user volume named %q must be dropped to avoid pod-admission collision with VCT-synthesized data volume, got %+v", DataVolumeName, v)
@@ -606,7 +606,7 @@ func TestAppendUserPodVolumes_PVCBackendDropsCollidingEngineData(t *testing.T) {
 		}
 	})
 
-	got := appendUserPodVolumes(operator, spec, nil)
+	got := appendUserPodVolumes(operator, spec, InstanceInfo{}, nil)
 	for _, v := range got {
 		if v.Name == DataVolumeName {
 			t.Fatalf("PVC backend: engine-template volume named %q must be dropped, got %+v", DataVolumeName, v)

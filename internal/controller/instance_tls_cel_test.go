@@ -94,19 +94,19 @@ var _ = Describe("FireboltInstance TLS certManager immutability (CEL, webhook-fr
 		})).To(Succeed())
 	})
 
-	It("rejects changing the engine key size while engine TLS stays enabled", func() {
-		inst := mkInstance("cel-engine-size-frozen", enabledListener(), nil)
+	It("allows changing the engine key size while engine TLS stays enabled", func() {
+		inst := mkInstance("cel-engine-size-mutable", enabledListener(), nil)
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
-		// FB-896 #2: the stable-name anchor cert cannot regenerate its key under
-		// rotationPolicy:Never, so an in-place algorithm/size edit while enabled
-		// wedges it — the CEL rule rejects it.
-		err := mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
+		// The old CEL rule froze this because rotationPolicy:Never meant
+		// cert-manager would never regenerate the stable-name anchor key to match,
+		// wedging the Certificate. Both TLS listeners now issue under
+		// rotationPolicy:Always, so a reissue mints matching key material and the
+		// parameter rotates cleanly — the freeze went away with its reason.
+		Expect(mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
 			cur.Spec.TLS.Engine.CertManager.Size = 256
-		})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("algorithm/size is immutable"))
+		})).To(Succeed())
 	})
 
 	It("allows changing the engine key size in the same update that disables engine TLS", func() {
@@ -122,18 +122,15 @@ var _ = Describe("FireboltInstance TLS certManager immutability (CEL, webhook-fr
 		})).To(Succeed())
 	})
 
-	It("rejects changing the gateway key size while gateway TLS stays enabled", func() {
-		inst := mkInstance("cel-gateway-size-frozen", nil, enabledListener())
+	It("allows changing the gateway key size while gateway TLS stays enabled", func() {
+		inst := mkInstance("cel-gateway-size-mutable", nil, enabledListener())
 		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(context.Background(), inst) }()
 
-		// FB-896 #2: the gateway serving cert has a stable Secret name too, so
-		// its key algorithm/size are frozen while enabled (same rule, gateway-scoped).
-		err := mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
+		// Same reasoning as the engine listener above.
+		Expect(mutateWithRetry(inst.Name, func(cur *computev1alpha1.FireboltInstance) {
 			cur.Spec.TLS.Gateway.CertManager.Size = 256
-		})
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("algorithm/size is immutable"))
+		})).To(Succeed())
 	})
 
 	It("does NOT freeze the gateway issuerRef (only key params are gateway-frozen)", func() {
