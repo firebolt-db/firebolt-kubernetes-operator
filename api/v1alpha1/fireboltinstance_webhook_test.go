@@ -186,21 +186,22 @@ func TestValidateUpdate_ImmutableFields(t *testing.T) {
 			wantErrSubstr: "issuerRef",
 		},
 		{
-			name: "engine TLS key size change rejected (issuer unchanged)",
+			// No longer frozen: both TLS listeners issue under
+			// rotationPolicy:Always, so a reissue mints key material matching the
+			// new parameters instead of silently keeping the old key.
+			name: "engine TLS key size change allowed",
 			mutate: func(o, n *FireboltInstance) {
 				o.Spec.TLS = engineTLS("ca-1", 384)
 				n.Spec.TLS = engineTLS("ca-1", 256)
 			},
-			wantErrSubstr: "size",
 		},
 		{
-			name: "engine TLS key algorithm change rejected",
+			name: "engine TLS key algorithm change allowed",
 			mutate: func(o, n *FireboltInstance) {
 				o.Spec.TLS = engineTLS("ca-1", 384)
 				n.Spec.TLS = engineTLS("ca-1", 2048)
 				n.Spec.TLS.Engine.CertManager.Algorithm = "RSA"
 			},
-			wantErrSubstr: "algorithm",
 		},
 		{
 			name: "engine TLS alg/size change across disable/re-enable allowed",
@@ -222,20 +223,18 @@ func TestValidateUpdate_ImmutableFields(t *testing.T) {
 			},
 		},
 		{
-			name: "gateway TLS key size change rejected",
+			name: "gateway TLS key size change allowed",
 			mutate: func(o, n *FireboltInstance) {
 				o.Spec.TLS = gatewayTLS("ECDSA", 384)
 				n.Spec.TLS = gatewayTLS("ECDSA", 256)
 			},
-			wantErrSubstr: "size",
 		},
 		{
-			name: "gateway TLS key algorithm change rejected",
+			name: "gateway TLS key algorithm change allowed",
 			mutate: func(o, n *FireboltInstance) {
 				o.Spec.TLS = gatewayTLS("ECDSA", 384)
 				n.Spec.TLS = gatewayTLS("RSA", 2048)
 			},
-			wantErrSubstr: "algorithm",
 		},
 		{
 			name: "gateway TLS alg/size change across disable/re-enable allowed",
@@ -1688,6 +1687,119 @@ func TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor(t *te
 		}
 		if errs := validateSigningKeyRotation(local, base); len(errs) == 0 {
 			t.Errorf("maxTokenAge=%q: expected retainDuration rejected against the default floor, got no error", mta)
+		}
+	}
+}
+
+// TestValidateTLS_ForbidsOperatorManagedSecretRefs pins the spec-level twin of the
+// pod-template Secret guard: a secretRef is another route to the operator's own
+// key material, and pointing the gateway listener at the JWT signing Secret would
+// mount that key into the client-facing Envoy pod.
+func TestValidateTLS_ForbidsOperatorManagedSecretRefs(t *testing.T) {
+	base := func() *FireboltInstance {
+		return &FireboltInstance{
+			Status: FireboltInstanceStatus{
+				Auth: &AuthStatus{SigningKeys: []SigningKeyStatus{
+					{ID: "signing-1", SecretName: "inst-auth-signing"},
+				}},
+			},
+		}
+	}
+
+	t.Run("gateway secretRef naming the signing key is rejected", func(t *testing.T) {
+		inst := base()
+		inst.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
+			Enabled:   true,
+			SecretRef: &corev1.LocalObjectReference{Name: "inst-auth-signing"},
+		}}
+		errs := ValidateTLS(inst)
+		if len(errs) == 0 {
+			t.Fatal("pointing spec.tls.gateway.secretRef at the signing keypair was accepted")
+		}
+		if msg := errs.ToAggregate().Error(); !strings.Contains(msg, "the operator manages itself") {
+			t.Errorf("error %q does not explain why the reference is forbidden", msg)
+		}
+	})
+
+	t.Run("a user's own BYO secret is still accepted", func(t *testing.T) {
+		inst := base()
+		inst.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
+			Enabled:   true,
+			SecretRef: &corev1.LocalObjectReference{Name: "my-own-tls"},
+		}}
+		if errs := ValidateTLS(inst); len(errs) != 0 {
+			t.Fatalf("a legitimate bring-your-own Secret was rejected: %v", errs.ToAggregate())
+		}
+	})
+}
+
+// TestValidateTLS_RejectsClientCAOnDisabledListener pins that a security-intent
+// field is never silently ignored: mTLS configured on a disabled listener used to
+// admit cleanly and serve plaintext.
+func TestValidateTLS_RejectsClientCAOnDisabledListener(t *testing.T) {
+	inst := &FireboltInstance{Spec: FireboltInstanceSpec{TLS: &TLSSpec{
+		Gateway: &TLSListenerSpec{
+			Enabled:           false,
+			ClientCASecretRef: &corev1.LocalObjectReference{Name: "corp-ca"},
+		},
+	}}}
+	errs := ValidateTLS(inst)
+	if len(errs) == 0 {
+		t.Fatal("clientCASecretRef on a disabled listener was silently accepted")
+	}
+	if msg := errs.ToAggregate().Error(); !strings.Contains(msg, "requires enabled: true") {
+		t.Errorf("error %q does not name the precondition", msg)
+	}
+}
+
+// TestValidateUsernameMapping covers the OIDC identity-collision guard.
+func TestValidateUsernameMapping(t *testing.T) {
+	path := field.NewPath("spec", "auth", "oidc", "providers").Index(0).Child("usernameMapping")
+
+	t.Run("single provider may use a bare claim", func(t *testing.T) {
+		if errs := validateUsernameMapping("{{ email }}", path, 1, "firebolt"); len(errs) != 0 {
+			t.Fatalf("a single-provider mapping was rejected: %v", errs.ToAggregate())
+		}
+	})
+
+	t.Run("multi-provider bare claim is rejected", func(t *testing.T) {
+		errs := validateUsernameMapping("{{ email }}", path, 2, "firebolt")
+		if len(errs) == 0 {
+			t.Fatal("two providers both mapping to {{ email }} were accepted")
+		}
+		if msg := errs.ToAggregate().Error(); !strings.Contains(msg, "iss") {
+			t.Errorf("error %q does not name the claim that disambiguates providers", msg)
+		}
+	})
+
+	t.Run("multi-provider issuer-qualified mapping is accepted", func(t *testing.T) {
+		if errs := validateUsernameMapping("{{ iss }}|{{ sub }}", path, 2, "firebolt"); len(errs) != 0 {
+			t.Fatalf("an issuer-qualified mapping was rejected: %v", errs.ToAggregate())
+		}
+	})
+
+	t.Run("a literal mapping onto the admin account is rejected", func(t *testing.T) {
+		if errs := validateUsernameMapping("firebolt", path, 1, "firebolt"); len(errs) == 0 {
+			t.Fatal("a mapping resolving to the admin username was accepted")
+		}
+	})
+}
+
+// TestValidateCertManagerKey_RSASizesMatchCertManager pins that admission accepts
+// exactly the RSA sizes cert-manager does. A size it rejects would otherwise be
+// admitted and then leave the Certificate permanently un-Ready.
+func TestValidateCertManagerKey_RSASizesMatchCertManager(t *testing.T) {
+	path := field.NewPath("spec", "auth", "local", "signingKeys", "certManager")
+	for _, size := range []int32{2048, 4096, 8192} {
+		cm := &CertManagerSpec{Algorithm: "RSA", Size: size}
+		if err := validateCertManagerKey(cm, path); err != nil {
+			t.Errorf("RSA size %d should be accepted: %v", size, err)
+		}
+	}
+	for _, size := range []int32{1024, 3072, 6144, 8193} {
+		cm := &CertManagerSpec{Algorithm: "RSA", Size: size}
+		if err := validateCertManagerKey(cm, path); err == nil {
+			t.Errorf("RSA size %d is rejected by cert-manager and must not be admitted", size)
 		}
 	}
 }

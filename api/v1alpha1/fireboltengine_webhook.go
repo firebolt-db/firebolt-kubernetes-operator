@@ -208,9 +208,13 @@ func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *Fireb
 }
 
 // validateSecretAliases rejects a spec.template volume that reaches one of the
-// Secrets the operator mounts into the engine pod, whatever the volume is named.
-// The reserved-volume-name rules cannot catch this: the name is the author's to
-// choose, and only the volume's source gives the aliasing away.
+// operator-managed Secrets belonging to the owning Instance, whatever the volume
+// is named. The reserved-volume-name rules cannot catch this: the name is the
+// author's to choose, and only the volume's source gives the aliasing away.
+//
+// The protected set is Instance-wide, not "what this engine's pod mounts": an
+// engine template has no business reaching the gateway's serving key or the
+// metadata Postgres credential either. See InstanceOperatorSecretNames.
 //
 // The Instance is read live so the rejection names Secrets that are really
 // mounted. An unreadable or absent Instance produces no finding — an engine may
@@ -228,7 +232,7 @@ func (v *FireboltEngineCustomValidator) validateSecretAliases(ctx context.Contex
 		return nil
 	}
 	protected := make(map[string]struct{})
-	for _, n := range EngineMountedSecretNames(inst) {
+	for _, n := range InstanceOperatorSecretNames(inst) {
 		protected[n] = struct{}{}
 	}
 	if len(protected) == 0 {

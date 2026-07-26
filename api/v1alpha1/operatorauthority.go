@@ -169,6 +169,16 @@ const (
 	// only once gateway TLS is ready and a client CA is configured; mounted
 	// read-only on the Envoy container.
 	GatewayClientCAVolumeName = "client-ca"
+	// GatewayEngineCRLVolumeName carries the "crl.pem" revocation list the
+	// gateway checks engine certificates against when re-encrypting upstream
+	// (spec.tls.engine.crlSecretRef). Present only when one is configured;
+	// mounted read-only on the Envoy container.
+	GatewayEngineCRLVolumeName = "engine-crl"
+	// GatewayClientCRLVolumeName carries the "crl.pem" revocation list the
+	// gateway checks client certificates against on its client-facing listener
+	// (spec.tls.gateway.crlSecretRef). Present only when mutual TLS is on and
+	// one is configured; mounted read-only on the Envoy container.
+	GatewayClientCRLVolumeName = "client-crl"
 	// MetadataConfigVolumeName carries the operator-rendered Pensieve
 	// XML config. Mounted at /configs on the metadata container.
 	MetadataConfigVolumeName = "config"
@@ -207,6 +217,8 @@ var operatorOwnedGatewayVolumeNames = []string{
 	GatewayEngineCAVolumeName,
 	GatewayTLSVolumeName,
 	GatewayClientCAVolumeName,
+	GatewayEngineCRLVolumeName,
+	GatewayClientCRLVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator
@@ -739,6 +751,9 @@ func VolumeSecretRefs(v *corev1.Volume) []string {
 	if v.CephFS != nil && v.CephFS.SecretRef != nil {
 		add(v.CephFS.SecretRef.Name)
 	}
+	if v.Cinder != nil && v.Cinder.SecretRef != nil {
+		add(v.Cinder.SecretRef.Name)
+	}
 	if v.FlexVolume != nil && v.FlexVolume.SecretRef != nil {
 		add(v.FlexVolume.SecretRef.Name)
 	}
@@ -840,14 +855,31 @@ func ValidateNoSecretRefEnv(
 	return errs
 }
 
-// EngineMountedSecretNames returns the Instance-wide Secrets the operator mounts
-// into every engine pod: the admin password and each JWT signing key, plus the
-// engine-listener TLS Secret. Empty entries are omitted, so an Instance whose
-// auth or TLS is still provisioning contributes nothing.
+// InstanceOperatorSecretNames returns every operator-managed Secret belonging to
+// this Instance that is derivable from the CR itself, REGARDLESS of which
+// component's pod happens to mount it: the admin password, each JWT signing key,
+// the engine-listener TLS anchor, the gateway's serving certificate, the gateway
+// client CA, and an externally-supplied metadata Postgres credential. Empty
+// entries are omitted, so an Instance whose auth or TLS is still provisioning
+// contributes nothing.
 //
-// The per-generation engine-TLS Secrets are not included — their names carry a
-// generation number, and only the engine reconciler knows how those are formed.
-func EngineMountedSecretNames(inst *FireboltInstance) []string {
+// The set is deliberately Instance-wide rather than per-component. It used to be
+// three disjoint per-component lists, which meant each pod template was screened
+// only against the Secrets ITS OWN pod mounts — so a gateway or metadata template
+// could alias the admin password or a JWT signing key, and one engine's template
+// could alias another engine's serving key. All of those are the same escalation
+// the guard exists to stop: a template author who cannot read Secrets mounts one
+// into a sidecar whose image and command they control. Screening every template
+// against the union closes the cross-component routes.
+//
+// Two names cannot be derived here because they are formed from suffixes private
+// to the controller package: the engine CA bundle, and the operator-generated
+// (as opposed to user-supplied) Postgres credential. The controller adds those,
+// along with the shape match for per-generation engine-TLS Secrets — see
+// instanceProtectedSecret in the controller package, which is the authoritative,
+// complete predicate. This function is what the admission webhooks can compute
+// on their own.
+func InstanceOperatorSecretNames(inst *FireboltInstance) []string {
 	var names []string
 	add := func(n string) {
 		if n != "" {
@@ -865,7 +897,77 @@ func EngineMountedSecretNames(inst *FireboltInstance) []string {
 	if inst.Status.EngineTLS != nil {
 		add(inst.Status.EngineTLS.SecretName)
 	}
+	if inst.Status.GatewayTLS != nil {
+		add(inst.Status.GatewayTLS.SecretName)
+	}
+	if inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil {
+		if ref := inst.Spec.TLS.Gateway.ClientCASecretRef; ref != nil {
+			add(ref.Name)
+		}
+	}
+	if inst.Spec.Metadata.Postgres != nil {
+		add(inst.Spec.Metadata.Postgres.CredentialsSecretRef.Name)
+	}
 	return names
+}
+
+// InstanceProvisionedSecretNames returns only the Secrets the operator CREATES
+// itself for this Instance — never one the user pointed it at.
+//
+// This is deliberately narrower than InstanceOperatorSecretNames, and the
+// difference matters. The broad set is right for the pod-template guards: a
+// template has no business mounting the admin password or the client CA even
+// though the user created those. But it is wrong for screening the user's own
+// spec-level references, because a bring-your-own listener's Secret ends up
+// recorded in Status.*TLS.SecretName — so screening spec.tls.gateway.secretRef
+// against the broad set would reject the very Secret the user legitimately
+// supplied, the moment the operator adopted it.
+//
+// What remains here is the material whose private key the operator mints: signing
+// keypairs, and each TLS listener's certificate ONLY on the cert-manager path.
+// Two names formed from controller-private suffixes (the engine CA bundle and the
+// operator-generated Postgres credential) are added by the caller in the
+// controller package.
+func InstanceProvisionedSecretNames(inst *FireboltInstance) []string {
+	var names []string
+	add := func(n string) {
+		if n != "" {
+			names = append(names, n)
+		}
+	}
+	if inst.Status.Auth != nil {
+		for _, k := range inst.Status.Auth.SigningKeys {
+			add(k.SecretName)
+		}
+	}
+	if tls := inst.Spec.TLS; tls != nil {
+		if tls.Engine != nil && tls.Engine.SecretRef == nil && inst.Status.EngineTLS != nil {
+			add(inst.Status.EngineTLS.SecretName)
+		}
+		if tls.Gateway != nil && tls.Gateway.SecretRef == nil && inst.Status.GatewayTLS != nil {
+			add(inst.Status.GatewayTLS.SecretName)
+		}
+	}
+	return names
+}
+
+// instanceProtectedSecretPredicate adapts InstanceProvisionedSecretNames into the
+// predicate the TLS reference checks take. Returns nil (protecting nothing) when
+// the Instance has provisioned nothing yet, which is the correct behaviour for a
+// first apply: there is no operator key material to point at.
+func instanceProtectedSecretPredicate(inst *FireboltInstance) func(string) bool {
+	names := InstanceProvisionedSecretNames(inst)
+	if len(names) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		set[n] = struct{}{}
+	}
+	return func(name string) bool {
+		_, hit := set[name]
+		return hit
+	}
 }
 
 // validatePrimaryContainerFields walks every user-set container field on

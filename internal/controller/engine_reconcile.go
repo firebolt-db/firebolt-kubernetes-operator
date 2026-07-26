@@ -83,10 +83,11 @@ type InstanceInfo struct {
 	// TLS is disabled (TLS == nil): there is nothing for the gateway to trust.
 	EngineTrustBundleReady bool
 
-	// MountedSecretNames are the Instance-wide Secrets this engine's pod
-	// mounts. A user template may not reach them through a volume of its own,
-	// whatever that volume is named.
-	MountedSecretNames []string
+	// ProtectedSecretNames are the operator-managed Secrets belonging to this
+	// engine's Instance — every one of them, not only the ones this engine's own
+	// pod mounts. A user template may not reach any through a volume of its own,
+	// whatever that volume is named. See instanceProtectedSecret.
+	ProtectedSecretNames []string
 }
 
 // ResolvedEngineTLSInfo carries the concrete, currently-provisioned
@@ -687,6 +688,7 @@ func buildGenEngineTLSCertificate(engineName, namespace string, gen int, tls *Re
 		algorithm = certmanagerv1.ECDSAKeyAlgorithm
 	}
 	issuerKind := resolveCertManagerIssuerKind(tls.CertManager.IssuerRef.Kind)
+	duration, renewBefore := resolveCertDuration(*tls.CertManager, DefaultCertDurationTLS, DefaultCertRenewBeforeTLS)
 
 	return &certmanagerv1.Certificate{
 		TypeMeta: metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"},
@@ -703,11 +705,12 @@ func buildGenEngineTLSCertificate(engineName, namespace string, gen int, tls *Re
 				engineName + SuffixService + "." + namespace + ".svc.cluster.local",
 				"localhost",
 			},
-			Usages:    []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
-			IssuerRef: cmmeta.IssuerReference{Name: tls.CertManager.IssuerRef.Name, Kind: issuerKind},
-			Duration:  &metav1.Duration{Duration: engineTLSCertDuration},
+			Usages:      []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
+			IssuerRef:   cmmeta.IssuerReference{Name: tls.CertManager.IssuerRef.Name, Kind: issuerKind},
+			Duration:    duration,
+			RenewBefore: renewBefore,
 			PrivateKey: &certmanagerv1.CertificatePrivateKey{
-				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				RotationPolicy: tlsCertRotationPolicy,
 				Encoding:       certmanagerv1.PKCS8,
 				Algorithm:      algorithm,
 				Size:           int(size),
@@ -1219,7 +1222,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	podVolumes = append(podVolumes, buildAuthVolumes(instanceInfo.Auth)...)
 	podVolumes = append(podVolumes, buildEngineTLSVolumes(instanceInfo.TLS, genResourceName(engineName, gen, SuffixEngineTLS))...)
-	podVolumes = appendUserPodVolumes(podVolumes, spec, classInfo)
+	podVolumes = appendUserPodVolumes(podVolumes, spec, instanceInfo, classInfo)
 
 	// Optional built-in engine web UI sidecar (engine/class uiSidecar: true).
 	// effectiveSidecarsWithUI is the single source of truth for the sidecar
@@ -2564,18 +2567,24 @@ func effectiveImagePullSecrets(spec *computev1alpha1.FireboltEngineSpec, classIn
 // spec.template.spec.volumes — without the static list, a user volume
 // named "data" would slip through admission and collide with the PVC-
 // synthesized data volume at pod creation time, leaving pods Pending.
-func appendUserPodVolumes(operator []corev1.Volume, spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) []corev1.Volume {
+func appendUserPodVolumes(
+	operator []corev1.Volume, spec *computev1alpha1.FireboltEngineSpec,
+	instanceInfo InstanceInfo, classInfo *FireboltEngineClassInfo,
+) []corev1.Volume {
 	reserved := operatorOwnedPodVolumeNames()
 	for i := range operator {
 		reserved[operator[i].Name] = struct{}{}
 	}
-	operatorSecrets := operatorMountedSecretNames(operator)
+	// The Instance-wide predicate, not a set derived from this pod's own volumes:
+	// an engine template must not reach a SIBLING engine's serving key or the
+	// gateway's, neither of which appears among this pod's operator volumes.
+	isProtected := engineProtectedSecret(instanceInfo)
 	out := make([]corev1.Volume, 0, len(operator))
 	out = append(out, operator...)
 	if classInfo != nil && classInfo.Template != nil {
-		out = appendUserVolumesFrom(out, classInfo.Template.Spec.Volumes, reserved, operatorSecrets)
+		out = appendUserVolumesFrom(out, classInfo.Template.Spec.Volumes, reserved, isProtected)
 	}
-	out = appendUserVolumesFrom(out, engineTemplate(spec).Spec.Volumes, reserved, operatorSecrets)
+	out = appendUserVolumesFrom(out, engineTemplate(spec).Spec.Volumes, reserved, isProtected)
 	return out
 }
 
@@ -2596,16 +2605,18 @@ func operatorOwnedPodVolumeNames() map[string]struct{} {
 }
 
 // appendUserVolumesFrom deep-copies entries from src into dst, skipping any
-// whose name is in the reserved set and any that reaches an operator-mounted
+// whose name is in the reserved set and any that reaches an operator-managed
 // Secret under a different name. The reconcile-time template check is what tells
 // the user about the latter; this is the layer that holds even if a future caller
 // skips that check.
-func appendUserVolumesFrom(dst, src []corev1.Volume, reserved, operatorSecrets map[string]struct{}) []corev1.Volume {
+func appendUserVolumesFrom(
+	dst, src []corev1.Volume, reserved map[string]struct{}, isProtected func(string) bool,
+) []corev1.Volume {
 	for i := range src {
 		if _, taken := reserved[src[i].Name]; taken {
 			continue
 		}
-		if aliasesOperatorSecret(&src[i], operatorSecrets) {
+		if aliasesProtectedSecret(&src[i], isProtected) {
 			continue
 		}
 		dst = append(dst, *src[i].DeepCopy())
