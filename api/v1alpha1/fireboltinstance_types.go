@@ -291,13 +291,39 @@ type CertManagerSpec struct {
 	// +optional
 	Algorithm string `json:"algorithm,omitempty"`
 
-	// Size is the private key size: RSA modulus bits (e.g. 2048, 4096) or
+	// Size is the private key size: RSA modulus bits (2048, 4096, or 8192) or
 	// ECDSA curve size (256, 384, 521). Defaults to 384 (the P-384 curve,
 	// matching the ECDSA algorithm default). The algorithm/size combination
-	// is validated at admission (see validateCertManagerKey).
+	// is validated at admission (see validateCertManagerKey), which mirrors
+	// cert-manager's own accepted values exactly — a size cert-manager
+	// rejects would otherwise be admitted here and then leave the
+	// Certificate permanently un-Ready.
 	// +kubebuilder:default=384
 	// +optional
 	Size int32 `json:"size,omitempty"`
+
+	// Duration is how long an issued certificate is valid for. Defaults per
+	// listener (see the DefaultCertDuration* constants in the controller
+	// package): bounded lifetimes on the TLS listeners so a compromised
+	// serving key is not valid indefinitely, and a longer — but still
+	// bounded — lifetime on the JWT signing keypair, whose certificate is
+	// never presented in a handshake and whose rotation is coordinated by
+	// the operator instead (see SigningKeyPolicy.RotationInterval).
+	//
+	// Renewal is safe on every listener because a reissue is already
+	// observed and rolled out: the gateway folds each mounted TLS Secret's
+	// resourceVersion into its config hash, and an engine generation rolls
+	// when its serving certificate's fingerprint changes. Shortening this
+	// does not require any new coordination.
+	// +optional
+	Duration *metav1.Duration `json:"duration,omitempty"`
+
+	// RenewBefore is how long before expiry cert-manager starts renewing.
+	// Defaults to a third of Duration when unset (cert-manager's own
+	// default), which leaves ample headroom for the rollout a renewal
+	// triggers. Must be shorter than Duration.
+	// +optional
+	RenewBefore *metav1.Duration `json:"renewBefore,omitempty"`
 }
 
 // PasswordLoginPolicy controls whether password-based login is available
@@ -665,6 +691,29 @@ type TLSListenerSpec struct {
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 
+	// CRLSecretRef optionally supplies a certificate revocation list the
+	// gateway loads alongside the trust anchor it verifies this listener's
+	// peers against, so a compromised peer certificate can be rejected before
+	// it expires. The Secret must carry "crl.pem" (a DER or PEM CRL). The
+	// operator only reads this Secret; it never creates, mutates, or
+	// garbage-collects it.
+	//
+	// Which peer depends on the listener:
+	//
+	//   - spec.tls.engine: engine certificates, as the gateway verifies them
+	//     when re-encrypting upstream.
+	//   - spec.tls.gateway: client certificates, and therefore meaningful only
+	//     alongside ClientCASecretRef (rejected at admission otherwise).
+	//
+	// Certificate lifetimes are bounded by default (see DefaultCertDurationTLS),
+	// which limits exposure but does not end it: without a CRL a leaked serving
+	// or client key stays usable for the remainder of its validity, and the
+	// operator has no other revocation path. It lives on the listener rather
+	// than on CertManagerSpec because a bring-your-own secretRef listener has no
+	// certManager block and still needs revocation.
+	// +optional
+	CRLSecretRef *corev1.LocalObjectReference `json:"crlSecretRef,omitempty"`
+
 	// ClientCASecretRef enables mutual TLS on this listener: the server
 	// requires a client certificate and verifies it against the "ca.crt"
 	// bundle in the referenced Secret. The operator only reads this Secret
@@ -716,19 +765,19 @@ type TLSSpec struct {
 	// Gateway configures TLS termination on the Envoy gateway's
 	// client-facing listener.
 	//
-	// The cert-manager key algorithm/size are immutable while gateway TLS stays
-	// enabled: the gateway serving Certificate has a stable Secret name under
-	// rotationPolicy:Never, so cert-manager reuses its existing key on reissue
-	// and will not regenerate it to match a changed algorithm/size — the
-	// Certificate wedges. A disable/re-enable (fresh key material) is permitted.
-	// The rule is field-scoped to the gateway listener (the shared
-	// TLSListenerSpec/CertManagerSpec types are not frozen struct-wide), skips a
-	// certManager⇄secretRef switch (has(...) guards), and the webhook re-checks
-	// it with a clearer message. Unlike the engine listener the gateway issuer is
-	// NOT frozen: reissuing the client cert under a new CA is a valid rotation
-	// (clients update their trust store) and reuses the same key, so it does not
-	// wedge.
-	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || ((self.certManager.algorithm == oldSelf.certManager.algorithm || oldSelf.certManager.algorithm == '') && (self.certManager.size == oldSelf.certManager.size || oldSelf.certManager.size == 0))",message="spec.tls.gateway.certManager algorithm/size is immutable while gateway TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name key to match, wedging the certificate. Disable gateway TLS or recreate the Instance to change the key parameters."
+	// The cert-manager key algorithm/size are MUTABLE here. They used to be
+	// frozen while gateway TLS stayed enabled, because the serving Certificate
+	// ran under rotationPolicy:Never against a stable Secret name: cert-manager
+	// reused the existing key on reissue and would not regenerate it to match a
+	// changed algorithm/size, wedging the Certificate. The TLS listeners now run
+	// under rotationPolicy:Always (see gatewayTLSRotationPolicy), so a reissue
+	// mints fresh key material that does match the new parameters, and the
+	// gateway rolls onto it because every mounted TLS Secret's resourceVersion is
+	// folded into its config hash. The rationale for the freeze is gone, so the
+	// freeze is gone with it.
+	//
+	// The gateway issuer was never frozen: reissuing the client-facing cert under
+	// a new CA is a valid rotation (clients update their trust store).
 	// +optional
 	Gateway *TLSListenerSpec `json:"gateway,omitempty"`
 
@@ -746,25 +795,20 @@ type TLSSpec struct {
 	// and a disable/re-enable (fresh certs, no overlap) — only an in-place
 	// issuer change while continuously enabled is rejected.
 	//
-	// The cert-manager key algorithm/size are likewise immutable while engine
-	// TLS stays enabled (second rule below). The stable-name anchor Certificate
-	// (Status.EngineTLS) carries the same key policy under rotationPolicy:Never,
-	// so cert-manager reuses its existing private key on every reissue and will
-	// NOT regenerate it to match a changed algorithm/size — the Certificate
-	// silently keeps the old key or never goes Ready for the new spec. The
-	// per-generation serving cert would pick up a new algorithm/size on its own
-	// (a fresh Secret name each generation), but the anchor it shares an issuer
-	// with would not, so an in-place edit still wedges engine TLS; freeze while
-	// enabled and permit it across a disable/re-enable (fresh key material).
+	// The cert-manager key algorithm/size are MUTABLE, for the same reason as on
+	// the gateway listener above: both the anchor and every per-generation
+	// serving Certificate now run under rotationPolicy:Always, so a reissue mints
+	// key material matching the new parameters instead of silently keeping the
+	// old key. An engine generation rolls onto the new material because
+	// computeStable rolls whenever the serving certificate's fingerprint changes.
 	//
-	// Both rules intentionally do not fire across a certManager⇄secretRef switch
-	// (the has(...) guards): that changes the resolved Secret name, which tlsHash
-	// folds, so it rolls the fleet through the normal convergence-gated path.
-	// Only same-Secret issuer/key-param swaps need freezing, because tlsHash
-	// cannot see them (issuerRef/algorithm/size are deliberately not folded
-	// across the anchor). The webhook re-checks both with clearer messages.
+	// The issuerRef rule intentionally does not fire across a
+	// certManager⇄secretRef switch (the has(...) guards): that changes the
+	// resolved Secret name, which tlsHash folds, so it rolls the fleet through
+	// the normal convergence-gated path. Only a same-Secret issuer swap needs
+	// freezing, because tlsHash cannot see it (issuerRef is deliberately not
+	// folded across the anchor). The webhook re-checks it with a clearer message.
 	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || (self.certManager.issuerRef.name == oldSelf.certManager.issuerRef.name && self.certManager.issuerRef.kind == oldSelf.certManager.issuerRef.kind)",message="spec.tls.engine.certManager.issuerRef is immutable while engine TLS is enabled: reissuing engine certificates under a new CA while the gateway still trusts the old anchor would break every upstream handshake. Disable engine TLS or recreate the Instance to change the issuer."
-	// +kubebuilder:validation:XValidation:rule="!(self.enabled && oldSelf.enabled) || !has(self.certManager) || !has(oldSelf.certManager) || ((self.certManager.algorithm == oldSelf.certManager.algorithm || oldSelf.certManager.algorithm == '') && (self.certManager.size == oldSelf.certManager.size || oldSelf.certManager.size == 0))",message="spec.tls.engine.certManager algorithm/size is immutable while engine TLS is enabled: under rotationPolicy:Never cert-manager will not regenerate the existing stable-name anchor key to match, wedging the certificate. Disable engine TLS or recreate the Instance to change the key parameters."
 	// +optional
 	Engine *TLSListenerSpec `json:"engine,omitempty"`
 }

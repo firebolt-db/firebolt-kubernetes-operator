@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -106,7 +107,6 @@ func validateImmutableFields(oldInst, newInst *FireboltInstance) field.ErrorList
 	var errs field.ErrorList
 	errs = append(errs, validateImmutableSigningKey(oldInst, newInst)...)
 	errs = append(errs, validateImmutableEngineTLSIssuer(oldInst, newInst)...)
-	errs = append(errs, validateImmutableTLSKeyParams(oldInst, newInst)...)
 	return errs
 }
 
@@ -157,8 +157,14 @@ func engineTLSCertManaged(inst *FireboltInstance) bool {
 // validateImmutableEngineTLSIssuer freezes the engine TLS issuer while engine
 // TLS stays enabled. Reissuing per-generation engine certificates under a new
 // CA while the gateway still trusts the old CA anchor (Status.EngineTLS) would
-// fail every upstream handshake mid-roll. The key algorithm/size are frozen
-// separately (validateImmutableTLSKeyParams).
+// fail every upstream handshake mid-roll.
+//
+// The key algorithm/size are NOT frozen (they used to be, on both listeners).
+// That freeze existed only because rotationPolicy:Never meant cert-manager would
+// never regenerate a stable-name key to match a changed algorithm/size, wedging
+// the Certificate. Both TLS listeners now issue under rotationPolicy:Always, so a
+// reissue mints matching key material and the parameters rotate cleanly. The CEL
+// twins were removed with it.
 func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.ErrorList {
 	if !engineTLSCertManaged(oldInst) || !engineTLSCertManaged(newInst) {
 		return nil
@@ -175,9 +181,6 @@ func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.
 			"Disable engine TLS or recreate the Instance to change the issuer.")}
 }
 
-// gatewayTLSCertManaged reports whether gateway TLS is enabled and provisioned
-// via cert-manager on inst. A bring-your-own SecretRef gateway has no
-// operator-managed key parameters to freeze.
 func gatewayTLSCertManaged(inst *FireboltInstance) bool {
 	return inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil && inst.Spec.TLS.Gateway.Enabled &&
 		inst.Spec.TLS.Gateway.CertManager != nil
@@ -196,20 +199,6 @@ func gatewayTLSCertManaged(inst *FireboltInstance) bool {
 // permitted; only an in-place edit while continuously enabled is rejected.
 // Mirrors the CEL transition rules on TLSSpec.Engine / TLSSpec.Gateway with
 // clearer, field-scoped messages.
-func validateImmutableTLSKeyParams(oldInst, newInst *FireboltInstance) field.ErrorList {
-	var errs field.ErrorList
-	if engineTLSCertManaged(oldInst) && engineTLSCertManaged(newInst) {
-		errs = append(errs, immutableKeyParamErrs(
-			oldInst.Spec.TLS.Engine.CertManager, newInst.Spec.TLS.Engine.CertManager,
-			field.NewPath("spec", "tls", "engine", "certManager"), "engine")...)
-	}
-	if gatewayTLSCertManaged(oldInst) && gatewayTLSCertManaged(newInst) {
-		errs = append(errs, immutableKeyParamErrs(
-			oldInst.Spec.TLS.Gateway.CertManager, newInst.Spec.TLS.Gateway.CertManager,
-			field.NewPath("spec", "tls", "gateway", "certManager"), "gateway")...)
-	}
-	return errs
-}
 
 // immutableKeyParamErrs reports any algorithm/size change between two
 // CertManagerSpecs, phrased for the named listener. A change from an unset
@@ -218,21 +207,6 @@ func validateImmutableTLSKeyParams(oldInst, newInst *FireboltInstance) field.Err
 // but every other change, including old-explicit-to-different-value and
 // explicit-to-unset, is still rejected. Mirrors the analogous escapes on the
 // TLSSpec.Engine / TLSSpec.Gateway CEL transition rules.
-func immutableKeyParamErrs(oldCM, newCM *CertManagerSpec, base *field.Path, listener string) field.ErrorList {
-	var errs field.ErrorList
-	if oldCM.Algorithm != newCM.Algorithm && oldCM.Algorithm != "" {
-		errs = append(errs, field.Invalid(base.Child("algorithm"), newCM.Algorithm,
-			fmt.Sprintf("is immutable while %s TLS is enabled: under rotationPolicy:Never cert-manager will "+
-				"not regenerate the existing stable-name key to match, wedging the certificate. Disable %s TLS "+
-				"or recreate the Instance to change the key algorithm.", listener, listener)))
-	}
-	if oldCM.Size != newCM.Size && oldCM.Size != 0 {
-		errs = append(errs, field.Invalid(base.Child("size"), newCM.Size,
-			fmt.Sprintf("is immutable while %s TLS is enabled (same reason as algorithm): disable %s TLS "+
-				"or recreate the Instance to change the key size.", listener, listener)))
-	}
-	return errs
-}
 
 // ValidateDelete validates a FireboltInstance on deletion.
 func (v *FireboltInstanceCustomValidator) ValidateDelete(_ context.Context, _ *FireboltInstance) (admission.Warnings, error) {
@@ -289,8 +263,19 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 	}
 	var errs field.ErrorList
 	enginePath := field.NewPath("spec", "tls", "engine")
-	errs = append(errs, validateTLSListener(tls.Engine, enginePath)...)
-	errs = append(errs, validateTLSListener(tls.Gateway, field.NewPath("spec", "tls", "gateway"))...)
+	gatewayPath := field.NewPath("spec", "tls", "gateway")
+	isProtected := instanceProtectedSecretPredicate(inst)
+	errs = append(errs, validateTLSListener(tls.Engine, enginePath, isProtected)...)
+	errs = append(errs, validateTLSListener(tls.Gateway, gatewayPath, isProtected)...)
+
+	// A client CRL is only consulted while verifying client certificates, which
+	// only happens when a client CA is configured. Without one it is dead config
+	// that reads as revocation being enforced.
+	if tls.Gateway != nil && tls.Gateway.CRLSecretRef != nil && tls.Gateway.ClientCASecretRef == nil {
+		errs = append(errs, field.Forbidden(gatewayPath.Child("crlSecretRef"),
+			"requires spec.tls.gateway.clientCASecretRef: a client revocation list is only "+
+				"consulted while verifying client certificates"))
+	}
 
 	// Mutual TLS (client-certificate verification) is honored only on the
 	// gateway's client-facing listener; the engine-side verify-client path
@@ -320,12 +305,36 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 // cert-manager Certificate) or SecretRef (a user-supplied Secret — see
 // TLSListenerSpec's doc comment). A cert-manager source additionally needs
 // a named issuer and a valid algorithm/size; a SecretRef needs a name.
-func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.ErrorList {
-	if listener == nil || !listener.Enabled {
+func validateTLSListener(listener *TLSListenerSpec, base *field.Path, isProtected func(string) bool) field.ErrorList {
+	if listener == nil {
 		return nil
 	}
 
 	var errs field.ErrorList
+
+	// Screened whether or not the listener is enabled: these name Secrets, and a
+	// reference to an operator-managed Secret is wrong in either state.
+	errs = append(errs, forbidProtectedSecretRef(listener.SecretRef, base.Child("secretRef"), isProtected)...)
+	errs = append(errs, forbidProtectedSecretRef(listener.ClientCASecretRef, base.Child("clientCASecretRef"), isProtected)...)
+	errs = append(errs, forbidProtectedSecretRef(listener.CRLSecretRef, base.Child("crlSecretRef"), isProtected)...)
+
+	if !listener.Enabled {
+		// Everything below describes how to terminate TLS, which a disabled
+		// listener does not do. Most of those fields are harmlessly inert, but
+		// clientCASecretRef is a statement of security INTENT: silently ignoring it
+		// leaves an operator believing client certificates are being verified when
+		// the listener is serving plaintext. Reject it rather than no-op it.
+		if listener.ClientCASecretRef != nil {
+			errs = append(errs, field.Forbidden(base.Child("clientCASecretRef"),
+				"requires enabled: true — mutual TLS cannot be configured on a disabled listener, "+
+					"and silently ignoring it would leave client certificates unverified"))
+		}
+		if listener.CRLSecretRef != nil {
+			errs = append(errs, field.Forbidden(base.Child("crlSecretRef"),
+				"requires enabled: true — a revocation list has nothing to apply to on a disabled listener"))
+		}
+		return errs
+	}
 
 	hasCertManager := listener.CertManager != nil
 	hasSecretRef := listener.SecretRef != nil
@@ -355,8 +364,33 @@ func validateTLSListener(listener *TLSListenerSpec, base *field.Path) field.Erro
 	if listener.ClientCASecretRef != nil && listener.ClientCASecretRef.Name == "" {
 		errs = append(errs, field.Required(base.Child("clientCASecretRef", "name"), "required"))
 	}
+	if listener.CRLSecretRef != nil && listener.CRLSecretRef.Name == "" {
+		errs = append(errs, field.Required(base.Child("crlSecretRef", "name"), "required"))
+	}
 
 	return errs
+}
+
+// forbidProtectedSecretRef rejects a user-supplied Secret reference that names one
+// of the operator's own Secrets.
+//
+// The pod-template guards already stop a template from reaching those Secrets, but
+// a spec-level secretRef is a second route to the same place and was unscreened:
+// pointing spec.tls.gateway.secretRef at the JWT signing keypair's Secret passed
+// admission (the name is non-empty, and that Secret does carry tls.crt/tls.key),
+// which would mount the Instance's token-signing private key into the
+// client-facing Envoy pod. Same guard, same predicate, other door.
+func forbidProtectedSecretRef(
+	ref *corev1.LocalObjectReference, path *field.Path, isProtected func(string) bool,
+) field.ErrorList {
+	if ref == nil || ref.Name == "" || isProtected == nil || !isProtected(ref.Name) {
+		return nil
+	}
+	return field.ErrorList{field.Forbidden(path,
+		fmt.Sprintf("must not name %q, a Secret the operator manages itself "+
+			"(a signing key, an engine or gateway TLS certificate, the engine CA bundle, "+
+			"or the metadata credentials); referencing it here would mount operator-owned "+
+			"key material into a pod that has no business holding it", ref.Name))}
 }
 
 // ValidateAuth mirrors packdb's instance.auth validation rules
@@ -673,6 +707,47 @@ func validatePositiveDurationField(path *field.Path, value string) *field.Error 
 	return nil
 }
 
+// issuerClaim is the JWT claim that identifies which provider minted a token. A
+// username mapping that does not incorporate it cannot distinguish two providers'
+// identities from each other.
+const issuerClaim = "iss"
+
+// defaultAdminName mirrors the AdminSpec.Name CRD default (packdb's own default
+// admin username).
+const defaultAdminName = "firebolt"
+
+// validateUsernameMapping rejects the two ways an OIDC username mapping can
+// resolve to an identity it should not.
+//
+//  1. With more than one provider configured, a mapping that does not incorporate
+//     the "iss" claim is not provider-unique. Two providers both mapping to
+//     "{{ email }}" — the value this operator's own example used to teach — resolve
+//     an identity from either provider onto the SAME Firebolt user, so a subject in
+//     the weaker IdP inherits whatever the stronger IdP's user was granted. With
+//     jitProvisioning enabled the collision is created automatically on first login.
+//     packdb validates each provider in isolation and cannot see this.
+//
+//  2. A mapping that is a bare literal equal to the admin username resolves an
+//     external identity onto the Instance admin account, which packdb re-provisions
+//     from config on every engine start. Only a literal is detectable at admission
+//     (a template's output depends on claims the operator never sees), so this
+//     catches the unambiguous case and leaves the templated one to documentation.
+func validateUsernameMapping(mapping string, path *field.Path, providerCount int, adminName string) field.ErrorList {
+	var errs field.ErrorList
+	if providerCount > 1 && !strings.Contains(mapping, issuerClaim) {
+		errs = append(errs, field.Invalid(path, mapping,
+			fmt.Sprintf("must incorporate the %q claim when more than one OIDC provider is configured: "+
+				"a mapping that is not provider-unique lets an identity from one provider resolve to "+
+				"another provider's Firebolt user (for example %q)", issuerClaim, "{{ iss }}|{{ sub }}")))
+	}
+	if !strings.Contains(mapping, "{{") && strings.TrimSpace(mapping) == adminName {
+		errs = append(errs, field.Invalid(path, mapping,
+			fmt.Sprintf("must not resolve to the Instance admin username %q: an OIDC identity "+
+				"mapped onto the admin account would inherit its privileges", adminName)))
+	}
+	return errs
+}
+
 // validateSigningAlgorithmCompatibility rejects a JWT signing algorithm
 // that doesn't match the cert-manager key algorithm used to provision the
 // signing keypair — packdb would otherwise fail to load an RSA-family
@@ -744,8 +819,15 @@ func validateCertManagerKey(cm *CertManagerSpec, base *field.Path) *field.Error 
 	sizePath := base.Child("size")
 	switch alg {
 	case "RSA":
-		if size < 2048 || size > 8192 {
-			return field.Invalid(sizePath, size, "RSA key size must be between 2048 and 8192 bits")
+		// cert-manager accepts 2048, 4096 and 8192 and nothing else ("No other
+		// values are allowed" — CertificatePrivateKey.Size). Admitting a range
+		// meant a plausible value like 3072 passed admission and then left the
+		// Certificate permanently un-Ready: AuthReady stuck at SigningKeyPending,
+		// and — because the signing key size is immutable once set — no edit could
+		// recover it. Mirror cert-manager's enum so the rejection happens at apply.
+		if size != 2048 && size != 4096 && size != 8192 {
+			return field.Invalid(sizePath, size,
+				"RSA key size must be one of 2048, 4096, or 8192 (cert-manager rejects any other value)")
 		}
 	case "ECDSA":
 		if size != 256 && size != 384 && size != 521 {

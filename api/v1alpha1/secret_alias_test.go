@@ -152,7 +152,7 @@ func TestValidateNoSecretAliasVolumes(t *testing.T) {
 	})
 }
 
-func TestEngineMountedSecretNames(t *testing.T) {
+func TestInstanceOperatorSecretNames(t *testing.T) {
 	inst := &FireboltInstance{
 		Spec: FireboltInstanceSpec{
 			Auth: &AuthSpec{Enabled: true, Local: &LocalAuthSpec{
@@ -169,16 +169,16 @@ func TestEngineMountedSecretNames(t *testing.T) {
 			EngineTLS: &EngineTLSStatus{SecretName: "inst-engine-tls"},
 		},
 	}
-	got := EngineMountedSecretNames(inst)
+	got := InstanceOperatorSecretNames(inst)
 	want := []string{"admin-pw", "inst-auth-signing", "inst-auth-signing-key-2", "inst-engine-tls"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("EngineMountedSecretNames = %v, want %v", got, want)
+		t.Fatalf("InstanceOperatorSecretNames = %v, want %v", got, want)
 	}
 
 	t.Run("auth disabled contributes no admin password", func(t *testing.T) {
 		off := inst.DeepCopy()
 		off.Spec.Auth.Enabled = false
-		for _, n := range EngineMountedSecretNames(off) {
+		for _, n := range InstanceOperatorSecretNames(off) {
 			if n == "admin-pw" {
 				t.Error("admin password Secret must not be protected while auth is disabled")
 			}
@@ -186,7 +186,7 @@ func TestEngineMountedSecretNames(t *testing.T) {
 	})
 
 	t.Run("unprovisioned instance protects nothing", func(t *testing.T) {
-		if got := EngineMountedSecretNames(&FireboltInstance{}); len(got) != 0 {
+		if got := InstanceOperatorSecretNames(&FireboltInstance{}); len(got) != 0 {
 			t.Errorf("want no names, got %v", got)
 		}
 	})

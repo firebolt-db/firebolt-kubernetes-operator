@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -518,15 +519,19 @@ func validateInstanceTemplates(inst *computev1alpha1.FireboltInstance) (gateway,
 		field.NewPath("spec", "metadata", "template"),
 		computev1alpha1.MetadataPodTemplateRules,
 	)
+	// One Instance-wide predicate for BOTH templates, not a per-component list
+	// each: the gateway template has no business reaching the admin password or a
+	// JWT signing key, and the metadata template has no business reaching the
+	// gateway's serving key. Screening each template only against the Secrets its
+	// own pod mounts left exactly those cross-component routes open.
+	protected := instanceProtectedSecret(inst)
 	if inst.Spec.Gateway.Template != nil {
 		gateway = append(gateway, validateTemplateSecretRefs(inst.Spec.Gateway.Template,
-			field.NewPath("spec", "gateway", "template", "spec"),
-			nameSetPredicate(gatewayMountedSecretNames(inst)), "gateway")...)
+			field.NewPath("spec", "gateway", "template", "spec"), protected, "gateway")...)
 	}
 	if inst.Spec.Metadata.Template != nil {
 		metadata = append(metadata, validateTemplateSecretRefs(inst.Spec.Metadata.Template,
-			field.NewPath("spec", "metadata", "template", "spec"),
-			nameSetPredicate(metadataMountedSecretNames(inst)), "metadata")...)
+			field.NewPath("spec", "metadata", "template", "spec"), protected, "metadata")...)
 	}
 	return gateway, metadata
 }
@@ -549,45 +554,80 @@ func validateTemplateSecretRefs(
 		tpl.Spec.InitContainers, base.Child("initContainers"), isProtected, component)...)
 }
 
-// gatewayMountedSecretNames returns the Secrets the operator mounts into the
-// gateway pod. The downstream server certificate is the sensitive one; the trust
-// bundle and client CA hold public certificates and are listed so the rule reads
-// as "the operator's own volumes are the operator's", not as a judgement about
-// each Secret's contents.
-func gatewayMountedSecretNames(inst *computev1alpha1.FireboltInstance) []string {
-	names := []string{engineCABundleSecretName(inst.Name)}
-	if inst.Status.GatewayTLS != nil {
-		names = append(names, inst.Status.GatewayTLS.SecretName)
-	}
-	if clientCA := gatewayClientCASecretRef(inst); clientCA != nil {
-		names = append(names, clientCA.Name)
-	}
-	return names
-}
-
-// metadataMountedSecretNames returns the Secrets the operator mounts into the
-// metadata pod — the Postgres credentials, whether operator-generated or
-// user-supplied for an external Postgres.
-func metadataMountedSecretNames(inst *computev1alpha1.FireboltInstance) []string {
-	return []string{metadataCredsSecretName(inst)}
-}
-
-// nameSetPredicate adapts a name list to the predicate ValidateNoSecretAliasVolumes
-// takes, dropping empty entries so an unprovisioned Secret protects nothing.
-func nameSetPredicate(names []string) func(string) bool {
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		if n != "" {
-			set[n] = struct{}{}
-		}
-	}
-	if len(set) == 0 {
-		return nil
+// instanceProtectedSecret is the authoritative, complete predicate for "no user
+// pod template may reach this Secret". Every template gate in the operator — the
+// gateway and metadata templates here, the engine and engine-class templates in
+// engine_controller.go — resolves through this one function, so a Secret is
+// protected on every path the moment it is protected on any.
+//
+// It is the union of three sources:
+//
+//   - computev1alpha1.InstanceOperatorSecretNames: everything derivable from the
+//     CR (admin password, signing keys, engine-TLS anchor, gateway serving cert,
+//     gateway client CA, an external Postgres credential).
+//   - the two names formed from suffixes private to this package: the engine CA
+//     bundle, and the operator-generated Postgres credential.
+//   - a SHAPE match for per-generation engine-TLS Secrets, deliberately NOT bound
+//     to any one engine's name. Binding it to the engine under review — as the
+//     per-engine predicate used to — let engine A's template alias engine B's
+//     serving private key, since B's Secret name does not start with A's.
+func instanceProtectedSecret(inst *computev1alpha1.FireboltInstance) func(string) bool {
+	exact := make(map[string]struct{})
+	for _, n := range instanceProtectedSecretNames(inst) {
+		exact[n] = struct{}{}
 	}
 	return func(name string) bool {
-		_, hit := set[name]
-		return hit
+		if name == "" {
+			return false
+		}
+		if _, hit := exact[name]; hit {
+			return true
+		}
+		return isGeneratedEngineTLSSecretName(name)
 	}
+}
+
+// instanceProtectedSecretNames is the exact-match half of
+// instanceProtectedSecret: every operator-managed Secret name for this Instance
+// that can be named outright. Exposed separately so the engine controller can
+// carry the list across into InstanceInfo (which is built from the Instance and
+// then consumed without it) and rebuild the same predicate on the far side.
+// Empty entries are dropped, so a component still provisioning protects nothing.
+func instanceProtectedSecretNames(inst *computev1alpha1.FireboltInstance) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(n string) {
+		if n == "" {
+			return
+		}
+		if _, dup := seen[n]; dup {
+			return
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	for _, n := range computev1alpha1.InstanceOperatorSecretNames(inst) {
+		add(n)
+	}
+	add(engineCABundleSecretName(inst.Name))
+	add(metadataCredsSecretName(inst))
+	return out
+}
+
+// isGeneratedEngineTLSSecretName reports whether name has the shape of a
+// per-generation engine-TLS Secret ("<engine>-g<N>-engine-tls",
+// genResourceName(engine, gen, SuffixEngineTLS)) for ANY engine. Matched by shape
+// because the generation number means no reconcile can enumerate the live set,
+// and by any-engine because a template must not reach a SIBLING engine's serving
+// key either.
+func isGeneratedEngineTLSSecretName(name string) bool {
+	if !strings.HasSuffix(name, SuffixEngineTLS) {
+		return false
+	}
+	// Require the generation infix so the instance-wide anchor
+	// ("<instance>-engine-tls", already covered by the exact set) and an
+	// unrelated user Secret merely ending in "-engine-tls" are not swept in.
+	return strings.Contains(strings.TrimSuffix(name, SuffixEngineTLS), SuffixGen)
 }
 
 // checkExternalPostgresSecret verifies the Secret referenced by

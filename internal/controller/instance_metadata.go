@@ -381,7 +381,7 @@ func effectiveMetadataPodTemplate(
 	}
 
 	containers := append([]corev1.Container{pensieve}, userSidecars...)
-	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
 		computev1alpha1.MetadataConfigVolumeName,
 		computev1alpha1.MetadataPostgresCredsVolumeName,
 		computev1alpha1.MetadataTmpVolumeName,

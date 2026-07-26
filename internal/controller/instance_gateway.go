@@ -149,6 +149,36 @@ const (
 	// buildListenerDownstreamTLSTransportSocket.
 	gatewayTLSMountPath = "/etc/envoy/tls/gateway"
 
+	// gatewayEngineCRLMountPath is the directory the engine-certificate CRL
+	// (spec.tls.engine.crlSecretRef) is mounted at on the Envoy container,
+	// present only when the operator supplied one. Referenced as the
+	// dynamic_forward_proxy cluster's validation_context crl.
+	gatewayEngineCRLMountPath = "/etc/envoy/tls/engine-crl"
+
+	// gatewayClientCRLMountPath is the directory the client-certificate CRL
+	// (spec.tls.gateway.crlSecretRef) is mounted at on the Envoy container,
+	// present only when mutual TLS is on AND a CRL was supplied.
+	gatewayClientCRLMountPath = "/etc/envoy/tls/client-crl"
+
+	// tlsCRLSecretKey is the data key a CRL Secret must carry. Not a
+	// cert-manager or corev1 convention — there is none for CRLs — so the
+	// operator fixes one and the CRD documents it.
+	tlsCRLSecretKey = "crl.pem"
+
+	// gatewayDownstreamMinTLSVersion is the floor the client-facing listener
+	// enforces. Pinned rather than left to Envoy's default so the operator's
+	// posture is a property of the operator, not of whichever Envoy build the
+	// chart happens to ship: a base-image bump or an upstream default change
+	// must not be able to move the floor on the one listener untrusted clients
+	// reach. TLSv1_2 rather than TLSv1_3 because external clients (BI tools,
+	// older drivers) still legitimately negotiate 1.2.
+	gatewayDownstreamMinTLSVersion = "TLSv1_2"
+
+	// gatewayUpstreamMinTLSVersion is the floor for the gateway→engine hop.
+	// Both ends are operator-managed and both are modern, so there is no reason
+	// to accept anything below TLS 1.3 here.
+	gatewayUpstreamMinTLSVersion = "TLSv1_3"
+
 	// gatewayClientCAMountPath is the directory the client-CA Secret is
 	// mounted at on the Envoy container when mutual TLS is enabled on the
 	// gateway's client-facing listener (spec.tls.gateway.clientCASecretRef).
@@ -409,22 +439,38 @@ func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstan
 	// pre-TLS config — avoiding a spurious config-hash change, and
 	// therefore a gateway rollout, for every instance that never touches
 	// spec.tls.engine.
+	// Revocation, when the operator supplied a CRL for engine certificates.
+	var crl string
+	if engineCRLSecretRef(instance) != nil {
+		crl = fmt.Sprintf("              crl:\n                filename: %s/%s\n",
+			gatewayEngineCRLMountPath, tlsCRLSecretKey)
+	}
+
 	return fmt.Sprintf(`      transport_socket:
         name: envoy.transport_sockets.tls
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
           common_tls_context:
             tls_params:
+              tls_minimum_protocol_version: %s
               ecdh_curves: [X25519, P-256, P-384, P-521]
             validation_context:
               trusted_ca:
                 filename: %s/%s
-              match_typed_subject_alt_names:
+%s              match_typed_subject_alt_names:
                 - san_type: DNS
                   matcher:
-                    suffix: ".%s.svc.cluster.local"
+                    suffix: "%s.%s.svc.cluster.local"
+                - san_type: DNS
+                  matcher:
+                    safe_regex:
+                      regex: "^[a-z0-9-]+%s[0-9]+%s\\.%s\\.svc\\.cluster\\.local$"
 `,
-		gatewayEngineCAMountPath, engineTLSCASecretKey, instance.Namespace)
+		gatewayUpstreamMinTLSVersion,
+		gatewayEngineCAMountPath, engineTLSCASecretKey,
+		crl,
+		SuffixService, instance.Namespace,
+		SuffixGen, SuffixHL, instance.Namespace)
 }
 
 // gatewayDownstreamTLSReady reports whether the gateway's client-facing
@@ -511,6 +557,26 @@ func gatewayClientCASecretRef(instance *computev1alpha1.FireboltInstance) *corev
 	return instance.Spec.TLS.Gateway.ClientCASecretRef
 }
 
+// gatewayCRLSecretRef returns the CRL for CLIENT certificates
+// (spec.tls.gateway.crlSecretRef), or nil when none is configured. Only
+// meaningful alongside a client CA; admission rejects it on its own.
+func gatewayCRLSecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Gateway.CRLSecretRef
+}
+
+// engineCRLSecretRef returns the CRL for ENGINE certificates
+// (spec.tls.engine.crlSecretRef), which the gateway loads when verifying engines
+// upstream, or nil when none is configured.
+func engineCRLSecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Engine == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Engine.CRLSecretRef
+}
+
 // buildListenerDownstreamTLSTransportSocket returns the client-facing
 // listener's filter_chain transport_socket YAML block (indented to nest
 // as a sibling of "filters:" within that filter_chain entry — see
@@ -535,10 +601,15 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
 	// one-way-TLS gateway renders byte-identically to before this feature.
 	var validationContext, requireClientCert string
 	if gatewayClientCASecretRef(instance) != nil {
+		var crl string
+		if gatewayCRLSecretRef(instance) != nil {
+			crl = fmt.Sprintf("                    crl:\n                      filename: %s/%s\n",
+				gatewayClientCRLMountPath, tlsCRLSecretKey)
+		}
 		validationContext = fmt.Sprintf(`                validation_context:
                   trusted_ca:
                     filename: %s/%s
-`, gatewayClientCAMountPath, engineTLSCASecretKey)
+%s`, gatewayClientCAMountPath, engineTLSCASecretKey, crl)
 		requireClientCert = "              require_client_certificate: true\n"
 	}
 
@@ -547,12 +618,15 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
               common_tls_context:
+                tls_params:
+                  tls_minimum_protocol_version: %s
                 tls_certificates:
                   - certificate_chain:
                       filename: %s/%s
                     private_key:
                       filename: %s/%s
 %s%s`,
+		gatewayDownstreamMinTLSVersion,
 		gatewayTLSMountPath, corev1.TLSCertKey,
 		gatewayTLSMountPath, corev1.TLSPrivateKeyKey,
 		validationContext, requireClientCert)
@@ -1582,6 +1656,25 @@ sleep 8
 				},
 			},
 		})
+		// Revocation for engine certificates, when supplied. Mounted alongside the
+		// trust bundle and referenced from the same validation_context, so a
+		// compromised engine key can be rejected before its certificate expires.
+		if ref := engineCRLSecretRef(instance); ref != nil {
+			envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+				Name:      computev1alpha1.GatewayEngineCRLVolumeName,
+				MountPath: gatewayEngineCRLMountPath,
+				ReadOnly:  true,
+			})
+			operatorVolumes = append(operatorVolumes, corev1.Volume{
+				Name: computev1alpha1.GatewayEngineCRLVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: ref.Name,
+						Items:      []corev1.KeyToPath{{Key: tlsCRLSecretKey, Path: tlsCRLSecretKey}},
+					},
+				},
+			})
+		}
 	}
 	// Present only once gateway TLS is enabled and ready — see
 	// gatewayDownstreamTLSReady's matching gate. Mounting the whole
@@ -1624,14 +1717,34 @@ sleep 8
 					},
 				},
 			})
+			// Revocation for client certificates, when supplied. Scoped inside the
+			// client-CA branch: a CRL without a CA to verify against is meaningless,
+			// and admission rejects that combination outright.
+			if ref := gatewayCRLSecretRef(instance); ref != nil {
+				envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+					Name:      computev1alpha1.GatewayClientCRLVolumeName,
+					MountPath: gatewayClientCRLMountPath,
+					ReadOnly:  true,
+				})
+				operatorVolumes = append(operatorVolumes, corev1.Volume{
+					Name: computev1alpha1.GatewayClientCRLVolumeName,
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: ref.Name,
+							Items:      []corev1.KeyToPath{{Key: tlsCRLSecretKey, Path: tlsCRLSecretKey}},
+						},
+					},
+				})
+			}
 		}
 	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
-	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes,
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
 		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
 		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName,
-		computev1alpha1.GatewayClientCAVolumeName)
+		computev1alpha1.GatewayClientCAVolumeName, computev1alpha1.GatewayEngineCRLVolumeName,
+		computev1alpha1.GatewayClientCRLVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {
@@ -1709,11 +1822,21 @@ func envoyImagePullPolicy(primary *corev1.Container, image string) corev1.PullPo
 // operator-rendered one (which would silently break the matching
 // volumeMount on the operator container).
 //
-// A user entry that reaches an operator-mounted Secret under some other volume
+// A user entry that reaches an operator-managed Secret under some other volume
 // name is dropped too. The reconcile-time template check is what tells the user
 // about it; this is the layer that holds even if a future caller skips that
 // check.
-func appendUserVolumes(operator []corev1.Volume, userVolumes []corev1.Volume, reserved ...string) []corev1.Volume {
+//
+// isProtected decides which Secrets are off limits and must be the INSTANCE-WIDE
+// predicate (instanceProtectedSecret), not a set derived from the volumes this
+// component happens to render. Deriving it from the component's own volumes — as
+// this used to, via operatorMountedSecretNames — meant the gateway dropped only
+// gateway Secrets and the metadata pod only its own, leaving each free to alias
+// the admin password or a JWT signing key. A nil predicate protects nothing.
+func appendUserVolumes(
+	operator []corev1.Volume, userVolumes []corev1.Volume,
+	isProtected func(string) bool, reserved ...string,
+) []corev1.Volume {
 	if len(userVolumes) == 0 {
 		return operator
 	}
@@ -1721,14 +1844,13 @@ func appendUserVolumes(operator []corev1.Volume, userVolumes []corev1.Volume, re
 	for _, n := range reserved {
 		reservedSet[n] = struct{}{}
 	}
-	operatorSecrets := operatorMountedSecretNames(operator)
 	out := make([]corev1.Volume, 0, len(operator)+len(userVolumes))
 	out = append(out, operator...)
 	for i := range userVolumes {
 		if _, taken := reservedSet[userVolumes[i].Name]; taken {
 			continue
 		}
-		if aliasesOperatorSecret(&userVolumes[i], operatorSecrets) {
+		if aliasesProtectedSecret(&userVolumes[i], isProtected) {
 			continue
 		}
 		out = append(out, *userVolumes[i].DeepCopy())

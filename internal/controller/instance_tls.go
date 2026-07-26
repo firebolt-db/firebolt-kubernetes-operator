@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	stderrors "errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,18 +41,75 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// engineTLSCertDuration is set far beyond any practical operator or
-// cluster lifetime so cert-manager does not renew the engine TLS
-// Certificate on its own schedule, mirroring authSigningCertDuration.
-// packdb's HTTP server (like SigningKeyManager) reads its configured
-// certificate_file/private_key_file only at process startup, so an
-// uncoordinated renewal would sit in the Secret unused until an engine
-// pod happened to restart for an unrelated reason — silently diverging
-// from what cert-manager believes is the live certificate. A future
-// rotation feature would need to plumb the Secret's content (not just
-// its name) into engine_reconcile.go's drift hash before this can safely
-// shrink.
-const engineTLSCertDuration = 100 * 365 * 24 * time.Hour
+// DefaultCertDurationTLS is the default lifetime of an operator-provisioned TLS
+// serving certificate (engine listener and gateway listener alike), overridable
+// per listener via CertManagerSpec.Duration.
+//
+// These certificates used to be issued for 100 years under
+// privateKey.rotationPolicy: Never — so the serving private key was never
+// regenerated, cert-manager's renewal never fired (its default renewBefore is a
+// third of the duration), and a leaked key stayed valid for a century with no
+// revocation path. The original justification was that packdb reads its
+// certificate only at process startup, so an uncoordinated renewal would sit
+// unused in the Secret.
+//
+// That justification no longer holds, because FB-896 built the machinery that
+// makes a renewal observable on both hops:
+//
+//   - engines: computeStable rolls a fresh blue-green generation when THIS
+//     generation's serving-certificate fingerprint changes, which is exactly what
+//     an in-place reissue looks like (engine_reconcile.go).
+//   - gateway: gatewayConfigHash folds every mounted TLS Secret's
+//     resourceVersion, so a reissue changes the pod template and rolls the
+//     Deployment (instance_gateway.go).
+//
+// So a renewal now propagates to running processes on its own, and a bounded
+// lifetime is both safe and the correct posture. 90 days also keeps the operator
+// inside the issuance limits real CAs enforce — many reject a multi-decade
+// duration outright, which silently capped the old value anyway.
+const DefaultCertDurationTLS = 90 * 24 * time.Hour
+
+// DefaultCertRenewBeforeTLS starts renewal a third of the way into the lifetime,
+// leaving 30 days of headroom for the rollout a reissue triggers — far more than
+// any engine fleet roll or gateway rollout needs, so an expiry can never be
+// reached because a roll was slow.
+const DefaultCertRenewBeforeTLS = 30 * 24 * time.Hour
+
+// tlsCertRotationPolicy is Always for both TLS listeners: a reissue mints fresh
+// key material rather than reusing whatever key already sits in the target
+// Secret. Two reasons, one security and one operational:
+//
+//   - Never means cert-manager adopts a pre-existing private key in the target
+//     Secret, which is the hole verifyCertManagerIssued closes from the other
+//     side; Always removes the incentive entirely for these two listeners.
+//   - Never meant an algorithm/size change could never take effect (cert-manager
+//     raises a warning and waits for a human), which is why those fields had to be
+//     CEL-frozen while the listener stayed enabled. With Always they rotate
+//     cleanly, so the freeze is gone from the CRD.
+//
+// The JWT signing keypair deliberately keeps Never — see authSigningRotationPolicy.
+var tlsCertRotationPolicy = certmanagerv1.RotationPolicyAlways
+
+// resolveCertDuration returns the issuance lifetime and renewal lead time for a
+// listener, applying the operator defaults when the user left them unset. Both are
+// returned as cert-manager wants them, and renewBefore is only returned when it is
+// strictly shorter than duration — cert-manager rejects the Certificate otherwise,
+// and silently dropping an inconsistent pair is worse than letting cert-manager
+// apply its own default lead time.
+func resolveCertDuration(cm computev1alpha1.CertManagerSpec, defDuration, defRenewBefore time.Duration) (*metav1.Duration, *metav1.Duration) {
+	duration := defDuration
+	if cm.Duration != nil && cm.Duration.Duration > 0 {
+		duration = cm.Duration.Duration
+	}
+	renewBefore := defRenewBefore
+	if cm.RenewBefore != nil && cm.RenewBefore.Duration > 0 {
+		renewBefore = cm.RenewBefore.Duration
+	}
+	if renewBefore >= duration {
+		return &metav1.Duration{Duration: duration}, nil
+	}
+	return &metav1.Duration{Duration: duration}, &metav1.Duration{Duration: renewBefore}
+}
 
 // defaultCertManagerIssuerKind is the cert-manager IssuerRef.Kind every
 // Certificate-building function in this package falls back to when the
@@ -76,16 +134,25 @@ func engineTLSCertificateName(instanceName string) string {
 	return instanceName + SuffixEngineTLS
 }
 
-// engineTLSWildcardDNSName returns the namespace-wide wildcard SAN that
-// covers every engine's stable routing Service in this namespace
-// (buildClusterService: "<engine>-service.<namespace>.svc.cluster.local"),
-// regardless of how many engines exist or what they are named. A single
-// static wildcard avoids having to track the Instance's current engine
-// set and reissue the certificate as engines are added, renamed, or
-// removed — the same "operator-generated, no user-visible rotation
-// surface" simplicity SigningKeyPolicy chose for the JWT signing key.
-func engineTLSWildcardDNSName(namespace string) string {
-	return "*." + namespace + ".svc.cluster.local"
+// engineTLSAnchorDNSName returns the single, deliberately non-routable SAN on the
+// instance-wide engine-TLS anchor certificate.
+//
+// The anchor exists for exactly one reason: to make the issuer's ca.crt available
+// so the gateway can verify engines upstream. Its private key is mounted nowhere —
+// engines serve per-generation certificates (buildGenEngineTLSCertificate), not
+// this one. It used to request "*.<namespace>.svc.cluster.local", which meant the
+// operator held a 100-year wildcard serverAuth key capable of impersonating EVERY
+// service in the namespace (the metadata gRPC endpoint, the gateway, any co-tenant
+// workload) purely as a side effect of fetching a CA certificate. Naming one
+// address nothing resolves to keeps the anchor useless as an impersonation
+// credential while still satisfying cert-manager's "at least one identity"
+// requirement.
+//
+// A dedicated trust-distribution mechanism (cert-manager's trust-manager Bundle,
+// or reading the CA Issuer's own Secret) would remove the need for a leaf
+// certificate here at all, and is the better long-term shape.
+func engineTLSAnchorDNSName(instanceName, namespace string) string {
+	return instanceName + "-engine-tls-anchor." + namespace + ".svc.cluster.local"
 }
 
 // ensureEngineTLS provisions the engine-listener TLS server certificate
@@ -265,6 +332,51 @@ func engineTLSSecretReady(secret *corev1.Secret) bool {
 		len(secret.Data[engineTLSCASecretKey]) > 0
 }
 
+// errSecretNotCertManagerIssued is returned when a Secret the operator is about
+// to treat as operator-provisioned key material was not written by cert-manager
+// for the Certificate the operator applied. Distinguished as a sentinel so the
+// callers can all surface it the same way.
+var errSecretNotCertManagerIssued = stderrors.New("secret was not issued by cert-manager for the expected certificate")
+
+// verifyCertManagerIssued confirms that secret is cert-manager's output for
+// certName, via the certificate-name annotation cert-manager stamps on every
+// target Secret it writes.
+//
+// This closes a real adoption hole, not a theoretical one. Every Certificate the
+// operator creates names its target Secret deterministically
+// ("<instance>-auth-signing", "<instance>-gateway-tls", "<engine>-g<N>-engine-tls"),
+// and cert-manager's documented contract for privateKey.rotationPolicy is that
+// under "Never" it "will only [generate a private key] if one does not already
+// exist in the target spec.secretName". So anyone able to CREATE a Secret in the
+// namespace — with no FireboltInstance write access and no Secret READ access —
+// could pre-create that exact name holding key material of their choosing, and
+// cert-manager would adopt it rather than mint one. For the JWT signing keypair
+// that is game over: the planted key becomes the Instance-wide signing key and its
+// holder can mint tokens every engine in the fleet accepts as the admin. For a TLS
+// listener it hands the attacker the serving private key.
+//
+// Only the certificate name is asserted, deliberately. cert-manager stamps it
+// exclusively on Secrets it owns for that specific Certificate, so it is already
+// sufficient to reject planted material, and it is STABLE across an issuer change
+// — which the issuer annotations are not. Checking those too would fail closed
+// during a gateway issuer rotation (a supported operation: the CRD leaves the
+// gateway issuer mutable precisely so a client cert can be reissued under a new
+// CA), because the Secret carries the old issuer's annotations until the reissue
+// lands.
+//
+// Deliberately NOT auto-remediated by deleting the offending Secret: destroying key
+// material on the strength of an annotation mismatch is the wrong default, and a
+// genuine mismatch always needs a human to work out where the Secret came from.
+// The operator refuses to use it, reports why, and waits.
+func verifyCertManagerIssued(secret *corev1.Secret, certName string) error {
+	got := secret.Annotations[certmanagerv1.CertificateNameKey]
+	if got != certName {
+		return fmt.Errorf("%w: annotation %q is %q, want %q",
+			errSecretNotCertManagerIssued, certmanagerv1.CertificateNameKey, got, certName)
+	}
+	return nil
+}
+
 // certificateReadyForCurrentGeneration reports whether a cert-manager
 // Certificate is Ready AND that Ready status was observed for the
 // Certificate's CURRENT generation. Checking only the Secret's key material
@@ -296,7 +408,7 @@ func certificateReadyForCurrentGeneration(cert *certmanagerv1.Certificate) bool 
 // buildEngineTLSCertificate and engineTLSSecretReady carry the
 // unit-tested surface for this function's logic.
 func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
-	var secretName string
+	var secretName, certName string
 	if ref := instance.Spec.TLS.Engine.SecretRef; ref != nil {
 		// Bring-your-own-Secret: the operator provisions nothing and owns
 		// nothing here, it only consumes the user-supplied cert material.
@@ -317,6 +429,7 @@ func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Cont
 			return false, fmt.Errorf("applying engine TLS certificate: %w", err)
 		}
 		secretName = desired.Spec.SecretName
+		certName = desired.Name
 
 		// Cert-manager path only: require the Certificate to be Ready for its
 		// current generation before trusting the Secret, so a failed
@@ -347,6 +460,15 @@ func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Cont
 	}
 	if !engineTLSSecretReady(&secret) {
 		return false, nil
+	}
+	// Cert-manager path only (a BYO secretRef is the user's own Secret by
+	// definition): refuse a target Secret this operator's Certificate did not
+	// produce, so a pre-created Secret cannot supply the engine fleet's serving
+	// private key. See verifyCertManagerIssued.
+	if certName != "" {
+		if err := verifyCertManagerIssued(&secret, certName); err != nil {
+			return false, fmt.Errorf("engine TLS secret %s/%s: %w", instance.Namespace, secretName, err)
+		}
 	}
 
 	createdAt := metav1.Now()
@@ -395,6 +517,7 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 	}
 
 	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
+	duration, renewBefore := resolveCertDuration(*policy, DefaultCertDurationTLS, DefaultCertRenewBeforeTLS)
 
 	return &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -411,18 +534,19 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: labels,
 			},
-			DNSNames: []string{
-				engineTLSWildcardDNSName(instance.Namespace),
-				"localhost",
-			},
-			Usages: []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
+			// One non-routable name, not a namespace wildcard: this certificate is
+			// never served, and a wildcard here would be a namespace-wide
+			// impersonation key held for no reason. See engineTLSAnchorDNSName.
+			DNSNames: []string{engineTLSAnchorDNSName(instance.Name, instance.Namespace)},
+			Usages:   []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
 			IssuerRef: cmmeta.IssuerReference{
 				Name: policy.IssuerRef.Name,
 				Kind: issuerKind,
 			},
-			Duration: &metav1.Duration{Duration: engineTLSCertDuration},
+			Duration:    duration,
+			RenewBefore: renewBefore,
 			PrivateKey: &certmanagerv1.CertificatePrivateKey{
-				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				RotationPolicy: tlsCertRotationPolicy,
 				Encoding:       certmanagerv1.PKCS8,
 				Algorithm:      algorithm,
 				Size:           int(size),
@@ -792,15 +916,12 @@ func mergeCACerts(inputs [][]byte) []byte {
 	return caBundleBytes(dedupCABlobs(inputs))
 }
 
-// gatewayTLSCertDuration mirrors engineTLSCertDuration's reasoning: even
-// though Envoy is not packdb (it may reload a filename-referenced TLS
-// certificate on change rather than only at process startup), the
-// operator has not verified that behavior against the exact Envoy version
-// it ships, so cert-manager auto-renewal stays disabled here for the same
-// "do not silently swap crypto material a running process hasn't been
-// told about" reason. Coordinated rotation is a planned addition, not
-// something to lean on an unverified hot-reload assumption for today.
-const gatewayTLSCertDuration = 100 * 365 * 24 * time.Hour
+// The gateway listener uses the same DefaultCertDurationTLS /
+// DefaultCertRenewBeforeTLS defaults as the engine listener. Envoy's own
+// hot-reload behaviour is deliberately NOT relied on: gatewayConfigHash folds
+// every mounted TLS Secret's resourceVersion, so a reissue changes the pod
+// template and the Deployment rolls onto the new material through the ordinary
+// (and, on a tightening transition, fail-closed) rollout path.
 
 func gatewayTLSCertificateName(instanceName string) string {
 	return instanceName + SuffixGatewayTLS
@@ -1101,6 +1222,14 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 	if !gatewayTLSSecretReady(&secret) {
 		return false, false, nil
 	}
+	// Cert-manager path only, same reasoning as the engine listener: a
+	// pre-created Secret under the deterministic target name must not become the
+	// gateway's client-facing serving key. See verifyCertManagerIssued.
+	if certManagerPath {
+		if err := verifyCertManagerIssued(&secret, certName); err != nil {
+			return false, false, fmt.Errorf("gateway TLS secret %s/%s: %w", instance.Namespace, secretName, err)
+		}
+	}
 
 	instance.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{
 		SecretName:          secretName,
@@ -1131,6 +1260,7 @@ func buildGatewayTLSCertificate(instance *computev1alpha1.FireboltInstance) *cer
 	}
 
 	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
+	duration, renewBefore := resolveCertDuration(*policy, DefaultCertDurationTLS, DefaultCertRenewBeforeTLS)
 
 	return &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1143,12 +1273,13 @@ func buildGatewayTLSCertificate(instance *computev1alpha1.FireboltInstance) *cer
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: labels,
 			},
-			DNSNames:  gatewayTLSDNSNames(instance),
-			Usages:    []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
-			IssuerRef: cmmeta.IssuerReference{Name: policy.IssuerRef.Name, Kind: issuerKind},
-			Duration:  &metav1.Duration{Duration: gatewayTLSCertDuration},
+			DNSNames:    gatewayTLSDNSNames(instance),
+			Usages:      []certmanagerv1.KeyUsage{certmanagerv1.UsageServerAuth},
+			IssuerRef:   cmmeta.IssuerReference{Name: policy.IssuerRef.Name, Kind: issuerKind},
+			Duration:    duration,
+			RenewBefore: renewBefore,
 			PrivateKey: &certmanagerv1.CertificatePrivateKey{
-				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				RotationPolicy: tlsCertRotationPolicy,
 				Encoding:       certmanagerv1.PKCS8,
 				Algorithm:      algorithm,
 				Size:           int(size),
