@@ -240,6 +240,9 @@ func buildPostgresStatefulSet(instance *computev1alpha1.FireboltInstance) *appsv
 					// PodSpec: kill legacy service-link env injection, DNS
 					// is the only service-discovery channel here.
 					EnableServiceLinks: boolPtr(false),
+					// postgres never calls the Kubernetes API, so keep the
+					// default ServiceAccount's token off the pod filesystem.
+					AutomountServiceAccountToken: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: boolPtr(true),
 						RunAsUser:    &pgUID,
