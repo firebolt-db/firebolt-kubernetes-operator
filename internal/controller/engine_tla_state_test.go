@@ -311,53 +311,13 @@ func tlaModelBoundary(s tlaState) bool {
 	}
 }
 
-// tlaInvariants verifies the same Safety predicates checked in the rapid
-// property test (engine_property_test.go's engineSim.Check) plus the TLA+
-// safety invariants that depend only on observable simulated state.
+// tlaInvariants runs the shared invariant registry (engine_invariants_test.go),
+// the same set the rapid harness checks after every action. Keyed by the spec's
+// Safety conjunct names, so a conjunct added to formal/FireboltEngine.tla fails
+// TestEngineInvariantsMatchSpec until it is implemented here too.
 func tlaInvariants(t *testing.T, m *engineSim) {
 	t.Helper()
-	s := &m.status
-
-	if isTerminalPhase(s.Phase) && s.CurrentGeneration != s.ActiveGeneration {
-		t.Fatalf("Inv_TerminalConsistency: phase=%s but CurrentGen=%d != ActiveGen=%d",
-			s.Phase, s.CurrentGeneration, s.ActiveGeneration)
-	}
-	if isTerminalPhase(s.Phase) && s.DrainingGeneration != nil {
-		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
-			s.Phase, *s.DrainingGeneration)
-	}
-	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
-		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS", s.ActiveGeneration)
-	}
-	if s.DrainingGeneration != nil && s.Phase != computev1alpha1.PhaseDraining && s.Phase != computev1alpha1.PhaseCleaning {
-		t.Fatalf("Inv_DrainingPhase: DrainingGen=%d but phase=%s",
-			*s.DrainingGeneration, s.Phase)
-	}
-	if s.DrainingGeneration != nil && *s.DrainingGeneration >= s.CurrentGeneration {
-		t.Fatalf("Inv_DrainingOlderThanCurrent: DrainingGen=%d, CurrentGen=%d",
-			*s.DrainingGeneration, s.CurrentGeneration)
-	}
-	if s.ActiveGeneration > s.CurrentGeneration {
-		t.Fatalf("Inv_GenOrder: ActiveGen=%d > CurrentGen=%d",
-			s.ActiveGeneration, s.CurrentGeneration)
-	}
-	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
-		if !ok {
-			t.Fatalf("cluster service missing %s label", LabelGeneration)
-		}
-		targetGen, err := strconv.Atoi(genStr)
-		if err != nil {
-			t.Fatalf("invalid %s label on cluster service: %v", LabelGeneration, err)
-		}
-		if targetGen != s.ActiveGeneration && targetGen != s.CurrentGeneration {
-			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d not in {activeGen=%d, currentGen=%d}",
-				targetGen, s.ActiveGeneration, s.CurrentGeneration)
-		}
-		if m.api.stses[targetGen] == nil {
-			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS", targetGen)
-		}
-	}
+	checkEngineInvariants(t, m)
 }
 
 // closureContains reports whether `actual` is one of the TLA+ states the model
