@@ -135,14 +135,17 @@ type engineSim struct {
 	// reconcile has caught up yet. It exists for Inv_QuiescedPhaseMatchesSpec,
 	// which only applies once the reconciler has quiesced.
 	//
-	// The spec gets "quiesced" for free: its EnvChangeSpec always bumps specVer,
-	// so StsMatchesSpec(currentGen) goes FALSE and the invariant's guard
-	// disables itself until reconciliation catches up. Go has spec changes that
-	// produce no template drift at all -- scaling replicas is applied to the
-	// StatefulSet in place and deliberately does not roll a generation -- so
-	// stsMatchesSpec stays TRUE while the terminal phase still names the old
-	// intent for exactly one reconcile. That lag is correct behavior, and only
-	// a random walk that changes replicas without reconciling can observe it.
+	// The spec gets "quiesced" for free: its EnvChangeSpec always bumps
+	// specVer, so StsMatchesSpec(currentGen) goes FALSE and the invariant's
+	// guard disables itself until reconciliation catches up.
+	//
+	// Go needs this flag because stsMatchesSpec alone does not close the
+	// window. A reconcile can bring the StatefulSet into line with a new
+	// spec and be observed before its status write lands: at that instant
+	// stsMatchesSpec is already TRUE while the terminal phase still names
+	// the old intent. That lag is correct behavior for exactly one
+	// reconcile, and only a random walk that mutates the spec and observes
+	// between the two writes can see it.
 	//
 	// Set by every spec/class-mutating action, cleared by a Reconcile that
 	// writes status. Crash variants leave it set on purpose: a reconcile that
@@ -472,6 +475,13 @@ func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
 // the carrier because both effective* paths use it and the field is
 // scalar (no value-equality subtlety).
 func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
+	// Like every other spec/class-mutating action. Inert for
+	// Inv_QuiescedPhaseMatchesSpec today, since that invariant only fires on
+	// a replicas-vs-phase mismatch and this action leaves replicas alone —
+	// but specDirty's contract is "set by every spec/class-mutating action",
+	// and an action that quietly opts out is a trap for the next invariant
+	// that leans on it.
+	m.specDirty = true
 	v := rapid.IntRange(1, 99).Draw(t, "conflictVersion")
 	if m.spec.Template == nil {
 		m.spec.Template = &corev1.PodTemplateSpec{}
