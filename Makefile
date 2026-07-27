@@ -115,7 +115,10 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: build
 build: manifests generate ## Build manager binary.
 	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
+	# ./cmd, not cmd/main.go: the package is more than one file (the
+	# wake-agent subcommand lives in cmd/wakeagent.go) and naming a single
+	# file silently omits the rest.
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager ./cmd
 
 .PHONY: kubectl-firebolt
 kubectl-firebolt: ## Build the kubectl-firebolt plugin for the host platform (install on PATH to use as `kubectl firebolt`).
@@ -277,6 +280,17 @@ helm-test-ui: ## Verify the engine web UI sidecar (uiSidecar: true) serves on a 
 		exit 1; \
 	fi
 	./scripts/ci/verify-ui-sidecar.sh "$(HELM_TEST_UI_NS)"
+
+.PHONY: helm-test-wake
+HELM_TEST_WAKE_NS ?= helm-verify-wake
+helm-test-wake: ## Verify wake-on-zero end to end on a chart-installed operator (kind).
+	@ctx="$$( $(KUBECTL) config current-context 2>/dev/null || true )"; \
+	if [ "$$ctx" != "$(HELM_TEST_CONTEXT)" ]; then \
+		echo "Refusing to run helm-test-wake on kube context '$$ctx' (expected '$(HELM_TEST_CONTEXT)')." >&2; \
+		echo "Switch context or override HELM_TEST_CONTEXT / KIND_CLUSTER explicitly." >&2; \
+		exit 1; \
+	fi
+	./scripts/ci/verify-wake-on-zero.sh "$(HELM_TEST_WAKE_NS)"
 
 .PHONY: helm-test-crds
 HELM_TEST_CRDS_NS ?= helm-verify-crds
