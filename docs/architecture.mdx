@@ -26,6 +26,12 @@ The metadata service stores and serves engine metadata. Engines connect to it at
 
 The gateway is the entry point for client query traffic. It receives a request, identifies the target engine, and forwards the request to healthy engine pods.
 
+Each gateway pod runs two containers: Envoy, which does the proxying, and a small read-only wake agent. A query for an engine that auto-stop has scaled to zero is parked by the agent while the Firebolt Operator scales that engine back up, then released once the engine's endpoints appear.
+
+The split exists because of where credentials may live. Envoy terminates untrusted traffic, so nothing in the gateway pod may write to the Kubernetes API: the agent's entire grant is `get`/`list`/`watch` on EndpointSlices, and it reports demand outward on a metrics endpoint the Firebolt Operator polls rather than writing anything itself. The Firebolt Operator, which already holds write permission, is the only component that scales. The Envoy container holds no token at all — the pod sets `automountServiceAccountToken: false` and projects a rotating token into the agent container alone, which containers cannot share because they have separate mount namespaces.
+
+An in-pod component is required rather than an Envoy-only arrangement: the engine Service is headless, so a stopped engine's name has no A records and the request fails at DNS resolution as a local reply, which retry policies never see. Something must hold the request until the engine exists, and holding it is what makes the first query after an auto-stop succeed instead of returning an error.
+
 ### PostgreSQL
 
 PostgreSQL is the backing database for the metadata service. The Firebolt Operator can provision a single node PostgreSQL instance for the metadata service. For production workloads you should provision your own PostgreSQL instance.
@@ -191,6 +197,6 @@ The rest of the design is split by audience and task:
 - [Instance reconciliation](./instance/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
 - [FireboltEngineClass design](./engineclass/fireboltengineclass-design) describes FireboltEngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
 - [Engine rollouts](./engine/engine-rollouts) describes drain checks and rolling update parameters.
-- [Auto-stop and wake-up](./engine/auto-stop-and-wake-up) describes Firebolt Operator-driven auto-stop and the gateway wake-up annotation protocol.
+- [Auto-stop and wake-up](./engine/auto-stop-and-wake-up) describes Firebolt Operator-driven auto-stop and the gateway wake-on-zero protocol.
 - [Gateway query routing](./instance/gateway/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.
 - [Gateway sizing](./instance/gateway/gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.

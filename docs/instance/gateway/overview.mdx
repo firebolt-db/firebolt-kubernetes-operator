@@ -54,12 +54,14 @@ The gateway ConfigMap (`{instance}-gateway-config`) is a pure function of the `F
 
 ### Gateway custom service account
 
-By default the Firebolt Operator creates a ServiceAccount, Role, and RoleBinding for the gateway under `<instance>-gateway`, granting `get` / `list` / `patch` on `fireboltengines` in the instance's namespace. The gateway uses this identity to stamp the `firebolt.io/wake-requested` annotation on `FireboltEngine` resources when a request arrives for a stopped engine (the wake-on-zero protocol). See [Auto-stop and wake-up](../../engine/auto-stop-and-wake-up#gateway-wake-up-protocol).
+By default the Firebolt Operator creates a ServiceAccount named `<instance>-gateway` and a RoleBinding tying it to the chart-managed `<release>-gateway-wake` ClusterRole, which grants `get` / `list` / `watch` on `endpointslices` in the instance's namespace.
 
-When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA / Role / RoleBinding entirely**. You are then responsible for:
+That read is the wake-agent sidecar's entire Kubernetes grant: it watches for a stopped engine's endpoints appearing so it can release the query it is holding. Nothing in the gateway pod can write to the API, and the Envoy container holds no token at all — the pod sets `automountServiceAccountToken: false` and projects the token into the agent container alone. See [Auto-stop and wake-up](../../engine/auto-stop-and-wake-up#gateway-wake-up-protocol).
+
+When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA and RoleBinding entirely**. You are then responsible for:
 
 1. Creating the ServiceAccount in the instance's namespace under the name you specified.
-2. Granting it the verbs the gateway needs:
+2. Granting it the read the wake agent needs:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -68,9 +70,9 @@ metadata:
   name: gateway-wake
   namespace: firebolt
 rules:
-  - apiGroups: ["compute.firebolt.io"]
-    resources: ["fireboltengines"]
-    verbs: ["get", "list", "patch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -87,12 +89,14 @@ roleRef:
   name: gateway-wake
 ```
 
+Taking ownership of the ServiceAccount also means taking ownership of the pod's token: the Firebolt Operator no longer forces `automountServiceAccountToken: false`, and your value on `spec.gateway.template.spec` applies. Set it to `false` unless a sidecar of your own needs API access.
+
 The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC.
 
-Missing or under-permissioned user service accounts do **not** fail at admission. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts but logs `Forbidden` 403s when it tries to patch a stopped engine's wake annotation. Verify with:
+Missing or under-permissioned user service accounts do **not** fail at admission, and they do not stop the gateway routing queries. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts with a wake agent that cannot watch endpoints, in which case queries to *stopped* engines return `503` instead of waiting. Verify with:
 
 ```bash
-kubectl auth can-i patch fireboltengines.compute.firebolt.io \
+kubectl auth can-i watch endpointslices.discovery.k8s.io \
   --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
 ```
 

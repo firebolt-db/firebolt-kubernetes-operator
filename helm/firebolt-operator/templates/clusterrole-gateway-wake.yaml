@@ -5,6 +5,16 @@ operator minted a per-instance Role with these same rules, which required
 `roles: create/update/patch` cluster-wide on the operator's RBAC. Shipping
 a single static ClusterRole removes that grant from the operator entirely.
 
+The rules are read-only, and deliberately so. The gateway pod terminates
+untrusted traffic; the only Kubernetes fact its wake-agent sidecar needs is
+whether a stopped engine's endpoints have appeared, which it reads from
+EndpointSlices. Nothing in the gateway pod may write to the API, and the
+Envoy container holds no token at all (the pod sets
+automountServiceAccountToken: false and projects the token into the agent
+container alone). Demand travels the other way: the agent exposes it on a
+metrics endpoint and the operator, which already holds write permission,
+does the scaling.
+
 The ClusterRole's name is passed to the operator via
 `--gateway-wake-cluster-role`; per-install isolation comes from the
 release-derived `<fullname>-gateway-wake` suffix so multiple operator
@@ -23,11 +33,11 @@ metadata:
   {{- end }}
 rules:
   - apiGroups:
-      - compute.firebolt.io
+      - discovery.k8s.io
     resources:
-      - fireboltengines
+      - endpointslices
     verbs:
       - get
       - list
-      - patch
+      - watch
 {{- end }}

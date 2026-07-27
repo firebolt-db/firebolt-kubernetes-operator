@@ -37,11 +37,11 @@ const (
 	DefaultAutoStopIdleTimeout  = 30 * time.Minute
 	DefaultAutoStopPollInterval = 1 * time.Minute
 	DefaultAutoStopIdleReplicas = int32(0)
-	// DefaultAutoStopWakeTTL bounds how long an unrefreshed
-	// AnnotationWakeRequested value still triggers a scale-up. Generous
-	// enough to cover engine cold-start (image pull on a fresh node, blue-
-	// green creating phase) while short enough that an abandoned request
-	// does not pin the engine indefinitely after the gateway gives up.
+	// DefaultAutoStopWakeTTL bounds how long an unrefreshed wake demand
+	// timestamp still triggers a scale-up. Generous enough to cover engine
+	// cold-start (image pull on a fresh node, blue-green creating phase)
+	// while short enough that an abandoned request does not pin the engine
+	// indefinitely after the gateway gives up.
 	DefaultAutoStopWakeTTL = 5 * time.Minute
 )
 
@@ -66,7 +66,7 @@ const (
 
 // AutoStopObservation is the runtime input the autoStop consumes each
 // cycle, sourced from a metric scrape over the active generation's pods
-// and the FireboltEngine's wake-up annotation.
+// and from wake demand reported by the gateways' wake agents.
 type AutoStopObservation struct {
 	// ActiveQueries is the sum of firebolt_running_queries +
 	// firebolt_suspended_queries across the active generation. Set to 0
@@ -79,11 +79,17 @@ type AutoStopObservation struct {
 	// never trips an unintended scale-down.
 	ScrapeFailed bool
 
-	// WakeRequestedAt is the parsed timestamp from
-	// metadata.annotations[AnnotationWakeRequested], or nil when the
-	// annotation is absent or malformed. The autoStop treats a value
+	// WakeRequestedAt is the most recent moment any gateway received a
+	// query for this engine while it had no ready endpoints, as reported
+	// by the wake agents and cached by WakeDemandTracker. Nil when no
+	// gateway has asked for it recently. The autoStop treats a value
 	// within DefaultAutoStopWakeTTL of now as a request to immediately
 	// scale up to ActiveReplicas.
+	//
+	// A timestamp rather than a live count of waiting requests: the client
+	// that triggered the wake may well have given up before the operator
+	// polled, and its having asked is still the reason to start the
+	// engine.
 	WakeRequestedAt *time.Time
 }
 
@@ -158,10 +164,19 @@ func computeAutoStopDecision(
 		idleReplicas = *as.IdleReplicas
 	}
 
-	// Wake annotation: a fresh stamp from the gateway requests an
-	// immediate scale-up to ActiveReplicas. Honored above schedule because
+	// Wake demand: a gateway saw a query for this engine while it was
+	// down, so scale up to ActiveReplicas. Honored above schedule because
 	// either path lands at the same target (ActiveReplicas), but reporting
 	// WakeRequested is more informative for operators looking at status.
+	//
+	// Deliberately above the spec.Replicas == 0 branch below, and this is
+	// load-bearing: an auto-stopped engine IS an engine at zero replicas,
+	// so checking "stopped" first would make wake impossible. The cost is
+	// that the decision function cannot distinguish an engine autoStop
+	// parked from one a user zeroed by hand, and a query will restart
+	// either. Users who want an engine to stay down set
+	// autoStop.enabled: false, which returns at the top of this function
+	// before wake is ever consulted.
 	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
 	}
@@ -232,6 +247,16 @@ func computeAutoStopDecision(
 		Reason:          AutoStopReasonActivity,
 		RequeueAfter:    pollInterval,
 	}
+}
+
+// wakeDemand returns the configured demand source, or a no-op when unset.
+// Tolerating nil keeps every existing unit test that builds a bare
+// FireboltEngineReconciler working without opting into wake.
+func (r *FireboltEngineReconciler) wakeDemand() WakeDemandSource {
+	if r.WakeDemand == nil {
+		return NoWakeDemand{}
+	}
+	return r.WakeDemand
 }
 
 func decisionWithScale(current, desired int32, reason string, requeue time.Duration) AutoStopDecision {
@@ -341,27 +366,6 @@ func parseHHMM(s string) (int, bool) {
 	return h*60 + m, true
 }
 
-// parseWakeAnnotation reads metadata.annotations[AnnotationWakeRequested]
-// and returns the parsed RFC 3339 timestamp, or nil when the annotation is
-// absent or malformed. A malformed value is treated as absent (rather than
-// returning an error) so a typo in an external client cannot wedge the
-// autoStop — the worst case is "wake never fires" which the gateway will
-// notice and re-stamp with a valid value.
-func parseWakeAnnotation(annotations map[string]string) *time.Time {
-	if annotations == nil {
-		return nil
-	}
-	v := annotations[AnnotationWakeRequested]
-	if v == "" {
-		return nil
-	}
-	t, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		return nil
-	}
-	return &t
-}
-
 // windowContains reports whether minute (0-1439) is inside [start, end). When
 // end < start the window is treated as crossing midnight: it is inside on
 // either side of 00:00. start == end is an empty window (returns false) so
@@ -440,7 +444,7 @@ func (r *FireboltEngineReconciler) runAutoStop(
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoStop")
 
 	obs := AutoStopObservation{
-		WakeRequestedAt: parseWakeAnnotation(engine.Annotations),
+		WakeRequestedAt: r.wakeDemand().LastDemand(engine.Namespace, engine.Name),
 	}
 	if engine.Spec.Replicas > 0 {
 		active, failed := r.scrapeActiveQueries(ctx, engine)

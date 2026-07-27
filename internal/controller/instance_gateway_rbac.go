@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -37,18 +36,10 @@ const (
 	SuffixGatewayWakeRole = "-gateway-wake"
 )
 
-// errGatewayWakeClusterRoleUnset is returned when the operator is
-// configured to manage gateway RBAC (no user-supplied gateway SA) but
-// the `--gateway-wake-cluster-role` flag is empty. Surfaced as a
-// GatewayReady=False/RBACMisconfigured condition so the operator
-// admin sees the missing flag instead of a silent broken gateway.
-var errGatewayWakeClusterRoleUnset = errors.New(
-	"--gateway-wake-cluster-role is empty; set it to the chart-managed ClusterRole name",
-)
-
 // gatewayServiceAccountName returns the ServiceAccount name attached to
-// gateway pods. The gateway uses this identity to patch the wake-up
-// annotation on FireboltEngines when a request lands for a stopped engine.
+// gateway pods. The wake-agent sidecar uses this identity to watch
+// EndpointSlices, which is the whole of what it is permitted to do; Envoy
+// itself never holds a token (see automountForGateway).
 func gatewayServiceAccountName(instanceName string) string {
 	return instanceName + SuffixGateway
 }
@@ -75,15 +66,26 @@ func gatewayWakeRoleBindingName(instanceName string) string {
 // ensureGatewayRBAC creates or updates the ServiceAccount and the
 // per-instance RoleBinding used by the gateway pods. The RoleBinding
 // targets a chart-managed ClusterRole (named via
-// `--gateway-wake-cluster-role`) that grants `get/list/patch` on
-// FireboltEngines, so the operator no longer needs `roles:
-// create/update/patch` anywhere in its RBAC.
+// `--gateway-wake-cluster-role`) granting `get/list/watch` on
+// EndpointSlices, so the operator needs neither `roles:
+// create/update/patch` in its own RBAC nor any write grant on the
+// gateway's identity.
+//
+// A missing flag is not an error. The grant exists only so the wake agent
+// can observe endpoints appearing; without it wake stops working and
+// everything users actually route traffic through carries on. Failing the
+// reconcile here would report a healthy gateway as broken over a
+// capability it does not need in order to proxy queries.
 func (r *FireboltInstanceReconciler) ensureGatewayRBAC(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	if r.GatewayWakeClusterRole == "" {
-		return errGatewayWakeClusterRoleUnset
-	}
 	if err := r.ensureGatewayServiceAccount(ctx, instance); err != nil {
 		return fmt.Errorf("ensuring gateway ServiceAccount: %w", err)
+	}
+	if r.GatewayWakeClusterRole == "" {
+		logf.FromContext(ctx).Info(
+			"--gateway-wake-cluster-role is empty; skipping the gateway wake RoleBinding. "+
+				"Wake-on-zero is disabled for this instance; query routing is unaffected.",
+			"instance", instance.Name)
+		return nil
 	}
 	if err := r.ensureGatewayWakeRoleBinding(ctx, instance); err != nil {
 		return fmt.Errorf("ensuring gateway wake RoleBinding: %w", err)
@@ -115,7 +117,9 @@ func (r *FireboltInstanceReconciler) ensureGatewayServiceAccount(ctx context.Con
 
 // ensureGatewayWakeRoleBinding creates or updates a RoleBinding in the
 // instance namespace that binds the chart-managed gateway-wake
-// ClusterRole to the gateway ServiceAccount.
+// ClusterRole to the gateway ServiceAccount. A RoleBinding (not a
+// ClusterRoleBinding) so the read is confined to the instance's own
+// namespace, which is where its engines live.
 func (r *FireboltInstanceReconciler) ensureGatewayWakeRoleBinding(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 	name := gatewayWakeRoleBindingName(instance.Name)

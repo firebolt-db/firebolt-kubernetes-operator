@@ -84,7 +84,7 @@ func TestEffectiveGatewayPodTemplate_ServiceAccountFallback(t *testing.T) {
 		inst := &computev1alpha1.FireboltInstance{
 			ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", contentHash(envoyYAML), baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", contentHash(envoyYAML), baseLabels, wakeAgentConfig{})
 		want := gatewayServiceAccountName(inst.Name)
 		if pt.Spec.ServiceAccountName != want {
 			t.Errorf("ServiceAccountName = %q, want %q (operator-managed default)", pt.Spec.ServiceAccountName, want)
@@ -102,7 +102,7 @@ func TestEffectiveGatewayPodTemplate_ServiceAccountFallback(t *testing.T) {
 				},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", contentHash(envoyYAML), baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", contentHash(envoyYAML), baseLabels, wakeAgentConfig{})
 		if pt.Spec.ServiceAccountName != "my-gateway-sa" {
 			t.Errorf("ServiceAccountName = %q, want my-gateway-sa", pt.Spec.ServiceAccountName)
 		}
@@ -134,7 +134,7 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 
 	t.Run("absent when engine TLS is disabled", func(t *testing.T) {
 		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"}}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		if v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName); v != nil {
 			t.Errorf("unexpected engine-CA volume with TLS disabled: %+v", v)
 		}
@@ -150,7 +150,7 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 				TLS: &computev1alpha1.TLSSpec{Engine: &computev1alpha1.TLSListenerSpec{Enabled: true}},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		if v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName); v != nil {
 			t.Errorf("unexpected engine-CA volume before EngineTLS is ready: %+v", v)
 		}
@@ -168,7 +168,7 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "fb-engine-tls", Reencrypting: true},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName)
 		// FB-896 #4: the gateway mounts the operator-assembled trust BUNDLE, not
 		// the anchor Secret directly, so it can trust every live generation's CA.
@@ -223,7 +223,7 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 
 	t.Run("absent and HTTP when gateway TLS is disabled", func(t *testing.T) {
 		inst := &computev1alpha1.FireboltInstance{ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"}}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		if v := findVol(pt, computev1alpha1.GatewayTLSVolumeName); v != nil {
 			t.Errorf("unexpected gateway-TLS volume with TLS disabled: %+v", v)
 		}
@@ -243,7 +243,7 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 				TLS: &computev1alpha1.TLSSpec{Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true}},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		if v := findVol(pt, computev1alpha1.GatewayTLSVolumeName); v != nil {
 			t.Errorf("unexpected gateway-TLS volume before GatewayTLS is ready: %+v", v)
 		}
@@ -263,7 +263,7 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "fb-gateway-tls"},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		v := findVol(pt, computev1alpha1.GatewayTLSVolumeName)
 		if v == nil || v.Secret == nil || v.Secret.SecretName != "fb-gateway-tls" {
 			t.Errorf("gateway-TLS volume = %+v, want Secret.SecretName=fb-gateway-tls", v)
@@ -298,7 +298,7 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "fb-gateway-tls"},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		c := pt.Spec.Containers[0]
 		if got := c.LivenessProbe.HTTPGet.Port.StrVal; got != "metrics" {
 			t.Errorf("liveness probe port = %q, want metrics", got)
@@ -321,7 +321,7 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "fb-gateway-tls"},
 			},
 		}
-		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels)
+		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		v := findVol(pt, computev1alpha1.GatewayClientCAVolumeName)
 		if v == nil || v.Secret == nil || v.Secret.SecretName != "clients-ca" {
 			t.Fatalf("client-CA volume = %+v, want Secret.SecretName=clients-ca", v)

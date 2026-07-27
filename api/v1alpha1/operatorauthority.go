@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -209,6 +208,18 @@ var operatorOwnedEngineVolumeNames = []string{
 	EngineTLSVolumeName,
 }
 
+// GatewayWakeAgentContainerName is the wake-agent sidecar's container name.
+const GatewayWakeAgentContainerName = "wake-agent"
+
+// GatewayWakeAgentTokenVolumeName is the projected ServiceAccount token
+// mounted into the wake-agent container alone.
+//
+// Reserved for the same reason the container name is, but the stakes are
+// higher: a user sidecar that declared a volumeMount by this name would
+// receive the token, defeating the "exactly one container holds the
+// credential" property the whole design rests on.
+const GatewayWakeAgentTokenVolumeName = "wake-agent-token"
+
 // operatorOwnedGatewayVolumeNames are the volume names the operator
 // renders on the gateway Deployment's pod template.
 var operatorOwnedGatewayVolumeNames = []string{
@@ -219,6 +230,7 @@ var operatorOwnedGatewayVolumeNames = []string{
 	GatewayClientCAVolumeName,
 	GatewayEngineCRLVolumeName,
 	GatewayClientCRLVolumeName,
+	GatewayWakeAgentTokenVolumeName,
 }
 
 // operatorOwnedMetadataVolumeNames are the volume names the operator
@@ -277,7 +289,7 @@ func ValidateReservedKeyPrefix(path *field.Path, m map[string]string) field.Erro
 	if len(reserved) == 0 {
 		return nil
 	}
-	sort.Strings(reserved)
+	slices.Sort(reserved)
 	errs := make(field.ErrorList, 0, len(reserved))
 	for _, k := range reserved {
 		errs = append(errs, field.Forbidden(path.Key(k),
@@ -416,8 +428,13 @@ var GatewayPodTemplateRules = PodTemplateRules{
 		Resources: true,
 	},
 	ReservedPrimaryVolumeMountNames: operatorOwnedGatewayVolumeNames,
-	AllowSidecars:                   true,
-	AllowInitContainers:             true,
+	// The wake-agent sidecar is operator-rendered. Without reserving the
+	// name a user sidecar called "wake-agent" would produce a duplicate
+	// container name and the apiserver would reject the Deployment
+	// permanently.
+	ReservedContainerNames: []string{GatewayWakeAgentContainerName},
+	AllowSidecars:          true,
+	AllowInitContainers:    true,
 }
 
 // MetadataPodTemplateRules is the ruleset for FireboltInstance.spec.metadata.template.
@@ -795,12 +812,13 @@ func ValidateNoSecretAliasVolumes(
 		"an additional container could read the Instance admin password or a JWT signing key through it"
 	var errs field.ErrorList
 	for i := range volumes {
-		for _, name := range VolumeSecretRefs(&volumes[i]) {
+		vol := &volumes[i]
+		for _, name := range VolumeSecretRefs(vol) {
 			if !isProtected(name) {
 				continue
 			}
 			errs = append(errs, field.Forbidden(base.Index(i),
-				fmt.Sprintf(detail, volumes[i].Name, name, component)))
+				fmt.Sprintf(detail, vol.Name, name, component)))
 		}
 	}
 	return errs

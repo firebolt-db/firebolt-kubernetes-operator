@@ -362,7 +362,7 @@ func TestBuildEnvoyConfigYAMLParses(t *testing.T) {
 	inst := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 	}
-	got := buildEnvoyConfigYAML(inst)
+	got := buildEnvoyConfigYAML(inst, false)
 
 	var out map[string]any
 	if err := yaml.Unmarshal([]byte(got), &out); err != nil {
@@ -395,7 +395,7 @@ func TestBuildEnvoyConfigYAMLParses(t *testing.T) {
 func TestBuildEnvoyConfigYAMLDFPSubClusterMode(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
@@ -439,7 +439,7 @@ func TestBuildEnvoyConfigYAMLDFPSubClusterMode(t *testing.T) {
 func TestBuildEnvoyConfigYAMLRetryPolicy(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
@@ -507,7 +507,7 @@ func TestBuildEnvoyConfigYAMLBufferLimit(t *testing.T) {
 
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 
 	want := fmt.Sprintf("per_connection_buffer_limit_bytes: %d", want2MiB)
 	if n := strings.Count(got, want); n != 2 {
@@ -530,7 +530,7 @@ func TestBuildEnvoyConfigYAMLBufferLimit(t *testing.T) {
 func TestBuildEnvoyConfigYAMLCircuitBreakers(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
@@ -599,7 +599,7 @@ func TestBuildEnvoyConfigYAMLCircuitBreakers(t *testing.T) {
 func TestBuildEnvoyConfigYAML_EngineTLSDisabled_NoTransportSocket(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
@@ -621,14 +621,14 @@ func TestBuildEnvoyConfigYAML_EngineTLSDisabled_ByteIdenticalAcrossReconciles(t 
 	inst := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 	}
-	first := buildEnvoyConfigYAML(inst)
+	first := buildEnvoyConfigYAML(inst, false)
 	if strings.Contains(first, "CLUSTER_PROVIDED\n\n") {
 		t.Error("emitted config has a blank line after 'lb_policy: CLUSTER_PROVIDED'; " +
 			"buildDFPUpstreamTLSTransportSocket's empty-string case must not leave a stray newline")
 	}
 	// Rendering twice must be byte-for-byte stable, matching every other
 	// buildEnvoyConfigYAML invariant (TestBuildEnvoyConfigYAMLStableAcrossInstances).
-	if second := buildEnvoyConfigYAML(inst); first != second {
+	if second := buildEnvoyConfigYAML(inst, false); first != second {
 		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
 	}
 }
@@ -647,7 +647,7 @@ func TestBuildEnvoyConfigYAML_EngineTLSEnabledButNotReady_NoTransportSocket(t *t
 			},
 		},
 		// Status.EngineTLS deliberately left nil: certificate not yet issued.
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
@@ -676,7 +676,7 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 		Status: computev1alpha1.FireboltInstanceStatus{
 			EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
 		},
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
@@ -811,7 +811,7 @@ func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsC
 			EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
 			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
 		},
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
@@ -861,7 +861,7 @@ func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsC
 func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
@@ -883,7 +883,7 @@ func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles(t
 	inst := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 	}
-	first := buildEnvoyConfigYAML(inst)
+	first := buildEnvoyConfigYAML(inst, false)
 	if strings.Contains(first, "host_selection_retry_max_attempts: 5\n\n") {
 		t.Error("emitted config has a blank line after 'host_selection_retry_max_attempts: 5'; " +
 			"buildListenerDownstreamTLSTransportSocket's empty-string case must not leave a stray newline")
@@ -892,7 +892,7 @@ func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles(t
 		t.Error("emitted config does not have stats_listener immediately following the retry policy " +
 			"with no intervening blank line; got:\n" + first)
 	}
-	if second := buildEnvoyConfigYAML(inst); first != second {
+	if second := buildEnvoyConfigYAML(inst, false); first != second {
 		t.Error("buildEnvoyConfigYAML is not deterministic across calls with the same instance")
 	}
 }
@@ -915,7 +915,7 @@ func TestBuildEnvoyConfigYAML_GatewayTLSEnabledButNotReady_FailsClosed(t *testin
 			},
 		},
 		// Status.GatewayTLS deliberately left nil: certificate not yet issued.
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
@@ -956,7 +956,7 @@ func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testi
 		Status: computev1alpha1.FireboltInstanceStatus{
 			GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
 		},
-	})
+	}, false)
 	var parsed map[string]any
 	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
@@ -1023,7 +1023,7 @@ func TestBuildEnvoyConfigYAML_GatewayMutualTLS(t *testing.T) {
 			Status: computev1alpha1.FireboltInstanceStatus{
 				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "inst-gateway-tls"},
 			},
-		})
+		}, false)
 		var parsed map[string]any
 		if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
 			t.Fatalf("emitted envoy config is not valid YAML: %v\n---\n%s", err, got)
@@ -1140,7 +1140,7 @@ func keysOf(m map[string]any) []string {
 func TestBuildEnvoyConfigYAMLEngineFromQueryParam(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
-	})
+	}, false)
 
 	for _, want := range []string{
 		"extract_engine_from_path",
@@ -1164,10 +1164,10 @@ func TestBuildEnvoyConfigYAMLEngineFromQueryParam(t *testing.T) {
 func TestBuildEnvoyConfigYAMLStableAcrossInstances(t *testing.T) {
 	a := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "ns-a"},
-	})
+	}, false)
 	b := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "ns-b"},
-	})
+	}, false)
 	// Replacing the namespace-specific fragment in b should yield a.
 	bAuthority := fmt.Sprintf("-service.ns-b.svc.cluster.local:%d", EngineHTTPQueryPort)
 	aAuthority := fmt.Sprintf("-service.ns-a.svc.cluster.local:%d", EngineHTTPQueryPort)

@@ -691,7 +691,7 @@ func buildGenEngineTLSCertificate(engineName, namespace string, gen int, tls *Re
 	duration, renewBefore := resolveCertDuration(*tls.CertManager, DefaultCertDurationTLS, DefaultCertRenewBeforeTLS)
 
 	return &certmanagerv1.Certificate{
-		TypeMeta: metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"},
+		TypeMeta: metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -1206,7 +1206,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	podVolumes := []corev1.Volume{
 		{
-			Name: "engine-config",
+			Name: computev1alpha1.EngineConfigVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
@@ -2249,7 +2249,7 @@ func effectiveEngineVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, class
 func appendUserVolumeMounts(dst, src []corev1.VolumeMount) []corev1.VolumeMount {
 	for i := range src {
 		name := src[i].Name
-		if name == "engine-config" || name == DataVolumeName {
+		if name == computev1alpha1.EngineConfigVolumeName || name == DataVolumeName {
 			continue
 		}
 		dst = append(dst, *src[i].DeepCopy())
@@ -2302,7 +2302,7 @@ func buildEngineContainerVolumeMounts(spec *computev1alpha1.FireboltEngineSpec, 
 			MountPath: DataMountPath,
 		},
 		corev1.VolumeMount{
-			Name:      "engine-config",
+			Name:      computev1alpha1.EngineConfigVolumeName,
 			MountPath: ConfigMountPath,
 			SubPath:   ConfigFileName,
 			ReadOnly:  true,
@@ -2598,9 +2598,9 @@ func appendUserPodVolumes(
 // making the runtime-derived reservation insufficient.
 func operatorOwnedPodVolumeNames() map[string]struct{} {
 	return map[string]struct{}{
-		"engine-config":             {},
-		DataVolumeName:              {},
-		EngineWebWritableVolumeName: {},
+		computev1alpha1.EngineConfigVolumeName: {},
+		DataVolumeName:                         {},
+		EngineWebWritableVolumeName:            {},
 	}
 }
 

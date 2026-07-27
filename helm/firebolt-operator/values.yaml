@@ -60,10 +60,26 @@ rbac:
   # surface as a 403 from the apiserver.
   apiserverProxyGrant: false
 
+# -- Wake-on-zero. When enabled, each gateway pod runs a read-only wake-agent
+# sidecar that holds a query arriving for an auto-stopped engine while the
+# operator scales that engine back up. The sidecar runs the operator's own
+# image (it is a subcommand of the same binary), so there is no second image
+# to pin or keep in step.
+#
+# Disabling this omits the sidecar and the RoleBinding: a query for a stopped
+# engine gets a 503 instead of waiting, and nothing wakes the engine. Query
+# routing to running engines is unaffected either way.
+# @default -- {}
+wakeAgent:
+  # -- Run the wake-agent sidecar and bind the EndpointSlice-read ClusterRole
+  # to each gateway ServiceAccount.
+  enabled: true
+
 # -- Chart-managed ClusterRole the operator binds to each FireboltInstance's
 # gateway ServiceAccount (via a per-instance RoleBinding), granting
-# `get/list/patch` on `compute.firebolt.io/fireboltengines` so the gateway can
-# wake a stopped engine.
+# `get/list/watch` on `discovery.k8s.io/endpointslices` so the gateway's
+# wake-agent sidecar can observe when a stopped engine's endpoints appear.
+# Read-only: nothing in the gateway pod may write to the Kubernetes API.
 # @default -- {}
 gatewayWakeClusterRole:
   # -- Render the ClusterRole. Set to false when supplying a pre-existing
