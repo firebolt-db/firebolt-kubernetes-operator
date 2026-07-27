@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.0...firebolt-operator-v0.5.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **security:** harden auth & TLS secret, certificate, and admission guards (FB-896) ([#89](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/89)) ([e7794ee](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e7794ee489ec149d686c0fbdf768422cf3927e80))
+
+
+### Dependencies
+
+* **deps:** bump github.com/google/cel-go from 0.26.0 to 0.29.0 ([#88](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/88)) ([6e5040d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6e5040d5ea74a07c853a766caeb4ae0812e97862))
+
 ## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.1...firebolt-operator-v0.5.0) (2026-07-27)
 
 
