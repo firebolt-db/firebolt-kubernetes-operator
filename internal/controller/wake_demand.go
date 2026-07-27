@@ -49,6 +49,11 @@ import (
 // polling a handful of gateway pods costs nothing measurable.
 const DefaultWakeDemandPollInterval = 2 * time.Second
 
+// maxDemandResponseBytes caps a single agent's exposition. Generous for a
+// legitimate agent (thousands of engines) and bounded against one that is
+// not: past this the series are truncated, which costs a wake at worst.
+const maxDemandResponseBytes = 1 << 20
+
 // wakeDemandScrapeTimeout bounds a single agent scrape. Short: an agent
 // that cannot answer promptly is one whose demand we will pick up on the
 // next tick anyway.
@@ -415,14 +420,21 @@ func (t *WakeDemandTracker) scrapeAgent(
 		if t.Clientset == nil {
 			return nil, fmt.Errorf("clientset not initialized for %s mode", mode)
 		}
-		raw, err := t.Clientset.CoreV1().
+		// Streamed and capped rather than DoRaw'd, to match the direct
+		// path below. Demand comes from a pod anyone with pod-create in the
+		// namespace can stand up (see the trust note on gatewayPods), so an
+		// unbounded read here is a memory-pressure lever aimed at the
+		// operator process — the one component in this path that does hold
+		// write permission.
+		stream, err := t.Clientset.CoreV1().
 			Pods(pod.Namespace).
 			ProxyGet("http", pod.Name, strconv.Itoa(int(port)), "/demand", nil).
-			DoRaw(ctx)
+			Stream(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("proxy scrape of %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
-		return raw, nil
+		defer func() { _ = stream.Close() }()
+		return io.ReadAll(io.LimitReader(stream, maxDemandResponseBytes))
 	}
 
 	// Plain HTTP: the demand endpoint carries no secrets, only engine
@@ -441,7 +453,7 @@ func (t *WakeDemandTracker) scrapeAgent(
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("wake agent %s/%s returned %s", pod.Namespace, pod.Name, resp.Status)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return io.ReadAll(io.LimitReader(resp.Body, maxDemandResponseBytes))
 }
 
 // parseWakeDemand extracts engine → last-demand timestamps from the
