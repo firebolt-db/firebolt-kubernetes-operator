@@ -496,7 +496,7 @@ func (r *FireboltInstanceReconciler) bootstrapSigningKey(ctx context.Context, in
 // deletes the Certificate and Secret explicitly instead.
 func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context, instance *computev1alpha1.FireboltInstance, key *computev1alpha1.SigningKeyStatus) (bool, error) {
 	desired := buildSigningCertificate(instance, key.ID)
-	desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+	desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return false, err

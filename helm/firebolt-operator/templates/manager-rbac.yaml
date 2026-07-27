@@ -132,6 +132,14 @@ rules:
       - update
       - watch
   - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - events.k8s.io
     resources:
       - events
@@ -303,6 +311,14 @@ rules:
       - list
       - patch
       - update
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
       - watch
   - apiGroups:
       - events.k8s.io

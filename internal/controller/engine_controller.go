@@ -38,9 +38,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -99,6 +101,13 @@ type FireboltEngineReconciler struct {
 	// MetricsRecorder records Prometheus metrics for engine CRs.
 	// Must be non-nil; use metrics.NoOpEngineRecorder{} in tests.
 	MetricsRecorder metrics.EngineRecorder
+
+	// WakeDemand reports when a gateway last received a query for an
+	// engine that had no ready endpoints, which autoStop honors as a
+	// request to scale back up. Nil is tolerated and means "no demand,
+	// ever" — the behavior when wake-on-zero is disabled, and the
+	// default in unit tests that do not exercise wake.
+	WakeDemand WakeDemandSource
 
 	// EventRecorder emits Kubernetes Events on the engine CR. Populated
 	// in SetupWithManager when nil; unit tests that exercise event-emitting
@@ -317,7 +326,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: engine.Generation,
-				Reason:             "InstanceNotReady",
+				Reason:             ReasonInstanceNotReady,
 				Message:            instanceErr.Error(),
 			})
 			setReadyCondition(&engine.Status, current, engine.Generation)
@@ -1556,8 +1565,24 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
+		WatchesRawSource(r.wakeDemandSource()).
 		Named(name).
 		Complete(r)
+}
+
+// wakeDemandSource turns newly-observed gateway demand into an immediate
+// reconcile for the engine it names.
+//
+// Without it the demand poll only refreshes a cache that auto-stop reads on
+// its own pollInterval — a minute by default — so a held query would wait
+// most of that before scale-up even began. Returns an empty channel source
+// when wake is disabled, which never fires.
+func (r *FireboltEngineReconciler) wakeDemandSource() source.TypedSource[reconcile.Request] {
+	ch := make(chan event.GenericEvent)
+	if tracker, ok := r.WakeDemand.(*WakeDemandTracker); ok && tracker.Events != nil {
+		ch = tracker.Events
+	}
+	return source.Channel(ch, &handler.EnqueueRequestForObject{})
 }
 
 // engineClassToEngines maps a FireboltEngineClass event to reconcile requests

@@ -91,15 +91,28 @@ type FireboltInstanceReconciler struct {
 	NameFilter string
 
 	// GatewayWakeClusterRole is the name of the chart-managed ClusterRole
-	// that grants get/list/patch on fireboltengines to the gateway
-	// ServiceAccount. The reconciler binds this ClusterRole via a per-
-	// instance RoleBinding in the instance's namespace; the operator never
-	// creates the ClusterRole itself, so the cluster-wide `roles` verbs
-	// no longer appear in the operator's RBAC. Empty means the user takes
-	// ownership of gateway RBAC entirely — instances that reach the
-	// operator-managed branch (no user-supplied gateway SA) fail with a
-	// surfaced GatewayReady=False condition until the flag is set.
+	// bound to each gateway ServiceAccount via a per-instance RoleBinding.
+	// It grants get/list/watch on EndpointSlices — the wake agent's entire
+	// Kubernetes grant, and read-only. The operator never creates the
+	// ClusterRole itself, so the cluster-wide `roles` verbs stay out of the
+	// operator's own RBAC.
+	//
+	// Empty is not fatal: the binding is skipped and wake stops working
+	// while query routing continues. The gateway is not degraded by the
+	// absence of a capability it only needs in order to wake stopped
+	// engines.
 	GatewayWakeClusterRole string
+
+	// WakeAgentImage is the image the gateway's wake-agent sidecar runs.
+	// The chart sets this to the operator's own image: the agent is a
+	// subcommand of the manager binary, so the two cannot drift out of
+	// sync on the demand-endpoint contract they share. Empty omits the
+	// sidecar entirely and disables wake (see wakeAgentConfig).
+	WakeAgentImage string
+
+	// WakeAgentImagePullPolicy is the pull policy for the sidecar. Empty
+	// lets Kubernetes apply its own default from the image tag.
+	WakeAgentImagePullPolicy corev1.PullPolicy
 }
 
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltinstances,verbs=get;list;watch;create;update;patch;delete
@@ -108,6 +121,12 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// The operator does not read EndpointSlices itself. It holds this grant so it
+// can bind the gateway-wake ClusterRole to each gateway ServiceAccount:
+// Kubernetes rejects a RoleBinding whose referenced role carries permissions
+// the creator lacks, so without it ensureGatewayWakeRoleBinding 403s on every
+// reconcile and the gateway is never created.
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete

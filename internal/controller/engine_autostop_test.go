@@ -367,26 +367,46 @@ func TestComputeAutoStopDecision_WakeIgnoredWhenAutoStopDisabled(t *testing.T) {
 	}
 }
 
-func TestParseWakeAnnotation(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		annots    map[string]string
-		expectNil bool
-	}{
-		{"nil map", nil, true},
-		{"empty value", map[string]string{AnnotationWakeRequested: ""}, true},
-		{"missing key", map[string]string{"unrelated": "x"}, true},
-		{"valid RFC3339", map[string]string{AnnotationWakeRequested: "2026-04-30T12:00:00Z"}, false},
-		{"malformed", map[string]string{AnnotationWakeRequested: "not-a-time"}, true},
+// fakeWakeDemand is a WakeDemandSource returning a fixed timestamp for one
+// engine.
+type fakeWakeDemand struct {
+	namespace string
+	engine    string
+	at        *time.Time
+}
+
+func (f fakeWakeDemand) LastDemand(namespace, engine string) *time.Time {
+	if namespace != f.namespace || engine != f.engine {
+		return nil
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseWakeAnnotation(tc.annots)
-			if (got == nil) != tc.expectNil {
-				t.Fatalf("parseWakeAnnotation(%v): got nil=%v want nil=%v", tc.annots, got == nil, tc.expectNil)
-			}
-		})
+	return f.at
+}
+
+// The reconciler must tolerate an unset WakeDemand: that is the shape of
+// every install with wake-on-zero disabled, and of most unit tests.
+func TestWakeDemandDefaultsToNoDemand(t *testing.T) {
+	t.Parallel()
+	r := &FireboltEngineReconciler{}
+	if got := r.wakeDemand().LastDemand("ns", "engine"); got != nil {
+		t.Fatalf("wakeDemand().LastDemand() = %v, want nil when unset", got)
+	}
+}
+
+func TestWakeDemandSourceIsScopedByNamespaceAndEngine(t *testing.T) {
+	t.Parallel()
+	at := time.Unix(1_700_000_000, 0)
+	r := &FireboltEngineReconciler{
+		WakeDemand: fakeWakeDemand{namespace: "ns", engine: "analytics", at: &at},
+	}
+	if got := r.wakeDemand().LastDemand("ns", "analytics"); got == nil || !got.Equal(at) {
+		t.Errorf("LastDemand(ns, analytics) = %v, want %v", got, at)
+	}
+	// A same-named engine in another namespace is a different engine.
+	if got := r.wakeDemand().LastDemand("other", "analytics"); got != nil {
+		t.Errorf("LastDemand(other, analytics) = %v, want nil", got)
+	}
+	if got := r.wakeDemand().LastDemand("ns", "reporting"); got != nil {
+		t.Errorf("LastDemand(ns, reporting) = %v, want nil", got)
 	}
 }
 

@@ -94,20 +94,19 @@ const (
 	// signal, avoiding a DeepEqual on server-defaulted PodSpec fields.
 	AnnotationConfigHash = "firebolt.io/config-hash"
 
-	// AnnotationWakeRequested is the contract between the gateway and the
-	// engine autoStop: the gateway patches this annotation with an
-	// RFC 3339 timestamp when it observes a request for an engine that is
-	// currently scaled to zero. The engine autoStop treats a fresh value
-	// (within DefaultAutoStopWakeTTL of now) as a request to immediately
-	// scale up to spec.autoStop.activeReplicas, bypassing the idle-timeout
-	// check. Stale values are ignored, so the gateway must keep stamping
-	// the annotation while it has buffered queries waiting for the engine.
-	//
-	// The annotation is honored only when spec.autoStop.enabled=true:
-	// without an autoStop policy the operator has no ActiveReplicas to
-	// scale to, and respecting the wake from a non-policy actor would
-	// silently override the user's spec.replicas==0 intent.
-	AnnotationWakeRequested = "firebolt.io/wake-requested"
+	// KindCertificate is the cert-manager Certificate kind, named because
+	// Server-Side Apply requires an explicit apiVersion/kind on every
+	// applied object and the literal would otherwise be repeated across
+	// several files.
+	KindCertificate = "Certificate"
+
+	// KindStatefulSet is the apps/v1 StatefulSet kind. Same rationale as
+	// KindCertificate.
+	KindStatefulSet = "StatefulSet"
+
+	// ReasonInstanceNotReady is the condition reason for an engine blocked
+	// on its parent FireboltInstance.
+	ReasonInstanceNotReady = "InstanceNotReady"
 
 	// SuffixService is appended to form the cluster Service name.
 	SuffixService = "-service"

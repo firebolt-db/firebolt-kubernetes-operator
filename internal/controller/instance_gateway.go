@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -32,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/wakeagent"
 )
 
 // The dynamic forward proxy is configured in "sub cluster" mode rather
@@ -65,6 +67,42 @@ const (
 	gatewayAdminPort     int32 = 9901
 	gatewayServicePort   int32 = 80
 	gatewayConfigKey           = "envoy.yaml"
+
+	// gatewayWakeAgentHoldPort is the loopback port the wake-agent serves
+	// its hold endpoint on. Bound to 127.0.0.1 inside the pod, so it is
+	// reachable from Envoy and from nothing else.
+	gatewayWakeAgentHoldPort int32 = 9902
+
+	// gatewayWakeAgentDemandPort is the port the agent exposes per-engine
+	// wake demand on. Unlike the hold port this binds all interfaces: the
+	// operator polls it across the pod network to decide which stopped
+	// engines to scale back up.
+	gatewayWakeAgentDemandPort int32 = 9903
+
+	// Resource floor for the wake-agent sidecar. Small and flat: it holds
+	// per-engine timestamps and parked connections, nothing that scales
+	// with query volume. No CPU limit, so a burst of releases is not
+	// throttled into looking like a hung agent.
+	gatewayWakeAgentCPURequest    = "10m"
+	gatewayWakeAgentMemoryRequest = "32Mi"
+	gatewayWakeAgentMemoryLimit   = "128Mi"
+
+	// gatewayWakeAgentDrainSeconds keeps the agent alive past Envoy's own
+	// 8-second preStop drain so held requests are not reset on rollout.
+	gatewayWakeAgentDrainSeconds int64 = 12
+
+	// gatewayStreamIdleTimeoutSeconds is Envoy's own HCM default, stated
+	// explicitly so the wake hold's dependency on it is visible. Must stay
+	// comfortably above gatewayWakeHoldTimeoutMillis.
+	gatewayStreamIdleTimeoutSeconds = 300
+
+	// gatewayWakeHoldTimeoutMillis bounds the Lua httpCall to the wake
+	// agent. Deliberately longer than the agent's own hold timeout
+	// (wakeagent.DefaultHoldTimeout, 120s) so that when an engine never
+	// arrives it is the agent's 503 + Retry-After that reaches the client,
+	// not an opaque Lua-side timeout. Keep the two in that order if either
+	// is changed.
+	gatewayWakeHoldTimeoutMillis = 125_000
 
 	// gatewayPerConnectionBufferLimitBytes is the value the operator stamps
 	// onto Envoy's per_connection_buffer_limit_bytes on BOTH the listener
@@ -208,7 +246,7 @@ const (
 func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	envoyYAML := buildEnvoyConfigYAML(instance)
+	envoyYAML := buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance))
 
 	// RBAC: the operator manages the gateway ServiceAccount, Role, and
 	// RoleBinding only when the user has NOT supplied a custom
@@ -338,7 +376,7 @@ func (r *FireboltInstanceReconciler) gatewayServingCurrentConfig(ctx context.Con
 		}
 		return false, err
 	}
-	wantHash, err := r.gatewayConfigHash(ctx, instance, buildEnvoyConfigYAML(instance))
+	wantHash, err := r.gatewayConfigHash(ctx, instance, buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance)))
 	if err != nil {
 		return false, err
 	}
@@ -642,7 +680,7 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
 		validationContext, requireClientCert)
 }
 
-func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnabled bool) string {
 	// Fail closed while a requested client TLS certificate is still
 	// provisioning: serve no client-facing listener at all rather than
 	// plaintext (see buildFailClosedEnvoyConfigYAML and
@@ -674,6 +712,22 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
+                # Set explicitly at Envoy's own default rather than left
+                # implicit, because two things now depend on it and neither
+                # is obvious from the surrounding config:
+                #
+                #   - A wake hold parks a stream with no bytes flowing for
+                #     up to gatewayWakeHoldTimeoutMillis. If this ever drops
+                #     below that, held queries die here instead of at the
+                #     agent, and the client gets a stream reset rather than
+                #     the agent's 503 + Retry-After.
+                #   - A long-running query that produces no output for this
+                #     long is also cut, which is why the value is not simply
+                #     raised: it is the only backstop on an idle stream now
+                #     that the route timeout is disabled.
+                #
+                # TestWakeHoldFitsInsideStreamIdleTimeout pins the ordering.
+                stream_idle_timeout: %ds
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
@@ -825,7 +879,8 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                             end
                             headers:replace("x-firebolt-engine", engine)
                             headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:%d")
-                          end
+
+%s                          end
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
@@ -1123,7 +1178,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                     socket_address:
                       address: 127.0.0.1
                       port_value: %d
-admin:
+%sadmin:
   address:
     socket_address:
       address: 127.0.0.1
@@ -1131,8 +1186,10 @@ admin:
 `,
 		gatewayPerConnectionBufferLimitBytes,                // listener: per_connection_buffer_limit_bytes
 		gatewayContainerPort,                                // listener: port_value
+		gatewayStreamIdleTimeoutSeconds,                     // http_connection_manager: stream_idle_timeout
 		instance.Namespace,                                  // Lua: :authority rewrite
 		EngineHTTPQueryPort,                                 // Lua: :authority rewrite port
+		buildWakeHoldLua(wakeEnabled),                       // Lua: wake-agent hold (empty when wake is off)
 		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
 		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
 		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
@@ -1142,6 +1199,7 @@ admin:
 		gatewayMaxRequestsPerEngine,                         // circuit_breakers: max_requests
 		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
 		gatewayAdminPort,                                    // admin_stats endpoint: port_value
+		buildWakeAgentCluster(wakeEnabled),                  // wake_agent cluster (empty when wake is off)
 		gatewayAdminPort,                                    // admin: port_value
 	)
 }
@@ -1389,7 +1447,19 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		return err
 	}
 
-	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
+	// Gated by the same predicate as the Envoy config, not just by the
+	// image being set. A user-supplied ServiceAccount opts out of
+	// operator-managed RBAC, so an agent injected against it could never
+	// watch EndpointSlices — and would sit unready, taking the gateway pod
+	// out of its Service.
+	wakeAgent := wakeAgentConfig{}
+	if r.wakeAgentEnabled(instance) {
+		wakeAgent = wakeAgentConfig{
+			Image:           r.WakeAgentImage,
+			ImagePullPolicy: r.WakeAgentImagePullPolicy,
+		}
+	}
+	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels, wakeAgent)
 
 	desired := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -1518,11 +1588,157 @@ func gatewayMetricsPort(gw *computev1alpha1.GatewaySpec) int32 {
 //     (excluding operator-reserved names — webhook already rejected
 //     those, but the merge is defensive in case the webhook is off)
 //     appended.
+//
+// wakeAgentEnabled reports whether this instance's gateway runs the
+// wake-agent sidecar.
+//
+// It gates the Envoy config as well as the pod: rendering the Lua hold call
+// without an agent behind it would be worse than not having the feature,
+// because Envoy's httpCall synthesizes a 503 on a refused connection rather
+// than reporting failure (see wakeagent.DecisionHeader), so every query
+// would be answered from a loopback port with nothing listening on it.
+//
+// A user-supplied ServiceAccount opts out. The agent needs an EndpointSlice
+// read grant that only the operator-managed RoleBinding provides; running it
+// against an SA that lacks it would leave the informer permanently unsynced.
+func (r *FireboltInstanceReconciler) wakeAgentEnabled(instance *computev1alpha1.FireboltInstance) bool {
+	if r.WakeAgentImage == "" {
+		return false
+	}
+	return userGatewayServiceAccountName(instance) == ""
+}
+
+// buildWakeHoldLua renders the wake-on-zero hold, or nothing when wake is
+// disabled for this instance.
+func buildWakeHoldLua(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf(`
+                            -- Wake-on-zero. Ask the in-pod wake agent whether
+                            -- this engine is routable. For a running engine
+                            -- the agent answers from an in-memory map and
+                            -- returns immediately; for an auto-stopped one it
+                            -- parks this request while the operator scales the
+                            -- engine back up, then releases it once the
+                            -- engine's EndpointSlice shows a ready endpoint.
+                            --
+                            -- Why the agent and not Envoy alone: the engine
+                            -- Service is headless, so a stopped engine's name
+                            -- has no A records and the request fails at DNS
+                            -- resolution as a LOCAL REPLY. retry_policy acts
+                            -- on upstream responses, so the route's retries
+                            -- below never see it and cannot ride out a cold
+                            -- start.
+                            --
+                            -- MUST be the last thing this filter does. Envoy
+                            -- invalidates the header object across the
+                            -- coroutine yield httpCall performs, so any
+                            -- headers:replace() after this point fails with
+                            -- "object used outside of proper scope" — and
+                            -- fails silently as far as the client is
+                            -- concerned, leaving :authority unrewritten and
+                            -- the query routed at the gateway itself.
+                            --
+                            -- Fail open, and note how. httpCall does NOT
+                            -- return nil when it cannot reach the agent:
+                            -- Envoy synthesizes a 503 and delivers it through
+                            -- the success path, so status alone cannot tell a
+                            -- crashed agent from one that deliberately shed
+                            -- the request. Only a response carrying the
+                            -- agent's own decision header is honored; the
+                            -- synthesized one has no such header and falls
+                            -- through to normal routing.
+                            local wake_headers = handle:httpCall(
+                              "wake_agent",
+                              {
+                                [":method"] = "GET",
+                                [":path"] = "/hold?engine=" .. engine,
+                                [":authority"] = "wake_agent"
+                              },
+                              nil,
+                              %d
+                            )
+                            if wake_headers ~= nil
+                              and wake_headers["%s"] ~= nil
+                              and wake_headers[":status"] ~= "200" then
+                              handle:respond(
+                                {[":status"] = "503", ["retry-after"] = "10"},
+                                "engine is not available; retry shortly"
+                              )
+                              return
+                            end
+`, gatewayWakeHoldTimeoutMillis, wakeagent.DecisionHeader)
+}
+
+// buildWakeAgentCluster renders the loopback cluster the Lua filter calls,
+// or nothing when wake is disabled.
+func buildWakeAgentCluster(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf(`    # The wake-agent sidecar, reached over loopback from the Lua filter.
+    #
+    # No circuit breakers configured, so Envoy's defaults (1024 connections,
+    # requests and pending requests) apply. The agent's own hold cap is
+    # derived from Envoy's memory limit and can exceed that on a large
+    # gateway, in which case Envoy sheds first with a synthetic 503 — which
+    # the filter treats as "agent unreachable" and routes anyway. That is the
+    # safe direction, but it means the effective hold ceiling is the lower of
+    # the two.
+    - name: wake_agent
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: wake_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
+`, gatewayWakeAgentHoldPort)
+}
+
+// wakeAgentConfig carries what effectiveGatewayPodTemplate needs in order to
+// render the wake-agent sidecar.
+//
+// A zero value omits the sidecar entirely. That is the degraded mode for an
+// operator installed without --wake-agent-image: no agent runs, Envoy's Lua
+// call to the wake_agent cluster fails fast against a refused loopback
+// connection, and the filter falls through to ordinary routing. Wake stops
+// working; query routing does not.
+type wakeAgentConfig struct {
+	Image           string
+	ImagePullPolicy corev1.PullPolicy
+}
+
+// computev1alpha1.GatewayWakeAgentTokenVolumeName is the projected ServiceAccount token mounted
+// into the wake-agent container ONLY.
+//
+// The pod sets automountServiceAccountToken: false and then projects the
+// token into a single container. Containers in a pod share the network and
+// IPC namespaces but NOT the mount namespace, so Envoy's filesystem never
+// contains a credential — which matters because Envoy is the process
+// terminating untrusted traffic. A projected token also rotates, unlike the
+// legacy kubelet mount, and client-go re-reads the file for free.
+
+// serviceAccountTokenMountPath is where client-go's rest.InClusterConfig
+// expects to find token and ca.crt.
+const serviceAccountTokenMountPath = "/var/run/secrets/kubernetes.io/serviceaccount" //nolint:gosec // path, not a credential
+
+// wakeAgentTokenExpirationSeconds is the projected token's lifetime. The
+// kubelet refreshes it at 80% of this, and client-go picks the new value up
+// off disk.
+const wakeAgentTokenExpirationSeconds int64 = 3600
+
 func effectiveGatewayPodTemplate(
 	instance *computev1alpha1.FireboltInstance,
 	configMapName string,
 	configHash string,
 	baseLabels map[string]string,
+	wakeAgent wakeAgentConfig,
 ) corev1.PodTemplateSpec {
 	var userPodMeta metav1.ObjectMeta
 	var userPodSpec corev1.PodSpec
@@ -1623,6 +1839,8 @@ sleep 8
 	if userPrimary != nil && computev1alpha1.HasContainerResources(userPrimary.Resources) {
 		envoy.Resources = *userPrimary.Resources.DeepCopy()
 	}
+
+	wakeAgentContainer, wakeAgentVolume := buildWakeAgentContainer(wakeAgent, &envoy)
 
 	operatorVolumes := []corev1.Volume{
 		{
@@ -1750,11 +1968,15 @@ sleep 8
 	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
+	if wakeAgentContainer != nil {
+		containers = append(containers, *wakeAgentContainer)
+		operatorVolumes = append(operatorVolumes, *wakeAgentVolume)
+	}
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
 		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
 		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName,
 		computev1alpha1.GatewayClientCAVolumeName, computev1alpha1.GatewayEngineCRLVolumeName,
-		computev1alpha1.GatewayClientCRLVolumeName)
+		computev1alpha1.GatewayClientCRLVolumeName, computev1alpha1.GatewayWakeAgentTokenVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {
@@ -1769,7 +1991,16 @@ sleep 8
 			}),
 		},
 		Spec: corev1.PodSpec{
-			ServiceAccountName:            sa,
+			ServiceAccountName: sa,
+			// No kubelet-mounted token on this pod. Envoy terminates
+			// untrusted traffic and has no business holding a Kubernetes
+			// credential; the wake agent, which does need one, gets a
+			// projected token mounted into its container alone (see
+			// computev1alpha1.GatewayWakeAgentTokenVolumeName). Users who supply their own
+			// ServiceAccount are opted out — they own their pod's
+			// credential story, including any sidecar that needs API
+			// access.
+			AutomountServiceAccountToken:  automountForGateway(&userPodSpec),
 			TerminationGracePeriodSeconds: &gracePeriod,
 			EnableServiceLinks:            boolPtr(false),
 			NodeSelector:                  userPodSpec.NodeSelector,
@@ -1784,6 +2015,172 @@ sleep 8
 			Volumes:                       volumes,
 		},
 	}
+}
+
+// automountForGateway returns the pod's automountServiceAccountToken.
+//
+// False for operator-managed ServiceAccounts. When the user supplies their
+// own ServiceAccount they have taken ownership of the pod's RBAC (see
+// userGatewayServiceAccountName), so their explicit value is honored and
+// the absence of one leaves the field unset — Kubernetes' own default
+// applies rather than a decision the operator makes on their behalf.
+func automountForGateway(userPodSpec *corev1.PodSpec) *bool {
+	if userPodSpec.ServiceAccountName != "" {
+		return userPodSpec.AutomountServiceAccountToken
+	}
+	return boolPtr(false)
+}
+
+// buildWakeAgentContainer renders the wake-agent sidecar and the projected
+// token volume it alone mounts. Returns (nil, nil) when no image is
+// configured, which omits the sidecar (see wakeAgentConfig).
+//
+// envoy is read, not modified: the agent's memory-derived hold cap is
+// sourced from the Envoy container's own limit, because the memory a held
+// request consumes is Envoy's, not the agent's.
+func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*corev1.Container, *corev1.Volume) {
+	if cfg.Image == "" {
+		return nil, nil
+	}
+
+	var runAsUser int64 = 65532 // distroless nonroot, matching the operator image
+
+	args := []string{
+		"wake-agent",
+		fmt.Sprintf("--hold-port=%d", gatewayWakeAgentHoldPort),
+		fmt.Sprintf("--demand-port=%d", gatewayWakeAgentDemandPort),
+		fmt.Sprintf("--envoy-admin-url=http://127.0.0.1:%d", gatewayAdminPort),
+		fmt.Sprintf("--per-hold-bytes=%d", gatewayPerConnectionBufferLimitBytes),
+	}
+
+	env := []corev1.EnvVar{{
+		Name: "POD_NAMESPACE",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+		},
+	}}
+
+	// Only expose Envoy's memory limit when one is actually set. The
+	// downward API's resourceFieldRef does not report "unset" — for a
+	// container with no limit it substitutes the node's allocatable, which
+	// would size the hold cap off the whole machine rather than off the
+	// gateway's budget. Omitting the variable instead lets the agent fall
+	// back to its static cap, which is the honest answer when no limit
+	// exists to divide up.
+	if _, ok := envoy.Resources.Limits[corev1.ResourceMemory]; ok {
+		env = append(env, corev1.EnvVar{
+			Name: "ENVOY_MEMORY_LIMIT_BYTES",
+			ValueFrom: &corev1.EnvVarSource{
+				ResourceFieldRef: &corev1.ResourceFieldSelector{
+					ContainerName: computev1alpha1.GatewayContainerName,
+					Resource:      "limits.memory",
+				},
+			},
+		})
+	}
+
+	container := &corev1.Container{
+		Name:            computev1alpha1.GatewayWakeAgentContainerName,
+		Image:           cfg.Image,
+		ImagePullPolicy: cfg.ImagePullPolicy,
+		Args:            args,
+		Env:             env,
+		// Explicit requests and limits, not left unset. Adding an
+		// unbounded container would demote a previously Guaranteed
+		// gateway pod to Burstable, and would be rejected outright in a
+		// namespace whose LimitRange requires requests. The agent holds
+		// per-engine timestamps and parked connections and does nothing
+		// else, so the floor is small and flat.
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(gatewayWakeAgentCPURequest),
+				corev1.ResourceMemory: resource.MustParse(gatewayWakeAgentMemoryRequest),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse(gatewayWakeAgentMemoryLimit),
+			},
+		},
+		// Outlive Envoy's drain. Envoy's preStop flips /healthz to 503
+		// and sleeps 8s so in-flight work finishes; an agent that exited
+		// first would reset every request it is holding and, for the
+		// remainder of that window, leave newly arriving queries talking
+		// to a dead loopback port. Sleeping past it lets the holds end
+		// the way they normally do.
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				Sleep: &corev1.SleepAction{Seconds: gatewayWakeAgentDrainSeconds},
+			},
+		},
+		Ports: []corev1.ContainerPort{
+			{Name: "wake-demand", ContainerPort: gatewayWakeAgentDemandPort, Protocol: corev1.ProtocolTCP},
+		},
+		// Readiness only, deliberately no liveness probe. A wedged agent
+		// should stop being polled for demand, not restart the container
+		// underneath requests it is currently holding — every one of those
+		// would turn into a client-visible reset. Envoy fails open, so an
+		// unready agent costs wake, not availability.
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				HTTPGet: &corev1.HTTPGetAction{
+					Path:   "/healthz",
+					Port:   intstr.FromString("wake-demand"),
+					Scheme: corev1.URISchemeHTTP,
+				},
+			},
+			InitialDelaySeconds: 1,
+			PeriodSeconds:       5,
+			TimeoutSeconds:      2,
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                &runAsUser,
+			RunAsNonRoot:             boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      computev1alpha1.GatewayWakeAgentTokenVolumeName,
+			MountPath: serviceAccountTokenMountPath,
+			ReadOnly:  true,
+		}},
+	}
+
+	// The three sources kubelet's own automount projects, reproduced
+	// explicitly so exactly one container sees them. rest.InClusterConfig
+	// needs token and ca.crt on disk; namespace is projected for parity
+	// with the standard mount.
+	expiration := wakeAgentTokenExpirationSeconds
+	volume := &corev1.Volume{
+		Name: computev1alpha1.GatewayWakeAgentTokenVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{
+					{
+						ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+							Path:              "token",
+							ExpirationSeconds: &expiration,
+						},
+					},
+					{
+						ConfigMap: &corev1.ConfigMapProjection{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"},
+							Items:                []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
+						},
+					},
+					{
+						DownwardAPI: &corev1.DownwardAPIProjection{
+							Items: []corev1.DownwardAPIVolumeFile{{
+								Path:     "namespace",
+								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return container, volume
 }
 
 // splitUserContainers separates the user's template containers into
