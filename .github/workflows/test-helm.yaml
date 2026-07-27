@@ -168,6 +168,13 @@ jobs:
       - name: Verify engine web UI sidecar
         run: make helm-test-ui KIND_CLUSTER="${KIND_CLUSTER}"
 
+      - name: Verify wake-on-zero
+        # The only check that exercises the real wake path: a chart-installed
+        # operator means the wake-agent sidecar runs from the actual operator
+        # image, inside the gateway pod, where Envoy's loopback call can reach
+        # it. The Go e2e suite runs the operator in-process and cannot.
+        run: make helm-test-wake KIND_CLUSTER="${KIND_CLUSTER}"
+
       - name: Verify website quickstart bundle
         run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"
 
