@@ -546,8 +546,12 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 	// rotationPolicy:Never means cert-manager reuses whatever private key already
 	// sits in the target Secret. Without this check, namespace `create secrets`
 	// alone is enough to choose the Instance's signing key. See
-	// verifyCertManagerIssued.
-	if err := verifyCertManagerIssued(&secret, desired.Name); err != nil {
+	// verifySigningKeyProvenance.
+	if err := verifySigningKeyProvenance(&secret, &cert, key.ObservedPublicKeyFingerprint); err != nil {
+		if r.EventRecorder != nil {
+			r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "SigningKeyProvenanceRejected",
+				"refusing signing key secret %s/%s: %v", instance.Namespace, key.SecretName, err)
+		}
 		return false, fmt.Errorf("signing key secret %s/%s: %w", instance.Namespace, key.SecretName, err)
 	}
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -687,6 +688,13 @@ func validatePositiveDurationField(path *field.Path, value string) *field.Error 
 // identities from each other.
 const issuerClaim = "iss"
 
+// issuerClaimRef matches a template reference to the issuer claim, not the bare
+// letters. A substring test reads "{{ swiss_id }}" and "dismissal@corp" as
+// issuer-qualified and admits exactly the non-unique mapping the check exists to
+// reject. Whitespace inside the braces is optional because packdb's template
+// parser tolerates it and the operator's own example writes "{{ iss }}".
+var issuerClaimRef = regexp.MustCompile(`\{\{\s*` + issuerClaim + `\s*\}\}`)
+
 // defaultAdminName mirrors the AdminSpec.Name CRD default (packdb's own default
 // admin username).
 const defaultAdminName = "firebolt"
@@ -719,7 +727,7 @@ func authAdminName(auth *AuthSpec) string {
 //     catches the unambiguous case and leaves the templated one to documentation.
 func validateUsernameMapping(mapping string, path *field.Path, providerCount int, adminName string) field.ErrorList {
 	var errs field.ErrorList
-	if providerCount > 1 && !strings.Contains(mapping, issuerClaim) {
+	if providerCount > 1 && !issuerClaimRef.MatchString(mapping) {
 		errs = append(errs, field.Invalid(path, mapping,
 			fmt.Sprintf("must incorporate the %q claim when more than one OIDC provider is configured: "+
 				"a mapping that is not provider-unique lets an identity from one provider resolve to "+

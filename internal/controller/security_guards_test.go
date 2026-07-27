@@ -19,6 +19,7 @@ package controller
 import (
 	"strings"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,6 +60,90 @@ func TestVerifyCertManagerIssued_RejectsPrePlantedSecret(t *testing.T) {
 	genuine.Annotations = map[string]string{certmanagerv1.CertificateNameKey: certName}
 	if err := verifyCertManagerIssued(genuine, certName); err != nil {
 		t.Fatalf("cert-manager's own output was rejected: %v", err)
+	}
+}
+
+// TestVerifySigningKeyProvenance_RejectsForgedAnnotation covers what the
+// annotation alone cannot. cert-manager's certificate-name annotation is
+// client-settable and the API server stores it verbatim, so an attacker who
+// plants a Secret sets it themselves and verifyCertManagerIssued passes.
+// creationTimestamp is the ordering the API server owns: it overwrites any
+// client-supplied value, and cert-manager cannot write a target Secret before
+// its Certificate exists.
+func TestVerifySigningKeyProvenance_RejectsForgedAnnotation(t *testing.T) {
+	const certName = "inst-auth-signing"
+	certCreated := metav1.NewTime(time.Unix(2_000_000, 0))
+
+	cert := &certmanagerv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1", CreationTimestamp: certCreated},
+	}
+	certPEM := mustGenSigningCertPEM()
+	secretAt := func(sec int64) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              certName,
+				Namespace:         "ns-1",
+				CreationTimestamp: metav1.NewTime(time.Unix(sec, 0)),
+				// The attacker stamps this themselves; it proves nothing.
+				Annotations: map[string]string{certmanagerv1.CertificateNameKey: certName},
+			},
+			Data: map[string][]byte{
+				corev1.TLSPrivateKeyKey: []byte("key"),
+				corev1.TLSCertKey:       certPEM,
+			},
+		}
+	}
+
+	planted := secretAt(1_999_999)
+	if err := verifySigningKeyProvenance(planted, cert, nil); err == nil {
+		t.Fatal("a Secret that predates its Certificate was accepted despite a correct annotation")
+	}
+
+	if err := verifySigningKeyProvenance(secretAt(2_000_001), cert, nil); err != nil {
+		t.Fatalf("cert-manager's own output was rejected: %v", err)
+	}
+	// Equal seconds must pass: creationTimestamp is second-granular and the
+	// honest path collides in that window.
+	if err := verifySigningKeyProvenance(secretAt(2_000_000), cert, nil); err != nil {
+		t.Fatalf("same-second issuance was rejected: %v", err)
+	}
+
+	// Recovery: a Certificate deleted and recreated leaves a Secret that legitimately
+	// predates it. Allowed only for a key already witnessed in status.
+	witnessed, err := signingKeyPublicKeyFingerprint(certPEM)
+	if err != nil {
+		t.Fatalf("fingerprinting the fixture cert: %v", err)
+	}
+	if err := verifySigningKeyProvenance(planted, cert, &witnessed); err != nil {
+		t.Fatalf("a previously witnessed key was rejected on Certificate recreate: %v", err)
+	}
+	other := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	if err := verifySigningKeyProvenance(planted, cert, &other); err == nil {
+		t.Fatal("an unwitnessed key was accepted through the recovery path")
+	}
+}
+
+// TestIsGeneratedEngineTLSSecretName_MatchesControllerNaming binds the shape
+// match admission uses to the names the controller actually mints. The two live
+// in different packages (admission cannot import the controller's suffix
+// constants), so a rename on either side has to fail here rather than silently
+// unprotect every engine serving key.
+func TestIsGeneratedEngineTLSSecretName_MatchesControllerNaming(t *testing.T) {
+	for _, gen := range []int{1, 2, 17, 1234} {
+		name := genResourceName("engine-a", gen, SuffixEngineTLS)
+		if !computev1alpha1.IsGeneratedEngineTLSSecretName(name) {
+			t.Errorf("admission does not recognize %q as an engine serving-cert Secret", name)
+		}
+	}
+	for _, name := range []string{
+		"inst" + SuffixEngineTLS, // instance-wide anchor, covered by the exact set
+		"my-own-engine-tls",      // unrelated user Secret
+		"engine-a-g1-gateway-tls",
+		"",
+	} {
+		if computev1alpha1.IsGeneratedEngineTLSSecretName(name) {
+			t.Errorf("admission wrongly claims %q is an engine serving-cert Secret", name)
+		}
 	}
 }
 

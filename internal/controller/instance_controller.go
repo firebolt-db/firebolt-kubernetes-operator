@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	stderrors "errors"
 	"fmt"
-	"strings"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -615,19 +614,11 @@ func instanceProtectedSecretNames(inst *computev1alpha1.FireboltInstance) []stri
 }
 
 // isGeneratedEngineTLSSecretName reports whether name has the shape of a
-// per-generation engine-TLS Secret ("<engine>-g<N>-engine-tls",
-// genResourceName(engine, gen, SuffixEngineTLS)) for ANY engine. Matched by shape
-// because the generation number means no reconcile can enumerate the live set,
-// and by any-engine because a template must not reach a SIBLING engine's serving
-// key either.
+// per-generation engine-TLS Secret (genResourceName(engine, gen,
+// SuffixEngineTLS)) for ANY engine. Shared with admission, which screens
+// spec.tls.*.secretRef against the same shape.
 func isGeneratedEngineTLSSecretName(name string) bool {
-	if !strings.HasSuffix(name, SuffixEngineTLS) {
-		return false
-	}
-	// Require the generation infix so the instance-wide anchor
-	// ("<instance>-engine-tls", already covered by the exact set) and an
-	// unrelated user Secret merely ending in "-engine-tls" are not swept in.
-	return strings.Contains(strings.TrimSuffix(name, SuffixEngineTLS), SuffixGen)
+	return computev1alpha1.IsGeneratedEngineTLSSecretName(name)
 }
 
 // checkExternalPostgresSecret verifies the Secret referenced by

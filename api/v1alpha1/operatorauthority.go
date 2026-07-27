@@ -952,22 +952,52 @@ func InstanceProvisionedSecretNames(inst *FireboltInstance) []string {
 }
 
 // instanceProtectedSecretPredicate adapts InstanceProvisionedSecretNames into the
-// predicate the TLS reference checks take. Returns nil (protecting nothing) when
-// the Instance has provisioned nothing yet, which is the correct behavior for a
-// first apply: there is no operator key material to point at.
+// predicate the TLS reference checks take. Non-nil even on a first apply, when
+// the Instance has provisioned nothing to name yet: the per-generation engine
+// serving Secrets are matched by shape and exist independently of anything this
+// Instance's status records.
 func instanceProtectedSecretPredicate(inst *FireboltInstance) func(string) bool {
-	names := InstanceProvisionedSecretNames(inst)
-	if len(names) == 0 {
-		return nil
-	}
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
+	set := make(map[string]struct{})
+	for _, n := range InstanceProvisionedSecretNames(inst) {
 		set[n] = struct{}{}
 	}
 	return func(name string) bool {
-		_, hit := set[name]
-		return hit
+		if name == "" {
+			return false
+		}
+		if _, hit := set[name]; hit {
+			return true
+		}
+		return IsGeneratedEngineTLSSecretName(name)
 	}
+}
+
+// Suffixes of operator-generated Secret names that admission has to recognize
+// without being able to enumerate the live set. Kept in step with the
+// controller's own constants by TestGeneratedEngineTLSSecretNameShapeMatches.
+const (
+	suffixEngineTLS = "-engine-tls"
+	suffixGen       = "-g"
+)
+
+// IsGeneratedEngineTLSSecretName reports whether name has the shape of a
+// per-generation engine serving-certificate Secret ("<engine>-g<N>-engine-tls")
+// for ANY engine in the namespace.
+//
+// Matched by shape rather than by name because the generation number means no
+// admission call can know which ones currently exist, and by any-engine because
+// a sibling engine's serving key is worth as much to an attacker as one's own:
+// the gateway authenticates engines against the engine CA and a namespace
+// wildcard SAN, so holding any engine's key is enough to impersonate an engine
+// to it.
+func IsGeneratedEngineTLSSecretName(name string) bool {
+	if !strings.HasSuffix(name, suffixEngineTLS) {
+		return false
+	}
+	// Require the generation infix so the instance-wide anchor
+	// ("<instance>-engine-tls") and an unrelated user Secret merely ending in
+	// "-engine-tls" are not swept in.
+	return strings.Contains(strings.TrimSuffix(name, suffixEngineTLS), suffixGen)
 }
 
 // validatePrimaryContainerFields walks every user-set container field on

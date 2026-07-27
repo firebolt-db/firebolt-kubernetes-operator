@@ -340,31 +340,29 @@ func engineTLSSecretReady(secret *corev1.Secret) bool {
 // callers can all surface it the same way.
 var errSecretNotCertManagerIssued = stderrors.New("secret was not issued by cert-manager for the expected certificate")
 
-// verifyCertManagerIssued confirms that secret is cert-manager's output for
-// certName, via the certificate-name annotation cert-manager stamps on every
-// target Secret it writes.
+// verifyCertManagerIssued checks that secret carries cert-manager's
+// certificate-name annotation for certName.
 //
-// This closes a real adoption hole, not a theoretical one. Every Certificate the
-// operator creates names its target Secret deterministically
-// ("<instance>-auth-signing", "<instance>-gateway-tls", "<engine>-g<N>-engine-tls"),
-// and cert-manager's documented contract for privateKey.rotationPolicy is that
-// under "Never" it "will only [generate a private key] if one does not already
-// exist in the target spec.secretName". So anyone able to CREATE a Secret in the
-// namespace — with no FireboltInstance write access and no Secret READ access —
-// could pre-create that exact name holding key material of their choosing, and
-// cert-manager would adopt it rather than mint one. For the JWT signing keypair
-// that is game over: the planted key becomes the Instance-wide signing key and its
-// holder can mint tokens every engine in the fleet accepts as the admin. For a TLS
-// listener it hands the attacker the serving private key.
+// This is a WRONG-SECRET check, not an authenticity check, and the difference
+// matters. The annotation is ordinary metadata: anyone who can create a Secret
+// can set it to any value, and the API server stores it verbatim. So it catches
+// a Secret that belongs to a different Certificate — a name collision, a
+// hand-copied Secret, a stale one left by a renamed Instance — and it catches
+// nothing at all about an attacker who plants key material under the right name.
+// Callers that need provenance against a hostile namespace principal need a
+// signal the API server owns rather than the client; see
+// verifySigningKeyProvenance.
 //
-// Only the certificate name is asserted, deliberately. cert-manager stamps it
-// exclusively on Secrets it owns for that specific Certificate, so it is already
-// sufficient to reject planted material, and it is STABLE across an issuer change
-// — which the issuer annotations are not. Checking those too would fail closed
-// during a gateway issuer rotation (a supported operation: the CRD leaves the
-// gateway issuer mutable precisely so a client cert can be reissued under a new
-// CA), because the Secret carries the old issuer's annotations until the reissue
-// lands.
+// Only the certificate name is asserted, deliberately. It is STABLE across an
+// issuer change — which the issuer annotations are not. Checking those too would
+// fail closed during a gateway issuer rotation (a supported operation: the CRD
+// leaves the gateway issuer mutable precisely so a client cert can be reissued
+// under a new CA), because the Secret carries the old issuer's annotations until
+// the reissue lands.
+//
+// The TLS listeners rely on this check alone, and that is sufficient for them:
+// tlsCertRotationPolicy is Always, so cert-manager generates a fresh private key
+// on every issuance and can never adopt planted material in the first place.
 //
 // Deliberately NOT auto-remediated by deleting the offending Secret: destroying key
 // material on the strength of an annotation mismatch is the wrong default, and a
@@ -377,6 +375,74 @@ func verifyCertManagerIssued(secret *corev1.Secret, certName string) error {
 			errSecretNotCertManagerIssued, certmanagerv1.CertificateNameKey, got, certName)
 	}
 	return nil
+}
+
+// errSigningKeyPredatesCertificate is returned when a signing Secret already
+// existed before the Certificate that is supposed to have produced it.
+var errSigningKeyPredatesCertificate = stderrors.New(
+	"signing key secret predates the certificate that would issue it")
+
+// verifySigningKeyProvenance decides whether a signing Secret really holds key
+// material this operator's Certificate produced.
+//
+// The signing keypair is the one place the operator cannot lean on
+// rotationPolicy for this. It is pinned to Never (authSigningRotationPolicy) so
+// that a key is only ever replaced through the rotation state machine, and
+// cert-manager's contract under Never is that it generates a private key "only
+// if one does not already exist in the target spec.secretName". Names are
+// deterministic. So a namespace principal holding nothing but `create secrets` —
+// no FireboltInstance write access, no Secret read access — can pre-create
+// "<instance>-auth-signing" holding a key of their choosing, and cert-manager
+// issues against it rather than minting one. The planted key becomes the
+// Instance-wide JWT signing key and its holder mints admin tokens every engine
+// in the fleet honors.
+//
+// The certificate-name annotation cannot detect that. The attacker sets it
+// themselves at create time, and cert-manager rewrites the same value after it
+// issues, so the Secret looks correct from every angle a client can control.
+//
+// creationTimestamp is the signal that works, because it is the one the API
+// server refuses to take from the client: it is overwritten on create
+// (rest.FillObjectMetaSystemFields), so a planted Secret is always stamped with
+// the moment it was planted. cert-manager cannot write the target Secret before
+// the Certificate exists, so for genuine material the Secret is never older than
+// its Certificate. Reversed order means the Secret was already sitting there.
+//
+// Two limits, both deliberate:
+//
+//   - creationTimestamp is second-granular, so a Secret planted within the same
+//     second as the Certificate's creation compares equal and passes. Equal must
+//     be allowed — the honest path collides in that window routinely — which
+//     leaves a sub-second race requiring the attacker to already know the kid.
+//     That is a far cry from "create a Secret whenever you like".
+//   - Recovery: if the Certificate is deleted and recreated (a GitOps prune, a
+//     manual cleanup) the surviving Secret now predates it through no fault of
+//     anyone. Allowed only when its public key is the one already witnessed in
+//     status, which an attacker's key by definition is not.
+//
+// A rejection is not auto-remediated. Deleting the Secret would destroy the
+// signing key, and if the material is genuine that retires every token in flight.
+func verifySigningKeyProvenance(
+	secret *corev1.Secret, cert *certmanagerv1.Certificate, witnessedFingerprint *string,
+) error {
+	if err := verifyCertManagerIssued(secret, cert.Name); err != nil {
+		return err
+	}
+	if !secret.CreationTimestamp.Before(&cert.CreationTimestamp) {
+		return nil
+	}
+	if witnessedFingerprint != nil {
+		if fp, err := signingKeyPublicKeyFingerprint(secret.Data[corev1.TLSCertKey]); err == nil &&
+			fp != "" && fp == *witnessedFingerprint {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: secret created %s, certificate %q created %s; "+
+		"the operator will not sign with key material it cannot attribute to its own certificate",
+		errSigningKeyPredatesCertificate,
+		secret.CreationTimestamp.UTC().Format(time.RFC3339),
+		cert.Name,
+		cert.CreationTimestamp.UTC().Format(time.RFC3339))
 }
 
 // certificateReadyForCurrentGeneration reports whether a cert-manager

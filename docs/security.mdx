@@ -416,10 +416,39 @@ When auth or TLS is enabled, these additional Secrets exist:
 | Gateway TLS certificate | cert-manager, or your own via `secretRef` | Gateway pods | cert-manager renewal on the same bounded default. A reissue rolls the Gateway Deployment. |
 | Gateway client CA | You create it; referenced by `clientCASecretRef` | Gateway pods (public certificate only) | Yours. A swap is treated as a tightening transition. |
 
-The operator reads a signing key's public-key fingerprint to detect key
+The Firebolt Operator reads a signing key's public-key fingerprint to detect key
 replacement, and a Secret's `resourceVersion` to detect an in-place password
 change. Neither the private key nor the password value is ever written to
 status, events, or logs.
+
+### Signing key provenance
+
+Signing key Secrets have deterministic names, and cert-manager reuses a private
+key that already exists in a Certificate's target Secret. Without a check, anyone
+holding `create secrets` in the namespace could pre-create that name with key
+material of their choosing and have it become the Instance's JWT signing key.
+
+The Firebolt Operator refuses to sign with a Secret it cannot attribute to its own
+Certificate. It compares creation timestamps: cert-manager cannot write a target
+Secret before the Certificate exists, so a signing Secret older than its
+Certificate was put there by something else. The check uses `creationTimestamp`
+rather than cert-manager's `cert-manager.io/certificate-name` annotation, because
+the annotation is ordinary metadata that whoever creates the Secret can set to any
+value, while the API server assigns `creationTimestamp` itself.
+
+You can hit this legitimately by deleting a signing Certificate and letting the
+Firebolt Operator recreate it, such as during a GitOps prune. The surviving Secret
+then predates its new Certificate. The Firebolt Operator allows this when the
+Secret holds the same public key it already recorded in
+`status.auth.signingKeys[].observedPublicKeyFingerprint`. If that fingerprint is
+also gone, the Firebolt Operator reports a `SigningKeyProvenanceRejected` event and
+waits. Deleting the Secret to clear the rejection destroys the signing key and
+invalidates every token signed with it, so confirm where the Secret came from
+first.
+
+The TLS listeners do not need this check. Their certificates use
+`rotationPolicy: Always`, so cert-manager generates a fresh private key on every
+issuance and never adopts pre-existing material.
 
 ## See also
 

@@ -1721,14 +1721,47 @@ func TestValidateTLS_ForbidsOperatorManagedSecretRefs(t *testing.T) {
 		}
 	})
 
+	// Per-generation engine serving Secrets are never in the Instance's status, so
+	// an exact-name set cannot cover them. Whoever holds one can impersonate an
+	// engine to the gateway, which authenticates engines on the engine CA and a
+	// namespace wildcard SAN.
+	t.Run("gateway secretRef naming an engine serving cert is rejected", func(t *testing.T) {
+		for _, name := range []string{"engine-a-g1-engine-tls", "other-engine-g42-engine-tls"} {
+			inst := base()
+			inst.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: name},
+			}}
+			if errs := ValidateTLS(inst); len(errs) == 0 {
+				t.Errorf("pointing spec.tls.gateway.secretRef at engine serving cert %q was accepted", name)
+			}
+		}
+	})
+
+	// The shape match has to hold before the Instance has provisioned anything to
+	// name: engine Secrets exist independently of this Instance's status.
+	t.Run("engine serving cert is rejected on a status-less instance", func(t *testing.T) {
+		inst := &FireboltInstance{Spec: FireboltInstanceSpec{TLS: &TLSSpec{
+			Gateway: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: "engine-a-g1-engine-tls"},
+			},
+		}}}
+		if errs := ValidateTLS(inst); len(errs) == 0 {
+			t.Fatal("engine serving cert accepted because the Instance had provisioned nothing yet")
+		}
+	})
+
 	t.Run("a user's own BYO secret is still accepted", func(t *testing.T) {
-		inst := base()
-		inst.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
-			Enabled:   true,
-			SecretRef: &corev1.LocalObjectReference{Name: "my-own-tls"},
-		}}
-		if errs := ValidateTLS(inst); len(errs) != 0 {
-			t.Fatalf("a legitimate bring-your-own Secret was rejected: %v", errs.ToAggregate())
+		for _, name := range []string{"my-own-tls", "my-own-engine-tls"} {
+			inst := base()
+			inst.Spec.TLS = &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:   true,
+				SecretRef: &corev1.LocalObjectReference{Name: name},
+			}}
+			if errs := ValidateTLS(inst); len(errs) != 0 {
+				t.Errorf("legitimate bring-your-own Secret %q was rejected: %v", name, errs.ToAggregate())
+			}
 		}
 	})
 }
@@ -1773,8 +1806,30 @@ func TestValidateUsernameMapping(t *testing.T) {
 	})
 
 	t.Run("multi-provider issuer-qualified mapping is accepted", func(t *testing.T) {
-		if errs := validateUsernameMapping("{{ iss }}|{{ sub }}", path, 2, "firebolt"); len(errs) != 0 {
-			t.Fatalf("an issuer-qualified mapping was rejected: %v", errs.ToAggregate())
+		for _, mapping := range []string{
+			"{{ iss }}|{{ sub }}",
+			"{{iss}}|{{sub}}",
+			"{{  iss  }}-{{ email }}",
+		} {
+			if errs := validateUsernameMapping(mapping, path, 2, "firebolt"); len(errs) != 0 {
+				t.Errorf("issuer-qualified mapping %q was rejected: %v", mapping, errs.ToAggregate())
+			}
+		}
+	})
+
+	// A substring test for "iss" reads all of these as issuer-qualified and
+	// admits exactly the cross-provider collision the check exists to reject.
+	t.Run("incidental iss substrings do not qualify", func(t *testing.T) {
+		for _, mapping := range []string{
+			"{{ swiss_id }}",
+			"{{ dismissal }}",
+			"{{ email }}@issuer.example.com",
+			"iss",
+			"{{ ISS }}",
+		} {
+			if errs := validateUsernameMapping(mapping, path, 2, "firebolt"); len(errs) == 0 {
+				t.Errorf("mapping %q passed the multi-provider uniqueness check without referencing the iss claim", mapping)
+			}
 		}
 	})
 
