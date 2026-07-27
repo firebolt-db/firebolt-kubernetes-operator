@@ -370,19 +370,18 @@ jobs:
         with:
           version: "latest"
 
+      # Versions and SHA-256 digests live in scripts/ci/pinned-tools.tsv.
       - name: Install helm-docs
-        env:
-          HELM_DOCS_VERSION: "1.14.2"
         run: |
-          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin helm-docs
+          scripts/ci/fetch-verified.sh helm-docs ./helm-docs.tar.gz
+          sudo tar -xzf ./helm-docs.tar.gz -C /usr/local/bin helm-docs
+          rm -f ./helm-docs.tar.gz
 
       - name: Install yq
-        env:
-          YQ_VERSION: v4.44.3
         run: |
-          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          scripts/ci/fetch-verified.sh yq ./yq
+          sudo install -m 0755 ./yq /usr/local/bin/yq
+          rm -f ./yq
 
       - name: Sync chart appVersion to released operator image
         # Charts are release-please components: release-please owns each chart's
@@ -489,12 +488,12 @@ jobs:
         with:
           version: "latest"
 
+      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv.
       - name: Install yq
-        env:
-          YQ_VERSION: v4.44.3
         run: |
-          sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
+          scripts/ci/fetch-verified.sh yq ./yq
+          sudo install -m 0755 ./yq /usr/local/bin/yq
+          rm -f ./yq
 
       - name: Login to GitHub Container Registry (Helm)
         run: |

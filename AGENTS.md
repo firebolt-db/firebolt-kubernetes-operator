@@ -25,10 +25,12 @@ helm/
   firebolt-operator/   # operator Helm chart
   firebolt-operator-crds/ # CRD-only Helm chart
 internal/
+  ci/                  # test-only: repo-level CI invariants (pinned tool digests)
   controller/          # reconcilers, state machines, gateway, drain logic
   infra/               # kubectl-firebolt plugin library (typed CRs + kubectl)
   metrics/             # Prometheus metric recorders
 scripts/               # CI helpers, Kind setup, image loading, code generation
+  ci/                  # workflow helpers + pinned third-party binary digests
 test/
   e2e/                 # Ginkgo E2E tests (build tag: e2e)
   testhelpers/         # shared test utilities
@@ -250,6 +252,16 @@ E2E rules:
 - The engine operator runs with the orphaned-generation GC **disabled by default** (`StartOperator` / `SetupTestInstance`), so happy-path specs assert the primary reconcile path never orphans a generation. A spec that drives **mid-flight spec changes** — rapid replica edits that abandon a half-built blue-green generation — MUST start its operator with `WithGC()`: the primary path deliberately leaves abandoned generations for the GC to reap, so without GC their `*-g<N>` StatefulSets linger. Symptom of getting this wrong: a spec times out in `WaitForEngineReady` waiting for *N* ready pods while extra `*-g<N>` pods from a superseded generation stay Running (it counts ready pods across all generations by the engine label).
 
 Do not delete Docker images or kind clusters; assume the kind cluster is already set up.
+
+### Pinned third-party CI binaries
+
+Every third-party binary that CI or the Makefile downloads (`kind`, `yq`, `helm-docs`, `tla2tools.jar`) is pinned by content in [`scripts/ci/pinned-tools.tsv`](scripts/ci/pinned-tools.tsv) and fetched through [`scripts/ci/fetch-verified.sh`](scripts/ci/fetch-verified.sh), which writes the destination only after the SHA-256 matches. A pinned *version* is not integrity protection on its own: an upstream release tag can be deleted and re-cut with different bytes, and these runners hold a `GITHUB_TOKEN` while executing PR code.
+
+- Call sites pass a **name**, never a URL: `scripts/ci/fetch-verified.sh <name> <dest>`. The manifest owns version, URL and digest, so a bump is one edit shared by every workflow and by `make formal-check`.
+- Fetch to a file, then unpack or install. Never pipe a download into `tar`/`sh` — that executes bytes before they are checked.
+- Bumping a version means replacing the URL **and** the digest together. Take the digest from the project's own published checksum file (`<url>.sha256sum` for kind, `checksums` for yq, `checksums.txt` for helm-docs); tlaplus publishes none, so `tla2tools.jar` is pinned from the artifact and a mismatch means the tag was re-cut.
+- The helper verifies an existing destination instead of trusting it, so it is safe to run over a restored `actions/cache` entry. The `formal-verification.yaml` TLA+ cache is keyed on `hashFiles('scripts/ci/pinned-tools.tsv')` and its download step runs unconditionally for that reason.
+- [`internal/ci/pinned_tools_test.go`](internal/ci/pinned_tools_test.go) (a test-only package, run by `make test`) keeps the manifest well-formed and fails any `curl`/`wget` of an `https://` URL in a workflow, the `Makefile`, or `scripts/**` that bypasses the helper. A line that fetches something other than an executable artifact can opt out with a `# fetch-verified-exempt: <reason>` comment.
 
 ### Required checks / rollup gates
 

@@ -353,11 +353,10 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 ##@ Formal Verification
 
 TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
-TLA2TOOLS_VERSION ?= v1.8.0
-TLA2TOOLS_URL ?= https://github.com/tlaplus/tlaplus/releases/download/$(TLA2TOOLS_VERSION)/tla2tools.jar
 
+# Version and SHA-256 live in scripts/ci/pinned-tools.tsv, shared with CI.
 $(TLA2TOOLS): $(LOCALBIN)
-	wget -q -O "$(TLA2TOOLS)" "$(TLA2TOOLS_URL)"
+	scripts/ci/fetch-verified.sh tla2tools "$(TLA2TOOLS)"
 
 .PHONY: tla2tools
 tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
