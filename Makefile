@@ -406,7 +406,7 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 			echo "ERROR: $$patch no longer applies. Re-point it at the current code -- do not delete it." >&2; \
 			fail=1; continue; \
 		fi; \
-		log=$$(mktemp); \
+		log=$$(mktemp "$${TMPDIR:-/tmp}/formal-mutants.XXXXXX"); \
 		go test ./internal/controller/ -run "$$test" -count=1 >"$$log" 2>&1 || true; \
 		git apply -R "formal/mutants/$$patch"; \
 		if grep -qF -e "$$want" "$$log"; then \
