@@ -28,7 +28,7 @@ COPY . .
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN GO_TAGS=$([ "${IMAGE_VARIANT}" = "latest" ] && echo "latest" || echo "") && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -a -tags "${GO_TAGS}" -ldflags "-X main.version=${VERSION}" -o manager cmd/main.go
+    go build -a -tags "${GO_TAGS}" -ldflags "-X main.version=${VERSION}" -o manager ./cmd
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
