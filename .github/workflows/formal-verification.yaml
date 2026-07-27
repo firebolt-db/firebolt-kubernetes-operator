@@ -38,7 +38,7 @@ jobs:
           printf '%s\n' "${files:-<none>}"
           if [ -z "${files}" ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-[a-z-]*state-tests\.py$|_tla_states_data_test\.go$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -90,7 +90,14 @@ jobs:
             -config formal/FireboltInstance.cfg \
             formal/FireboltInstance.tla
 
-      - name: Verify Phase 3 state-cover fixture is up to date
+      - name: Run TLC — SigningKeyRotation
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/SigningKeyRotation.cfg \
+            formal/SigningKeyRotation.tla
+
+      - name: Verify state-cover fixtures are up to date
         run: |
           # Reuse the cached tla2tools.jar at the location the Makefile expects.
           mkdir -p bin
@@ -102,9 +109,26 @@ jobs:
           python3 scripts/gen-tla-state-tests.py \
             --dot formal/FireboltEngine.dot \
             --out internal/controller/engine_tla_states_data_test.go
-          if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then
+          java -cp bin/tla2tools.jar tlc2.TLC -workers 2 \
+            -config formal/FireboltInstance.cfg \
+            -dump dot,actionlabels formal/FireboltInstance.dot \
+            formal/FireboltInstance.tla
+          python3 scripts/gen-tla-instance-state-tests.py \
+            --dot formal/FireboltInstance.dot \
+            --out internal/controller/instance_tla_states_data_test.go
+          java -cp bin/tla2tools.jar tlc2.TLC -workers 2 \
+            -config formal/SigningKeyRotation.cfg \
+            -dump dot,actionlabels formal/SigningKeyRotation.dot \
+            formal/SigningKeyRotation.tla
+          python3 scripts/gen-tla-rotation-state-tests.py \
+            --dot formal/SigningKeyRotation.dot \
+            --out internal/controller/rotation_tla_states_data_test.go
+          fixtures="internal/controller/engine_tla_states_data_test.go \
+            internal/controller/instance_tla_states_data_test.go \
+            internal/controller/rotation_tla_states_data_test.go"
+          if ! git diff --quiet -- $fixtures; then
             echo "::error::TLA+ state-cover fixture is stale; run 'make formal-gen' and commit"
-            git --no-pager diff -- internal/controller/engine_tla_states_data_test.go
+            git --no-pager diff -- $fixtures
             exit 1
           fi
 
