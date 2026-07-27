@@ -28,7 +28,7 @@ package controller
 // therefore not optional on the Go side.
 
 import (
-	"sort"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -273,7 +273,7 @@ func checkEngineInvariants(t invariantT, m *engineSim) {
 	for name := range engineInvariants {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	for _, name := range names {
 		engineInvariants[name](t, m)
 	}
