@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.1...firebolt-operator-v0.5.0) (2026-07-27)
+
+
+### Features
+
+* **api:** add spec.auth and spec.tls to FireboltInstance with validation and RBAC (FB-896) ([59f792b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/59f792b43c2dd2b59c3be11a9310f392d046dad0))
+* **controller:** provision auth, TLS, and coordinated signing-key rotation (FB-896) ([63d000a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/63d000aced7d64273dab54bd68b2aa36029caa81))
+
+
+### Bug Fixes
+
+* **cli:** derive the port-forward scheme from observed TLS state (FB-896) ([9e8a5a3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9e8a5a3a0476506a301a785e16c7a63ece81f4e8))
+* **controller:** disable service account token automount on postgres (FB-2516) ([e0ad19e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e0ad19eeb7824b5600749cbbbfd804f53a4193f7))
+* **gateway:** offer every engine-certificate curve on the upstream TLS context (FB-896) ([e5d36e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e5d36e32bb3b32c3c370752f406a235af32e9acd))
+
+
+### Dependencies
+
+* **deps:** bump golang from 1.26.4 to 1.26.5 ([#85](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/85)) ([75f008e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/75f008e15aecd6f880d8bcbbcdcce3356166046f))
+* **deps:** bump packdb engine/metadata to 5.0.1-0.20260727005216.d09b51086f14 ([96d5881](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96d58814a48268778ca207ff6e9b1fced7a0c9ae))
+
 ## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.0...firebolt-operator-v0.4.1) (2026-07-21)
 
 
