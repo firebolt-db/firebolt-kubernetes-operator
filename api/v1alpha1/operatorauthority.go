@@ -968,17 +968,42 @@ func instanceProtectedSecretPredicate(inst *FireboltInstance) func(string) bool 
 		if _, hit := set[name]; hit {
 			return true
 		}
-		return IsGeneratedEngineTLSSecretName(name)
+		return IsGeneratedEngineTLSSecretName(name) || IsInstanceSigningSecretName(inst.Name, name)
 	}
 }
 
 // Suffixes of operator-generated Secret names that admission has to recognize
 // without being able to enumerate the live set. Kept in step with the
-// controller's own constants by TestGeneratedEngineTLSSecretNameShapeMatches.
+// controller's own constants by the shape-match binding tests.
 const (
-	suffixEngineTLS = "-engine-tls"
-	suffixGen       = "-g"
+	suffixEngineTLS   = "-engine-tls"
+	suffixGen         = "-g"
+	suffixAuthSigning = "-auth-signing"
 )
+
+// IsInstanceSigningSecretName reports whether name is a JWT signing keypair
+// Secret belonging to the named Instance: the bootstrap key
+// ("<instance>-auth-signing") or any rotation generation
+// ("<instance>-auth-signing-<kid>").
+//
+// Matched by shape rather than against the names in status.auth.signingKeys,
+// because status trails the Secret. On a first apply status.auth is nil, and
+// the Instance reconciler validates pod templates before it provisions the
+// signing key, so a name-only screen admits a template that aliases the key the
+// operator is about to mint. Future rotation generations have the same problem:
+// their names do not exist anywhere until the moment they are minted.
+//
+// Reserving the whole prefix also claims names the operator does not currently
+// use, such as "<instance>-auth-signing-mine". That is the intended trade: the
+// prefix is the operator's own, and a template author has no reason to put their
+// Secret there.
+func IsInstanceSigningSecretName(instanceName, name string) bool {
+	if instanceName == "" || name == "" {
+		return false
+	}
+	base := instanceName + suffixAuthSigning
+	return name == base || strings.HasPrefix(name, base+"-")
+}
 
 // IsGeneratedEngineTLSSecretName reports whether name has the shape of a
 // per-generation engine serving-certificate Secret ("<engine>-g<N>-engine-tls")

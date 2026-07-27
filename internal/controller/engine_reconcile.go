@@ -88,6 +88,11 @@ type InstanceInfo struct {
 	// pod mounts. A user template may not reach any through a volume of its own,
 	// whatever that volume is named. See instanceProtectedSecret.
 	ProtectedSecretNames []string
+
+	// InstanceName is the FireboltInstance this engine belongs to. Carried so the
+	// far side can rebuild the shape half of the protected-Secret predicate,
+	// which covers signing keys that exist before any status records them.
+	InstanceName string
 }
 
 // ResolvedEngineTLSInfo carries the concrete, currently-provisioned

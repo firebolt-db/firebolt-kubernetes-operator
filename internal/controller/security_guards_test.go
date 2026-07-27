@@ -147,6 +147,53 @@ func TestIsGeneratedEngineTLSSecretName_MatchesControllerNaming(t *testing.T) {
 	}
 }
 
+// TestSigningSecretProtectedBeforeStatusExists covers the first-apply window.
+// The Instance reconciler validates pod templates before it provisions the
+// signing key, so on a fresh Instance status.auth is nil and a name-only screen
+// admits a template aliasing the key the operator is about to mint. Every gate
+// has to protect the name from the start, not from the moment status catches up.
+func TestSigningSecretProtectedBeforeStatusExists(t *testing.T) {
+	fresh := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}
+	if fresh.Status.Auth != nil {
+		t.Fatal("fixture is meant to have no auth status")
+	}
+
+	bootstrap := signingCertificateName(fresh.Name, AuthSigningKeyID)
+	rotated := signingCertificateName(fresh.Name, signingKeyID(7))
+
+	for _, name := range []string{bootstrap, rotated} {
+		if !instanceProtectedSecret(fresh)(name) {
+			t.Errorf("instance template gate leaves %q unprotected before status exists", name)
+		}
+		if !engineProtectedSecret(InstanceInfo{InstanceName: fresh.Name})(name) {
+			t.Errorf("engine template gate leaves %q unprotected before status exists", name)
+		}
+		if errs := computev1alpha1.ValidateTLS(&computev1alpha1.FireboltInstance{
+			ObjectMeta: fresh.ObjectMeta,
+			Spec: computev1alpha1.FireboltInstanceSpec{TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:   true,
+					SecretRef: &corev1.LocalObjectReference{Name: name},
+				},
+			}},
+		}); len(errs) == 0 {
+			t.Errorf("spec.tls.gateway.secretRef accepted %q before status existed", name)
+		}
+	}
+
+	// Another Instance's signing key is not this Instance's business either, but
+	// it must not be swept in by this predicate — it is covered where that
+	// Instance's own name is known.
+	if instanceProtectedSecret(fresh)("other-auth-signing") {
+		t.Error("the prefix match reaches beyond this Instance's own name")
+	}
+	if instanceProtectedSecret(fresh)("instx-auth-signing") {
+		t.Error("the prefix match fired on a near-miss Instance name")
+	}
+}
+
 // TestInstanceProtectedSecretIsInstanceWide pins the cross-component fix: the
 // predicate every template gate resolves through must cover the whole Instance,
 // not just the Secrets one component's pod mounts.

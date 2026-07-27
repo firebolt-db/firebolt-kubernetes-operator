@@ -582,7 +582,8 @@ func instanceProtectedSecret(inst *computev1alpha1.FireboltInstance) func(string
 		if _, hit := exact[name]; hit {
 			return true
 		}
-		return isGeneratedEngineTLSSecretName(name)
+		return isGeneratedEngineTLSSecretName(name) ||
+			computev1alpha1.IsInstanceSigningSecretName(inst.Name, name)
 	}
 }
 
