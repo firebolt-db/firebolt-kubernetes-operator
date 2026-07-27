@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1390,13 +1391,29 @@ func DeleteClientPod(ctx context.Context, podName string) {
 //     so failures carry DNS/connect/response timings that pinpoint the phase
 //     that stalled.
 func execCurlQuery(ctx context.Context, podName, url, query string, extraHeaders ...string) (string, error) {
+	return execCurlQueryWithDeadline(ctx, podName, url, query, defaultCurlMaxTimeSeconds, extraHeaders...)
+}
+
+// defaultCurlMaxTimeSeconds bounds an ordinary query against a running
+// engine. Wake-on-zero needs its own, much larger, value: a query to a
+// stopped engine is held by the gateway for as long as the engine takes to
+// start, so a client deadline shorter than the cold start kills the very
+// request that triggered the wake.
+const defaultCurlMaxTimeSeconds = 33
+
+func execCurlQueryWithDeadline(
+	ctx context.Context,
+	podName, url, query string,
+	maxTimeSeconds int,
+	extraHeaders ...string,
+) (string, error) {
 	const curlTimingFmt = "%{stderr}timings: code=%{http_code} dns=%{time_namelookup}s " +
 		"connect=%{time_connect}s starttransfer=%{time_starttransfer}s total=%{time_total}s\n"
 
 	curlArgs := []string{
 		"-sSf",
 		"--connect-timeout", "2",
-		"--max-time", "33",
+		"--max-time", strconv.Itoa(maxTimeSeconds),
 		"-w", curlTimingFmt,
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",
@@ -1468,18 +1485,6 @@ func GetEngine(ctx context.Context, name string) (*computev1alpha1.FireboltEngin
 		return nil, err
 	}
 	return engine, nil
-}
-
-// AnnotateEngine sets one annotation on the engine CR (retrying on
-// conflict). Used by the autoStop spec to stamp the gateway wake-up
-// annotation the way a real gateway would.
-func AnnotateEngine(ctx context.Context, name, key, value string) error {
-	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
-		if engine.Annotations == nil {
-			engine.Annotations = map[string]string{}
-		}
-		engine.Annotations[key] = value
-	})
 }
 
 // QueryResponse represents the JSON response from fb
@@ -2088,10 +2093,22 @@ func WaitForGatewayReplicas(ctx context.Context, instanceName string, expected i
 // from inside a client pod. The gateway routes the query to the specified
 // engine based on the X-Firebolt-Engine header.
 func RunQueryViaGateway(ctx context.Context, podName, instanceName, engineName, query string) (string, error) {
+	return RunQueryViaGatewayWithDeadline(ctx, podName, instanceName, engineName, query, defaultCurlMaxTimeSeconds)
+}
+
+// RunQueryViaGatewayWithDeadline is RunQueryViaGateway with an explicit
+// client deadline, for queries expected to be held while an auto-stopped
+// engine starts.
+func RunQueryViaGatewayWithDeadline(
+	ctx context.Context,
+	podName, instanceName, engineName, query string,
+	maxTimeSeconds int,
+) (string, error) {
 	serviceName := instanceName + controller.SuffixGateway
 	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?query_label=e2e-gateway-test&output_format=JSON_Compact",
 		serviceName, testNamespace)
-	return execCurlQuery(ctx, podName, url, query, "X-Firebolt-Engine: "+engineName)
+	return execCurlQueryWithDeadline(ctx, podName, url, query, maxTimeSeconds,
+		"X-Firebolt-Engine: "+engineName)
 }
 
 // GatewayBackgroundQueryRunner runs queries through the gateway in the background.
