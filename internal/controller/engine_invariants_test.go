@@ -169,6 +169,15 @@ var engineInvariants = map[string]func(t invariantT, m *engineSim){
 		if !isTerminalPhase(m.status.Phase) {
 			return
 		}
+		// Quiesced also means the reconciler has caught up with the last spec
+		// change. The spec gets that from StsMatchesSpec, because its
+		// EnvChangeSpec always bumps specVer; Go has spec changes that produce
+		// no template drift (replicas are applied in place by design), so the
+		// terminal phase can legitimately name the old intent for one reconcile.
+		// See engineSim.specDirty.
+		if m.specDirty {
+			return
+		}
 		sts := m.api.stses[m.status.CurrentGeneration]
 		if sts == nil || !stsMatchesSpec(sts, &m.spec, testInstanceInfo(), m.classInfo) {
 			return
