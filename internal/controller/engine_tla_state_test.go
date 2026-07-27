@@ -27,6 +27,7 @@ package controller
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -172,9 +173,15 @@ func materializeTLAState(s tlaState) *engineSim {
 }
 
 // projectEngineSim extracts the TLA+ observable variables from the simulated
-// cluster state. instanceReady is preserved from the input state because the
-// compute layer cannot change it — the gate is enforced by the outer Reconcile.
-func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
+// cluster state. instanceReady and classReady are preserved from the input state
+// because the compute layer cannot change either — both gates are enforced by
+// the outer Reconcile.
+//
+// Every field of tlaState must be populated here. The round-trip guard in
+// TestTLAEngineStateCover (materialize → project == start) is what enforces
+// that: a field left at its zero value silently narrows what closureContains
+// compares, which weakens every assertion in the suite.
+func projectEngineSim(m *engineSim, instanceReady, classReady bool) tlaState {
 	st := tlaState{
 		Phase:         string(m.status.Phase),
 		CurrentGen:    m.status.CurrentGeneration,
@@ -186,6 +193,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		PodsReady:     m.podsReady,
 		PodsDrained:   m.podsDrained,
 		InstanceReady: instanceReady,
+		ClassReady:    classReady,
 	}
 	for g := range st.StsSpecVer {
 		st.StsSpecVer[g] = -1
@@ -371,28 +379,43 @@ func closureContains(closureIDs []int, actual tlaState) bool {
 	return false
 }
 
+// tlaStateEqual compares two projected states by reflection deliberately.
+//
+// A hand-written field-by-field comparison is weakenable in a way nothing
+// catches: drop a field here (ClassReady was in fact missing until this was
+// written) and the closure check silently accepts states the model
+// distinguishes. `make formal-verify` cannot catch it either — it asserts the
+// committed fixture matches the generator's output, not that the fixture is
+// still being compared in full. reflect.DeepEqual covers every field of
+// tlaState, including the StsSpecVer array, so narrowing the comparison now
+// requires deleting a field from the struct, which shows up in the diff.
 func tlaStateEqual(a, b tlaState) bool {
-	if a.Phase != b.Phase ||
-		a.CurrentGen != b.CurrentGen ||
-		a.ActiveGen != b.ActiveGen ||
-		a.DrainingGen != b.DrainingGen ||
-		a.SpecVer != b.SpecVer ||
-		a.SpecWantsStop != b.SpecWantsStop ||
-		a.SvcTargetGen != b.SvcTargetGen ||
-		a.PodsReady != b.PodsReady ||
-		a.PodsDrained != b.PodsDrained ||
-		a.InstanceReady != b.InstanceReady {
-		return false
-	}
-	for i := range a.StsSpecVer {
-		if a.StsSpecVer[i] != b.StsSpecVer[i] {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }
 
+// Coverage pins. These are hand-maintained on purpose: they cannot live in the
+// generated fixture, because the fixture is regenerated from the spec and
+// therefore always agrees with itself. A spec change that collapses the state
+// space, or a widened skip predicate that swallows states the compute layer
+// used to be checked against, leaves `make formal-verify` green — the fixture
+// still matches the generator's output, there are simply far fewer cases in it,
+// and the test only logged the counts.
+//
+// Pinning them in hand-written code forces any movement in coverage to appear
+// as an edit in the diff. If one of these assertions fails, the question to
+// answer in the commit message is *why* coverage moved — then update the number.
+const (
+	tlaExpectedCases           = 6404
+	tlaExpectedRan             = 3512
+	tlaExpectedSkippedGate     = 2856
+	tlaExpectedSkippedBoundary = 36
+)
+
 func TestTLAEngineStateCover(t *testing.T) {
+	if len(tlaEngineStateCases) != tlaExpectedCases {
+		t.Fatalf("fixture has %d cases, expected %d: the state space moved. Regenerate with `make formal-gen`, then update tlaExpectedCases and say why in the commit",
+			len(tlaEngineStateCases), tlaExpectedCases)
+	}
 	skippedGate := 0
 	skippedBoundary := 0
 	for i := range tlaEngineStateCases {
@@ -411,6 +434,17 @@ func TestTLAEngineStateCover(t *testing.T) {
 			start.DrainingGen, start.SpecVer)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAState(start)
+
+			// Guard the fixture itself: if materialization does not reproduce the
+			// starting state, every closure assertion below is meaningless. It
+			// also forces projectEngineSim to populate every tlaState field — a
+			// dropped field fails the round-trip for any state whose value
+			// differs from that field's zero value. Same guard the rotation
+			// harness already carries.
+			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady); !tlaStateEqual(got, start) {
+				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
+			}
+
 			result := computeEngineReconcile(
 				&m.spec, &m.status, m.buildState(),
 				propEngineName, propNamespace, 0, testInstanceInfo(), nil,
@@ -425,16 +459,31 @@ func TestTLAEngineStateCover(t *testing.T) {
 			}
 			tlaInvariants(t, m)
 
-			actual := projectEngineSim(m, start.InstanceReady)
+			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady)
 			if !closureContains(tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
 					start, actual, len(tc.Closure), formatClosure(tc.Closure))
 			}
 		})
 	}
+	ran := len(tlaEngineStateCases) - skippedGate - skippedBoundary
 	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
-		len(tlaEngineStateCases)-skippedGate-skippedBoundary, len(tlaEngineStateCases),
-		skippedGate, skippedBoundary)
+		ran, len(tlaEngineStateCases), skippedGate, skippedBoundary)
+
+	// The skip predicates are the other way coverage can quietly vanish: widen
+	// tlaShouldGateOut or tlaModelBoundary and states stop being exercised with
+	// no fixture change at all, so `make formal-verify` cannot see it.
+	if skippedGate != tlaExpectedSkippedGate {
+		t.Errorf("tlaShouldGateOut skipped %d cases, expected %d: the gate predicate changed. Justify the new coverage and update tlaExpectedSkippedGate",
+			skippedGate, tlaExpectedSkippedGate)
+	}
+	if skippedBoundary != tlaExpectedSkippedBoundary {
+		t.Errorf("tlaModelBoundary skipped %d cases, expected %d: the boundary predicate changed. Justify the new coverage and update tlaExpectedSkippedBoundary",
+			skippedBoundary, tlaExpectedSkippedBoundary)
+	}
+	if ran != tlaExpectedRan {
+		t.Errorf("ran %d cases against computeEngineReconcile, expected %d", ran, tlaExpectedRan)
+	}
 }
 
 // formatClosure renders the first few entries of a closure index list for

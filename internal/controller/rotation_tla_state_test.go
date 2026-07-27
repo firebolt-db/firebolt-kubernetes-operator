@@ -34,6 +34,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -283,16 +284,13 @@ func (m *rotationTLASim) project(t *testing.T) tlaRotationState {
 	return out
 }
 
+// rotationStateEqual compares by reflection so the comparison cannot be
+// narrowed without deleting a field from tlaRotationState. A hand-written
+// field-by-field version is weakenable in a way no target catches:
+// `make formal-verify` checks that the fixture matches the generator's output,
+// not that the fixture is still compared in full.
 func rotationStateEqual(a, b tlaRotationState) bool {
-	if a.Gen != b.Gen || a.Converged != b.Converged || len(a.Keys) != len(b.Keys) {
-		return false
-	}
-	for i := range a.Keys {
-		if a.Keys[i] != b.Keys[i] {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(a, b)
 }
 
 func rotationClosureContains(closureIDs []int, actual tlaRotationState) bool {
@@ -335,7 +333,15 @@ func tlaRotationInvariants(t *testing.T, m *rotationTLASim) {
 	}
 }
 
+// tlaRotationExpectedCases pins the size of the state cover; see the reasoning
+// on the equivalent constant in engine_tla_state_test.go.
+const tlaRotationExpectedCases = 19
+
 func TestTLARotationStateCover(t *testing.T) {
+	if len(tlaRotationStateCases) != tlaRotationExpectedCases {
+		t.Fatalf("fixture has %d cases, expected %d: the state space moved. Regenerate with `make formal-gen`, then update tlaRotationExpectedCases and say why in the commit",
+			len(tlaRotationStateCases), tlaRotationExpectedCases)
+	}
 	for i := range tlaRotationStateCases {
 		tc := tlaRotationStateCases[i]
 		start := tlaRotationStatePool[tc.Start]
