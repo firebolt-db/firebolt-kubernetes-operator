@@ -186,7 +186,17 @@ func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 	}
 }
 
+// tlaInstanceExpectedCases pins the size of the state cover. Hand-maintained
+// deliberately: the fixture is generated from the spec, so it always agrees with
+// itself and `make formal-verify` stays green even if the state space collapses.
+// See the same reasoning in engine_tla_state_test.go.
+const tlaInstanceExpectedCases = 32
+
 func TestTLAInstanceStateCover(t *testing.T) {
+	if len(tlaInstanceStateCases) != tlaInstanceExpectedCases {
+		t.Fatalf("fixture has %d cases, expected %d: the state space moved. Regenerate with `make formal-gen`, then update tlaInstanceExpectedCases and say why in the commit",
+			len(tlaInstanceStateCases), tlaInstanceExpectedCases)
+	}
 	for i := range tlaInstanceStateCases {
 		tc := tlaInstanceStateCases[i]
 		start := tlaInstanceStatePool[tc.Start]
@@ -195,6 +205,13 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			start.PostgresAvail, start.MetadataAvail, start.GatewayAvail)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAInstanceState(start)
+
+			// Guard the fixture itself: if materialization does not reproduce the
+			// starting state, the closure assertion below proves nothing, and a
+			// projection that drops a field would go unnoticed.
+			if got := projectInstanceSim(m); got != start {
+				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
+			}
 
 			// Mirror instanceSim.Reconcile in engine_property_test.go style:
 			// init-seed branch when Phase is empty, otherwise the full
