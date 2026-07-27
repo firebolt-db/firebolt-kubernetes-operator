@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -475,7 +477,7 @@ func adminSecretFixture() *corev1.Secret {
 
 func signingSecretFixture() *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-instance-auth-signing", Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-instance-auth-signing", Namespace: testNamespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: "test-instance-auth-signing"}},
 		// A parseable tls.crt alongside tls.key so resolveInstanceInfo's FB-896 #4
 		// public-key fingerprint fold can read a real public key.
 		Data: map[string][]byte{

@@ -116,7 +116,7 @@ func validEngineTLSSpecForController() *computev1alpha1.TLSSpec {
 	}
 }
 
-func TestBuildEngineTLSCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testing.T) {
+func TestBuildEngineTLSCertificate_DefaultsToECDSAP384PKCS8BoundedRotate(t *testing.T) {
 	instance := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 		Spec:       computev1alpha1.FireboltInstanceSpec{TLS: validEngineTLSSpecForController()},
@@ -135,7 +135,10 @@ func TestBuildEngineTLSCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testin
 		t.Errorf("Spec.SecretName = %q, want %q (Certificate and Secret share a name)", cert.Spec.SecretName, wantName)
 	}
 
-	wantDNSNames := []string{"*.ns-1.svc.cluster.local", "localhost"}
+	// One non-routable name, NOT a namespace wildcard: the anchor's key is mounted
+	// nowhere (engines serve per-generation certs), so a wildcard here would be a
+	// namespace-wide impersonation credential held for no reason.
+	wantDNSNames := []string{"inst-engine-tls-anchor.ns-1.svc.cluster.local"}
 	if !slices.Equal(cert.Spec.DNSNames, wantDNSNames) {
 		t.Errorf("DNSNames = %v, want %v", cert.Spec.DNSNames, wantDNSNames)
 	}
@@ -158,13 +161,13 @@ func TestBuildEngineTLSCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testin
 	if pk.Encoding != certmanagerv1.PKCS8 {
 		t.Errorf("Encoding = %q, want PKCS8", pk.Encoding)
 	}
-	if pk.RotationPolicy != certmanagerv1.RotationPolicyNever {
-		t.Errorf("RotationPolicy = %q, want Never", pk.RotationPolicy)
+	if pk.RotationPolicy != certmanagerv1.RotationPolicyAlways {
+		t.Errorf("RotationPolicy = %q, want Always (a reissue must mint fresh key material)", pk.RotationPolicy)
 	}
 
-	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != engineTLSCertDuration {
-		t.Errorf("Duration = %v, want %v (must be effectively-static so cert-manager never auto-renews)",
-			cert.Spec.Duration, engineTLSCertDuration)
+	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != DefaultCertDurationTLS {
+		t.Errorf("Duration = %v, want %v (bounded, so a leaked serving key is not valid indefinitely)",
+			cert.Spec.Duration, DefaultCertDurationTLS)
 	}
 
 	if cert.Spec.IssuerRef.Name != "internal-ca" {
@@ -442,7 +445,7 @@ func TestEnsureEngineTLS_ConvergenceGatesReady(t *testing.T) {
 	certName := engineTLSCertificateName("inst")
 	anchorSecret := func() *corev1.Secret {
 		return &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+			ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: certName}},
 			Data: map[string][]byte{
 				corev1.TLSCertKey:       []byte("cert"),
 				corev1.TLSPrivateKeyKey: []byte("key"),
@@ -646,7 +649,7 @@ func TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration(t *testin
 	// The Secret carries valid key material (a prior issuance); the Certificate
 	// the apply below creates starts with no Ready condition.
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: certName}},
 		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
 	}
 	cli := fake.NewClientBuilder().WithScheme(sch).
@@ -719,7 +722,7 @@ func TestEnsureGatewayTLS_StaleReadyGenerationKeepsServingButReportsDegraded(t *
 	sch := authTestScheme(t)
 	certName := gatewayTLSCertificateName("inst")
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: certName}},
 		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
 	}
 	cli := fake.NewClientBuilder().WithScheme(sch).
@@ -867,7 +870,7 @@ func TestEnsureEngineCABundle(t *testing.T) {
 	const ns = "ns-1"
 	caSecret := func(name, ca string) *corev1.Secret {
 		return &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}},
 			Data:       map[string][]byte{engineTLSCASecretKey: []byte(ca)},
 		}
 	}
@@ -1521,7 +1524,7 @@ func TestEnsureGatewayTLS_TightenDuringReissueFailsClosed(t *testing.T) {
 	sch := authTestScheme(t)
 	certName := gatewayTLSCertificateName("inst")
 	serverSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1"},
+		ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: "ns-1", Annotations: map[string]string{certmanagerv1.CertificateNameKey: certName}},
 		Data:       map[string][]byte{corev1.TLSCertKey: []byte("cert"), corev1.TLSPrivateKeyKey: []byte("key")},
 	}
 	clientCA := &corev1.Secret{
@@ -1635,7 +1638,7 @@ func validGatewayTLSSpecForController() *computev1alpha1.TLSSpec {
 	}
 }
 
-func TestBuildGatewayTLSCertificate_DefaultsToECDSAP384PKCS8NeverRotateAndServiceDNSNames(t *testing.T) {
+func TestBuildGatewayTLSCertificate_DefaultsToECDSAP384PKCS8BoundedRotateAndServiceDNSNames(t *testing.T) {
 	instance := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
 		Spec:       computev1alpha1.FireboltInstanceSpec{TLS: validGatewayTLSSpecForController()},
@@ -1683,13 +1686,13 @@ func TestBuildGatewayTLSCertificate_DefaultsToECDSAP384PKCS8NeverRotateAndServic
 	if pk.Encoding != certmanagerv1.PKCS8 {
 		t.Errorf("Encoding = %q, want PKCS8", pk.Encoding)
 	}
-	if pk.RotationPolicy != certmanagerv1.RotationPolicyNever {
-		t.Errorf("RotationPolicy = %q, want Never", pk.RotationPolicy)
+	if pk.RotationPolicy != certmanagerv1.RotationPolicyAlways {
+		t.Errorf("RotationPolicy = %q, want Always (a reissue must mint fresh key material)", pk.RotationPolicy)
 	}
 
-	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != gatewayTLSCertDuration {
-		t.Errorf("Duration = %v, want %v (must be effectively-static so cert-manager never auto-renews)",
-			cert.Spec.Duration, gatewayTLSCertDuration)
+	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != DefaultCertDurationTLS {
+		t.Errorf("Duration = %v, want %v (bounded, so a leaked serving key is not valid indefinitely)",
+			cert.Spec.Duration, DefaultCertDurationTLS)
 	}
 
 	if cert.Spec.IssuerRef.Name != "internal-ca" {

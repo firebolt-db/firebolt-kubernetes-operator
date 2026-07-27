@@ -107,7 +107,7 @@ func TestAppendUserPodVolumesDropsSecretAliases(t *testing.T) {
 					Volumes: []corev1.Volume{tc.userVolume},
 				}},
 			}
-			got := appendUserPodVolumes(operatorAuthVolumes(), spec, nil)
+			got := appendUserPodVolumes(operatorAuthVolumes(), spec, protectedInfo(), nil)
 			if kept := hasVolume(got, tc.userVolume.Name); kept != tc.wantKept {
 				t.Fatalf("volume %q kept=%v, want %v (rendered: %v)",
 					tc.userVolume.Name, kept, tc.wantKept, volumeNames(got))
@@ -135,7 +135,7 @@ func TestAppendUserPodVolumesDropsClassSecretAliases(t *testing.T) {
 			},
 		}},
 	}
-	got := appendUserPodVolumes(operatorAuthVolumes(), &computev1alpha1.FireboltEngineSpec{}, classInfo)
+	got := appendUserPodVolumes(operatorAuthVolumes(), &computev1alpha1.FireboltEngineSpec{}, protectedInfo(), classInfo)
 	if hasVolume(got, "class-alias") {
 		t.Error("class template aliased the signing-key Secret and was not dropped")
 	}
@@ -157,7 +157,7 @@ func TestAppendUserVolumesDropsSecretAliases(t *testing.T) {
 		projectedSecretVolume("proj", "inst-gateway-tls"),
 		secretVolume("mine", "my-own-secret"),
 	}
-	got := appendUserVolumes(operator, user,
+	got := appendUserVolumes(operator, user, nameSet("inst-gateway-tls"),
 		computev1alpha1.GatewayTLSVolumeName, computev1alpha1.GatewayTmpVolumeName)
 
 	for _, dropped := range []string{"innocuous", "proj"} {
@@ -174,21 +174,9 @@ func TestAppendUserVolumesDropsSecretAliases(t *testing.T) {
 	}
 }
 
-func TestOperatorMountedSecretNames(t *testing.T) {
-	got := operatorMountedSecretNames(operatorAuthVolumes())
-	for _, want := range []string{"admin-pw", "inst-auth-signing"} {
-		if _, hit := got[want]; !hit {
-			t.Errorf("Secret %q is mounted by an operator volume but not protected", want)
-		}
-	}
-	if _, hit := got["cfg"]; hit {
-		t.Error("a ConfigMap-sourced operator volume must not contribute a protected Secret name")
-	}
-}
-
 func TestEngineProtectedSecret(t *testing.T) {
-	info := InstanceInfo{MountedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
-	isProtected := engineProtectedSecret(testEngineName, info)
+	info := InstanceInfo{ProtectedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
+	isProtected := engineProtectedSecret(info)
 
 	for _, name := range []string{
 		"admin-pw",
@@ -202,11 +190,14 @@ func TestEngineProtectedSecret(t *testing.T) {
 			t.Errorf("Secret %q should be protected", name)
 		}
 	}
+	// A SIBLING engine's per-generation Secret is protected too. It used to be
+	// excluded (the shape match was anchored on this engine's name), which let one
+	// engine's template mount another engine's serving private key.
+	if !isProtected("other-engine" + SuffixGen + "0" + SuffixEngineTLS) {
+		t.Error("a sibling engine's per-generation TLS Secret should be protected")
+	}
 	for _, name := range []string{
 		"my-own-secret",
-		// Another engine's per-generation Secret is not this template's to reach,
-		// but it is also not this engine's pod that would mount it.
-		"other-engine" + SuffixGen + "0" + SuffixEngineTLS,
 		testEngineName + SuffixGen + "0" + SuffixConfig,
 	} {
 		if isProtected(name) {
@@ -216,7 +207,7 @@ func TestEngineProtectedSecret(t *testing.T) {
 }
 
 func TestEngineAliasedSecretVolumes(t *testing.T) {
-	info := InstanceInfo{MountedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
+	info := InstanceInfo{ProtectedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
 	engine := &computev1alpha1.FireboltEngine{}
 	engine.Name = testEngineName
 	engine.Spec.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
@@ -309,7 +300,7 @@ func secretEnvFromContainer(name, secretName string) corev1.Container {
 }
 
 func TestValidateEngineSecretEnvRefs(t *testing.T) {
-	info := InstanceInfo{MountedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
+	info := InstanceInfo{ProtectedSecretNames: []string{"admin-pw", "inst-auth-signing"}}
 	engine := func(containers, initContainers []corev1.Container) *computev1alpha1.FireboltEngine {
 		e := &computev1alpha1.FireboltEngine{}
 		e.Name = testEngineName
@@ -372,7 +363,7 @@ func TestValidateEngineSecretEnvRefs(t *testing.T) {
 // and blocking the render would freeze the engine on exactly that pod instead of
 // rolling to a clean one.
 func TestValidateEngineTemplatesBlocksEnvButNotVolumes(t *testing.T) {
-	info := InstanceInfo{MountedSecretNames: []string{"admin-pw"}}
+	info := InstanceInfo{ProtectedSecretNames: []string{"admin-pw"}}
 	e := &computev1alpha1.FireboltEngine{}
 	e.Name = testEngineName
 	e.Spec.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
@@ -389,5 +380,71 @@ func TestValidateEngineTemplatesBlocksEnvButNotVolumes(t *testing.T) {
 	e.Spec.Template.Spec.Containers = []corev1.Container{secretEnvContainer("sidecar", "admin-pw")}
 	if errs := validateEngineTemplates(e, nil, info); len(errs) == 0 {
 		t.Error("an env Secret reference must block the render")
+	}
+}
+
+// protectedInfo is the InstanceInfo an engine reconcile would carry for an
+// Instance whose auth and TLS are provisioned: the Instance-wide protected set,
+// not a per-engine one.
+func protectedInfo() InstanceInfo {
+	return InstanceInfo{ProtectedSecretNames: []string{
+		"admin-pw", "inst-auth-signing", "inst-engine-tls", "inst-gateway-tls",
+	}}
+}
+
+// nameSet builds the predicate the render-time drop takes, for tests that do not
+// have a full FireboltInstance to hand.
+func nameSet(names ...string) func(string) bool {
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		set[n] = struct{}{}
+	}
+	return func(name string) bool {
+		_, hit := set[name]
+		return hit
+	}
+}
+
+// TestAppendUserPodVolumesDropsCrossComponentAliases pins the fix for the
+// per-component scoping hole: an engine template must not reach a SIBLING
+// engine's per-generation serving key, nor the gateway's, neither of which
+// appears among this pod's own operator volumes.
+func TestAppendUserPodVolumesDropsCrossComponentAliases(t *testing.T) {
+	cases := []struct {
+		name   string
+		secret string
+	}{
+		{"sibling engine's per-generation serving key", "other-engine-g7-engine-tls"},
+		{"gateway's downstream serving key", "inst-gateway-tls"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &computev1alpha1.FireboltEngineSpec{
+				Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{secretVolume("sneaky", tc.secret)},
+				}},
+			}
+			got := appendUserPodVolumes(operatorAuthVolumes(), spec, protectedInfo(), nil)
+			if hasVolume(got, "sneaky") {
+				t.Fatalf("template aliased %q and was not dropped (rendered: %v)", tc.secret, volumeNames(got))
+			}
+		})
+	}
+}
+
+// TestIsGeneratedEngineTLSSecretName pins the shape match that makes the
+// cross-engine case above work without enumerating live generations.
+func TestIsGeneratedEngineTLSSecretName(t *testing.T) {
+	cases := map[string]bool{
+		"eng-g1-engine-tls":           true,
+		"other-engine-g42-engine-tls": true,
+		"inst-engine-tls":             false, // the instance anchor: exact-matched instead
+		"my-own-engine-tls":           false, // a user Secret that merely ends the same way
+		"eng-g1-config":               false,
+	}
+	for name, want := range cases {
+		if got := isGeneratedEngineTLSSecretName(name); got != want {
+			t.Errorf("isGeneratedEngineTLSSecretName(%q) = %v, want %v", name, got, want)
+		}
 	}
 }

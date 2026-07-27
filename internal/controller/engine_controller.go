@@ -537,6 +537,16 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		errs = append(errs, err)
 	} else {
 		for i := range secretList.Items {
+			// Label match alone is not proof of ownership. Anyone who can create a
+			// Secret in this namespace can stamp firebolt.io/engine on it, and a
+			// label-only sweep would then destroy it on engine deletion. Require
+			// evidence the operator's own machinery produced it: a cert-manager
+			// annotation naming a Certificate for one of THIS engine's generations.
+			if !engineOwnedSecret(&secretList.Items[i], engine.Name) {
+				log.Info("Skipping Secret that carries the engine label but is not operator-provisioned",
+					"name", secretList.Items[i].Name)
+				continue
+			}
 			log.Info("Deleting Secret", "name", secretList.Items[i].Name)
 			if err := r.deleteIfExists(ctx, &secretList.Items[i]); err != nil {
 				log.Error(err, "Failed to delete Secret", "name", secretList.Items[i].Name)
@@ -560,6 +570,22 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 
 	log.Info("Finalizer removed, deletion complete")
 	return nil
+}
+
+// engineOwnedSecret reports whether a labeled Secret really is one this engine's
+// reconcile produced, as opposed to a user Secret that merely carries the same
+// label. The operator's only Secrets here are cert-manager targets for the
+// per-generation TLS Certificates, so the proof is cert-manager's own
+// certificate-name annotation pointing at a Certificate named for this engine.
+//
+// Deliberately conservative: a Secret that fails this check is LEFT BEHIND rather
+// than deleted. Orphaning a Secret is recoverable; deleting someone else's is not.
+func engineOwnedSecret(secret *corev1.Secret, engineName string) bool {
+	certName := secret.Annotations[certmanagerv1.CertificateNameKey]
+	if certName == "" {
+		return false
+	}
+	return strings.HasPrefix(certName, engineName+SuffixGen) && strings.HasSuffix(certName, SuffixEngineTLS)
 }
 
 // certKindUnavailable reports whether a List/Get for cert-manager Certificates
@@ -954,7 +980,7 @@ func engineTemplates(
 func validateEngineSecretEnvRefs(
 	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
 ) field.ErrorList {
-	isProtected := engineProtectedSecret(engine.Name, info)
+	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
 	for _, t := range engineTemplates(engine, classInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
@@ -1000,7 +1026,7 @@ func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
 func engineAliasedSecretVolumes(
 	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
 ) field.ErrorList {
-	isProtected := engineProtectedSecret(engine.Name, info)
+	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
 	for _, t := range engineTemplates(engine, classInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretAliasVolumes(
@@ -1010,20 +1036,34 @@ func engineAliasedSecretVolumes(
 }
 
 // engineProtectedSecret reports which Secret names an engine template must not
-// reach: the Instance-wide set the resolver recorded, plus the per-generation
-// engine-TLS Secrets, matched by shape because their names carry a generation
-// number that no single reconcile can enumerate.
-func engineProtectedSecret(engineName string, info InstanceInfo) func(string) bool {
-	exact := make(map[string]struct{}, len(info.MountedSecretNames))
-	for _, n := range info.MountedSecretNames {
-		exact[n] = struct{}{}
+// reach: the Instance-wide operator-managed set the resolver recorded, plus any
+// engine's per-generation TLS Secret, matched by shape because their names carry
+// a generation number that no single reconcile can enumerate.
+//
+// Deliberately NOT scoped to this engine. The shape match used to be anchored on
+// "<this engine>-g", which let engine A's template alias engine B's serving
+// private key — B's Secret name does not start with A's, so the guard never
+// looked at it. Protection is a property of the Secret, not of which engine is
+// under review, so both halves of the predicate are now Instance-wide (see
+// instanceProtectedSecret / isGeneratedEngineTLSSecretName). Signing keys are
+// matched by shape for a second reason: they are protected from the first apply,
+// before any status names them.
+func engineProtectedSecret(info InstanceInfo) func(string) bool {
+	exact := make(map[string]struct{}, len(info.ProtectedSecretNames))
+	for _, n := range info.ProtectedSecretNames {
+		if n != "" {
+			exact[n] = struct{}{}
+		}
 	}
-	genPrefix := engineName + SuffixGen
 	return func(name string) bool {
+		if name == "" {
+			return false
+		}
 		if _, hit := exact[name]; hit {
 			return true
 		}
-		return strings.HasPrefix(name, genPrefix) && strings.HasSuffix(name, SuffixEngineTLS)
+		return isGeneratedEngineTLSSecretName(name) ||
+			computev1alpha1.IsSigningKeySecretName(name)
 	}
 }
 
@@ -1430,6 +1470,18 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 			return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s: %w", gen, genSecretName, genErr)
 		}
 		if genErr == nil {
+			// Refuse a per-generation Secret this operator's Certificate did not
+			// produce. Its name is deterministic ("<engine>-g<N>-engine-tls") and
+			// rotationPolicy means cert-manager adopts a private key already sitting
+			// in the target Secret, so a pre-created Secret would otherwise become
+			// what this generation's pods serve. Fail the resolve rather than render
+			// a pod around planted key material — an engine that does not start is
+			// strictly better than one serving a key an attacker chose. See
+			// verifyCertManagerIssued.
+			if err := verifyCertManagerIssued(&genSecret, genSecretName); err != nil {
+				return InstanceInfo{}, fmt.Errorf("engine generation %d TLS secret %s/%s: %w",
+					gen, engine.Namespace, genSecretName, err)
+			}
 			if crt := genSecret.Data[corev1.TLSCertKey]; len(crt) > 0 {
 				info.TLS.ServingCertFP = caFingerprint(string(crt))
 			}
@@ -1464,7 +1516,12 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		}
 	}
 
-	info.MountedSecretNames = computev1alpha1.EngineMountedSecretNames(inst)
+	// The Instance-wide operator-managed Secret set — not just what THIS engine's
+	// pod mounts. An engine template has no business reaching the gateway's serving
+	// key or the metadata Postgres credential either, and a per-component set left
+	// exactly those routes open. instanceProtectedSecret adds the two names formed
+	// from suffixes private to this package.
+	info.ProtectedSecretNames = instanceProtectedSecretNames(inst)
 	return info, nil
 }
 

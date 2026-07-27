@@ -73,16 +73,32 @@ func resolvedCertManagerAlgSize(cm computev1alpha1.CertManagerSpec) (string, int
 // is minted via signingKeyID instead.
 var AuthSigningKeyID = signingKeyID(1)
 
-// authSigningCertDuration is set far beyond any practical operator or
-// cluster lifetime so cert-manager does not renew a signing Certificate
-// on its own schedule. packdb's SigningKeyManager reads signing keys only
-// at process startup, so an uncoordinated renewal would make one engine
-// sign tokens with a key its peers can't yet validate — see
-// buildSigningCertificate's doc comment. When SigningKeyPolicy's
-// RotationInterval is set, the operator performs its own coordinated
-// rotation (stepSigningKeyRotation) instead of relying on cert-manager's
-// renewal schedule.
-const authSigningCertDuration = 100 * 365 * 24 * time.Hour
+// DefaultCertDurationSigning is the default lifetime of a JWT signing keypair's
+// certificate, overridable via spec.auth.local.signingKeys.certManager.duration.
+//
+// Unlike the TLS listeners this certificate is NEVER presented in a handshake —
+// it exists only so cert-manager mints and stores a keypair — so its notAfter has
+// no bearing on anything packdb does; packdb reads tls.key and nothing else.
+// The lifetime was 100 years, which many real CAs refuse to issue outright. A
+// bounded default is issuable everywhere and costs nothing, because a renewal here
+// is invisible to the fleet: under authSigningRotationPolicy (Never) cert-manager
+// reuses the existing private key, and authHash folds the key's PUBLIC-KEY
+// fingerprint rather than the Secret's resourceVersion — precisely so a cert-only
+// reissue does NOT roll every engine. Key rotation remains the operator's job via
+// SigningKeyPolicy.RotationInterval.
+const DefaultCertDurationSigning = 365 * 24 * time.Hour
+
+// DefaultCertRenewBeforeSigning keeps cert-manager's customary one-third lead time.
+const DefaultCertRenewBeforeSigning = 120 * 24 * time.Hour
+
+// authSigningRotationPolicy stays Never, in deliberate contrast to
+// tlsCertRotationPolicy. A signing key must only ever be replaced through the
+// operator's coordinated two-phase rotation (see AuthStatus's doc comment): letting
+// cert-manager mint fresh material on its own renewal schedule would destroy the
+// old key while engines were still signing with it, which is exactly the validation
+// gap the rotation state machine exists to prevent. verifyCertManagerIssued is what
+// stops "Never" from also meaning "adopts whatever key someone else planted".
+var authSigningRotationPolicy = certmanagerv1.RotationPolicyNever
 
 // authSigningCertCommonName is the fixed X.509 subject used for every
 // signing Certificate. Deliberately NOT derived from the instance name or
@@ -524,6 +540,21 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 		return false, nil
 	}
 
+	// Refuse to adopt key material this operator's Certificate did not produce.
+	// Signing keys are the highest-value Secret the operator manages — whoever
+	// holds one can mint an admin token for every engine in the Instance — and
+	// rotationPolicy:Never means cert-manager reuses whatever private key already
+	// sits in the target Secret. Without this check, namespace `create secrets`
+	// alone is enough to choose the Instance's signing key. See
+	// verifySigningKeyProvenance.
+	if err := verifySigningKeyProvenance(&secret, &cert, key.ObservedPublicKeyFingerprint); err != nil {
+		if r.EventRecorder != nil {
+			r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "SigningKeyProvenanceRejected",
+				"refusing signing key secret %s/%s: %v", instance.Namespace, key.SecretName, err)
+		}
+		return false, fmt.Errorf("signing key secret %s/%s: %w", instance.Namespace, key.SecretName, err)
+	}
+
 	// FB-896 #4: witness the key's PUBLIC-KEY identity so an actual replacement
 	// of the private key under this STABLE kid becomes visible. We fingerprint
 	// the public key (SubjectPublicKeyInfo of tls.crt), NOT the Certificate
@@ -595,6 +626,7 @@ func buildSigningCertificate(instance *computev1alpha1.FireboltInstance, kid str
 	}
 
 	issuerKind := resolveCertManagerIssuerKind(policy.IssuerRef.Kind)
+	duration, renewBefore := resolveCertDuration(policy, DefaultCertDurationSigning, DefaultCertRenewBeforeSigning)
 
 	return &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -624,9 +656,18 @@ func buildSigningCertificate(instance *computev1alpha1.FireboltInstance, kid str
 				Name: policy.IssuerRef.Name,
 				Kind: issuerKind,
 			},
-			Duration: &metav1.Duration{Duration: authSigningCertDuration},
+			// Pinned explicitly rather than left to cert-manager's default. With
+			// `usages` unset, the issued certificate can pick up serverAuth/clientAuth
+			// extended key usages, which would make the JWT signing keypair — mounted
+			// into every engine pod — a valid TLS client credential against anything
+			// trusting the same CA, including a gateway mTLS listener configured with
+			// that CA. This certificate authenticates nothing; digitalSignature is all
+			// it needs.
+			Usages:      []certmanagerv1.KeyUsage{certmanagerv1.UsageDigitalSignature},
+			Duration:    duration,
+			RenewBefore: renewBefore,
 			PrivateKey: &certmanagerv1.CertificatePrivateKey{
-				RotationPolicy: certmanagerv1.RotationPolicyNever,
+				RotationPolicy: authSigningRotationPolicy,
 				Encoding:       certmanagerv1.PKCS8,
 				Algorithm:      algorithm,
 				Size:           int(size),
