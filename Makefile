@@ -384,6 +384,44 @@ formal-check-counterexample: tla2tools ## Assert the naive retain-window anchor 
 		exit 1; \
 	fi
 
+.PHONY: formal-check-mutants
+formal-check-mutants: ## Assert each pinned mutant still makes the state-cover suite fail.
+	@# formal-check-counterexample proves the *spec* still expresses a hazard.
+	@# This proves the *state-cover suite* still catches a broken reconciler:
+	@# every row in formal/mutants/manifest.tsv is applied in turn and the named
+	@# test must fail with the named message. Requiring the specific message
+	@# rather than a non-zero `go test` exit matters — a patch that no longer
+	@# applies cleanly, or one that stops compiling, also exits non-zero and
+	@# would otherwise look like a passing negative control.
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "ERROR: working tree is dirty. formal-check-mutants applies and reverts patches in place," >&2; \
+		echo "       so it refuses to run rather than risk your uncommitted work." >&2; \
+		exit 1; \
+	fi
+	@fail=0; \
+	while IFS="$$(printf '\t')" read -r patch test want; do \
+		case "$$patch" in ''|\#*) continue;; esac; \
+		echo "mutant: $$patch"; \
+		if ! git apply "formal/mutants/$$patch" 2>/dev/null; then \
+			echo "ERROR: $$patch no longer applies. Re-point it at the current code -- do not delete it." >&2; \
+			fail=1; continue; \
+		fi; \
+		log=$$(mktemp); \
+		go test ./internal/controller/ -run "$$test" -count=1 >"$$log" 2>&1 || true; \
+		git apply -R "formal/mutants/$$patch"; \
+		if grep -qF -e "$$want" "$$log"; then \
+			echo "  OK: $$test still fails with \"$$want\""; \
+		else \
+			echo "ERROR: $$patch did not make $$test fail with \"$$want\"." >&2; \
+			echo "       Either the guard it removes is no longer load-bearing, or the suite stopped checking it." >&2; \
+			tail -20 "$$log" >&2; \
+			fail=1; \
+		fi; \
+		rm -f "$$log"; \
+	done < formal/mutants/manifest.tsv; \
+	if [ "$$fail" -ne 0 ]; then exit 1; fi; \
+	echo "OK: every pinned mutant still fails the state-cover suite"
+
 .PHONY: formal-dump
 formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \

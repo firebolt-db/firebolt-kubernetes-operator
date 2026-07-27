@@ -1,0 +1,21 @@
+diff --git a/internal/controller/engine_reconcile.go b/internal/controller/engine_reconcile.go
+index 6d9ffe0..6879ec6 100644
+--- a/internal/controller/engine_reconcile.go
++++ b/internal/controller/engine_reconcile.go
+@@ -553,16 +553,6 @@ func computeSwitching(
+ 	status := &r.Status
+ 	gen := status.CurrentGeneration
+ 
+-	if current.ClusterServiceTargetGen != gen {
+-		// See computeStable for why we rebuild via buildClusterService
+-		// instead of DeepCopying the live Service: SSA Apply rejects a
+-		// desired object whose metadata.managedFields is non-nil, and a
+-		// DeepCopy of the live object always carries managedFields.
+-		r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
+-		r.Requeue = true
+-		return
+-	}
+-
+ 	oldGen := status.ActiveGeneration
+ 	status.ActiveGeneration = gen
+ 

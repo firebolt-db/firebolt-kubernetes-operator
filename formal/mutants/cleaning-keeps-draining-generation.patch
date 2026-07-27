@@ -1,0 +1,12 @@
+diff --git a/internal/controller/engine_reconcile.go b/internal/controller/engine_reconcile.go
+index 6d9ffe0..2205215 100644
+--- a/internal/controller/engine_reconcile.go
++++ b/internal/controller/engine_reconcile.go
+@@ -634,7 +634,6 @@ func computeCleaning(
+ 		r.DeleteResources = append(r.DeleteResources, toDelete...)
+ 	}
+ 
+-	status.DrainingGeneration = nil
+ 	status.Phase = terminalPhase(spec)
+ 	r.Requeue = true
+ }

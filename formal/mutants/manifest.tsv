@@ -1,0 +1,16 @@
+# Pinned mutants: each row is a deliberately-broken reconciler that the TLA+
+# state-cover suite MUST still catch. Columns are tab-separated:
+#
+#   <patch file>\t<go test name>\t<message that must appear in the output>
+#
+# Run via `make formal-check-mutants`. The expected message is required
+# verbatim, not merely a non-zero `go test` exit: a compile error also exits
+# non-zero, so a patch that has rotted would otherwise look like a passing
+# negative control.
+#
+# If a patch stops applying, re-point it at the current code. Do not delete it —
+# a deleted mutant is a guard nobody is checking any more.
+creating-advance-without-pods-ready.patch	TestTLAEngineStateCover	result not in TLA+ reconciler closure
+switching-flip-active-without-service.patch	TestTLAEngineStateCover	Inv_ServiceKnownGen
+cleaning-keeps-draining-generation.patch	TestTLAEngineStateCover	Inv_TerminalNoDraining
+rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not in the TLA+ reconciler closure

@@ -1,0 +1,19 @@
+diff --git a/internal/controller/instance_auth.go b/internal/controller/instance_auth.go
+index 5be9025..798029d 100644
+--- a/internal/controller/instance_auth.go
++++ b/internal/controller/instance_auth.go
+@@ -712,14 +712,6 @@ func (r *FireboltInstanceReconciler) stepSigningKeyRotation(ctx context.Context,
+ 		// retain window must not start counting yet — see
+ 		// RetireEligibleAt's doc comment for why anchoring at DemotedAt
+ 		// instead would reopen a validation gap.
+-		converged, lagging, err := r.enginesConvergedOn(ctx, instance, keys)
+-		if err != nil {
+-			return err
+-		}
+-		if !converged {
+-			r.noteRotationPending(ctx, instance, computev1alpha1.RotationStepAwaitingRetireAnchor, lagging, wasPending)
+-			return nil
+-		}
+ 		now := metav1.Now()
+ 		other.RetireEligibleAt = &now
+ 		return nil

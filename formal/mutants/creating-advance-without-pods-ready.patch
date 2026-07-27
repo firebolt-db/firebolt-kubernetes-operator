@@ -1,0 +1,16 @@
+diff --git a/internal/controller/engine_reconcile.go b/internal/controller/engine_reconcile.go
+index 6d9ffe0..653c41a 100644
+--- a/internal/controller/engine_reconcile.go
++++ b/internal/controller/engine_reconcile.go
+@@ -510,11 +510,6 @@ func computeCreating(
+ 		r.EnsureClusterSvc = buildClusterService(engineName, engineNamespace, gen)
+ 	}
+ 
+-	if !current.CurrentPodsReady {
+-		r.RequeueAfter = 5 * time.Second
+-		return
+-	}
+-
+ 	// FB-896 #4: hold the blue-green cutover (the Service-selector flip in
+ 	// computeSwitching) until the gateway has rolled out trust for THIS
+ 	// generation's certificate CA. A generation minted under a CA rotated behind
