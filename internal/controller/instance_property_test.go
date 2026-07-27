@@ -22,20 +22,27 @@ package controller
 //
 // The TLA+ spec (formal/FireboltInstance.tla) abstracts a reconcile pass
 // to a single atomic ReconcileRun action that derives Phase from the
-// availability of three pipeline components (postgres, metadata, gateway).
-// This sim drives the same shape against the real Go pure functions
-// `setInstanceReadyRollup` and `computePhase`, so a divergence between
-// model and implementation surfaces as an invariant violation.
+// availability of five components (postgres, metadata, gateway,
+// engineTLS, gatewayTLS). This sim drives the same shape against the
+// real Go pure functions `setInstanceReadyRollup` and `computePhase`,
+// so a divergence between model and implementation surfaces as an
+// invariant violation.
 //
 // Component availability mapping (matches instance_controller.go):
 //
-//	MetadataReady condition := compAvail[postgres] AND compAvail[metadata]
-//	GatewayReady  condition := compAvail[gateway]
+//	MetadataReady   condition := compAvail[postgres] AND compAvail[metadata]
+//	GatewayReady    condition := compAvail[gateway]
+//	EngineTLSReady  condition := compAvail[engineTLS]
+//	GatewayTLSReady condition := compAvail[gatewayTLS]
 //
 // Postgres has no separate runtime condition: a Postgres failure surfaces
 // via MetadataReady=False with a Postgres-specific Reason. The TLA+ spec
 // keeps postgres as its own component for clarity; this sim collapses it
 // into the Metadata condition exactly as the production code does.
+// A TLS-disabled instance reports its TLS conditions True with reason
+// "Disabled" (ensureEngineTLS / ensureGatewayTLS); that corresponds to
+// the sub-space where the two TLS flags stay permanently TRUE, so it
+// needs no separate mode here.
 
 import (
 	"testing"
@@ -52,7 +59,7 @@ const (
 )
 
 // instanceComponents is the set of components from the TLA+ spec.
-var instanceComponents = []string{"postgres", "metadata", "gateway"}
+var instanceComponents = []string{"postgres", "metadata", "gateway", "engineTLS", "gatewayTLS"}
 
 // instanceSim is the FireboltInstance state machine. It tracks the env-set
 // availability of each pipeline component and drives the real Go phase-
@@ -86,28 +93,23 @@ func (m *instanceSim) gatewayReadyFromComponents() bool {
 // does not constrain Reason strings, so any stable mapping works as long
 // as it's consistent with what the real code emits.
 func (m *instanceSim) writeComponentConditions() {
-	setBool := func(typ string, ready bool, readyReason, falseReason string) {
+	setBool := func(typ string, ready bool) {
 		status := metav1.ConditionFalse
-		reason := falseReason
+		reason := "Provisioning"
 		if ready {
 			status = metav1.ConditionTrue
-			reason = readyReason
+			reason = "Ready"
 		}
 		setInstanceCondition(m.instance, typ, status, reason, "")
 	}
-	setBool(computev1alpha1.InstanceConditionMetadataReady,
-		m.metadataReadyFromComponents(), "Ready", "Provisioning")
-	setBool(computev1alpha1.InstanceConditionGatewayReady,
-		m.gatewayReadyFromComponents(), "Ready", "Provisioning")
-	// The formal model does not track TLS provisioning, so it represents a
-	// TLS-disabled instance: ensure*TLS report these True with reason
-	// "Disabled" when the feature is off, so they never gate Ready here. The
-	// TLS-pending gate is covered directly by
-	// TestSetInstanceReadyRollup_HeldWhileTLSPending.
-	setInstanceCondition(m.instance, computev1alpha1.InstanceConditionEngineTLSReady,
-		metav1.ConditionTrue, "Disabled", "")
-	setInstanceCondition(m.instance, computev1alpha1.InstanceConditionGatewayTLSReady,
-		metav1.ConditionTrue, "Disabled", "")
+	setBool(computev1alpha1.InstanceConditionMetadataReady, m.metadataReadyFromComponents())
+	setBool(computev1alpha1.InstanceConditionGatewayReady, m.gatewayReadyFromComponents())
+	// The TLS conditions are their own model components: engineTLS covers
+	// the convergence-gated EngineTLSReady, gatewayTLS the serving-gated
+	// GatewayTLSReady. Reason vocabulary is unconstrained by the spec;
+	// "Provisioning" stands in for the real code's pending reasons.
+	setBool(computev1alpha1.InstanceConditionEngineTLSReady, m.compAvail["engineTLS"])
+	setBool(computev1alpha1.InstanceConditionGatewayTLSReady, m.compAvail["gatewayTLS"])
 }
 
 // ---------- State-machine actions ----------
@@ -224,9 +226,11 @@ func TestInstanceStateMachine(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		m := &instanceSim{
 			compAvail: map[string]bool{
-				"postgres": false,
-				"metadata": false,
-				"gateway":  false,
+				"postgres":   false,
+				"metadata":   false,
+				"gateway":    false,
+				"engineTLS":  false,
+				"gatewayTLS": false,
 			},
 			instance: &computev1alpha1.FireboltInstance{},
 		}

@@ -75,9 +75,11 @@ func goPhaseToTLA(p computev1alpha1.InstancePhase) string {
 func materializeTLAInstanceState(s tlaInstanceState) *instanceSim {
 	m := &instanceSim{
 		compAvail: map[string]bool{
-			"postgres": s.PostgresAvail,
-			"metadata": s.MetadataAvail,
-			"gateway":  s.GatewayAvail,
+			"postgres":   s.PostgresAvail,
+			"metadata":   s.MetadataAvail,
+			"gateway":    s.GatewayAvail,
+			"engineTLS":  s.EngineTLSAvail,
+			"gatewayTLS": s.GatewayTLSAvail,
 		},
 		instance: &computev1alpha1.FireboltInstance{},
 	}
@@ -96,12 +98,12 @@ func materializeTLAInstanceState(s tlaInstanceState) *instanceSim {
 		writeAvailCondition(m.instance,
 			computev1alpha1.InstanceConditionGatewayReady,
 			s.GatewayAvail)
-		// The model abstracts away TLS: represent a TLS-disabled instance
-		// (conditions True/"Disabled") so they never gate the roll-up.
-		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionEngineTLSReady,
-			metav1.ConditionTrue, "Disabled", "")
-		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionGatewayTLSReady,
-			metav1.ConditionTrue, "Disabled", "")
+		writeAvailCondition(m.instance,
+			computev1alpha1.InstanceConditionEngineTLSReady,
+			s.EngineTLSAvail)
+		writeAvailCondition(m.instance,
+			computev1alpha1.InstanceConditionGatewayTLSReady,
+			s.GatewayTLSAvail)
 		setInstanceReadyRollup(m.instance)
 	}
 	return m
@@ -122,10 +124,12 @@ func writeAvailCondition(instance *computev1alpha1.FireboltInstance, condType st
 // projectInstanceSim extracts the TLA+ observable variables from the sim.
 func projectInstanceSim(m *instanceSim) tlaInstanceState {
 	return tlaInstanceState{
-		Phase:         goPhaseToTLA(m.instance.Status.Phase),
-		PostgresAvail: m.compAvail["postgres"],
-		MetadataAvail: m.compAvail["metadata"],
-		GatewayAvail:  m.compAvail["gateway"],
+		Phase:           goPhaseToTLA(m.instance.Status.Phase),
+		PostgresAvail:   m.compAvail["postgres"],
+		MetadataAvail:   m.compAvail["metadata"],
+		GatewayAvail:    m.compAvail["gateway"],
+		EngineTLSAvail:  m.compAvail["engineTLS"],
+		GatewayTLSAvail: m.compAvail["gatewayTLS"],
 	}
 }
 
@@ -190,9 +194,10 @@ func TestTLAInstanceStateCover(t *testing.T) {
 	for i := range tlaInstanceStateCases {
 		tc := tlaInstanceStateCases[i]
 		start := tlaInstanceStatePool[tc.Start]
-		name := fmt.Sprintf("case-%02d/%s/p=%t/m=%t/g=%t",
+		name := fmt.Sprintf("case-%03d/%s/p=%t/m=%t/g=%t/et=%t/gt=%t",
 			i, start.Phase,
-			start.PostgresAvail, start.MetadataAvail, start.GatewayAvail)
+			start.PostgresAvail, start.MetadataAvail, start.GatewayAvail,
+			start.EngineTLSAvail, start.GatewayTLSAvail)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAInstanceState(start)
 

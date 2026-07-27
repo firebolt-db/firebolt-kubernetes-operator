@@ -4,12 +4,24 @@
 \* Models the three-phase lifecycle:
 \*   Provisioning -> Ready <-> Degraded
 \*
-\* The reconciler runs a sequential three-step pipeline every reconcile:
-\*   Postgres -> Metadata -> Gateway
+\* The reconciler runs a sequential pipeline every reconcile:
+\*   Postgres -> Metadata -> Gateway (-> Auth/TLS provisioning)
 \*
 \* It stops at the first failing step and calls setInstanceReadyRollup before
-\* every status write, so the phase always reflects ALL three conditions even
+\* every status write, so the phase always reflects ALL gating conditions even
 \* when the reconcile returned early.
+\*
+\* The Ready roll-up gates on five component conditions. The model keeps one
+\* boolean per component; the Go mapping (mirrored by instanceSim in
+\* instance_property_test.go) is:
+\*   MetadataReady   := compAvail[postgres] /\ compAvail[metadata]
+\*   GatewayReady    := compAvail[gateway]
+\*   EngineTLSReady  := compAvail[engineTLS]
+\*   GatewayTLSReady := compAvail[gatewayTLS]
+\* A TLS-disabled instance reports its TLS conditions True with reason
+\* "Disabled"; in the model that is the sub-space where the two TLS flags
+\* stay permanently TRUE, so disabling TLS is a strict subset of modeled
+\* behaviors, not a separate mode.
 \*
 \* Verified properties:
 \*   Safety          - TypeOK invariant: valid phase and boolean component flags
@@ -42,7 +54,7 @@
 
 EXTENDS Integers, TLC
 
-Components == {"postgres", "metadata", "gateway"}
+Components == {"postgres", "metadata", "gateway", "engineTLS", "gatewayTLS"}
 
 VARIABLES
     phase,    \* current FireboltInstance phase
@@ -52,7 +64,7 @@ vars == <<phase, compAvail>>
 
 Phases == {"uninitialized", "provisioning", "ready", "degraded"}
 
-\* All three component conditions are True.
+\* All component conditions are True.
 AllReady == \A c \in Components : compAvail[c]
 
 \* Derive next phase from current component availability.
@@ -132,7 +144,7 @@ Safety ==
 \* Liveness
 \* ---------------------------------------------------------------------------
 
-\* If all three components become and permanently stay available, phase eventually
+\* If all components become and permanently stay available, phase eventually
 \* reaches Ready.  The precondition <>[]AllReady (permanent stability) is needed
 \* because a transiently-ready state is insufficient: the environment can degrade
 \* a component before ReconcileRun fires, at which point ReconcileRun becomes a
