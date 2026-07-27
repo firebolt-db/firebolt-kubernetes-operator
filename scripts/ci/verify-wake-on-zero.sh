@@ -132,7 +132,11 @@ if grep -q "serviceaccount" <<<"$envoy_mounts"; then
 fi
 echo "envoy holds no ServiceAccount token; automount is disabled"
 
-echo "Waiting for the wake-agent container to become Ready..."
+# With no probes on the sidecar (deliberately — see buildWakeAgentContainer),
+# Ready here means "started without crashing", not "healthy". That is still
+# worth asserting: it catches a bad image, a bad flag, or a crash loop. The
+# wake path itself is proven by the query below, not by this.
+echo "Waiting for the wake-agent container to start..."
 for i in $(seq 1 60); do
   agent_ready=$(kubectl get pod "$gateway_pod" -n "$NAMESPACE" \
     -o jsonpath='{.status.containerStatuses[?(@.name=="wake-agent")].ready}' 2>/dev/null || echo "")

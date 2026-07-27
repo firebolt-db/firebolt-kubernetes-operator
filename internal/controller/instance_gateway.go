@@ -2114,23 +2114,24 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 		Ports: []corev1.ContainerPort{
 			{Name: "wake-demand", ContainerPort: gatewayWakeAgentDemandPort, Protocol: corev1.ProtocolTCP},
 		},
-		// Readiness only, deliberately no liveness probe. A wedged agent
-		// should stop being polled for demand, not restart the container
-		// underneath requests it is currently holding — every one of those
-		// would turn into a client-visible reset. Envoy fails open, so an
-		// unready agent costs wake, not availability.
-		ReadinessProbe: &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path:   "/healthz",
-					Port:   intstr.FromString("wake-demand"),
-					Scheme: corev1.URISchemeHTTP,
-				},
-			},
-			InitialDelaySeconds: 1,
-			PeriodSeconds:       5,
-			TimeoutSeconds:      2,
-		},
+		// No probes at all, and both omissions are deliberate.
+		//
+		// No readiness probe, because a pod is Ready only when EVERY
+		// container is. A probe here would let a wedged agent evict the
+		// whole gateway pod from its Service and take Envoy down with it —
+		// the exact outage the fail-open design exists to prevent, arriving
+		// through the back door. An earlier revision had one, with a comment
+		// claiming an unready agent "costs wake, not availability". That was
+		// simply wrong.
+		//
+		// No liveness probe, because restarting a wedged agent would reset
+		// every request it is currently holding, turning a degraded wake
+		// into client-visible errors.
+		//
+		// Nothing is lost by having neither. Envoy fails open when the agent
+		// does not answer, and the operator's demand poll just sees nothing
+		// — so a broken agent degrades to "wake stops working" on its own,
+		// with no probe needed to arrange it.
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                &runAsUser,
 			RunAsNonRoot:             boolPtr(true),

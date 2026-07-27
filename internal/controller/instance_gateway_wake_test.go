@@ -291,7 +291,17 @@ func envByName(c *corev1.Container, name string) *corev1.EnvVar {
 // No liveness probe, deliberately: restarting a wedged agent would reset
 // every request it is holding, turning a degraded wake into client-visible
 // errors. Envoy fails open, so an unready agent costs wake, not routing.
-func TestWakeAgentHasNoLivenessProbe(t *testing.T) {
+// The sidecar must carry no probes.
+//
+// A readiness probe is the dangerous one: a pod is Ready only when EVERY
+// container is, so probing the agent would let a wedged one evict the whole
+// gateway pod from its Service and take Envoy with it — the outage the
+// fail-open design exists to prevent, arriving through the back door. An
+// earlier revision had exactly that, and this test asserted its presence.
+//
+// A liveness probe would restart the agent and reset every request it is
+// holding, turning a degraded wake into client-visible errors.
+func TestWakeAgentHasNoProbes(t *testing.T) {
 	t.Parallel()
 	pt := renderGatewayPod(t, wakeInstance(t, nil), wakeAgentConfig{Image: testWakeAgentImage})
 	agent := containerByName(pt, computev1alpha1.GatewayWakeAgentContainerName)
@@ -301,8 +311,12 @@ func TestWakeAgentHasNoLivenessProbe(t *testing.T) {
 	if agent.LivenessProbe != nil {
 		t.Error("wake-agent has a liveness probe; a restart would reset held requests")
 	}
-	if agent.ReadinessProbe == nil {
-		t.Error("wake-agent has no readiness probe")
+	if agent.ReadinessProbe != nil {
+		t.Error("wake-agent has a readiness probe; an unready agent would take " +
+			"the gateway pod out of its Service and break the data path")
+	}
+	if agent.StartupProbe != nil {
+		t.Error("wake-agent has a startup probe; same failure mode as readiness")
 	}
 }
 
