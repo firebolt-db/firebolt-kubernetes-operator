@@ -398,7 +398,9 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 		echo "       so it refuses to run rather than risk your uncommitted work." >&2; \
 		exit 1; \
 	fi
-	@fail=0; \
+	@fail=0; applied=""; log=""; \
+	trap 'if [ -n "$$applied" ]; then git apply -R "formal/mutants/$$applied" >/dev/null 2>&1 || true; fi; \
+	      if [ -n "$$log" ]; then rm -f "$$log" || true; fi; :' EXIT HUP INT TERM; \
 	while IFS="$$(printf '\t')" read -r patch test want; do \
 		case "$$patch" in ''|\#*) continue;; esac; \
 		echo "mutant: $$patch"; \
@@ -406,9 +408,11 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 			echo "ERROR: $$patch no longer applies. Re-point it at the current code -- do not delete it." >&2; \
 			fail=1; continue; \
 		fi; \
+		applied="$$patch"; \
 		log=$$(mktemp "$${TMPDIR:-/tmp}/formal-mutants.XXXXXX"); \
 		go test ./internal/controller/ -run "$$test" -count=1 >"$$log" 2>&1 || true; \
 		git apply -R "formal/mutants/$$patch"; \
+		applied=""; \
 		if grep -qF -e "$$want" "$$log"; then \
 			echo "  OK: $$test still fails with \"$$want\""; \
 		else \
@@ -417,7 +421,7 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 			tail -20 "$$log" >&2; \
 			fail=1; \
 		fi; \
-		rm -f "$$log"; \
+		rm -f "$$log"; log=""; \
 	done < formal/mutants/manifest.tsv; \
 	if [ "$$fail" -ne 0 ]; then exit 1; fi; \
 	echo "OK: every pinned mutant still fails the state-cover suite"
