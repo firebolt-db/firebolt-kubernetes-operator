@@ -1,0 +1,40 @@
+# Model scope: which production functions are bound to a TLA+ spec.
+#
+# Columns are tab-separated:
+#
+#   <func>\t<file>\t<spec>\t<state-cover fixture>
+#
+# scripts/ci/check-model-scope.sh reads this and, for a change that touches one
+# of these functions, asks that the spec and its fixture move too. It proves
+# nothing -- it turns "the model quietly stopped tracking the code" into a
+# review prompt. A change that legitimately does not affect the model passes by
+# saying so: put `Model-scope-ok: <reason>` in a commit message or the PR body.
+#
+# What is NOT here matters as much as what is. These machines ship with no
+# model at all, so no formal target says anything about them:
+#
+#   * auto-stop (computeAutoStopDecision) -- covered by a rapid harness with
+#     hand-written precedence invariants (engine_autostop_property_test.go),
+#     which is not a spec binding
+#   * gateway wake-on-zero
+#   * FireboltEngineClass merge / drift detection (stsMatchesSpec and the
+#     effective* resolvers)
+#   * drain probing and its timeouts (deliberately deferred: fuzzed time is the
+#     highest false-positive axis)
+#
+# So "the TLA+ suite passes" means "the three modelled machines still agree with
+# their specs", not "this change is verified". Adding a machine here means
+# writing a spec for it; SigningKeyRotation.tla is the smallest worked example,
+# counterexample config included.
+computeEngineReconcile	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+terminalPhase	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeStable	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeCreating	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeSwitching	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeDraining	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeCleaning	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+setInstanceReadyRollup	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
+computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
+stepSigningKeyRotation	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+promoteSigningKey	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+signingKeysForRender	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go

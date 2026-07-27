@@ -164,6 +164,33 @@ jobs:
       - name: Every pinned mutant must still fail the state-cover suite
         run: make formal-check-mutants
 
+  # Ask that a change to a model-bound function moves its spec and fixture too.
+  # Deliberately NOT wired into the tlc-required gate: this is a review prompt
+  # with an escape hatch, not a proof. Runs on every PR because the script is a
+  # couple of git diffs and a no-op when nothing model-bound changed, so path
+  # scoping would cost more than it saves.
+  model-scope:
+    name: Model scope
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Need the merge base with the target branch, not a shallow tip.
+          fetch-depth: 0
+
+      - name: A change to a modelled machine should move its model
+        env:
+          # Through env, never inlined into the script body: the PR body is
+          # attacker-controlled text.
+          MODEL_SCOPE_TEXT: ${{ github.event.pull_request.body }}
+          BASE_REF: origin/${{ github.base_ref }}
+        run: scripts/ci/check-model-scope.sh "$BASE_REF" HEAD
+
   # Single stable required-check name for branch protection. Keeping the
   # required name "TLC model checker" on this gate (the worker jobs are "TLC"
   # and "Mutants") means branch protection does not change when workers are
