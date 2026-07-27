@@ -572,7 +572,7 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 	return nil
 }
 
-// engineOwnedSecret reports whether a labelled Secret really is one this engine's
+// engineOwnedSecret reports whether a labeled Secret really is one this engine's
 // reconcile produced, as opposed to a user Secret that merely carries the same
 // label. The operator's only Secrets here are cert-manager targets for the
 // per-generation TLS Certificates, so the proof is cert-manager's own

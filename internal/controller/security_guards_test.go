@@ -173,21 +173,21 @@ func TestEngineTLSAnchorIsNotANamespaceWildcard(t *testing.T) {
 // TestEngineOwnedSecret pins that the engine's deletion sweep needs proof of
 // provenance, not just a label anyone in the namespace can stamp.
 func TestEngineOwnedSecret(t *testing.T) {
-	labelled := func(annotations map[string]string) *corev1.Secret {
+	labeled := func(annotations map[string]string) *corev1.Secret {
 		return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
 			Name:        "looks-legit",
 			Annotations: annotations,
 		}}
 	}
-	if engineOwnedSecret(labelled(nil), "eng") {
+	if engineOwnedSecret(labeled(nil), "eng") {
 		t.Error("a Secret carrying only the engine label must not be deleted")
 	}
-	if engineOwnedSecret(labelled(map[string]string{
+	if engineOwnedSecret(labeled(map[string]string{
 		certmanagerv1.CertificateNameKey: "other-eng-g1-engine-tls",
 	}), "eng") {
 		t.Error("another engine's cert-manager Secret must not be deleted by this engine")
 	}
-	if !engineOwnedSecret(labelled(map[string]string{
+	if !engineOwnedSecret(labeled(map[string]string{
 		certmanagerv1.CertificateNameKey: "eng" + SuffixGen + "1" + SuffixEngineTLS,
 	}), "eng") {
 		t.Error("this engine's own per-generation TLS Secret should be swept")

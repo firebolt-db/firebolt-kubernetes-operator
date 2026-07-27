@@ -181,33 +181,6 @@ func validateImmutableEngineTLSIssuer(oldInst, newInst *FireboltInstance) field.
 			"Disable engine TLS or recreate the Instance to change the issuer.")}
 }
 
-func gatewayTLSCertManaged(inst *FireboltInstance) bool {
-	return inst.Spec.TLS != nil && inst.Spec.TLS.Gateway != nil && inst.Spec.TLS.Gateway.Enabled &&
-		inst.Spec.TLS.Gateway.CertManager != nil
-}
-
-// validateImmutableTLSKeyParams freezes the cert-manager key algorithm and size
-// on each TLS listener while that listener stays continuously enabled. The
-// engine anchor and the gateway serving cert both use stable Secret names with
-// rotationPolicy:Never, so cert-manager reuses the existing private key on every
-// reissue and will NOT regenerate it to match a changed algorithm/size — the
-// Certificate silently keeps the old key or never goes Ready for the new spec.
-// (The per-generation engine serving cert picks up a new algorithm/size on its
-// own — a fresh Secret name each generation — but the stable-name anchor it
-// shares an issuer with does not, so an in-place edit still wedges engine TLS.)
-// A disable/re-enable or a new Instance starts from fresh key material and is
-// permitted; only an in-place edit while continuously enabled is rejected.
-// Mirrors the CEL transition rules on TLSSpec.Engine / TLSSpec.Gateway with
-// clearer, field-scoped messages.
-
-// immutableKeyParamErrs reports any algorithm/size change between two
-// CertManagerSpecs, phrased for the named listener. A change from an unset
-// old value (legacy controller-defaulted empty string / zero) to an explicit
-// one is permitted — there was no committed key parameter to wedge against —
-// but every other change, including old-explicit-to-different-value and
-// explicit-to-unset, is still rejected. Mirrors the analogous escapes on the
-// TLSSpec.Engine / TLSSpec.Gateway CEL transition rules.
-
 // ValidateDelete validates a FireboltInstance on deletion.
 func (v *FireboltInstanceCustomValidator) ValidateDelete(_ context.Context, _ *FireboltInstance) (admission.Warnings, error) {
 	return nil, nil
@@ -469,7 +442,7 @@ func validateAuthEnabled(auth *AuthSpec, base *field.Path) field.ErrorList {
 	errs = append(errs, validatePreferredAuthorizationServer(auth, base.Child("preferredAuthorizationServer"))...)
 
 	if auth.OIDC != nil {
-		errs = append(errs, validateOIDCAuth(auth.OIDC, base.Child("oidc"))...)
+		errs = append(errs, validateOIDCAuth(auth.OIDC, base.Child("oidc"), authAdminName(auth))...)
 	}
 
 	return errs
@@ -531,7 +504,7 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 // starting with "_", required name/discoveryURL/usernameMapping) is already
 // enforced by kubebuilder markers on OIDCAuthSpec/OIDCProviderSpec; this
 // covers what those markers cannot express.
-func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path) field.ErrorList {
+func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) field.ErrorList {
 	var errs field.ErrorList
 
 	if oidc.JWT != nil {
@@ -556,6 +529,8 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path) field.ErrorList {
 			errs = append(errs, field.Duplicate(providerPath.Child("name"), p.Name))
 		}
 		seen[p.Name] = struct{}{}
+		errs = append(errs, validateUsernameMapping(
+			p.UsernameMapping, providerPath.Child("usernameMapping"), len(oidc.Providers), adminName)...)
 		if p.JWKS != nil {
 			if err := validateDurationField(providerPath.Child("jwks", "cacheTTL"), p.JWKS.CacheTTL); err != nil {
 				errs = append(errs, err)
@@ -715,6 +690,16 @@ const issuerClaim = "iss"
 // defaultAdminName mirrors the AdminSpec.Name CRD default (packdb's own default
 // admin username).
 const defaultAdminName = "firebolt"
+
+// authAdminName is the admin username an OIDC mapping must not resolve onto,
+// resolved the way the engine will see it: the explicit value when set,
+// otherwise the CRD default that packdb also defaults to.
+func authAdminName(auth *AuthSpec) string {
+	if auth.Local != nil && auth.Local.Admin.Name != "" {
+		return auth.Local.Admin.Name
+	}
+	return defaultAdminName
+}
 
 // validateUsernameMapping rejects the two ways an OIDC username mapping can
 // resolve to an identity it should not.

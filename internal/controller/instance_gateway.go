@@ -174,10 +174,19 @@ const (
 	// older drivers) still legitimately negotiate 1.2.
 	gatewayDownstreamMinTLSVersion = "TLSv1_2"
 
-	// gatewayUpstreamMinTLSVersion is the floor for the gateway→engine hop.
-	// Both ends are operator-managed and both are modern, so there is no reason
-	// to accept anything below TLS 1.3 here.
-	gatewayUpstreamMinTLSVersion = "TLSv1_3"
+	// gatewayUpstreamMinTLSVersion and gatewayUpstreamMaxTLSVersion bound the
+	// gateway→engine hop. Both ends are operator-managed, so the floor is pinned
+	// for the same reason the downstream one is.
+	//
+	// The ceiling must be set alongside the floor. Envoy defaults a CLIENT
+	// context's maximum to TLSv1_2, so raising only the minimum to TLSv1_3 leaves
+	// an empty version range and BoringSSL refuses the connection outright with
+	// NO_SUPPORTED_VERSIONS_ENABLED — every query 503s before the engine is even
+	// dialed. The floor stays at 1.2 rather than 1.3 because nothing has
+	// established that the engine's TLS stack negotiates 1.3; the ceiling lets
+	// them use it when both can.
+	gatewayUpstreamMinTLSVersion = "TLSv1_2"
+	gatewayUpstreamMaxTLSVersion = "TLSv1_3"
 
 	// gatewayClientCAMountPath is the directory the client-CA Secret is
 	// mounted at on the Envoy container when mutual TLS is enabled on the
@@ -453,6 +462,7 @@ func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstan
           common_tls_context:
             tls_params:
               tls_minimum_protocol_version: %s
+              tls_maximum_protocol_version: %s
               ecdh_curves: [X25519, P-256, P-384, P-521]
             validation_context:
               trusted_ca:
@@ -466,7 +476,7 @@ func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstan
                     safe_regex:
                       regex: "^[a-z0-9-]+%s[0-9]+%s\\.%s\\.svc\\.cluster\\.local$"
 `,
-		gatewayUpstreamMinTLSVersion,
+		gatewayUpstreamMinTLSVersion, gatewayUpstreamMaxTLSVersion,
 		gatewayEngineCAMountPath, engineTLSCASecretKey,
 		crl,
 		SuffixService, instance.Namespace,

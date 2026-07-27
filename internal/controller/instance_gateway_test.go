@@ -19,11 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
-	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

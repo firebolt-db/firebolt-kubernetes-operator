@@ -953,7 +953,7 @@ func InstanceProvisionedSecretNames(inst *FireboltInstance) []string {
 
 // instanceProtectedSecretPredicate adapts InstanceProvisionedSecretNames into the
 // predicate the TLS reference checks take. Returns nil (protecting nothing) when
-// the Instance has provisioned nothing yet, which is the correct behaviour for a
+// the Instance has provisioned nothing yet, which is the correct behavior for a
 // first apply: there is no operator key material to point at.
 func instanceProtectedSecretPredicate(inst *FireboltInstance) func(string) bool {
 	names := InstanceProvisionedSecretNames(inst)

@@ -96,7 +96,9 @@ var tlsCertRotationPolicy = certmanagerv1.RotationPolicyAlways
 // strictly shorter than duration — cert-manager rejects the Certificate otherwise,
 // and silently dropping an inconsistent pair is worse than letting cert-manager
 // apply its own default lead time.
-func resolveCertDuration(cm computev1alpha1.CertManagerSpec, defDuration, defRenewBefore time.Duration) (*metav1.Duration, *metav1.Duration) {
+func resolveCertDuration(
+	cm computev1alpha1.CertManagerSpec, defDuration, defRenewBefore time.Duration,
+) (issued, renewLead *metav1.Duration) {
 	duration := defDuration
 	if cm.Duration != nil && cm.Duration.Duration > 0 {
 		duration = cm.Duration.Duration
@@ -918,7 +920,7 @@ func mergeCACerts(inputs [][]byte) []byte {
 
 // The gateway listener uses the same DefaultCertDurationTLS /
 // DefaultCertRenewBeforeTLS defaults as the engine listener. Envoy's own
-// hot-reload behaviour is deliberately NOT relied on: gatewayConfigHash folds
+// hot-reload behavior is deliberately NOT relied on: gatewayConfigHash folds
 // every mounted TLS Secret's resourceVersion, so a reissue changes the pod
 // template and the Deployment rolls onto the new material through the ordinary
 // (and, on a tightening transition, fail-closed) rollout path.
