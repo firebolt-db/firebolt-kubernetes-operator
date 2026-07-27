@@ -109,6 +109,20 @@ const (
 	// silently override the user's spec.replicas==0 intent.
 	AnnotationWakeRequested = "firebolt.io/wake-requested"
 
+	// KindCertificate is the cert-manager Certificate kind, named because
+	// Server-Side Apply requires an explicit apiVersion/kind on every
+	// applied object and the literal would otherwise be repeated across
+	// several files.
+	KindCertificate = "Certificate"
+
+	// KindStatefulSet is the apps/v1 StatefulSet kind. Same rationale as
+	// KindCertificate.
+	KindStatefulSet = "StatefulSet"
+
+	// ReasonInstanceNotReady is the condition reason for an engine blocked
+	// on its parent FireboltInstance.
+	ReasonInstanceNotReady = "InstanceNotReady"
+
 	// SuffixService is appended to form the cluster Service name.
 	SuffixService = "-service"
 	// SuffixGen is appended to form generation-scoped resource names.

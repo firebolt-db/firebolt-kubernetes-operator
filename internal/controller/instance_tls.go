@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -305,7 +305,7 @@ func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Cont
 		secretName = ref.Name
 	} else {
 		desired := buildEngineTLSCertificate(instance)
-		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate}
 
 		// GC note: same as ensureSigningCertificate — OwnerReference +
 		// Kubernetes' garbage collector, not the manual label-based sweep in
@@ -677,7 +677,7 @@ func caFingerprintsSorted(blobs []string) []string {
 	for i, b := range blobs {
 		fps[i] = caFingerprint(b)
 	}
-	sort.Strings(fps)
+	slices.Sort(fps)
 	return fps
 }
 
@@ -739,7 +739,7 @@ func dedupCABlobs(inputs [][]byte) []string {
 		seen[b] = struct{}{}
 		blobs = append(blobs, b)
 	}
-	sort.Strings(blobs)
+	slices.Sort(blobs)
 	return blobs
 }
 
@@ -977,7 +977,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 		secretName = ref.Name
 	} else {
 		desired := buildGatewayTLSCertificate(instance)
-		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+		desired.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate}
 
 		if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 			return false, false, err

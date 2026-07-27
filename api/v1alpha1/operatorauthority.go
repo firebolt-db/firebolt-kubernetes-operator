@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -265,7 +264,7 @@ func ValidateReservedKeyPrefix(path *field.Path, m map[string]string) field.Erro
 	if len(reserved) == 0 {
 		return nil
 	}
-	sort.Strings(reserved)
+	slices.Sort(reserved)
 	errs := make(field.ErrorList, 0, len(reserved))
 	for _, k := range reserved {
 		errs = append(errs, field.Forbidden(path.Key(k),
@@ -780,12 +779,13 @@ func ValidateNoSecretAliasVolumes(
 		"an additional container could read the Instance admin password or a JWT signing key through it"
 	var errs field.ErrorList
 	for i := range volumes {
-		for _, name := range VolumeSecretRefs(&volumes[i]) {
+		vol := &volumes[i]
+		for _, name := range VolumeSecretRefs(vol) {
 			if !isProtected(name) {
 				continue
 			}
 			errs = append(errs, field.Forbidden(base.Index(i),
-				fmt.Sprintf(detail, volumes[i].Name, name, component)))
+				fmt.Sprintf(detail, vol.Name, name, component)))
 		}
 	}
 	return errs

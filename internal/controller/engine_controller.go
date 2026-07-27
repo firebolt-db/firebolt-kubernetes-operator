@@ -317,7 +317,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: engine.Generation,
-				Reason:             "InstanceNotReady",
+				Reason:             ReasonInstanceNotReady,
 				Message:            instanceErr.Error(),
 			})
 			setReadyCondition(&engine.Status, current, engine.Generation)

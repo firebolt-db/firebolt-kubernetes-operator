@@ -141,6 +141,13 @@ linters:
           - gosec
           - forcetypeassert
         path: _test\.go
+      # Validation code accumulates field.ErrorList by appending variadic
+      # spreads whose lengths are not known at the allocation site, so there
+      # is no honest capacity to preallocate. Sizing from the number of
+      # append CALLS would be a wrong number that only silences the linter.
+      - linters:
+          - prealloc
+        text: 'Consider preallocating (errs|out)'
       # Ginkgo and Gomega are designed around dot imports; this is the standard
       # usage pattern endorsed by the frameworks' documentation.
       - linters:

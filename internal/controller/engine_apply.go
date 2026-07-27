@@ -201,7 +201,7 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 func (r *FireboltEngineReconciler) ensureEngineTLSCert(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *certmanagerv1.Certificate) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
-	want.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: "Certificate"}
+	want.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
@@ -224,7 +224,7 @@ func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *co
 func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *appsv1.StatefulSet) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
-	want.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"}
+	want.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: KindStatefulSet}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
