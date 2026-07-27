@@ -213,12 +213,16 @@ The operator's own auth and TLS Secrets are excluded from this. The protected se
 
 Both apply to the primary container, sidecars, and init containers, and to a referenced `FireboltEngineClass` template as well as the resource's own.
 
-Some of these Secrets are matched by name shape rather than by a name the Firebolt Operator has already recorded, because a template is validated before the Secret exists. Two name patterns are reserved for every Instance, whether or not the Secret is provisioned yet:
+Some of these Secrets are matched by name shape rather than by a name the Firebolt Operator has already recorded, because a template is validated before the Secret exists. Two name patterns are reserved, whether or not the Secret is provisioned yet:
 
 - `<instance>-auth-signing` and `<instance>-auth-signing-*`, the JWT signing keypairs.
 - `<engine>-g<generation>-engine-tls`, the per-generation Engine serving certificates.
 
+These patterns match across every Instance and Engine in the namespace, not only the resource being validated. A template on one Instance cannot reach a sibling Instance's signing key, and a template on one Engine cannot reach another Engine's serving certificate. Protection is a property of the Secret, not of which resource the template belongs to.
+
 Do not create your own Secrets under these names. A reference to one is treated as a reference to operator key material and is dropped or refused.
+
+Secrets you name yourself are the exception, because the Firebolt Operator cannot recognize them by shape. The admin password Secret is screened by name against the Instance being validated, so a template on one Instance can still reference a **sibling** Instance's admin password Secret if the two use different names for it. Treat template edit rights as read access to every Secret in the namespace, as above, and put unrelated Instances in separate namespaces when that matters.
 
 ### Network isolation between pods
 

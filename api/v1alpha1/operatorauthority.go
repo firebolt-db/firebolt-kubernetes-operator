@@ -968,7 +968,7 @@ func instanceProtectedSecretPredicate(inst *FireboltInstance) func(string) bool 
 		if _, hit := set[name]; hit {
 			return true
 		}
-		return IsGeneratedEngineTLSSecretName(name) || IsInstanceSigningSecretName(inst.Name, name)
+		return IsGeneratedEngineTLSSecretName(name) || IsSigningKeySecretName(name)
 	}
 }
 
@@ -981,9 +981,9 @@ const (
 	suffixAuthSigning = "-auth-signing"
 )
 
-// IsInstanceSigningSecretName reports whether name is a JWT signing keypair
-// Secret belonging to the named Instance: the bootstrap key
-// ("<instance>-auth-signing") or any rotation generation
+// IsSigningKeySecretName reports whether name is a JWT signing keypair Secret
+// belonging to ANY Instance in the namespace: a bootstrap key
+// ("<instance>-auth-signing") or a rotation generation
 // ("<instance>-auth-signing-<kid>").
 //
 // Matched by shape rather than against the names in status.auth.signingKeys,
@@ -993,16 +993,25 @@ const (
 // operator is about to mint. Future rotation generations have the same problem:
 // their names do not exist anywhere until the moment they are minted.
 //
-// Reserving the whole prefix also claims names the operator does not currently
-// use, such as "<instance>-auth-signing-mine". That is the intended trade: the
-// prefix is the operator's own, and a template author has no reason to put their
-// Secret there.
-func IsInstanceSigningSecretName(instanceName, name string) bool {
-	if instanceName == "" || name == "" {
+// Any-Instance, not this-Instance, for the same reason IsGeneratedEngineTLSSecretName
+// is any-engine: protection is a property of the Secret, not of which resource is
+// under review. Scoping the match to the Instance being validated let a template on
+// one Instance mount a SIBLING Instance's signing key out of the same namespace and
+// mint tokens the sibling's engines honor — the cross-component escalation this
+// guard exists to stop, one level up.
+//
+// Reserving the shape also claims names the operator does not use, such as
+// "app-auth-signing-mine". That is the intended trade, and the same one already
+// accepted for engine serving certificates.
+func IsSigningKeySecretName(name string) bool {
+	base, _, found := strings.Cut(name, suffixAuthSigning)
+	if !found || base == "" {
 		return false
 	}
-	base := instanceName + suffixAuthSigning
-	return name == base || strings.HasPrefix(name, base+"-")
+	// Only an exact suffix or a "-<kid>" continuation; "app-auth-signingkey" is
+	// someone else's Secret.
+	rest := name[len(base)+len(suffixAuthSigning):]
+	return rest == "" || strings.HasPrefix(rest, "-")
 }
 
 // IsGeneratedEngineTLSSecretName reports whether name has the shape of a

@@ -167,7 +167,7 @@ func TestSigningSecretProtectedBeforeStatusExists(t *testing.T) {
 		if !instanceProtectedSecret(fresh)(name) {
 			t.Errorf("instance template gate leaves %q unprotected before status exists", name)
 		}
-		if !engineProtectedSecret(InstanceInfo{InstanceName: fresh.Name})(name) {
+		if !engineProtectedSecret(InstanceInfo{})(name) {
 			t.Errorf("engine template gate leaves %q unprotected before status exists", name)
 		}
 		if errs := computev1alpha1.ValidateTLS(&computev1alpha1.FireboltInstance{
@@ -183,14 +183,35 @@ func TestSigningSecretProtectedBeforeStatusExists(t *testing.T) {
 		}
 	}
 
-	// Another Instance's signing key is not this Instance's business either, but
-	// it must not be swept in by this predicate — it is covered where that
-	// Instance's own name is known.
-	if instanceProtectedSecret(fresh)("other-auth-signing") {
-		t.Error("the prefix match reaches beyond this Instance's own name")
+	// A SIBLING Instance's signing key, in the same namespace. Scoping the shape
+	// match to the Instance under review let a template on this one mount it and
+	// mint tokens the sibling's engines honor.
+	for _, name := range []string{"other-auth-signing", "other-auth-signing-signing-3"} {
+		if !instanceProtectedSecret(fresh)(name) {
+			t.Errorf("instance template gate leaves sibling Instance's %q unprotected", name)
+		}
+		if !engineProtectedSecret(InstanceInfo{})(name) {
+			t.Errorf("engine template gate leaves sibling Instance's %q unprotected", name)
+		}
+		if errs := computev1alpha1.ValidateTLS(&computev1alpha1.FireboltInstance{
+			ObjectMeta: fresh.ObjectMeta,
+			Spec: computev1alpha1.FireboltInstanceSpec{TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:   true,
+					SecretRef: &corev1.LocalObjectReference{Name: name},
+				},
+			}},
+		}); len(errs) == 0 {
+			t.Errorf("spec.tls.gateway.secretRef accepted sibling Instance's %q", name)
+		}
 	}
-	if instanceProtectedSecret(fresh)("instx-auth-signing") {
-		t.Error("the prefix match fired on a near-miss Instance name")
+
+	// The shape still has to end where the operator's naming ends, or it starts
+	// claiming unrelated Secrets.
+	for _, name := range []string{"app-auth-signingkey", "auth-signing", "-auth-signing", "signing", ""} {
+		if instanceProtectedSecret(fresh)(name) {
+			t.Errorf("the shape match claimed %q, which no Instance mints", name)
+		}
 	}
 }
 

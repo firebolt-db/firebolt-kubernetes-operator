@@ -1046,8 +1046,8 @@ func engineAliasedSecretVolumes(
 // looked at it. Protection is a property of the Secret, not of which engine is
 // under review, so both halves of the predicate are now Instance-wide (see
 // instanceProtectedSecret / isGeneratedEngineTLSSecretName). Signing keys are
-// matched by prefix for a second reason: they are protected from the first
-// apply, before any status names them.
+// matched by shape for a second reason: they are protected from the first apply,
+// before any status names them.
 func engineProtectedSecret(info InstanceInfo) func(string) bool {
 	exact := make(map[string]struct{}, len(info.ProtectedSecretNames))
 	for _, n := range info.ProtectedSecretNames {
@@ -1063,7 +1063,7 @@ func engineProtectedSecret(info InstanceInfo) func(string) bool {
 			return true
 		}
 		return isGeneratedEngineTLSSecretName(name) ||
-			computev1alpha1.IsInstanceSigningSecretName(info.InstanceName, name)
+			computev1alpha1.IsSigningKeySecretName(name)
 	}
 }
 
@@ -1522,7 +1522,6 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 	// exactly those routes open. instanceProtectedSecret adds the two names formed
 	// from suffixes private to this package.
 	info.ProtectedSecretNames = instanceProtectedSecretNames(inst)
-	info.InstanceName = inst.Name
 	return info, nil
 }
 
