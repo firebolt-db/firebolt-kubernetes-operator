@@ -68,7 +68,7 @@ func markCertReadyForGeneration(t *testing.T, cli client.Client, ns, name string
 // advance a staged tightening transition to completion.
 func markGatewayServingCurrentConfig(t *testing.T, cli client.Client, r *FireboltInstanceReconciler, instance *computev1alpha1.FireboltInstance) {
 	t.Helper()
-	hash, err := r.gatewayConfigHash(context.Background(), instance, buildEnvoyConfigYAML(instance))
+	hash, err := r.gatewayConfigHash(context.Background(), instance, buildEnvoyConfigYAML(instance, false))
 	if err != nil {
 		t.Fatalf("computing gateway fail-closed config hash: %v", err)
 	}

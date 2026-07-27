@@ -19,7 +19,7 @@ package controller
 import (
 	"context"
 	stderrors "errors"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -178,7 +178,7 @@ func TestFireboltEngineClassToEngines_NamespaceScoped(t *testing.T) {
 		}
 		gotNames = append(gotNames, req.Name)
 	}
-	sort.Strings(gotNames)
+	slices.Sort(gotNames)
 	want := []string{"a", "b"}
 	if len(gotNames) != len(want) || gotNames[0] != want[0] || gotNames[1] != want[1] {
 		t.Errorf("enqueued engines = %v, want %v (cross-namespace engine e must be filtered out)", gotNames, want)
