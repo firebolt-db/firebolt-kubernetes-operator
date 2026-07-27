@@ -443,6 +443,14 @@ rather than cert-manager's `cert-manager.io/certificate-name` annotation, becaus
 the annotation is ordinary metadata that whoever creates the Secret can set to any
 value, while the API server assigns `creationTimestamp` itself.
 
+This stops a principal who can create Secrets. It does not stop one who can also
+create `Certificate` objects: that principal creates the Certificate first and
+plants the Secret after it, so the ordering holds honestly. **Grant
+`create certificates` in a namespace running Firebolt Instances only to principals
+you would trust with the JWT signing key.** Closing that case requires
+cert-manager to stop reusing pre-existing private keys, which conflicts with
+operator-coordinated key rotation.
+
 You can hit this legitimately by deleting a signing Certificate and letting the
 Firebolt Operator recreate it, such as during a GitOps prune. The surviving Secret
 then predates its new Certificate. The Firebolt Operator allows this when the

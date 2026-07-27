@@ -401,24 +401,39 @@ var errSigningKeyPredatesCertificate = stderrors.New(
 // themselves at create time, and cert-manager rewrites the same value after it
 // issues, so the Secret looks correct from every angle a client can control.
 //
-// creationTimestamp is the signal that works, because it is the one the API
-// server refuses to take from the client: it is overwritten on create
-// (rest.FillObjectMetaSystemFields), so a planted Secret is always stamped with
-// the moment it was planted. cert-manager cannot write the target Secret before
-// the Certificate exists, so for genuine material the Secret is never older than
-// its Certificate. Reversed order means the Secret was already sitting there.
+// creationTimestamp is what the check keys on instead, because it is the one
+// field here the API server refuses to take from the client: it is overwritten on
+// create (rest.FillObjectMetaSystemFields), so a planted Secret is always stamped
+// with the moment it was planted. cert-manager cannot write the target Secret
+// before the Certificate exists, so for genuine material the Secret is never
+// older than its Certificate. Reversed order means the Secret was already
+// sitting there.
 //
-// Two limits, both deliberate:
+// What this does and does not close, stated precisely because the distinction is
+// easy to lose:
 //
+//   - It closes the `create secrets` case above, which is the whole attack for a
+//     principal who cannot create Certificates. They cannot make their Secret
+//     postdate an object they have to wait for the operator to create.
+//   - It does NOT close the case where the same principal can also create
+//     Certificates. Applying the Certificate is server-side apply with
+//     ForceOwnership, which adopts an existing object rather than failing, so an
+//     attacker creates the Certificate at the deterministic name first and plants
+//     the Secret after it. The ordering then holds honestly and this check passes.
+//     The Certificate is not a trusted reference point; nothing measured against
+//     it can be.
 //   - creationTimestamp is second-granular, so a Secret planted within the same
-//     second as the Certificate's creation compares equal and passes. Equal must
-//     be allowed — the honest path collides in that window routinely — which
-//     leaves a sub-second race requiring the attacker to already know the kid.
-//     That is a far cry from "create a Secret whenever you like".
+//     second as the Certificate's creation compares equal and passes. Equal has to
+//     be allowed, because the honest path collides in that window routinely.
 //   - Recovery: if the Certificate is deleted and recreated (a GitOps prune, a
 //     manual cleanup) the surviving Secret now predates it through no fault of
 //     anyone. Allowed only when its public key is the one already witnessed in
 //     status, which an attacker's key by definition is not.
+//
+// Closing the Certificate-create case needs cert-manager to stop adopting
+// pre-existing key material at all, which means rotationPolicy:Always for signing
+// — and that regenerates the key under a stable kid on renewal, the validation gap
+// authSigningRotationPolicy exists to avoid. It is a design trade, not a patch.
 //
 // A rejection is not auto-remediated. Deleting the Secret would destroy the
 // signing key, and if the material is genuine that retires every token in flight.
