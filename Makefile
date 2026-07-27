@@ -365,9 +365,10 @@ tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
 formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/SigningKeyRotation.cfg formal/SigningKeyRotation.tla
 
 .PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
+formal-dump: tla2tools ## Dump the TLC state graphs for all specs to formal/*.dot.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/FireboltEngine.cfg \
 		-dump dot,actionlabels formal/FireboltEngine.dot \
@@ -376,6 +377,10 @@ formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.d
 		-config formal/FireboltInstance.cfg \
 		-dump dot,actionlabels formal/FireboltInstance.dot \
 		formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/SigningKeyRotation.cfg \
+		-dump dot,actionlabels formal/SigningKeyRotation.dot \
+		formal/SigningKeyRotation.tla
 
 .PHONY: formal-gen
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
@@ -385,10 +390,13 @@ formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from th
 	python3 scripts/gen-tla-instance-state-tests.py \
 		--dot formal/FireboltInstance.dot \
 		--out internal/controller/instance_tla_states_data_test.go
+	python3 scripts/gen-tla-rotation-state-tests.py \
+		--dot formal/SigningKeyRotation.dot \
+		--out internal/controller/rotation_tla_states_data_test.go
 
 .PHONY: formal-verify
 formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
-	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go internal/controller/rotation_tla_states_data_test.go; do \
 		if ! git diff --quiet -- "$$f"; then \
 			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
 			git --no-pager diff -- "$$f"; \
