@@ -169,12 +169,29 @@ var engineInvariants = map[string]func(t invariantT, m *engineSim){
 		if !isTerminalPhase(m.status.Phase) {
 			return
 		}
-		// Quiesced also means the reconciler has caught up with the last spec
-		// change. The spec gets that from StsMatchesSpec, because its
-		// EnvChangeSpec always bumps specVer; Go has spec changes that produce
-		// no template drift (replicas are applied in place by design), so the
-		// terminal phase can legitimately name the old intent for one reconcile.
-		// See engineSim.specDirty.
+		// Quiesced also means the reconciler has caught up with the last
+		// spec change, and stsMatchesSpec below does NOT establish that on
+		// its own.
+		//
+		// The window it misses is status lag, not template drift: a
+		// reconcile can bring the STS into line with a new spec and be
+		// observed before its status write lands. At that instant
+		// stsMatchesSpec is already true while status.Phase still names the
+		// previous intent — legitimately, for exactly one reconcile.
+		// specDirty tracks precisely that window ("a spec change happened
+		// and no reconcile has written status since").
+		//
+		// Empirically load-bearing, not defensive: delete this guard and the
+		// suite fails at -rapid.checks=5000 with
+		//   Inv_QuiescedPhaseMatchesSpec: phase=stopped but spec.Replicas=3
+		//   (quiesced on a matching STS)
+		// It survives the default check count, which is why the interleaving
+		// is easy to talk yourself out of.
+		//
+		// An earlier version of this comment justified the guard by claiming
+		// replica edits leave stsMatchesSpec true because scaling is applied
+		// in place. That is false — stsMatchesSpec compares Replicas as its
+		// first check — and the true reason is the one above.
 		if m.specDirty {
 			return
 		}
