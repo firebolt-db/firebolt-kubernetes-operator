@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.1.0...firebolt-operator-crds-chart-0.2.0) (2026-07-27)
+
+
+### Features
+
+* **api:** add spec.auth and spec.tls to FireboltInstance with validation and RBAC (FB-896) ([59f792b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/59f792b43c2dd2b59c3be11a9310f392d046dad0))
+
 ## [0.1.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.0.10...firebolt-operator-crds-chart-0.1.0) (2026-06-22)
 
 
