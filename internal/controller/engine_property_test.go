@@ -521,76 +521,16 @@ func (m *engineSim) DeleteEngine(_ *rapid.T) {
 	}
 }
 
-// ---------- Invariant checks (mirrors formal/FireboltEngine.tla Safety) ----------
+// ---------- Invariant checks ----------
 
-// Check is called by rapid after every action. All resource invariants run
-// against m.api (the api truth). The cache is only the controller's input;
-// transient cache/api divergence is the input space, not the bug surface.
+// Check is called by rapid after every action. The invariants themselves live in
+// engine_invariants_test.go, shared with the TLA+ state cover and keyed by the
+// spec's Safety conjunct names, so the two harnesses cannot drift apart or fall
+// behind the spec. All of them read m.api (the api truth); the cache is only the
+// controller's input, and transient cache/api divergence is the input space, not
+// the bug surface.
 func (m *engineSim) Check(t *rapid.T) {
-	s := &m.status
-
-	// Inv_TerminalConsistency: terminal phase => CurrentGeneration == ActiveGeneration
-	if isTerminalPhase(s.Phase) && s.CurrentGeneration != s.ActiveGeneration {
-		t.Fatalf("Inv_TerminalConsistency: phase=%s but CurrentGen=%d != ActiveGen=%d",
-			s.Phase, s.CurrentGeneration, s.ActiveGeneration)
-	}
-
-	// Inv_TerminalNoDraining: terminal phase => DrainingGeneration == nil
-	if isTerminalPhase(s.Phase) && s.DrainingGeneration != nil {
-		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
-			s.Phase, *s.DrainingGeneration)
-	}
-
-	// Inv_ActiveHasSTS: ActiveGeneration >= 0 => STS for that gen exists
-	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
-		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS in cluster",
-			s.ActiveGeneration)
-	}
-
-	// Inv_ServiceKnownGen + Inv_ServiceValid: once traffic is active, the
-	// cluster service selector points to a gen in {activeGen, currentGen}
-	// and that gen's STS exists.
-	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
-		if !ok {
-			t.Fatalf("cluster service missing %s label", LabelGeneration)
-		}
-		targetGen, err := strconv.Atoi(genStr)
-		if err != nil {
-			t.Fatalf("invalid %s label on cluster service: %v", LabelGeneration, err)
-		}
-		if targetGen != s.ActiveGeneration && targetGen != s.CurrentGeneration {
-			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d ∉ {activeGen=%d, currentGen=%d}",
-				targetGen, s.ActiveGeneration, s.CurrentGeneration)
-		}
-		if m.api.stses[targetGen] == nil {
-			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS in cluster", targetGen)
-		}
-	}
-
-	// Inv_NoOrphanedResources: terminal phase => only currentGen resources survive.
-	// GC runs as part of Reconcile when phase is terminal, so any stale gens still
-	// present after a Reconcile call indicate a GC gap.
-	if isTerminalPhase(s.Phase) {
-		for gen := range m.api.stses {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but STS gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-		for gen := range m.api.configMaps {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but ConfigMap gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-		for gen := range m.api.headlessSvcs {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but HeadlessSvc gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-	}
+	checkEngineInvariants(t, m)
 }
 
 func TestEngineStateMachine(t *testing.T) {

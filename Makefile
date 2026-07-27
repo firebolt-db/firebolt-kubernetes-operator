@@ -403,6 +403,7 @@ formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.d
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
 	python3 scripts/gen-tla-state-tests.py \
 		--dot formal/FireboltEngine.dot \
+		--spec formal/FireboltEngine.tla \
 		--out internal/controller/engine_tla_states_data_test.go
 	python3 scripts/gen-tla-instance-state-tests.py \
 		--dot formal/FireboltInstance.dot \

@@ -47,6 +47,26 @@ const (
 )
 
 
+// tlaRequiredInvariants are the conjuncts of the spec's `Safety ==`
+// predicate, in spec order. engine_invariants_test.go asserts that every
+// one of them has a Go counterpart in the shared invariant registry, so a
+// conjunct added to the spec fails the build until it is implemented -- the
+// invariants are hand-transcribed into the harnesses, and nothing else
+// notices when the spec grows one they do not check.
+var tlaRequiredInvariants = []string{
+	"TypeOK",
+	"Inv_TerminalConsistency",
+	"Inv_ServiceValid",
+	"Inv_TerminalHasSTS",
+	"Inv_ActiveHasSTS",
+	"Inv_ServiceKnownGen",
+	"Inv_DrainingPhase",
+	"Inv_TerminalNoDraining",
+	"Inv_DrainingOlderThanCurrent",
+	"Inv_GenOrder",
+	"Inv_QuiescedPhaseMatchesSpec",
+}
+
 // 6404 unique reachable TLA+ states (uninitialised excluded).
 var tlaStatePool = []tlaState{
 	{"cleaning", 1, 1, 0, 1, false, [4]int{0, 1, -1, -1}, 1, true, true, false, false},

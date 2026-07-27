@@ -58,6 +58,68 @@ EDGE_RE = re.compile(r'^(-?\d+)\s+->\s+(-?\d+)\s+\[label="(' + LABEL_BODY + r')"
 # stsSpecVer = (0 :> -1 @@ 1 :> -1 @@ 2 :> -1)
 FN_ENTRY_RE = re.compile(r"(-?\d+)\s*:>\s*(-?\d+)")
 
+# Conjuncts of the spec's `Safety ==` definition:
+#     Safety ==
+#         /\ TypeOK
+#         /\ Inv_TerminalConsistency
+SAFETY_START_RE = re.compile(r"^Safety\s*==\s*$")
+CONJUNCT_RE = re.compile(r"^\s*/\\\s*([A-Za-z_][A-Za-z0-9_]*)\s*$")
+
+
+def parse_safety_conjuncts(spec_path: Path) -> List[str]:
+    """Return the names conjoined into the spec's Safety predicate.
+
+    These are emitted into the fixture so the Go side can assert it implements
+    every one of them. The invariants are otherwise transcribed by hand into two
+    harnesses, and nothing notices when the spec grows a conjunct that neither
+    of them checks.
+    """
+    names: List[str] = []
+    in_safety = False
+    for line in spec_path.read_text().splitlines():
+        if not in_safety:
+            if SAFETY_START_RE.match(line):
+                in_safety = True
+            continue
+        m = CONJUNCT_RE.match(line)
+        if m:
+            names.append(m.group(1))
+            continue
+        # Blank lines and comments inside the definition are fine; anything else
+        # (the next definition, or a conjunct that is not a bare name) ends it.
+        if line.strip() == "" or line.lstrip().startswith("\\*"):
+            continue
+        break
+    if not names:
+        raise SystemExit(f"error: no Safety conjuncts parsed from {spec_path}")
+    return names
+
+
+def check_env_actions(edges: Iterable[Tuple[int, int, str]]) -> None:
+    """Fail if the state graph has an `Env*` action this script does not know.
+
+    Everything not in ENV_ACTIONS counts as a *reconciler* edge, so an
+    unrecognised environment action silently widens every reconciler closure and
+    weakens the whole state cover -- with no fixture staleness and no failing
+    test to show for it. Fail generation instead.
+    """
+    unknown = sorted(
+        {
+            action
+            for _, _, action in edges
+            if action.startswith("Env") and action not in ENV_ACTIONS
+        }
+    )
+    if unknown:
+        raise SystemExit(
+            "error: unrecognised environment action(s) in the state graph: "
+            + ", ".join(unknown)
+            + "\n       Add them to ENV_ACTIONS in this script. Until then they "
+            "count as\n       reconciler transitions, which widens every closure "
+            "and weakens the cover."
+        )
+
+
 
 def unescape_dot(s: str) -> str:
     """Decode DOT label escapes (\\, \", \n) into the corresponding chars."""
@@ -276,6 +338,12 @@ def main() -> int:
     parser.add_argument("--dot", required=True, type=Path, help="TLC DOT dump")
     parser.add_argument("--out", required=True, type=Path, help="Go fixture output path")
     parser.add_argument(
+        "--spec",
+        required=True,
+        type=Path,
+        help="TLA+ spec, read for the Safety predicate's conjunct list",
+    )
+    parser.add_argument(
         "--include-uninitialized",
         action="store_true",
         help="Include phase=uninitialized states (default: skip; the real code handles "
@@ -287,6 +355,9 @@ def main() -> int:
     if not nodes:
         print(f"error: no states parsed from {args.dot}", file=sys.stderr)
         return 1
+
+    check_env_actions(edges)
+    required_invariants = parse_safety_conjuncts(args.spec)
 
     # Partition edges into reconciler vs environment.
     reconciler_edges: Dict[int, List[int]] = defaultdict(list)
@@ -357,6 +428,19 @@ def main() -> int:
             max_gen=max_gen, max_spec=max_spec, max_gen_plus_one=max_gen + 1
         )
     ]
+    out_lines.append(
+        "// tlaRequiredInvariants are the conjuncts of the spec's `Safety ==`\n"
+        "// predicate, in spec order. engine_invariants_test.go asserts that every\n"
+        "// one of them has a Go counterpart in the shared invariant registry, so a\n"
+        "// conjunct added to the spec fails the build until it is implemented -- the\n"
+        "// invariants are hand-transcribed into the harnesses, and nothing else\n"
+        "// notices when the spec grows one they do not check."
+    )
+    out_lines.append("var tlaRequiredInvariants = []string{")
+    for name in required_invariants:
+        out_lines.append(f'\t"{name}",')
+    out_lines.append("}")
+    out_lines.append("")
     out_lines.append(f"// {len(pool_states)} unique reachable TLA+ states (uninitialised excluded).")
     out_lines.append("var tlaStatePool = []tlaState{")
     for s in pool_states:
