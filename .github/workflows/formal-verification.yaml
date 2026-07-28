@@ -49,7 +49,7 @@ jobs:
             exit 0
           fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-[a-z-]*state-tests\.py$|_tla_states_data_test\.go$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-[a-z-]*state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/check-counterexamples\.sh$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -114,20 +114,14 @@ jobs:
             -config formal/SigningKeyRotation.cfg \
             formal/SigningKeyRotation.tla
 
-      - name: Run TLC — SigningKeyRotation naive anchor must still fail
-        run: |
-          # Requires TLC's specific violation line rather than a non-zero exit:
-          # a parse error or OOM also exits non-zero and would otherwise pass.
-          out="$(java -cp tla2tools.jar tlc2.TLC -workers 2 -nowarning \
-            -config formal/SigningKeyRotationNaive.cfg \
-            formal/SigningKeyRotation.tla 2>&1 || true)"
-          if echo "$out" | grep -q 'Invariant NoValidationGap is violated'; then
-            echo "OK: the naive retain-window anchor still violates NoValidationGap"
-          else
-            echo "::error::SigningKeyRotationNaive.cfg no longer produces the expected NoValidationGap violation"
-            echo "$out" | tail -40
-            exit 1
-          fi
+      - name: Every naive config must still produce its pinned violation
+        # Delegates to the same script and table the Makefile target uses. This
+        # step used to inline one config, and inlining is what made it wrong: the
+        # table grew to six negative controls while a hardcoded copy would have
+        # gone on checking one of them and reporting success.
+        # Through `bash`, matching the model-scope step: the invocation does not
+        # need to depend on the file mode.
+        run: bash scripts/ci/check-counterexamples.sh tla2tools.jar
 
       - name: Verify state-cover fixtures are up to date
         run: |
