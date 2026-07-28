@@ -447,7 +447,7 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 		rm -f "$$log"; log=""; \
 	done < formal/mutants/manifest.tsv; \
 	if [ "$$fail" -ne 0 ]; then exit 1; fi; \
-	echo "OK: every pinned mutant still fails the state-cover suite"
+	echo "OK: every pinned mutant still fails the test its row names"
 
 .PHONY: formal-dump
 formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
