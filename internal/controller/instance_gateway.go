@@ -248,20 +248,30 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 
 	envoyYAML := buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance))
 
-	// RBAC: the operator manages the gateway ServiceAccount, Role, and
-	// RoleBinding only when the user has NOT supplied a custom
-	// spec.gateway.template.spec.serviceAccountName. Setting that field
-	// is the explicit opt-out signal: the user is taking responsibility
-	// for the SA and the RBAC it needs (see
-	// docs/crd-reference/instance-crd-reference.mdx "Gateway custom ServiceAccount"
-	// for the verb set). Operator-managed RBAC would otherwise bind to
-	// a different SA name than the one the gateway pod runs as, and
-	// the wake-on-zero patch would silently 403 at runtime — worse
-	// than the loud "ServiceAccount not found" the kubelet logs when
-	// the user-supplied SA is missing.
+	// RBAC: the operator manages the gateway ServiceAccount, RoleBinding, and
+	// the binding to the chart's wake ClusterRole only when the user has NOT
+	// supplied a custom spec.gateway.template.spec.serviceAccountName. Setting
+	// that field is the explicit opt-out signal: the user is taking
+	// responsibility for the SA and the read the wake agent needs (see
+	// docs/instance/gateway/overview.mdx "Gateway custom service account" for
+	// the verb set and a copy-pasteable Role). Operator-managed RBAC would
+	// otherwise bind to a different SA name than the one the gateway pod runs
+	// as, and the agent's EndpointSlice watch would silently 403 at runtime —
+	// worse than the loud "ServiceAccount not found" the kubelet logs when the
+	// user-supplied SA is missing.
+	//
+	// This path also hands back the pod's token: the operator stops forcing
+	// automountServiceAccountToken: false, so the user's value applies. The log
+	// has to say both, because following it with only the grant and the
+	// Kubernetes automount default would put a token in the Envoy container,
+	// which terminates untrusted traffic and needs no API access at all.
 	if userSA := userGatewayServiceAccountName(instance); userSA != "" {
 		log.Info(
-			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, so the user is responsible for the ServiceAccount and RBAC (get/list/patch on compute.firebolt.io/fireboltengines for wake-on-zero)",
+			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, "+
+				"so the user owns the ServiceAccount and the read wake-on-zero needs "+
+				"(get/list/watch on discovery.k8s.io/endpointslices). "+
+				"automountServiceAccountToken is no longer forced to false on this path — "+
+				"set it explicitly on spec.gateway.template.spec unless a sidecar of your own needs API access",
 			"serviceAccountName", userSA,
 		)
 	} else if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
