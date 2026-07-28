@@ -37,7 +37,7 @@ import (
 
 // markCertReadyForGeneration marks the cert-manager Certificate ns/name Ready
 // for its current generation, simulating cert-manager completing issuance.
-// FB-896 #4 gates TLS/auth readiness on this (not just Secret-key presence), so
+// Readiness gating keys on this (not just Secret-key presence), so
 // tests that seed a Secret and expect readiness must also mark the Certificate
 // ready. Requires the fake client to be built
 // WithStatusSubresource(&certmanagerv1.Certificate{}) so the status survives
@@ -63,8 +63,8 @@ func markCertReadyForGeneration(t *testing.T, cli client.Client, ns, name string
 // config-hash of whatever buildEnvoyConfigYAML currently yields for the instance,
 // and its status shows a completed rollout. The rendered config depends on
 // instance.Status.GatewayTLS, so this rolls out the FAIL-CLOSED config when the
-// status is nil (the staging state, FB-896 #1) and the SECURE config once the
-// status is populated (the FB-896 #5 serving gate) — call it in each phase to
+// status is nil (the staging state) and the SECURE config once the
+// status is populated (the serving gate) — call it in each phase to
 // advance a staged tightening transition to completion.
 func markGatewayServingCurrentConfig(t *testing.T, cli client.Client, r *FireboltInstanceReconciler, instance *computev1alpha1.FireboltInstance) {
 	t.Helper()
@@ -400,7 +400,7 @@ func TestEnsureEngineTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 }
 
 // TestEnsureEngineTLS_SecretRefRejected verifies the controller's
-// defense-in-depth after FB-896 #1: engine bring-your-own Secret is no longer
+// defense-in-depth: engine bring-your-own Secret is no longer
 // supported (the operator must issue per-generation certs whose SANs cover the
 // engine pod hostnames), so ensureEngineTLS's ValidateTLS re-run rejects it
 // even on a CR that reached the cluster with a bypassed webhook — rather than
@@ -434,7 +434,7 @@ func TestEnsureEngineTLS_SecretRefRejected(t *testing.T) {
 	}
 }
 
-// TestEnsureEngineTLS_ConvergenceGatesReady covers FB-896 #4: once the anchor
+// TestEnsureEngineTLS_ConvergenceGatesReady covers convergence gating: once the anchor
 // certificate is provisioned, EngineTLSReady must stay False/Converging until
 // the engine fleet has actually rolled onto TLS (Reencrypting). The condition
 // feeds the Instance Ready roll-up, which must not advertise Ready over a
@@ -540,7 +540,7 @@ func TestEnsureGatewayTLS_SecretRefConsumesUserSecret(t *testing.T) {
 		},
 	}
 
-	// FB-896 #1: enabling gateway TLS on a plaintext gateway is a *tightening*
+	// Enabling gateway TLS on a plaintext gateway is a *tightening*
 	// transition (plaintext→one-way TLS), so the first reconcile stages
 	// fail-closed rather than immediately serving the BYO cert.
 	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
@@ -591,7 +591,7 @@ func TestEnsureGatewayTLS_SecretRefConsumesUserSecret(t *testing.T) {
 	}
 }
 
-// TestEnsureGatewayTLS_ClientCAPendingFailsClosed covers FB-896 #2: when mutual
+// TestEnsureGatewayTLS_ClientCAPendingFailsClosed covers the pending client CA: when mutual
 // TLS is requested (clientCASecretRef) but the client-CA Secret is missing, the
 // gateway must fail CLOSED. A stale non-nil Status.GatewayTLS left standing
 // keeps gatewayDownstreamTLSReady true, so the previous one-way pods keep
@@ -638,7 +638,7 @@ func TestEnsureGatewayTLS_ClientCAPendingFailsClosed(t *testing.T) {
 }
 
 // TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration covers
-// FB-896 #4: a cert-manager-backed listener must not be reported ready on the
+// A cert-manager-backed listener must not be reported ready on the
 // mere presence of a Secret carrying tls.crt/tls.key — the Certificate must be
 // Ready for its CURRENT generation. Otherwise a failed re-issuance (issuer/SAN
 // change) leaves the previous certificate serving while GatewayTLSReady stays
@@ -675,7 +675,7 @@ func TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration(t *testin
 
 	// cert-manager finishes issuance: the Certificate goes Ready for its gen.
 	// Cert material is now ready, but enabling on a plaintext gateway is a
-	// tightening transition (FB-896 #1), so this reconcile stages fail-closed.
+	// tightening transition, so this reconcile stages fail-closed.
 	markCertReadyForGeneration(t, cli, "ns-1", certName)
 	if err := r.ensureGatewayTLS(context.Background(), instance); err != nil {
 		t.Fatalf("ensureGatewayTLS (cert ready, staging): %v", err)
@@ -710,7 +710,7 @@ func TestEnsureGatewayTLS_WaitsForCertificateReadyForCurrentGeneration(t *testin
 }
 
 // TestEnsureGatewayTLS_StaleReadyGenerationKeepsServingButReportsDegraded is
-// the core FB-896 #4 case: a Ready=True condition left over from a PRIOR
+// the core case: a Ready=True condition left over from a PRIOR
 // successful issuance — its ObservedGeneration now lagging the Certificate's
 // current generation because a re-issuance (after a DNS-SAN/issuer change) is
 // failing — must NOT count as ready. The operator keeps serving the still-valid
@@ -793,7 +793,7 @@ func TestMergeCACerts(t *testing.T) {
 	}
 }
 
-// TestCollectCACerts_CompleteSemantics pins the FB-896 #4 completeness contract:
+// TestCollectCACerts_CompleteSemantics pins the completeness contract:
 // complete is true only when EVERY requested name was read with a non-empty
 // ca.crt, so ensureEngineCABundle can tell a genuine set apart from a transiently
 // partial one and refuse to publish a pruned bundle. A name that is NotFound or
@@ -859,7 +859,7 @@ func TestCollectCACerts_CompleteSemantics(t *testing.T) {
 	})
 }
 
-// TestEnsureEngineCABundle covers FB-896 #4 assembly and #3 pruning: the gateway
+// TestEnsureEngineCABundle covers bundle assembly and pruning: the gateway
 // trust bundle is the deduped union of every live engine generation's CA (the
 // long-lived anchor is EXCLUDED so its pinned CA cannot linger — #3, with the
 // anchor kept only as a fallback when no per-gen CA is present), it self-prunes
@@ -1246,7 +1246,7 @@ func TestEnsureEngineCABundle(t *testing.T) {
 	})
 }
 
-// TestPublishRolledEngineTrustCAs_PreservesOnAssemblyError covers FB-896 #6: when
+// TestPublishRolledEngineTrustCAs_PreservesOnAssemblyError covers when
 // bundle assembly failed (bundleErr != nil, fingerprints nil), the last-confirmed
 // Status.RolledEngineTrustCAs must be preserved rather than clobbered with nil —
 // the previous bundle may still be serving, and dropping the set would wrongly
@@ -1272,7 +1272,7 @@ func TestPublishRolledEngineTrustCAs_PreservesOnAssemblyError(t *testing.T) {
 	}
 }
 
-// TestEnsureGatewayTLS_StagesOnlyWhenTightening covers the FB-896 #1 posture
+// TestEnsureGatewayTLS_StagesOnlyWhenTightening covers the posture
 // machine: a transition to a *stricter* posture (one-way→mTLS) stages
 // fail-closed and withholds readiness until the rollout completes, while a
 // *loosening* (mTLS→one-way) or steady transition serves immediately with no
@@ -1303,7 +1303,7 @@ func TestEnsureGatewayTLS_StagesOnlyWhenTightening(t *testing.T) {
 		if servedMode != "" {
 			inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "byo-gw-tls", Mode: servedMode}
 			// A served posture means the gateway was already reported Ready. The
-			// FB-896 #5 serving gate only re-checks on the transition OUT of a
+			// The serving gate only re-checks on the transition OUT of a
 			// not-ready state, so seeding this True lets a loosening/steady
 			// transition stay Ready without re-rolling (the anti-flap behavior);
 			// a genuine tighten resets it to False/StagingFailClosed regardless.
@@ -1392,7 +1392,7 @@ func TestEnsureGatewayTLS_StagesOnlyWhenTightening(t *testing.T) {
 	})
 }
 
-// TestEnsureGatewayTLS_ClientCASwapStages covers FB-896 #2: replacing the client
+// TestEnsureGatewayTLS_ClientCASwapStages covers replacing the client
 // CA (CA-A→CA-B) keeps the posture at MutualTLS on both sides, so the posture
 // ordinal alone would miss it and roll without staging — leaving old pods
 // trusting the retired CA-A during the roll. Comparing the recorded client-CA
@@ -1472,7 +1472,7 @@ func TestEnsureGatewayTLS_ClientCASwapStages(t *testing.T) {
 	})
 }
 
-// TestEnsureGatewayTLS_ReadyStableAcrossRenewal covers the FB-896 #5 anti-flap
+// TestEnsureGatewayTLS_ReadyStableAcrossRenewal covers the anti-flap
 // guard: once GatewayTLSReady is True, a later change that re-rolls the gateway
 // (e.g. a server-cert renewal) must NOT drop the Instance out of Ready. The
 // serving gate only applies on the transition OUT of a not-ready state; a
@@ -1512,7 +1512,7 @@ func TestEnsureGatewayTLS_ReadyStableAcrossRenewal(t *testing.T) {
 	}
 }
 
-// TestEnsureGatewayTLS_TightenDuringReissueFailsClosed covers FB-896 #1: when an
+// TestEnsureGatewayTLS_TightenDuringReissueFailsClosed covers the reissue race: when an
 // operator tightens the posture (one-way→mTLS) in the SAME edit that forces a
 // server-cert reissuance, the gateway must go fail-closed immediately rather than
 // keep the old one-way listener accepting certificate-less clients while the new
@@ -1561,7 +1561,7 @@ func TestEnsureGatewayTLS_TightenDuringReissueFailsClosed(t *testing.T) {
 	}
 }
 
-// TestEnsureGatewayTLS_TightenPreservesCreatedAt covers FB-896 #3: the status's
+// TestEnsureGatewayTLS_TightenPreservesCreatedAt covers the status's
 // CreatedAt is captured BEFORE the tightening path clears the status, so when a
 // tighten clears and repopulates the status WITHIN A SINGLE reconcile pass it does
 // not re-stamp CreatedAt to Now(). Modeled as a client-CA swap (CA-A→CA-B) whose

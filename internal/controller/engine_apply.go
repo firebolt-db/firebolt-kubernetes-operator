@@ -40,7 +40,7 @@ func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine 
 
 	// Apply the per-generation engine TLS Certificate first, so cert-manager
 	// can begin issuing its Secret before the StatefulSet's pods try to mount
-	// it (FB-896 #1). Pods otherwise sit in ContainerCreating until the Secret
+	// it. Pods otherwise sit in ContainerCreating until the Secret
 	// lands — self-healing, just slower.
 	if result.EnsureEngineTLSCert != nil {
 		log.Info("Ensuring engine TLS Certificate", "name", result.EnsureEngineTLSCert.Name)

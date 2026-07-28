@@ -18,7 +18,7 @@
 # silent even after history rewrites.
 value_74C1494275B3EC5601DEB210A6ACA034
 
-# FB-896 auth test fixtures. These are fake credential values hard-coded in
+# Auth test fixtures. These are fake credential values hard-coded in
 # unit tests (never real secrets): the literal admin-password Secret key name
 # "password" (instance_auth_test.go, fireboltinstance_webhook_test.go), and the
 # fake admin-Secret names "admin-creds" and "a-different-secret" used to assert

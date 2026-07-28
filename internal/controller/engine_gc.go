@@ -122,7 +122,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	}
 
 	// Per-generation engine TLS Certificates and their cert-manager-derived
-	// Secrets (FB-896 #1) carry LabelEngine + LabelGeneration too (the Secret
+	// Secrets carry LabelEngine + LabelGeneration too (the Secret
 	// via the Certificate's SecretTemplate), but nothing above ever referenced
 	// them, so they accumulated across every TLS rollout — and because
 	// cert-manager does not owner-reference the derived Secret, the Secret even

@@ -29,7 +29,7 @@ import (
 // testdata/packdb-application-config.schema.json is a point-in-time copy of
 // packdb's src/Core/Application/application-config.schema.json, captured at
 // packdb commit 2127bc79a9dc3238c0a1c04edcc830eca06da596 (2026-07-01). This
-// file is FB-896's most exhaustive check on rendered auth config: it is
+// file is the auth/TLS work's most exhaustive check on rendered auth config: it is
 // additionalProperties:false at every level, so validating buildConfigMap's
 // full output against it catches any unknown/misplaced key — the class of
 // bug that crashes every engine at startup — deterministically, without

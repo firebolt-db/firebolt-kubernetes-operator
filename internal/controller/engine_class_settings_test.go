@@ -255,7 +255,7 @@ func TestEffectiveCustomEngineConfig_StripsOperatorPathsFromBothLayers(t *testin
 	}
 }
 
-// TestEffectiveCustomEngineConfig_StripsInstanceAuth pins down FB-896's
+// TestEffectiveCustomEngineConfig_StripsInstanceAuth pins down the auth/TLS work's
 // Phase 1D lockdown: instance.auth is an Instance-wide policy resolved
 // once per Instance (every engine must share byte-identical signing
 // keys), so a per-engine customEngineConfig override must never survive

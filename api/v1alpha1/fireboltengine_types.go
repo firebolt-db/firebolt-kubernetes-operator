@@ -540,7 +540,7 @@ type FireboltEngineStatus struct {
 
 	// ObservedEngineServingCertFP is the fingerprint of the serving-certificate
 	// tls.crt the current stable generation was last confirmed on, recorded once
-	// a reconcile finds the generation stable (FB-896 #1). ObservedEngineServingCertGen
+	// a reconcile finds the generation stable. ObservedEngineServingCertGen
 	// records which generation that fingerprint belongs to. computeStable treats a
 	// changed fingerprint as an in-place re-issuance — and rolls a fresh
 	// generation so running pods stop serving the stale leaf — ONLY when the

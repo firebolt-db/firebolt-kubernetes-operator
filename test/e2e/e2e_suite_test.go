@@ -220,7 +220,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	}
 
 	By("Installing cert-manager and a CA ClusterIssuer for auth/TLS specs")
-	// Auth signing keys and engine/gateway TLS (FB-896) are provisioned as
+	// Auth signing keys and engine/gateway TLS are provisioned as
 	// cert-manager Certificates, so the feature cannot be exercised without
 	// cert-manager + a CA-backed issuer in the cluster. The install is guarded
 	// so a persistent local kind cluster isn't reinstalled on every re-run.

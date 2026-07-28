@@ -132,8 +132,8 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 	}
 }
 
-// TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets covers FB-896 round-4
-// #4: per-generation engine TLS Certificates and their cert-manager-derived
+// TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets covers
+// per-generation engine TLS Certificates and their cert-manager-derived
 // Secrets (both carrying LabelEngine + LabelGeneration) must be swept on the
 // same keepGens schedule as STS/Svc/CM — reclaiming abandoned generations while
 // preserving the current AND the draining generation (whose pods still mount the

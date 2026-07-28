@@ -93,7 +93,7 @@ func TestValidateUpdate_AllowsSameID(t *testing.T) {
 	}
 }
 
-// TestValidateUpdate_ImmutableFields covers FB-896 round-4 #1 and #5: the JWT
+// TestValidateUpdate_ImmutableFields covers the immutability rules: the JWT
 // signing algorithm and signing-key size are immutable while auth stays
 // enabled (packdb cannot serve two key curves at once), and the engine TLS
 // issuer is immutable while engine TLS stays enabled (reissuing under a new CA
@@ -278,8 +278,8 @@ func TestValidateUpdate_ImmutableFields(t *testing.T) {
 	}
 }
 
-// TestValidatePodTemplate_GatewayClientCAVolumeReserved covers FB-896 round-4
-// #7: "client-ca" is an operator-rendered gateway volume, so a user sidecar
+// TestValidatePodTemplate_GatewayClientCAVolumeReserved covers that
+// "client-ca" is an operator-rendered gateway volume, so a user sidecar
 // may not mount it by that name. Before it joined operatorOwnedGatewayVolumeNames
 // the template passed admission, then the volume was silently dropped at render
 // (mTLS off) or resolved to the operator's CA (mTLS on).
@@ -1178,7 +1178,7 @@ func TestValidateTLS(t *testing.T) {
 			wantError: false,
 		},
 		{
-			// FB-896 #1: engine bring-your-own Secret is no longer supported —
+			// Engine bring-your-own Secret is no longer supported —
 			// the operator must issue per-generation certificates whose SANs
 			// cover the engine pod hostnames.
 			name: "engine enabled with secretRef is rejected (BYO not supported for the engine listener)",

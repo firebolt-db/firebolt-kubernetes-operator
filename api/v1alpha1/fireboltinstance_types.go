@@ -938,7 +938,7 @@ type SigningKeyStatus struct {
 	// re-issues by minting a NEW kid, so a fingerprint change on an EXISTING kid
 	// is a genuine, unexpected key replacement: a hazard, since the destroyed old
 	// key can no longer validate tokens it signed. The operator surfaces such a
-	// change as a Warning Event and re-records it here (FB-896 #4). Nil until
+	// change as a Warning Event and re-records it here. Nil until
 	// first observed. A pointer (like the ObservedCertRevision it replaced) keeps
 	// SigningKeyStatus compact — a value string would push the struct past
 	// gocritic's rangeValCopy threshold for every loop that ranges these keys.
@@ -1141,7 +1141,7 @@ type EngineTLSStatus struct {
 // GatewayTLSMode enumerates the security posture the gateway's client-facing
 // listener serves once TLS is enabled, recorded in GatewayTLSStatus.Mode so the
 // operator can distinguish a *tightening* transition (which needs a staged
-// fail-closed rollout — see FB-896 #1) from a steady or loosening one.
+// fail-closed rollout) from a steady or loosening one.
 const (
 	// GatewayTLSModeOneWay is one-way (server-only) TLS: the gateway presents
 	// a certificate but does not require one from clients.
@@ -1170,8 +1170,8 @@ type GatewayTLSStatus struct {
 	// GatewayTLSModeOneWay ("TLS") or GatewayTLSModeMutual ("MutualTLS"). It
 	// records what the gateway is actually *serving* so the controller can tell
 	// a tightening transition (plaintext→TLS, one-way→mTLS) apart from a steady
-	// or loosening one and stage a fail-closed rollout only when tightening (see
-	// FB-896 #1). Empty on a status written before this field existed; treated
+	// or loosening one and stage a fail-closed rollout only when tightening.
+	// Empty on a status written before this field existed; treated
 	// as one-way TLS, its only possible prior meaning.
 	// +optional
 	Mode string `json:"mode,omitempty"`
@@ -1181,8 +1181,8 @@ type GatewayTLSStatus struct {
 	// controller can detect a client-CA *replacement* (CA-A→CA-B) that keeps the
 	// mode MutualTLS but retires trust in the old CA. Such a swap is a tightening
 	// transition even though the posture ordinal is unchanged, and must stage a
-	// fail-closed rollout so old pods stop accepting the retired CA's clients (see
-	// FB-896 #2). Empty for one-way TLS (no client CA) and while pending. ca.crt
+	// fail-closed rollout so old pods stop accepting the retired CA's clients.
+	// Empty for one-way TLS (no client CA) and while pending. ca.crt
 	// is a public certificate, so fingerprinting it raises no
 	// weak-sensitive-data-hashing concern.
 	// +optional
@@ -1234,7 +1234,7 @@ type FireboltInstanceStatus struct {
 	// CA certificates the gateway has been CONFIRMED to have rolled out into its
 	// upstream trusted_ca bundle — updated only once the gateway Deployment is
 	// fully serving the config that embeds the current bundle (see
-	// ensureEngineCABundle / gatewayServingCurrentConfig, FB-896 #4). The engine
+	// ensureEngineCABundle / gatewayServingCurrentConfig). The engine
 	// controller gates a blue-green generation's Service-selector cutover on its
 	// own generation certificate's CA fingerprint appearing here, so it never
 	// routes traffic to a generation the gateway cannot yet verify (which would

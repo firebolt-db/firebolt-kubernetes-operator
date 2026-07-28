@@ -170,7 +170,7 @@ func TestEffectiveGatewayPodTemplate_EngineCAVolume(t *testing.T) {
 		}
 		pt := effectiveGatewayPodTemplate(inst, "fb-gateway-config", "", baseLabels, wakeAgentConfig{})
 		v := findVol(pt, computev1alpha1.GatewayEngineCAVolumeName)
-		// FB-896 #4: the gateway mounts the operator-assembled trust BUNDLE, not
+		// The gateway mounts the operator-assembled trust BUNDLE, not
 		// the anchor Secret directly, so it can trust every live generation's CA.
 		if v == nil || v.Secret == nil || v.Secret.SecretName != engineCABundleSecretName("fb") {
 			t.Errorf("engine-CA volume = %+v, want Secret.SecretName=%s", v, engineCABundleSecretName("fb"))

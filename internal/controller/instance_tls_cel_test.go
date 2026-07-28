@@ -23,7 +23,7 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// FB-896 #5: the engine TLS issuerRef must be immutable while engine TLS stays
+// The engine TLS issuerRef must be immutable while engine TLS stays
 // enabled, enforced by a field-scoped CEL transition rule on the CRD itself so
 // it holds even when the validating webhook is disabled (the shipped Helm
 // default). This suite runs against envtest with the CRD bases applied and NO

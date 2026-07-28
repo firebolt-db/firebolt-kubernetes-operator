@@ -343,7 +343,7 @@ func (t *WakeDemandTracker) watches(namespace string) bool {
 // The real fix is authenticating the payload rather than identifying its
 // sender — an operator-provisioned per-instance token the agent presents,
 // or mTLS on the demand endpoint. Worth doing if wake ever gates something
-// costlier than a scale-up. Tracked on FB-2619.
+// costlier than a scale-up.
 func (t *WakeDemandTracker) gatewayPods(ctx context.Context, namespace string) ([]corev1.Pod, error) {
 	podList := &corev1.PodList{}
 	if err := t.Client.List(ctx, podList,

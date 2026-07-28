@@ -319,10 +319,9 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // this is the signal that a config change has actually propagated to every
 // serving pod. Two features gate on it: the fail-closed→secure staging in
 // ensureGatewayTLS (so old insecure pods are gone before the secure listener is
-// reported ready — FB-896 #1) and the engine-CA trust-bundle expansion in
+// reported ready) and the engine-CA trust-bundle expansion in
 // ensureEngineCABundle (so a newly-trusted CA is actually loaded by every
-// gateway pod before old-CA engine generations are allowed to retire —
-// FB-896 #4).
+// gateway pod before old-CA engine generations are allowed to retire).
 //
 // Returns false (not an error) when the Deployment does not exist yet.
 func (r *FireboltInstanceReconciler) gatewayRolloutComplete(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
@@ -373,10 +372,10 @@ func deploymentRolledOut(dep *appsv1.Deployment) bool {
 // matches the current desired config is what distinguishes "serving the current
 // config" from "serving a stale one that happens to be settled".
 //
-// Two callers rely on it: the staged tightening transition (FB-896 #1) invokes
+// Two callers rely on it: the staged tightening transition invokes
 // it with Status.GatewayTLS already nil, so buildEnvoyConfigYAML yields the
 // fail-closed config and this answers "is the fail-closed rollout done?"; the
-// engine-trust-bundle publish step (FB-896 #4) invokes it in steady state, so
+// engine-trust-bundle publish step invokes it in steady state, so
 // it answers "has the gateway rolled out the config embedding the current CA
 // bundle?" — the precondition for publishing Status.RolledEngineTrustCAs.
 func (r *FireboltInstanceReconciler) gatewayServingCurrentConfig(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
@@ -601,7 +600,7 @@ func gatewayPostureLevel(mode string) int {
 
 // gatewayPostureTightening reports whether the desired client-facing posture is
 // stricter than what the gateway currently serves — the only case that needs a
-// staged fail-closed rollout (FB-896 #1). Loosening (mTLS→one-way, TLS→off) and
+// staged fail-closed rollout. Loosening (mTLS→one-way, TLS→off) and
 // steady state carry no fail-open risk and skip staging.
 func gatewayPostureTightening(instance *computev1alpha1.FireboltInstance) bool {
 	return gatewayPostureLevel(gatewayDesiredMode(instance)) > gatewayPostureLevel(gatewayServedMode(instance))
@@ -1423,7 +1422,7 @@ func (r *FireboltInstanceReconciler) gatewayConfigHash(ctx context.Context, inst
 // pods start (MaxUnavailable=100%, MaxSurge=0). Otherwise it uses the
 // zero-downtime default (MaxUnavailable=0, MaxSurge=25%).
 //
-// FB-896 #1: the client-facing Service has one selector and old Ready pods stay
+// The client-facing Service has one selector and old Ready pods stay
 // endpoints under MaxUnavailable=0, so a plain rolling update to the fail-closed
 // config keeps the looser listener serving throughout the roll (fail-open).
 // Forcing old pods out first trades that for a brief reject-all
@@ -1884,7 +1883,7 @@ sleep 8
 	}
 	// Present only once engine TLS is enabled and ready — see
 	// buildDFPUpstreamTLSTransportSocket's matching gate. Sources the
-	// operator-assembled trust BUNDLE (ensureEngineCABundle, FB-896 #4), not the
+	// operator-assembled trust BUNDLE (ensureEngineCABundle), not the
 	// single anchor Secret: the bundle's ca.crt is the union of every live
 	// generation's CA, so the gateway keeps trusting engines across a CA
 	// rotation behind the immutable issuer name. Projected to just ca.crt (the

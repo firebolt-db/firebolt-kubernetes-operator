@@ -32,7 +32,7 @@ import (
 	enginemetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
-// TestBuildGenEngineTLSCertificate_SANs covers FB-896 #1: the per-generation
+// TestBuildGenEngineTLSCertificate_SANs covers the per-generation
 // engine cert must carry SANs that packdb's HTTPS startup verification and the
 // gateway can actually match — the per-gen pod wildcard (full .svc.cluster.local
 // suffix), the routing Service, and localhost — which the old instance-wide
@@ -118,7 +118,7 @@ func TestBuildConfigMap_TLSEnabled_RendersExpectedShape(t *testing.T) {
 	}
 	tlsCfg := nestedMap(t, listener, "tls")
 	// certificate_file is the startup-assembled leaf+CA bundle, not the raw
-	// mounted tls.crt (FB-896 #2); private_key_file stays the mounted key.
+	// mounted tls.crt; private_key_file stays the mounted key.
 	wantCertPath := EngineTLSBundlePath
 	wantKeyPath := EngineTLSMountPath + "/" + corev1.TLSPrivateKeyKey
 	if tlsCfg["certificate_file"] != wantCertPath {
@@ -192,7 +192,7 @@ func TestBuildStatefulSet_TLSEnabled_VolumesAndMountsWired(t *testing.T) {
 	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, testInstanceInfoWithTLS(), nil)
 	pod := sts.Spec.Template.Spec
 
-	// The engine pod serves its PER-GENERATION certificate (FB-896 #1), not the
+	// The engine pod serves its PER-GENERATION certificate, not the
 	// instance CA anchor Secret — so the mounted Secret name is derived from the
 	// generation, not Status.EngineTLS.SecretName.
 	wantSecret := genResourceName(testEngineName, 0, SuffixEngineTLS)
@@ -373,7 +373,7 @@ func TestResolveInstanceInfo_TLSEnabledButNotReadyBlocks(t *testing.T) {
 	}
 }
 
-// TestResolveInstanceInfo_UnblocksOnProvisionedNotCondition is the FB-896 #4
+// TestResolveInstanceInfo_UnblocksOnProvisionedNotCondition is the #4
 // no-deadlock regression: the engine roll onto TLS must be unblocked by the
 // PROVISIONED fact (Status.EngineTLS populated), NOT by
 // InstanceConditionEngineTLSReady — which is now convergence-gated (True only
@@ -430,7 +430,7 @@ func TestResolveInstanceInfo_TLSReadyAndSecretPresentPopulatesTLS(t *testing.T) 
 	}
 }
 
-// TestResolveInstanceInfo_PopulatesServingCertFP covers FB-896 #1: the current
+// TestResolveInstanceInfo_PopulatesServingCertFP covers the current
 // generation's serving-certificate fingerprint is read live from its tls.crt so
 // computeStable can detect a cert-manager re-issuance and roll a new generation.
 // It is read regardless of whether the gateway is re-encrypting upstream (unlike
@@ -461,7 +461,7 @@ func TestResolveInstanceInfo_PopulatesServingCertFP(t *testing.T) {
 	}
 }
 
-// TestResolveInstanceInfo_EngineTrustBundleGate covers the FB-896 #4 cutover
+// TestResolveInstanceInfo_EngineTrustBundleGate covers the cutover
 // correlation seam: resolveInstanceInfo sets EngineTrustBundleReady only when
 // THIS engine's current-generation certificate CA fingerprint appears in the
 // instance's published RolledEngineTrustCAs (the set the gateway has confirmed

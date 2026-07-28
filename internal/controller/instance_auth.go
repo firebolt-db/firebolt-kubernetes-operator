@@ -279,7 +279,7 @@ func checkSecretKeyPresent(ctx context.Context, cli client.Client, namespace, na
 // fingerprint of its tls.crt, after confirming the private key (tls.key) is
 // present — the same existence gate checkSecretKeyPresent applies. It is folded
 // into authHash at BOTH sites (resolveInstanceInfo and enginesConvergedOn) in
-// place of the Secret ResourceVersion (FB-896 #4): under rotationPolicy:Never a
+// place of the Secret ResourceVersion: under rotationPolicy:Never a
 // cert-only reissuance rewrites the Secret (new tls.crt, new ResourceVersion)
 // while reusing the key, so folding the ResourceVersion rolled the fleet for
 // nothing; folding the public-key fingerprint rolls it only when the key
@@ -555,7 +555,7 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 		return false, fmt.Errorf("signing key secret %s/%s: %w", instance.Namespace, key.SecretName, err)
 	}
 
-	// FB-896 #4: witness the key's PUBLIC-KEY identity so an actual replacement
+	// Witness the key's PUBLIC-KEY identity so an actual replacement
 	// of the private key under this STABLE kid becomes visible. We fingerprint
 	// the public key (SubjectPublicKeyInfo of tls.crt), NOT the Certificate
 	// revision: under rotationPolicy:Never cert-manager re-issues the cert

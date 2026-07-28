@@ -53,7 +53,7 @@ import (
 // certificate only at process startup, so an uncoordinated renewal would sit
 // unused in the Secret.
 //
-// That justification no longer holds, because FB-896 built the machinery that
+// That justification no longer holds, because the auth/TLS work built the machinery that
 // makes a renewal observable on both hops:
 //
 //   - engines: computeStable rolls a fresh blue-green generation when THIS
@@ -233,7 +233,7 @@ func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instan
 	}
 	instance.Status.EngineTLS.Reencrypting = allOnTLS
 
-	// FB-896 #4: the anchor certificate is provisioned, but the gateway→engine hop
+	// The anchor certificate is provisioned, but the gateway→engine hop
 	// stays plaintext until every engine has rolled onto a TLS-serving generation
 	// (allOnTLS, mirrored into Reencrypting above). EngineTLSReady feeds the
 	// Instance Ready roll-up, so report True only once the fleet has actually
@@ -639,7 +639,7 @@ func buildEngineTLSCertificate(instance *computev1alpha1.FireboltInstance) *cert
 }
 
 // engineCABundleSecretName is the operator-owned Secret the gateway mounts as
-// its engine trusted_ca (FB-896 #4). See SuffixEngineCABundle.
+// its engine trusted_ca. See SuffixEngineCABundle.
 func engineCABundleSecretName(instanceName string) string {
 	return instanceName + SuffixEngineCABundle
 }
@@ -683,7 +683,7 @@ const AnnotationEngineTrustCAs = "firebolt.io/engine-trust-cas"
 // bookkeeping.
 //
 // The long-lived anchor (Status.EngineTLS.SecretName) is deliberately excluded
-// from the union (FB-896 #3): with rotationPolicy:Never and a ~100yr lifetime its
+// from the union: with rotationPolicy:Never and a ~100yr lifetime its
 // ca.crt is pinned to the CA that signed it, so seeding it unconditionally would
 // keep a retired CA trusted indefinitely, contradicting the self-pruning above.
 // It is used only as a fallback when no live per-generation CA is discoverable in
@@ -716,7 +716,7 @@ func (r *FireboltInstanceReconciler) ensureEngineCABundle(ctx context.Context, i
 
 	// Every live generation's per-engine TLS Secret across the fleet — the CAs
 	// signing the certs engines actually serve. The anchor is deliberately NOT
-	// seeded here (FB-896 #3): it is rotationPolicy:Never with a ~100yr lifetime,
+	// seeded here: it is rotationPolicy:Never with a ~100yr lifetime,
 	// so its ca.crt is pinned to whatever CA signed it at creation, and keeping it
 	// would leave a retired CA in the bundle forever after its generations drain —
 	// defeating the self-pruning below. It serves only as a fallback when no live
@@ -1068,7 +1068,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, insta
 		return err
 	}
 	if staging {
-		// FB-896 #1: cert material is ready, but the gateway is being tightened
+		// Cert material is ready, but the gateway is being tightened
 		// (plaintext→TLS or one-way→mTLS) and is intentionally serving fail-closed
 		// until the previous, looser pods are fully replaced. Report not-ready with
 		// a distinct reason rather than the generic pending message.
@@ -1086,7 +1086,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, insta
 		return nil
 	}
 
-	// FB-896 #5: the certificate is ready and Status.GatewayTLS now records the
+	// The certificate is ready and Status.GatewayTLS now records the
 	// desired secure posture, but ensureGatewayResources has not yet rolled that
 	// secure config out this reconcile — the gateway may still be serving the
 	// prior fail-closed (or looser) pods, whose metrics-port readiness keeps
@@ -1148,13 +1148,13 @@ func gatewayTLSSecretReady(secret *corev1.Secret) bool {
 // has completed and Status.GatewayTLS has been populated with the desired secure
 // posture. ready=true means "the status now describes the secure config"; it is
 // NOT the same as "the secure config is serving" — the caller (ensureGatewayTLS)
-// gates GatewayTLSReady on gatewayServingCurrentConfig separately (FB-896 #5),
+// gates GatewayTLSReady on gatewayServingCurrentConfig separately,
 // because this function runs before ensureGatewayResources rolls the secure
 // config out.
 //
-// staging=true reports the FB-896 #1 window: the desired client-facing posture
+// staging=true reports the staging window: the desired client-facing posture
 // is stricter than what the gateway is currently serving (plaintext→TLS,
-// one-way→mTLS, or a client-CA replacement — FB-896 #2). The tightening decision
+// one-way→mTLS, or a client-CA replacement). The tightening decision
 // is made and fail-closed enforced BEFORE the cert/secret readiness gates, so a
 // tighten that coincides with a server-cert reissuance still stops the old,
 // looser listener rather than fail-open while the new cert is issued.
@@ -1201,7 +1201,7 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 	// client certs against) must already exist and carry ca.crt. Resolved here,
 	// ahead of the cert/secret readiness gates, so the tightening decision below
 	// is made — and fail-closed enforced — even while the server cert is
-	// mid-reissue (FB-896 #1).
+	// mid-reissue.
 	var desiredClientCAFP string
 	if ref := instance.Spec.TLS.Gateway.ClientCASecretRef; ref != nil {
 		var caSecret corev1.Secret
@@ -1225,13 +1225,13 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLSCertificate(ctx context.Con
 			instance.Status.GatewayTLS = nil
 			return false, false, nil
 		}
-		// FB-896 #2: fingerprint the client CA (a public cert — safe to hash) so a
+		// Fingerprint the client CA (a public cert — safe to hash) so a
 		// replacement CA-A→CA-B, which keeps the mode MutualTLS but retires trust
 		// in CA-A, is recognized as a tightening transition below.
 		desiredClientCAFP = caFingerprint(string(ca))
 	}
 
-	// FB-896 #1/#2: decide whether the desired posture is a *tightening* of what
+	// Decide whether the desired posture is a *tightening* of what
 	// the gateway currently serves, using the CURRENT (pre-mutation) status, and
 	// capture the prior CreatedAt before any status mutation.
 	//
