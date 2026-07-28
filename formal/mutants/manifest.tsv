@@ -10,7 +10,24 @@
 #
 # If a patch stops applying, re-point it at the current code. Do not delete it —
 # a deleted mutant is a guard nobody is checking any more.
+#
+# The message column accepts `|`-separated ALTERNATIVES, and a row passes if ANY
+# of them appears. Some mutants violate two invariants at once and the suite
+# reports only one: checkEngineInvariants runs the registry in sorted order on
+# purpose, so "the one reported" means alphabetically first among those that
+# fail. Pinning a single name therefore depends on which co-failing invariant
+# sorts earliest, and breaks when the registry gains an earlier-sorting one.
+#
+# That is what happened to the cleaning mutant. It violates BOTH
+# Inv_DrainingPhase and Inv_TerminalNoDraining — the latter is logically implied
+# by the former, since TerminalPhases and {draining, cleaning} are disjoint, so
+# no state can violate one without the other — and the sorted registry reports
+# Inv_DrainingPhase. Listing both makes the row state the hazard instead of an
+# artefact of ordering.
+#
+# Only list alternatives for invariants that genuinely co-fail. Two unrelated
+# names in one row would let a mutant pass for the wrong reason.
 creating-advance-without-pods-ready.patch	TestTLAEngineStateCover	result not in TLA+ reconciler closure
 switching-flip-active-without-service.patch	TestTLAEngineStateCover	Inv_ServiceKnownGen
-cleaning-keeps-draining-generation.patch	TestTLAEngineStateCover	Inv_TerminalNoDraining
+cleaning-keeps-draining-generation.patch	TestTLAEngineStateCover	Inv_DrainingPhase|Inv_TerminalNoDraining
 rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not in the TLA+ reconciler closure

@@ -413,9 +413,13 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 		go test ./internal/controller/ -run "$$test" -count=1 >"$$log" 2>&1 || true; \
 		git apply -R "formal/mutants/$$patch"; \
 		applied=""; \
-		if grep -qF -e "$$want" "$$log"; then \
+		pat=$$(mktemp "$${TMPDIR:-/tmp}/formal-mutants-pat.XXXXXX"); \
+		printf '%s\n' "$$want" | tr '|' '\n' > "$$pat"; \
+		if grep -qF -f "$$pat" "$$log"; then \
+			rm -f "$$pat"; \
 			echo "  OK: $$test still fails with \"$$want\""; \
 		else \
+			rm -f "$$pat"; \
 			echo "ERROR: $$patch did not make $$test fail with \"$$want\"." >&2; \
 			echo "       Either the guard it removes is no longer load-bearing, or the suite stopped checking it." >&2; \
 			tail -20 "$$log" >&2; \
