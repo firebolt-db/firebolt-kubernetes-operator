@@ -72,13 +72,16 @@ const (
 	// concurrently. Their execution windows overlap, so the union leaves no
 	// instant where the engine has nothing running.
 	//
-	// Deliberately 2, not more: the client pod has a 16Mi memory limit, and two
-	// is exactly the peak concurrency the previous shape already reached (one
-	// curl per kubectl exec, two execs), so this cannot OOM a pod that was fine
-	// before. Raising it would mean raising CreateClientPod's limit, which every
-	// other spec shares. Concurrency is not what fixes the flake anyway — moving
-	// the loop in-pod is, since that shrinks the hole between consecutive
-	// queries from a kubectl-exec round-trip to a local process spawn.
+	// Deliberately 2, not more: the client pod has a 16Mi memory limit, and the
+	// real peak inside it during the hold window is three concurrent curls —
+	// these two load workers plus the metrics scrape that samples the gauge once
+	// a second — one more than the previous shape's peak of two. Whether that
+	// envelope fits 16Mi is ultimately proven by CI, not by this arithmetic.
+	// Raising the worker count would widen it further and would mean raising
+	// CreateClientPod's limit, which every other spec shares. Concurrency is not
+	// what fixes the flake anyway — moving the loop in-pod is, since that
+	// shrinks the hole between consecutive queries from a kubectl-exec
+	// round-trip to a local process spawn.
 	drainLoadWorkers = 2
 	// drainLoadStopFile is touched inside the client pod to end the loop.
 	drainLoadStopFile = "/tmp/e2e-drain-load-stop"
@@ -141,6 +144,11 @@ func (b *lockedBuffer) String() string {
 // Stopping is a file the test touches, not a kill: killing kubectl does not reap
 // the shell inside the container, and a loop left running would keep the pod busy
 // and stall the release assertion that follows.
+//
+// stop is idempotent: only the first call touches the stop file and waits for
+// the loop to drain; later calls return the same counts. That lets a
+// DeferCleanup guarantee the loop is stopped on any exit while the success
+// path keeps its own explicit call, which needs the counts before asserting.
 func keepPodBusy(ctx context.Context, clientPod, podIP string) (stop func() (succeeded, failed int64)) {
 	url := fmt.Sprintf("http://%s/?query_label=e2e-drain-load&output_format=JSON_Compact",
 		net.JoinHostPort(podIP, "3473"))
@@ -182,27 +190,30 @@ wait
 		_ = cmd.Run() // a non-zero exit is reported through the counts below
 	}()
 
+	var stopOnce sync.Once
+	var succeeded, failed int64
 	return func() (int64, int64) {
-		touch := exec.CommandContext(ctx, "kubectl", kubectlArgs(
-			"exec", clientPod, "-n", testNamespace, "--", "touch", drainLoadStopFile)...)
-		if err := touch.Run(); err != nil {
-			GinkgoWriter.Printf("could not touch %s (loop will stop at its backstop): %v\n",
-				drainLoadStopFile, err)
-		}
-		select {
-		case <-done:
-		case <-time.After(drainLoadDrainTimeout):
-			GinkgoWriter.Printf("in-pod load loop did not exit within %s\n", drainLoadDrainTimeout)
-		}
-		var succeeded, failed int64
-		for _, line := range strings.Split(out.String(), "\n") {
-			switch strings.TrimSpace(line) {
-			case "OK":
-				succeeded++
-			case "FAIL":
-				failed++
+		stopOnce.Do(func() {
+			touch := exec.CommandContext(ctx, "kubectl", kubectlArgs(
+				"exec", clientPod, "-n", testNamespace, "--", "touch", drainLoadStopFile)...)
+			if err := touch.Run(); err != nil {
+				GinkgoWriter.Printf("could not touch %s (loop will stop at its backstop): %v\n",
+					drainLoadStopFile, err)
 			}
-		}
+			select {
+			case <-done:
+			case <-time.After(drainLoadDrainTimeout):
+				GinkgoWriter.Printf("in-pod load loop did not exit within %s\n", drainLoadDrainTimeout)
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				switch strings.TrimSpace(line) {
+				case "OK":
+					succeeded++
+				case "FAIL":
+					failed++
+				}
+			}
+		})
 		return succeeded, failed
 	}
 }
@@ -232,10 +243,10 @@ func drainHoldFailure(samples []int64, idle, scrapeErrors int) string {
 	}
 	if idle > 0 {
 		return fmt.Sprintf("INCONCLUSIVE, not a product failure: the load generator left the "+
-			"old-generation pod idle — running+suspended read 0 on %d of %d samples [%s]. "+
-			"Releasing a drain during an idle instant is permitted by the contract, so this run "+
-			"says nothing about the operator. Fix the load generator, not the operator.",
-			idle, len(samples), joined)
+			"old-generation pod idle — running+suspended read 0 on %d of %d samples [%s]; failed "+
+			"scrapes: %d. Releasing a drain during an idle instant is permitted by the contract, "+
+			"so this run says nothing about the operator. Fix the load generator, not the operator.",
+			idle, len(samples), joined, scrapeErrors)
 	}
 	return fmt.Sprintf("LIKELY CONTRACT VIOLATION: the draining generation was released even "+
 		"though running+suspended was non-zero at every one of %d samples [%s]; failed scrapes: "+
@@ -288,6 +299,16 @@ var _ = Describe("Firebolt Engine Drain", func() {
 
 			By("Starting continuous queries against the old-generation pod")
 			stopLoad := keepPodBusy(ctx, clientPod, oldPod.Status.PodIP)
+			// A failing assertion below must still stop the in-pod loop (a loop
+			// left running would keep the pod busy into the next spec) and must
+			// still record the load evidence, which otherwise only the success
+			// path printed. stopLoad is idempotent, so the explicit call on the
+			// success path keeps its ordering and counts.
+			DeferCleanup(func() {
+				succeeded, failed := stopLoad()
+				GinkgoWriter.Printf("Old-generation load (cleanup): %d succeeded, %d failed\n",
+					succeeded, failed)
+			})
 
 			By("Triggering a blue-green rollout via a no-op toleration")
 			Expect(UpdateEngineScheduling(ctx, engineName, nil, []corev1.Toleration{{
