@@ -442,9 +442,9 @@ func TestWaiterRefcountReleasesOnLastWaiter(t *testing.T) {
 	tr := newReadinessTracker()
 	tr.MarkSynced()
 
-	_ = tr.WaitChan("engine")
-	_ = tr.WaitChan("engine")
-	tr.DoneWaiting("engine")
+	a := tr.WaitChan("engine")
+	b := tr.WaitChan("engine")
+	tr.DoneWaiting("engine", a)
 
 	tr.mu.RLock()
 	stillThere := len(tr.waiters)
@@ -453,12 +453,78 @@ func TestWaiterRefcountReleasesOnLastWaiter(t *testing.T) {
 		t.Fatalf("waiters = %d after releasing one of two, want 1", stillThere)
 	}
 
-	tr.DoneWaiting("engine")
+	tr.DoneWaiting("engine", b)
 	tr.mu.RLock()
 	gone := len(tr.waiters)
 	tr.mu.RUnlock()
 	if gone != 0 {
 		t.Errorf("waiters = %d after the last release, want 0", gone)
+	}
+}
+
+// A waiter release is keyed by channel identity, not by engine name. After
+// setReady retires a channel, the engine can flap not-ready and a new hold
+// can register a fresh channel under the same name; a woken waiter's
+// deferred release from the previous generation must not decrement the new
+// registration, or the new hold would be stranded until its timeout.
+func TestDoneWaitingIgnoresRetiredChannel(t *testing.T) {
+	t.Parallel()
+	tr := newReadinessTracker()
+	tr.MarkSynced()
+
+	a := tr.WaitChan("engine")   // hold A parks
+	tr.setReady("engine", true)  // A woken; its channel is retired
+	tr.setReady("engine", false) // engine flaps away again
+	b := tr.WaitChan("engine")   // hold B parks on a fresh channel
+	tr.DoneWaiting("engine", a)  // A's deferred release finally runs
+
+	tr.mu.RLock()
+	waiters, refs := len(tr.waiters), tr.waiterRefs["engine"]
+	tr.mu.RUnlock()
+	if waiters != 1 || refs != 1 {
+		t.Fatalf("waiters=%d refs=%d after a stale release, want 1/1", waiters, refs)
+	}
+
+	tr.setReady("engine", true) // B must be released, not time out
+	select {
+	case <-b:
+	case <-time.After(time.Second):
+		t.Fatal("second-generation waiter stranded by a stale release")
+	}
+}
+
+// A wake that completes exactly at the hold deadline can lose the select
+// race between the readiness edge and the timer. The engine is routable at
+// that point, so the hold must answer 200, not 503.
+func TestHandleHoldTimerRaceAnswersReadyEngine(t *testing.T) {
+	t.Parallel()
+	a := testAgent(t, 30*time.Millisecond)
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		a.handleHold(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/hold?engine=lastmoment", http.NoBody))
+		done <- rec
+	}()
+	waitFor(t, func() bool { return a.demand.PendingTotal() == 1 })
+
+	// The engine becomes ready, but the waiter's channel close is never
+	// observed — the timer arm wins the select, exactly as it can when both
+	// events land together.
+	a.readiness.mu.Lock()
+	a.readiness.ready["lastmoment"] = struct{}{}
+	a.readiness.mu.Unlock()
+
+	select {
+	case rec := <-done:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 when the engine is ready at the deadline", rec.Code)
+		}
+		if got := rec.Header().Get(DecisionHeader); got != DecisionReleased {
+			t.Errorf("%s = %q, want %q", DecisionHeader, got, DecisionReleased)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not return after the hold deadline")
 	}
 }
 
