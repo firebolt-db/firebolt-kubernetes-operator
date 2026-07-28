@@ -125,6 +125,14 @@ var _ = Describe("Firebolt Engine Drain", func() {
 					succeeded, failed)
 			})
 
+			// The hold below is far enough from here that ramp-up cannot pollute
+			// it — the rollout wait sits in between. Waiting anyway pins the
+			// premise before the rollout is triggered, so a load loop that never
+			// produced traffic fails here, with that as the reason, instead of
+			// surfacing later as a drain that released "too early".
+			By("Waiting for the load to actually reach the old-generation pod")
+			waitForLoadInFlight(ctx, clientPod, oldPod.Status.PodIP)
+
 			By("Triggering a blue-green rollout via a no-op toleration")
 			Expect(UpdateEngineScheduling(ctx, engineName, nil, []corev1.Toleration{{
 				Key:      drainRolloutTolerationKey,

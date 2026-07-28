@@ -109,6 +109,9 @@ var _ = Describe("Firebolt Engine AutoStop", func() {
 			stopLoad := keepURLBusy(ctx, clientPod, engineServiceQueryURL(engineName), computeBoundQuery)
 			DeferCleanup(func() { stopLoad() })
 
+			By("Waiting for the load to actually reach the engine before holding")
+			waitForLoadInFlight(ctx, clientPod, enginePods[0].Status.PodIP)
+
 			// The gauge is sampled alongside the assertion so a failure can say
 			// whether the premise held. It does not weaken anything: the replica
 			// check is unconditional, so any scale-down fails the spec whether or

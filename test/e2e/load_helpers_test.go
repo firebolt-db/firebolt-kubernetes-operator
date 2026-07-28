@@ -31,6 +31,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 // Continuous query load for the specs that assert the operator does NOT act on
@@ -80,6 +81,12 @@ const (
 	// loadDrainTimeout bounds waiting for the loop to notice the stop file: a
 	// worker may be mid-query, and curl's own --max-time is 33s.
 	loadDrainTimeout = 60 * time.Second
+	// loadRampTimeout bounds waiting for the first query to actually reach the
+	// engine after the loop starts — the kubectl handshake plus a container
+	// process spawn plus connect. Generous because a contended runner is exactly
+	// when this is slow, and waiting longer is harmless while starting a hold too
+	// early is not.
+	loadRampTimeout = 60 * time.Second
 )
 
 // lockedBuffer collects the exec's output. The command runs on its own
@@ -202,6 +209,32 @@ wait
 		})
 		return succeeded, failed
 	}
+}
+
+// waitForLoadInFlight blocks until the engine's query gauges actually show work,
+// and must be called between starting a load loop and asserting a hold on it.
+//
+// keepURLBusy returns as soon as the exec goroutine is launched, so the first
+// moments belong to ramp-up: the kubectl handshake, the container process spawn,
+// the first connect. During those the gauge legitimately reads 0. A hold window
+// that starts sampling immediately therefore records idle samples that say
+// nothing about the operator, and the premise check on those samples fails a run
+// that was fine. Ramping up is not the same thing as going idle mid-hold, and
+// only the second is evidence about anything.
+//
+// The wait doubles as a stronger premise: the hold begins only once load is
+// observed in flight, rather than assuming it is.
+func waitForLoadInFlight(ctx context.Context, clientPod, podIP string) {
+	GinkgoHelper()
+	Eventually(func(g Gomega) {
+		body, err := scrapeEnginePodMetrics(ctx, clientPod, podIP)
+		g.Expect(err).NotTo(HaveOccurred())
+		active, ok := parseActiveQueries(body)
+		g.Expect(ok).To(BeTrue(), "engine query gauges missing or unparsable")
+		g.Expect(active).To(BeNumerically(">", 0),
+			"no query reached the engine within %s of starting the load loop; "+
+				"the loop is not producing traffic", loadRampTimeout)
+	}, loadRampTimeout, time.Second).Should(Succeed())
 }
 
 // loadHoldTracker records what the engine's query gauges read during a hold
