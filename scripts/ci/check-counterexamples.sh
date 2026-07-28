@@ -34,9 +34,23 @@ fi
 fail=0
 listed=""
 
+# The current row's TLC log; the trap covers an interrupt mid-row.
+log=""
+trap '[ -n "$log" ] && rm -f "$log"' EXIT
+
 while IFS="$(printf '\t')" read -r cfg spec expect; do
   case "$cfg" in '' | \#*) continue ;; esac
   listed="$listed $cfg"
+
+  # A row with a missing column must fail loudly, not vacuously: grep -F ""
+  # matches every log, so an empty expectation would turn the row into a check
+  # that can never go red — the exact failure mode this script exists to catch.
+  if [ -z "$spec" ] || [ -z "$expect" ]; then
+    echo "ERROR: $MANIFEST row \"$cfg\" is missing its spec or expectation column" >&2
+    echo "       (want <cfg><TAB><spec><TAB><violation line>)." >&2
+    fail=1
+    continue
+  fi
 
   for f in "formal/$cfg" "formal/$spec"; do
     if [ ! -f "$f" ]; then
