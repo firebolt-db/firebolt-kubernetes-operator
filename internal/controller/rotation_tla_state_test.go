@@ -34,7 +34,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
@@ -284,24 +283,6 @@ func (m *rotationTLASim) project(t *testing.T) tlaRotationState {
 	return out
 }
 
-// rotationStateEqual compares by reflection so the comparison cannot be
-// narrowed without deleting a field from tlaRotationState. A hand-written
-// field-by-field version is weakenable in a way no target catches:
-// `make formal-verify` checks that the fixture matches the generator's output,
-// not that the fixture is still compared in full.
-func rotationStateEqual(a, b tlaRotationState) bool {
-	return reflect.DeepEqual(a, b)
-}
-
-func rotationClosureContains(closureIDs []int, actual tlaRotationState) bool {
-	for _, id := range closureIDs {
-		if rotationStateEqual(tlaRotationStatePool[id], actual) {
-			return true
-		}
-	}
-	return false
-}
-
 // tlaRotationInvariants re-checks the spec's safety invariants against the Go
 // state, so a violation is caught here too and not only in TLC.
 func tlaRotationInvariants(t *testing.T, m *rotationTLASim) {
@@ -351,7 +332,7 @@ func TestTLARotationStateCover(t *testing.T) {
 
 			// Guard the fixture itself: if materialization does not reproduce the
 			// starting state, every closure assertion below is meaningless.
-			if got := m.project(t); !rotationStateEqual(got, start) {
+			if got := m.project(t); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
 
@@ -363,19 +344,11 @@ func TestTLARotationStateCover(t *testing.T) {
 			tlaRotationInvariants(t, m)
 
 			actual := m.project(t)
-			if !rotationClosureContains(tc.Closure, actual) {
+			if !tlaClosureContains(tlaRotationStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in the TLA+ reconciler closure of the starting state\n  start:  %+v\n  actual: %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), formatRotationClosure(tc.Closure))
+					start, actual, len(tc.Closure), tlaFormatClosure(tlaRotationStatePool, tc.Closure))
 			}
 		})
 	}
 	t.Logf("rotation state cover: ran %d cases", len(tlaRotationStateCases))
-}
-
-func formatRotationClosure(closureIDs []int) string {
-	out := ""
-	for _, id := range closureIDs {
-		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaRotationStatePool[id])
-	}
-	return out
 }
