@@ -39,6 +39,16 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+# Defined up here, not next to the `$(LOCALBIN): mkdir` rule down in Build
+# Dependencies, because rule TARGETS are expanded when the makefile is read.
+# While this lived below the Formal Verification section, `$(TLA2TOOLS):`
+# expanded to the literal `/tla2tools.jar` -- a path that never exists, so the
+# rule fired on every single invocation. The recipe still wrote to the right
+# place (recipes expand at execution time, by which point LOCALBIN is set), which
+# is why it looked like it worked. Rule LOOKUP is order-independent, so the mkdir
+# rule can stay where it is.
+LOCALBIN ?= $(shell pwd)/bin
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -356,7 +366,11 @@ TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
 TLA2TOOLS_VERSION ?= v1.8.0
 TLA2TOOLS_URL ?= https://github.com/tlaplus/tlaplus/releases/download/$(TLA2TOOLS_VERSION)/tla2tools.jar
 
-$(TLA2TOOLS): $(LOCALBIN)
+# Order-only prerequisite (the `|`) so bin/'s mtime does not count: as a normal
+# prerequisite, any rule that writes into bin/ bumps the directory past the jar
+# and the download runs again. Together with hoisting LOCALBIN (see above) this
+# stops every formal target re-fetching 4.5MB, and lets caching bin/ in CI work.
+$(TLA2TOOLS): | $(LOCALBIN)
 	wget -q -O "$(TLA2TOOLS)" "$(TLA2TOOLS_URL)"
 
 .PHONY: tla2tools
@@ -462,7 +476,6 @@ formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any g
 ##@ Dependencies
 
 ## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
 
