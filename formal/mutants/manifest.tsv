@@ -37,12 +37,13 @@ rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not i
 # The autostop row below is the negative control for the rapid layer, not the
 # state cover. Every other row names a state-cover test, which proves the
 # state cover can go red but says nothing about the four rapid property
-# harnesses. This row's defect is provably outside the state cover's reach:
-# computeAutoStopDecision is bound to no TLA+ spec (see the unmodelled list in
-# formal/model-scope.tsv), and the full TestTLA*StateCover suite passes with
-# the patch applied. The mutant inverts the wake-TTL comparison, so fresh
-# demand is ignored (a parked engine never wakes) and expired demand is
-# honored (a stale stamp resurrects a stopped engine).
+# harnesses. The mutant inverts the wake-TTL comparison, so fresh demand is
+# ignored (a parked engine never wakes) and expired demand is honored (a
+# stale stamp resurrects a stopped engine). It was pinned before the wake
+# model existed, when computeAutoStopDecision was bound to no spec and the
+# full TestTLA*StateCover suite passed with the patch applied; the wake state
+# cover now also exercises the function, and the row keeps naming the rapid
+# harness because proving THAT harness can fail is what it is for.
 #
 # Determinism: the property harness fails on any draw with autoStop enabled
 # and a wake stamp present (~25% of draws), so a default run misses the
@@ -54,3 +55,8 @@ rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not i
 # names the rapid harness anyway because its purpose is to prove THAT harness
 # can fail; the runner executes only the named test.
 autostop-wake-honors-expired-demand.patch	TestComputeAutoStopDecision_Properties	want "WakeRequested"|Reason = "WakeRequested"
+# The wake check moved BELOW the stopped early return: the one precedence rule
+# without which wake-on-zero cannot work at all, since an auto-stopped engine IS
+# an engine at zero replicas. EngineWakeNaiveStoppedFirst.cfg pins the same
+# inversion in the model, where it violates WakeIsNotLost.
+autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result not in the TLA+ reconciler closure
