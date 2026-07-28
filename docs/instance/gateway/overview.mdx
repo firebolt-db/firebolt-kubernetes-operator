@@ -58,47 +58,15 @@ By default the Firebolt Operator creates a ServiceAccount named `<instance>-gate
 
 That read is the wake-agent sidecar's entire Kubernetes grant: it watches for a stopped engine's endpoints appearing so it can release the query it is holding. Nothing in the gateway pod can write to the API, and the Envoy container holds no token at all — the pod sets `automountServiceAccountToken: false` and projects the token into the agent container alone. See [Auto-stop and wake-up](../../engine/auto-stop-and-wake-up#gateway-wake-up-protocol).
 
-When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA and RoleBinding entirely**. You are then responsible for:
+When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA and RoleBinding entirely**. It also **turns off wake-on-zero for that gateway**: the wake-agent sidecar and its hold hook are not rendered, so queries for auto-stopped engines return `503` and do not wake them, exactly as when the [wake agent is disabled in the chart](../../engine/auto-stop-and-wake-up#disabling-wake). Engines still scale up on `spec.autoStop.schedule` windows. The Firebolt Operator records a `WakeOnZeroDisabled` warning event on the `FireboltInstance` when this applies.
 
-1. Creating the ServiceAccount in the instance's namespace under the name you specified.
-2. Granting it the read the wake agent needs:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gateway-wake
-  namespace: firebolt
-rules:
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gateway-wake
-  namespace: firebolt
-subjects:
-  - kind: ServiceAccount
-    name: my-gateway-sa
-    namespace: firebolt
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gateway-wake
-```
+You are responsible for creating the ServiceAccount in the instance's namespace under the name you specified. It needs no Kubernetes permissions: with the wake agent gone, nothing in the gateway pod talks to the API.
 
 Taking ownership of the ServiceAccount also means taking ownership of the pod's token: the Firebolt Operator no longer forces `automountServiceAccountToken: false`, and your value on `spec.gateway.template.spec` applies. Set it to `false` unless a sidecar of your own needs API access.
 
-The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC.
+The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC, and keeps wake-on-zero available.
 
-Missing or under-permissioned user service accounts do **not** fail at admission, and they do not stop the gateway routing queries. The pod either fails to start (`ServiceAccount … not found` on the kubelet event stream) or starts with a wake agent that cannot watch endpoints, in which case queries to *stopped* engines return `503` instead of waiting. Verify with:
-
-```bash
-kubectl auth can-i watch endpointslices.discovery.k8s.io \
-  --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
-```
+A missing user ServiceAccount does **not** fail at admission: the gateway pod fails to start with `ServiceAccount … not found` on the kubelet event stream. Create the SA before pointing the Instance at it.
 
 ## Rolling update parameters
 

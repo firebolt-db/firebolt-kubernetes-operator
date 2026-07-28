@@ -251,29 +251,31 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 	// RBAC: the operator manages the gateway ServiceAccount, RoleBinding, and
 	// the binding to the chart's wake ClusterRole only when the user has NOT
 	// supplied a custom spec.gateway.template.spec.serviceAccountName. Setting
-	// that field is the explicit opt-out signal: the user is taking
-	// responsibility for the SA and the read the wake agent needs (see
-	// docs/instance/gateway/overview.mdx "Gateway custom service account" for
-	// the verb set and a copy-pasteable Role). Operator-managed RBAC would
-	// otherwise bind to a different SA name than the one the gateway pod runs
-	// as, and the agent's EndpointSlice watch would silently 403 at runtime —
-	// worse than the loud "ServiceAccount not found" the kubelet logs when the
-	// user-supplied SA is missing.
+	// that field is the explicit opt-out signal: the user takes over the
+	// gateway's identity, and wake-on-zero goes away with it (see
+	// wakeAgentEnabled) — no sidecar, no Lua hold, and no EndpointSlice grant
+	// for the operator to manage. Queries for auto-stopped engines then return
+	// 503 and do not wake them; schedule windows still scale engines up.
 	//
 	// This path also hands back the pod's token: the operator stops forcing
 	// automountServiceAccountToken: false, so the user's value applies. The log
-	// has to say both, because following it with only the grant and the
-	// Kubernetes automount default would put a token in the Envoy container,
-	// which terminates untrusted traffic and needs no API access at all.
+	// has to say both, because a user following it with the Kubernetes
+	// automount default would put a token in the Envoy container, which
+	// terminates untrusted traffic and needs no API access at all.
 	if userSA := userGatewayServiceAccountName(instance); userSA != "" {
 		log.Info(
 			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, "+
-				"so the user owns the ServiceAccount and the read wake-on-zero needs "+
-				"(get/list/watch on discovery.k8s.io/endpointslices). "+
+				"so the user owns the ServiceAccount and wake-on-zero is disabled: "+
+				"queries for auto-stopped engines return 503 and do not wake them. "+
 				"automountServiceAccountToken is no longer forced to false on this path — "+
 				"set it explicitly on spec.gateway.template.spec unless a sidecar of your own needs API access",
 			"serviceAccountName", userSA,
 		)
+		if r.WakeAgentImage != "" && r.EventRecorder != nil {
+			r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "WakeOnZeroDisabled",
+				"Reconciling", "wake-on-zero is disabled because spec.gateway.template.spec.serviceAccountName is set; "+
+					"queries for auto-stopped engines return 503 and do not wake them")
+		}
 	} else if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
 		return fmt.Errorf("ensuring gateway RBAC: %w", err)
 	}
