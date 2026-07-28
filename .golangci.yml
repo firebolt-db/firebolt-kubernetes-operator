@@ -197,6 +197,12 @@ linters:
           - revive
           - errcheck
         text: "fmt\\.(Print|Fprint)"
+      # strings.Builder's Write* methods are documented to always return a nil
+      # error (the error is in the signature only to satisfy the io writer
+      # interfaces), so an unhandled return there is noise, not a hazard.
+      - linters:
+          - revive
+        text: "strings\\.Builder\\.Write"
     paths:
       - third_party$
       - builtin$
