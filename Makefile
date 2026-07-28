@@ -450,7 +450,7 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 	echo "OK: every pinned mutant still fails the state-cover suite"
 
 .PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
+formal-dump: tla2tools ## Dump the TLC state graph of every spec to formal/*.dot.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/FireboltEngine.cfg \
 		-dump dot,actionlabels formal/FireboltEngine.dot \
@@ -466,15 +466,20 @@ formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.d
 
 .PHONY: formal-gen
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
-	python3 scripts/gen-tla-state-tests.py \
+	@# One generator, one --model per machine. The projection, the env-action
+	@# filter and the emitted Go names live in that script's MODELS registry, not
+	@# here, so adding a spec is a config entry plus a line below.
+	python3 scripts/gen-tla-state-tests.py --model engine \
 		--dot formal/FireboltEngine.dot \
 		--spec formal/FireboltEngine.tla \
 		--out internal/controller/engine_tla_states_data_test.go
-	python3 scripts/gen-tla-instance-state-tests.py \
+	python3 scripts/gen-tla-state-tests.py --model instance \
 		--dot formal/FireboltInstance.dot \
+		--spec formal/FireboltInstance.tla \
 		--out internal/controller/instance_tla_states_data_test.go
-	python3 scripts/gen-tla-rotation-state-tests.py \
+	python3 scripts/gen-tla-state-tests.py --model rotation \
 		--dot formal/SigningKeyRotation.dot \
+		--spec formal/SigningKeyRotation.tla \
 		--out internal/controller/rotation_tla_states_data_test.go
 
 .PHONY: formal-verify
