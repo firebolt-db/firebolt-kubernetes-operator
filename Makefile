@@ -465,6 +465,13 @@ formal-dump: tla2tools ## Dump the TLC state graph of every spec to formal/*.dot
 		-config formal/SigningKeyRotation.cfg \
 		-dump dot,actionlabels formal/SigningKeyRotation.dot \
 		formal/SigningKeyRotation.tla
+	@# WakeAgentHold.tla is deliberately absent: it has no state-cover fixture, so
+	@# nothing consumes its state graph. See formal/model-scope.tsv for why the
+	@# agent-side half is not bound to Go.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/EngineWake.cfg \
+		-dump dot,actionlabels formal/EngineWake.dot \
+		formal/EngineWake.tla
 
 .PHONY: formal-gen
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
@@ -483,10 +490,14 @@ formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from th
 		--dot formal/SigningKeyRotation.dot \
 		--spec formal/SigningKeyRotation.tla \
 		--out internal/controller/rotation_tla_states_data_test.go
+	python3 scripts/gen-tla-state-tests.py --model wake \
+		--dot formal/EngineWake.dot \
+		--spec formal/EngineWake.tla \
+		--out internal/controller/wake_tla_states_data_test.go
 
 .PHONY: formal-verify
 formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
-	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go internal/controller/rotation_tla_states_data_test.go; do \
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go internal/controller/rotation_tla_states_data_test.go internal/controller/wake_tla_states_data_test.go; do \
 		if ! git diff --quiet -- "$$f"; then \
 			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
 			git --no-pager diff -- "$$f"; \
