@@ -77,8 +77,11 @@ CONSTANTS
     \* TerminalPhases and {draining, cleaning} are disjoint;
     \* Inv_TerminalConsistency and Inv_QuiescedPhaseMatchesSpec likewise need a
     \* changed assignment rather than a dropped conjunct; and TypeOK cannot be
-    \* violated by any guard change. Those five needing mutated writes are covered
-    \* on the Go side instead, by formal/mutants/manifest.tsv.
+    \* violated by any guard change. The four needing a mutated write are NOT
+    \* pinned anywhere today: formal/mutants/manifest.tsv mutates the Go
+    \* reconciler, not this spec, and none of its rows targets them. Covering
+    \* them takes the AnchorAtDemotion flag shape (change a write, not drop a
+    \* guard) and is a deliberate follow-up, not coverage that already exists.
     SwitchWithoutService,
       \* TRUE removes the cutover gate in ReconcileSwitching_Complete: the
       \* switch finalises even though the cluster Service still points at an
