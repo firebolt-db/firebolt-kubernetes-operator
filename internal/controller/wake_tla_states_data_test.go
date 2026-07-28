@@ -28,12 +28,19 @@ type tlaWakeState struct {
 }
 
 // tlaWakeTestCase references tlaWakeStatePool by index. Start is the index of
-// the starting state; Closure is the set of indices the model considers
-// reachable from Start via 1+ reconciler-only transitions (plus Start itself
-// when a stutter is legitimate).
+// the starting state; Successors is the set of indices the model reaches from
+// Start in EXACTLY ONE reconciler transition (plus Start itself when a stutter
+// is legitimate, i.e. when the enabled arm changes nothing).
+//
+// One step, not the transitive closure the other fixtures carry, because one
+// call of computeAutoStopDecision is one reconciler action: its arms are
+// mutually exclusive. Accepting the transitive set would accept the successor's
+// successor too, and here that is projection-visible -- a scale-down would pass
+// while reporting Stopped instead of Idle, and a first quiet observation while
+// reporting ActivityObserved instead of Initializing.
 type tlaWakeTestCase struct {
-	Start   int
-	Closure []int
+	Start      int
+	Successors []int
 }
 
 
@@ -248,8 +255,8 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{24, []int{24}},
 	{25, []int{31}},
 	{26, []int{31}},
-	{27, []int{34, 35}},
-	{28, []int{34, 35}},
+	{27, []int{35}},
+	{28, []int{35}},
 	{29, []int{39}},
 	{30, []int{39}},
 	{31, []int{31}},
@@ -274,10 +281,10 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{50, []int{31}},
 	{51, []int{31}},
 	{52, []int{31}},
-	{53, []int{1, 2}},
-	{54, []int{1, 2}},
-	{55, []int{1, 2}},
-	{56, []int{1, 2}},
+	{53, []int{1}},
+	{54, []int{1}},
+	{55, []int{1}},
+	{56, []int{1}},
 	{57, []int{39}},
 	{58, []int{39}},
 	{59, []int{39}},
@@ -286,10 +293,10 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{62, []int{31}},
 	{63, []int{31}},
 	{64, []int{31}},
-	{65, []int{3, 4}},
-	{66, []int{3, 4}},
-	{67, []int{3, 4}},
-	{68, []int{3, 4}},
+	{65, []int{3}},
+	{66, []int{3}},
+	{67, []int{3}},
+	{68, []int{3}},
 	{69, []int{39}},
 	{70, []int{39}},
 	{71, []int{39}},
@@ -313,7 +320,7 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{89, []int{89}},
 	{90, []int{90}},
 	{91, []int{94}},
-	{92, []int{97, 98}},
+	{92, []int{98}},
 	{93, []int{102}},
 	{94, []int{94}},
 	{95, []int{94}},
@@ -325,10 +332,10 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{101, []int{102}},
 	{102, []int{102}},
 	{103, []int{94}},
-	{104, []int{18, 19}},
+	{104, []int{18}},
 	{105, []int{102}},
 	{106, []int{109}},
-	{107, []int{112, 113}},
+	{107, []int{113}},
 	{108, []int{117}},
 	{109, []int{109}},
 	{110, []int{109}},
@@ -349,7 +356,7 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{125, []int{117}},
 	{126, []int{117}},
 	{127, []int{130}},
-	{128, []int{133, 134}},
+	{128, []int{134}},
 	{129, []int{138}},
 	{130, []int{130}},
 	{131, []int{130}},
@@ -372,18 +379,18 @@ var tlaWakeStateCases = []tlaWakeTestCase{
 	{148, []int{130}},
 	{149, []int{130}},
 	{150, []int{130}},
-	{151, []int{1, 2}},
-	{152, []int{1, 2}},
-	{153, []int{1, 2}},
+	{151, []int{1}},
+	{152, []int{1}},
+	{153, []int{1}},
 	{154, []int{138}},
 	{155, []int{138}},
 	{156, []int{138}},
 	{157, []int{130}},
 	{158, []int{130}},
 	{159, []int{130}},
-	{160, []int{3, 4}},
-	{161, []int{3, 4}},
-	{162, []int{3, 4}},
+	{160, []int{3}},
+	{161, []int{3}},
+	{162, []int{3}},
 	{163, []int{138}},
 	{164, []int{138}},
 	{165, []int{138}},

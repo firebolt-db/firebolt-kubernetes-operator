@@ -22,8 +22,19 @@ package controller
 // For every reachable state in the TLC state graph of formal/EngineWake.tla
 // (regenerated via `make formal-gen`), this test materializes the inputs
 // computeAutoStopDecision reads, runs it once, applies the decision exactly as
-// runAutoStop does, and verifies the resulting state lies in the model's
-// reconciler closure of the starting state.
+// runAutoStop does, and verifies the resulting state is one the model reaches
+// from the starting state in EXACTLY ONE reconciler step.
+//
+// One step is what makes this binding tight, and it is available here for a
+// reason the other three covers cannot use: computeAutoStopDecision is one call
+// and its arms are mutually exclusive, so the model has exactly one reconciler
+// successor per state. The engine, instance and rotation covers assert
+// membership in the TRANSITIVE closure instead, because one whole reconcile pass
+// there legitimately performs several model sub-steps at once. Taking the
+// transitive set here would accept the successor's successor as well, and in this
+// model that is visible in the projection: it would pass a scale-down that
+// reported Stopped rather than Idle, and a first quiet observation that reported
+// ActivityObserved rather than Initializing.
 //
 // What this binds that the existing rapid harness
 // (engine_autostop_property_test.go) does not: that harness draws inputs
@@ -31,7 +42,7 @@ package controller
 // about which input combinations are REACHABLE, and its assertions are a second
 // transcription of the same rules rather than a model. Here the reachable set
 // comes from the model and the expected outcome comes from the model, so a
-// re-ordered precedence rule fails as "not in the closure" rather than needing
+// re-ordered precedence rule fails as "not the model's successor" rather than needing
 // somebody to have foreseen it. The two are complementary: rapid explores the
 // tuning knobs (arbitrary idleReplicas / activeReplicas / timeouts, schedule
 // windows) that the model abstracts to three replica levels and one timeout.
@@ -64,7 +75,7 @@ import (
 // Nothing enforces that these tick counts still match the cfg, and nothing
 // needs to: they are what converts a model age into an input, so a cfg that
 // moved WakeTTL or IdleTimeout without moving them makes the Go decision
-// disagree with the model and the closure assertion below fails on the states
+// disagree with the model and the successor assertion below fails on the states
 // that straddle the boundary.
 const (
 	tlaWakeTTLTicks         = 2
@@ -341,7 +352,7 @@ func TestTLAWakeStateCover(t *testing.T) {
 			m := materializeTLAWakeState(t, start)
 
 			// Guard the fixture itself: if materialization does not reproduce
-			// the starting state, every closure assertion below is meaningless.
+			// the starting state, every successor assertion below is meaningless.
 			if got := m.project(); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
@@ -352,9 +363,9 @@ func TestTLAWakeStateCover(t *testing.T) {
 			checkWakeInvariants(t, m)
 
 			actual := m.project()
-			if !tlaClosureContains(tlaWakeStatePool, tc.Closure, actual) {
-				t.Fatalf("result not in the TLA+ reconciler closure of the starting state\n  start:  %+v\n  actual: %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), tlaFormatClosure(tlaWakeStatePool, tc.Closure))
+			if !tlaClosureContains(tlaWakeStatePool, tc.Successors, actual) {
+				t.Fatalf("result is not a one-step reconciler successor in the model\n  start:  %+v\n  actual: %+v\n  permitted (%d states):\n%s",
+					start, actual, len(tc.Successors), tlaFormatClosure(tlaWakeStatePool, tc.Successors))
 			}
 		})
 	}

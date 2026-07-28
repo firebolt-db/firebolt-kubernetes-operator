@@ -35,4 +35,12 @@ rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not i
 # without which wake-on-zero cannot work at all, since an auto-stopped engine IS
 # an engine at zero replicas. EngineWakeNaiveStoppedFirst.cfg pins the same
 # inversion in the model, where it violates WakeIsNotLost.
-autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result not in the TLA+ reconciler closure
+autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
+# A scale-down that reports Stopped instead of Idle. The replica count is right
+# and only the reason token is wrong, so this catches nothing about the scaling
+# and everything about the wake cover's STRICTNESS: it is caught only because
+# that cover asserts the model's one-step successor rather than the transitive
+# closure, in which Stopped is the step after Idle and therefore acceptable.
+# Loosen the cover back to a closure and this row goes green while the row above
+# stays red -- which is the point of having both.
+autostop-idle-reports-stopped.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
