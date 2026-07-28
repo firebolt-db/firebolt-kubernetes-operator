@@ -27,7 +27,6 @@ package controller
 
 import (
 	"fmt"
-	"reflect"
 	"strconv"
 	"testing"
 
@@ -179,8 +178,8 @@ func materializeTLAState(s tlaState) *engineSim {
 //
 // Every field of tlaState must be populated here. The round-trip guard in
 // TestTLAEngineStateCover (materialize → project == start) is what enforces
-// that: a field left at its zero value silently narrows what closureContains
-// compares, which weakens every assertion in the suite.
+// that: a field left at its zero value silently narrows what
+// tlaClosureContains compares, which weakens every assertion in the suite.
 func projectEngineSim(m *engineSim, instanceReady, classReady bool) tlaState {
 	st := tlaState{
 		Phase:         string(m.status.Phase),
@@ -320,39 +319,6 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 	checkEngineInvariants(t, m)
 }
 
-// closureContains reports whether `actual` is one of the TLA+ states the model
-// considers reachable from the test's starting state. A real Reconcile call
-// may perform several model sub-steps in one shot (the spec models reconciles
-// atomically per sub-action; the implementation batches), so the resulting
-// state is checked for closure membership rather than equality with any
-// single specific successor. The closure includes the starting state itself
-// only when the model permits a stutter there (no reconciler action enabled
-// or a self-loop edge); otherwise a no-op Reconcile is rejected.
-//
-// closureIDs are indices into tlaStatePool.
-func closureContains(closureIDs []int, actual tlaState) bool {
-	for _, id := range closureIDs {
-		if tlaStateEqual(tlaStatePool[id], actual) {
-			return true
-		}
-	}
-	return false
-}
-
-// tlaStateEqual compares two projected states by reflection deliberately.
-//
-// A hand-written field-by-field comparison is weakenable in a way nothing
-// catches: drop a field here (ClassReady was in fact missing until this was
-// written) and the closure check silently accepts states the model
-// distinguishes. `make formal-verify` cannot catch it either — it asserts the
-// committed fixture matches the generator's output, not that the fixture is
-// still being compared in full. reflect.DeepEqual covers every field of
-// tlaState, including the StsSpecVer array, so narrowing the comparison now
-// requires deleting a field from the struct, which shows up in the diff.
-func tlaStateEqual(a, b tlaState) bool {
-	return reflect.DeepEqual(a, b)
-}
-
 // Coverage pins. These are hand-maintained on purpose: they cannot live in the
 // generated fixture, because the fixture is regenerated from the spec and
 // therefore always agrees with itself. A spec change that collapses the state
@@ -399,9 +365,9 @@ func TestTLAEngineStateCover(t *testing.T) {
 			// starting state, every closure assertion below is meaningless. It
 			// also forces projectEngineSim to populate every tlaState field — a
 			// dropped field fails the round-trip for any state whose value
-			// differs from that field's zero value. Same guard the rotation
-			// harness already carries.
-			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady); !tlaStateEqual(got, start) {
+			// differs from that field's zero value. Every state-cover harness
+			// carries this guard, through the same shared comparison.
+			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
 
@@ -420,9 +386,9 @@ func TestTLAEngineStateCover(t *testing.T) {
 			tlaInvariants(t, m)
 
 			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady)
-			if !closureContains(tc.Closure, actual) {
+			if !tlaClosureContains(tlaStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), formatClosure(tc.Closure))
+					start, actual, len(tc.Closure), tlaFormatClosure(tlaStatePool, tc.Closure))
 			}
 		})
 	}
@@ -444,20 +410,4 @@ func TestTLAEngineStateCover(t *testing.T) {
 	if ran != tlaExpectedRan {
 		t.Errorf("ran %d cases against computeEngineReconcile, expected %d", ran, tlaExpectedRan)
 	}
-}
-
-// formatClosure renders the first few entries of a closure index list for
-// inclusion in a Fatalf message. Each entry is prefixed by its pool index so
-// errors point straight back into tlaStatePool.
-func formatClosure(closureIDs []int) string {
-	const limit = 8
-	out := ""
-	for i, id := range closureIDs {
-		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
-			break
-		}
-		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaStatePool[id])
-	}
-	return out
 }
