@@ -290,6 +290,26 @@ var tlaActionCoverageLedger = []tlaActionCoverage{
 			"shape outright rather than emitting a list that quietly omits it",
 	},
 	{
+		Spec: "EngineWake.tla",
+		Reason: "the Go side of this spec is one pure function, not a harness with " +
+			"an action vocabulary: wake_tla_state_test.go calls " +
+			"computeAutoStopDecision directly against a materialized state. Its " +
+			"eight Reconcile* disjuncts are the arms of that one function and are " +
+			"covered by the state cover collectively; its environment disjuncts " +
+			"(the clock, the poller, the agent) are things no Go code in this " +
+			"package performs. Covering the action set would mean writing a rapid " +
+			"sim for the wake protocol, which is worth doing when the agent side " +
+			"is bound too -- see formal/model-scope.tsv",
+	},
+	{
+		Spec: "WakeAgentHold.tla",
+		Reason: "no Go binding at all, by decision: its subject is unexported " +
+			"in-memory bookkeeping in internal/wakeagent, which cannot import this " +
+			"package. formal/model-scope.tsv carries the reason and what unblocking " +
+			"it would take. Its Next also uses the existentially-quantified shape " +
+			"the generator's parser rejects",
+	},
+	{
 		Spec: "SigningKeyRotation.tla",
 		Reason: "no rapid/sim harness exists to correspond to. " +
 			"rotation_tla_state_test.go calls production stepSigningKeyRotation " +

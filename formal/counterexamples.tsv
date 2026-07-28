@@ -12,8 +12,12 @@
 # without deciding which of the two happened.
 #
 # The expected line is matched literally (grep -F) against the whole TLC log, so
-# it works for temporal properties ("Temporal property X is violated") as well as
-# invariants. Copy it from a real failing run rather than typing it from memory.
+# it works for temporal properties as well as invariants. Copy it from a real
+# failing run rather than typing it from memory: TLC words the three cases
+# differently, and the differences are not guessable —
+#   "Invariant X is violated"          a state invariant
+#   "Action property X is violated"     a [][A]_vars property
+#   "Temporal property X was violated"  a liveness property (note: was, not is)
 #
 # Each config lists ONE invariant under INVARIANTS rather than Safety (or,
 # when the pinned violation is an action property, ONE property under
@@ -31,3 +35,7 @@ FireboltEngineNaiveGCCurrent.cfg	FireboltEngine.tla	Invariant Inv_TerminalHasSTS
 FireboltEngineNaiveAdvance.cfg	FireboltEngine.tla	Invariant Inv_ServiceValid is violated
 FireboltEngineNaiveDrift.cfg	FireboltEngine.tla	Invariant Inv_DrainingPhase is violated
 FireboltInstanceNaiveRollup.cfg	FireboltInstance.tla	Action property PhaseReflectsComponents is violated
+EngineWakeNaiveStoppedFirst.cfg	EngineWake.tla	Temporal property WakeIsNotLost was violated
+EngineWakeNaiveStaleDemand.cfg	EngineWake.tla	Action property ScaleUpOnlyOnFreshDemand is violated
+EngineWakeNaiveUnfilteredPoll.cfg	EngineWake.tla	Invariant Inv_DemandOnlyForStoppedEngines is violated
+WakeAgentHoldNaiveNameRelease.cfg	WakeAgentHold.tla	Invariant Inv_NoStrandedWaiter is violated
