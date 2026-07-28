@@ -224,6 +224,87 @@ def parse_safety_conjuncts(spec_path: Path) -> List[str]:
     return names
 
 
+# Disjuncts of the spec's `Next ==` definition:
+#     Next ==
+#         \/ EnvChangeSpec
+#         \/ EnvSetInstanceReady(TRUE)
+#         \/ ReconcileCleaning
+NEXT_START_RE = re.compile(r"^Next\s*==\s*$")
+DISJUNCT_RE = re.compile(
+    r"^\s*\\/\s*([A-Za-z_][A-Za-z0-9_]*(?:\([^()]*\))?)\s*$"
+)
+
+
+def parse_next_actions(spec_path: Path) -> List[str]:
+    """Return the action names disjoined into the spec's Next relation, in spec
+    order and including the argument as written (`EnvSetClassReady(TRUE)`).
+
+    These are emitted into the fixture so the Go side can assert that the set of
+    things its harness can DO corresponds to the set of things the spec says can
+    happen. Nothing else relates the two: a spec action with no harness
+    counterpart is a transition the random walk never attempts, and a harness
+    action with no spec counterpart is behaviour the model says nothing about.
+    Neither shows up as a fixture diff or a failing test.
+
+    Only bare `\\/ Name` and `\\/ Name(args)` disjuncts are understood. An
+    existentially-quantified disjunct (`\\/ \\E c \\in Components : ...`, which
+    FireboltInstance.tla and SigningKeyRotation.tla both use) is rejected rather
+    than guessed at: the action's identity there is the quantified name, and
+    inferring it means deciding how to name each instantiation. A caller that
+    needs those specs covered should teach this function the shape deliberately.
+    """
+    names: List[str] = []
+    in_next = False
+    for line in spec_path.read_text().splitlines():
+        if not in_next:
+            if NEXT_START_RE.match(line):
+                in_next = True
+            continue
+        m = DISJUNCT_RE.match(line)
+        if m:
+            names.append(m.group(1))
+            continue
+        if line.strip() == "" or line.lstrip().startswith("\\*"):
+            continue
+        if line.lstrip().startswith("\\/"):
+            raise SystemExit(
+                f"error: {spec_path} has a Next disjunct this script cannot name:\n"
+                f"           {line.strip()}\n"
+                "       Emitting a spec-action list that silently omits it would "
+                "make the\n       Go-side correspondence check pass while covering "
+                "less than it claims."
+            )
+        # The next definition (or anything else at column zero) ends Next.
+        break
+    if not names:
+        raise SystemExit(f"error: no Next disjuncts parsed from {spec_path}")
+    return names
+
+
+def check_labels_are_spec_actions(
+    edges: List[Edge], spec_actions: List[str], spec_path: Path
+) -> None:
+    """Fail if the state graph is labelled with an action the Next parse missed.
+
+    This is what makes the emitted list trustworthy rather than merely
+    plausible: every edge TLC produced is attributed to a disjunct we named. The
+    reverse does not hold and is not checked -- a disjunct can be enabled in no
+    reachable state at the configured bounds, which is a fact about the model
+    worth stating on the Go side rather than a generation error.
+    """
+    known = set(spec_actions)
+    unknown = sorted({action for _, _, action in edges if action not in known})
+    if unknown:
+        raise SystemExit(
+            "error: the state graph is labelled with action(s) absent from "
+            f"{spec_path}'s Next:\n           "
+            + ", ".join(unknown)
+            + "\n       The Next parser and TLC disagree about what the actions "
+            "are, so the\n       emitted list cannot be used to check the harness "
+            "against the spec."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Reconciler closure
 # ---------------------------------------------------------------------------
@@ -341,8 +422,18 @@ class SpecConfig:
     # Emit the spec's `Safety ==` conjuncts so the Go side can assert it
     # implements every one of them.
     emit_invariants: bool = False
+    # Emit the spec's `Next ==` disjuncts so the Go side can assert its harness's
+    # action set corresponds to them. Also turns on the check that every action
+    # label TLC produced was named by the Next parse.
+    emit_actions: bool = False
+    # Go identifier for the emitted action list. Required when emit_actions.
+    actions_var: str = ""
     # Appended to the stdout summary, interpolated with the `bounds` ctx.
     summary_suffix: str = ""
+
+    def __post_init__(self) -> None:
+        if self.emit_actions and not self.actions_var:
+            raise SystemExit("error: emit_actions needs actions_var")
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +847,8 @@ MODELS: Dict[str, SpecConfig] = {
         bounds=engine_bounds,
         validate_actions=engine_check_env_actions,
         emit_invariants=True,
+        emit_actions=True,
+        actions_var="tlaEngineSpecActions",
         summary_suffix=" (MaxGen={max_gen}, MaxSpec={max_spec})",
     ),
     "instance": SpecConfig(
@@ -795,6 +888,18 @@ INVARIANTS_COMMENT = (
     "// conjunct added to the spec fails the build until it is implemented -- the\n"
     "// invariants are hand-transcribed into the harnesses, and nothing else\n"
     "// notices when the spec grows one they do not check."
+)
+
+ACTIONS_COMMENT = (
+    "// {var} are the disjuncts of the spec's `Next ==` relation, in spec order\n"
+    "// and with arguments as written. engine_actions_test.go asserts that each\n"
+    "// one is either mapped to a harness action by an explicit declaration or\n"
+    "// listed as spec-only with a reason -- and the same in reverse for the\n"
+    "// harness's own actions.\n"
+    "//\n"
+    "// The correspondence has to be declared rather than inferred: the names\n"
+    "// deliberately differ on the two sides, and several spec actions map to the\n"
+    "// one whole-pass Reconcile the harness exposes."
 )
 
 
@@ -864,6 +969,16 @@ def generate(cfg: SpecConfig, dot: Path, spec: Path, out: Path) -> str:
         lines.append(INVARIANTS_COMMENT)
         lines.append("var tlaRequiredInvariants = []string{")
         for name in parse_safety_conjuncts(spec):
+            lines.append(f"\t{go_str(name)},")
+        lines.append("}")
+        lines.append("")
+
+    if cfg.emit_actions:
+        spec_actions = parse_next_actions(spec)
+        check_labels_are_spec_actions(edges, spec_actions, spec)
+        lines.append(ACTIONS_COMMENT.format(var=cfg.actions_var))
+        lines.append(f"var {cfg.actions_var} = []string{{")
+        for name in spec_actions:
             lines.append(f"\t{go_str(name)},")
         lines.append("}")
         lines.append("")
