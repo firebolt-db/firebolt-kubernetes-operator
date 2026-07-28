@@ -74,7 +74,7 @@ type InstanceInfo struct {
 	// EngineTrustBundleReady reports whether the gateway has confirmed it
 	// trusts THIS engine's current-generation certificate CA — i.e. that CA's
 	// fingerprint appears in FireboltInstance.Status.RolledEngineTrustCAs, the
-	// set the gateway has actually rolled out (FB-896 #4). computeCreating gates
+	// set the gateway has actually rolled out. computeCreating gates
 	// the blue-green cutover (the Service-selector flip to the new generation)
 	// on this: routing traffic to a generation whose cert the gateway cannot yet
 	// verify — as happens briefly after a CA rotation behind the immutable
@@ -98,7 +98,7 @@ type InstanceInfo struct {
 // Instance's Status, not its Spec.
 type ResolvedEngineTLSInfo struct {
 	// SecretName is the instance-wide engine-TLS Secret — copied from
-	// FireboltInstance.Status.EngineTLS.SecretName. Post-FB-896-#1 this Secret
+	// FireboltInstance.Status.EngineTLS.SecretName. Since then this Secret
 	// is the CA anchor: it carries the issuer's ca.crt (which the gateway
 	// trusts) and is the stable, generation-independent identity fed into
 	// tlsHash. It is NOT the Secret the engine pod serves — each blue-green
@@ -116,7 +116,7 @@ type ResolvedEngineTLSInfo struct {
 
 	// ServingCertFP is the fingerprint (hex SHA-256 via caFingerprint) of the
 	// CURRENT generation's serving-certificate tls.crt, read live in
-	// resolveInstanceInfo (FB-896 #1). It is deliberately NOT folded into
+	// resolveInstanceInfo. It is deliberately NOT folded into
 	// tlsHash: tlsHash is reconstructed instance-side (engineFleetTLSState) with
 	// no per-generation context, so folding a per-generation value there would
 	// make the re-encryption convergence gate unreproducible and deadlock it.
@@ -169,7 +169,7 @@ type ResolvedAuthInfo struct {
 	// replacement key under the same kid) sign, and vice versa: a cross-engine
 	// split-brain under one kid, invisible to every other drift check because ID
 	// and SecretName are unchanged. This folds the public-key fingerprint rather
-	// than the Secret ResourceVersion (FB-896 #4): under rotationPolicy:Never a
+	// than the Secret ResourceVersion: under rotationPolicy:Never a
 	// cert-only reissuance bumps the ResourceVersion while reusing the key, so a
 	// ResourceVersion fold rolled the fleet for nothing; the fingerprint changes
 	// only when the key actually does. Public material only, never a hash of the
@@ -358,7 +358,7 @@ func computeStable(
 		return
 	}
 
-	// FB-896 #1: roll a new generation when THIS generation's serving certificate
+	// Roll a new generation when THIS generation's serving certificate
 	// has been re-issued in place out from under the running pods. packdb reads
 	// its certificate only at process start, and the drift hash checked by
 	// stsMatchesSpec is generation-independent (anchor name + key policy), so a
@@ -436,7 +436,7 @@ func computeStable(
 	// engineFleetTLSState / engineUpstreamTLSReady).
 	status.ObservedEngineTLSHash = current.CurrentSTS.Annotations[AnnotationEngineTLSHash]
 
-	// FB-896 #1: record the serving-cert fingerprint (and the generation it
+	// Record the serving-cert fingerprint (and the generation it
 	// belongs to) this stable generation is on, so a later in-place re-issuance
 	// of the SAME generation's cert is caught as drift by the check above, while a
 	// future generation's naturally-different fingerprint is not. Cleared when
@@ -516,7 +516,7 @@ func computeCreating(
 		return
 	}
 
-	// FB-896 #4: hold the blue-green cutover (the Service-selector flip in
+	// Hold the blue-green cutover (the Service-selector flip in
 	// computeSwitching) until the gateway has rolled out trust for THIS
 	// generation's certificate CA. A generation minted under a CA rotated behind
 	// the (name-immutable) issuer would otherwise take over the Service selector
@@ -658,7 +658,7 @@ func buildGenResources(
 }
 
 // buildGenEngineTLSCertificate returns the per-generation engine-listener TLS
-// server Certificate (FB-896 #1). Its SANs are what let packdb's HTTPS startup
+// server Certificate. Its SANs are what let packdb's HTTPS startup
 // verification succeed, which the old single instance-wide wildcard could not:
 //
 //   - "*.<gen-headless>.<ns>.svc.cluster.local": every pod of this generation,
@@ -733,7 +733,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		// full-suffix wildcard *.<gen-headless>.<ns>.svc.cluster.local
 		// (buildGenEngineTLSCertificate). The short .svc suffix — and the extra
 		// label depth — is exactly what the old namespace-wide wildcard could
-		// not match (FB-896 #1). DNS resolves both forms identically.
+		// not match. DNS resolves both forms identically.
 		host := fmt.Sprintf("%s.%s.%s.svc.cluster.local", podName, headlessSvcName, namespace)
 		nodes[i] = map[string]interface{}{"host": host}
 	}
@@ -836,8 +836,8 @@ func authSigningKeyPrivateKeyPath(id string) string {
 // (FireboltCoreHealthChecker), so with a CA-backed issuer that splits the
 // chain across tls.crt (leaf) and ca.crt (issuer) the leaf alone cannot be
 // validated — the engine would stay NotReady. EngineStartupScript concatenates
-// the two mounted files into this writable path before the engine starts
-// (FB-896 #2). engineTLSKeyPath stays the raw mounted private key.
+// the two mounted files into this writable path before the engine starts.
+// engineTLSKeyPath stays the raw mounted private key.
 func engineTLSCertPath() string {
 	return EngineTLSBundlePath
 }
@@ -858,7 +858,7 @@ func engineTLSKeyPath() string {
 // way to render "TLS in addition to the existing plaintext default" short
 // of also declaring a second, explicit plaintext listener. This operator
 // intentionally does NOT do that: engine TLS is all-or-nothing by design
-// (see the FB-896 implementation plan's Phase 2 decision), so enabling it
+// (see the implementation plan's Phase 2 decision), so enabling it
 // replaces plaintext port 3473 with TLS on the same port rather than
 // opening a second port. Callers that still expect plaintext on this port
 // — the gateway's dynamic_forward_proxy cluster and the engine web UI
@@ -2386,7 +2386,7 @@ func buildEngineTLSVolumes(tls *ResolvedEngineTLSInfo, secretName string) []core
 	}
 	// secretName is the PER-GENERATION cert Secret (buildGenEngineTLSCertificate),
 	// not tls.SecretName (the instance CA anchor): each generation serves its own
-	// certificate whose SANs cover that generation's pod hostnames (FB-896 #1).
+	// certificate whose SANs cover that generation's pod hostnames.
 	return []corev1.Volume{{
 		Name: computev1alpha1.EngineTLSVolumeName,
 		VolumeSource: corev1.VolumeSource{

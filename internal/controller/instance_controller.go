@@ -257,7 +257,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Step 0.7: Assemble the gateway's engine trust bundle — the union of every
 	// live engine generation's CA plus the instance anchor — so the gateway
 	// keeps trusting engines across a CA rotation behind the (name-immutable)
-	// issuer (FB-896 #4). Reads Status.EngineTLS and the engine fleet; must run
+	// issuer. Reads Status.EngineTLS and the engine fleet; must run
 	// before Step 4 because the gateway pod mounts this bundle and folds its
 	// ResourceVersion into the config hash. Same failure-isolation as the TLS
 	// steps: a failure leaves the previous bundle in place rather than blocking.
@@ -353,7 +353,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			"Provisioning", "gateway Deployment has no ready replicas yet")
 	}
 
-	// FB-896 #6: publishRolledEngineTrustCAs preserves the prior confirmed set
+	// PublishRolledEngineTrustCAs preserves the prior confirmed set
 	// when assembly failed (bundleErr != nil), rather than clobbering it with nil.
 	r.publishRolledEngineTrustCAs(ctx, instance, engineTrustCAFingerprints, bundleErr)
 
@@ -370,7 +370,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // publishRolledEngineTrustCAs records, in Status.RolledEngineTrustCAs, the
 // engine CA fingerprints the gateway has CONFIRMED rolled out — so the engine's
 // blue-green cutover gate can verify a new generation's CA is trusted before
-// flipping its Service selector (FB-896 #4). The set is updated only once the
+// flipping its Service selector. The set is updated only once the
 // gateway is actually serving the config that embeds the current bundle
 // (gatewayServingCurrentConfig): mid-roll the old pods still serve the previous
 // (subset) bundle, so keeping the last-confirmed set is the safe floor. It is
@@ -380,8 +380,8 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // it is non-nil the fingerprints are nil but the previous bundle Secret and
 // gateway Deployment may still match and be fully serving, so this preserves the
 // last-confirmed set rather than clobbering it — otherwise a transient assembly
-// error would wrongly block engine cutovers the gateway can still serve
-// (FB-896 #6). ensureEngineCABundle returns (nil, nil) when engine upstream TLS
+// error would wrongly block engine cutovers the gateway can still serve.
+// ensureEngineCABundle returns (nil, nil) when engine upstream TLS
 // is not engaged, so the clear-on-disable path below still runs in that case.
 func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Context, instance *computev1alpha1.FireboltInstance, fingerprints []string, bundleErr error) {
 	if bundleErr != nil {
@@ -767,10 +767,10 @@ func setInstanceCondition(
 // block a non-TLS instance). When TLS is requested the Instance must not
 // advertise Ready until the requested secure path is actually serving, not
 // merely provisioned:
-//   - EngineTLSReady is convergence-gated (FB-896 #4): True only once the
+//   - EngineTLSReady is convergence-gated: True only once the
 //     engine fleet has rolled onto TLS and the gateway is re-encrypting
 //     upstream, so the Instance never reports Ready over a plaintext hop.
-//   - GatewayTLSReady is serving-gated (FB-896 #5): True only once the secure
+//   - GatewayTLSReady is serving-gated: True only once the secure
 //     client-facing listener has actually rolled out, so the Instance never
 //     reports Ready while the client port still rejects.
 //

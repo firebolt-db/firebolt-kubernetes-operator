@@ -141,7 +141,7 @@ const (
 	// gateway mounts as trusted_ca: the union of every CA currently signing a
 	// live engine generation's certificate (plus the anchor). Unlike the other
 	// suffixed resources this is NOT a cert-manager Certificate — the operator
-	// assembles and writes it directly (see ensureEngineCABundle, FB-896 #4).
+	// assembles and writes it directly (see ensureEngineCABundle).
 	SuffixEngineCABundle = "-engine-ca-bundle"
 
 	// MetadataServicePort is the gRPC port the metadata service listens on.
@@ -224,7 +224,7 @@ const (
 	// EngineTLSBundlePath is the writable path (under the runtime emptyDir
 	// mounted at /run/firebolt) where EngineStartupScript assembles the
 	// leaf+CA bundle packdb reads as its listener certificate_file — see
-	// engineTLSCertPath and FB-896 #2. It must NOT live under
+	// engineTLSCertPath and the engine listener contract. It must NOT live under
 	// EngineTLSMountPath, which is a read-only Secret mount.
 	EngineTLSBundlePath = "/run/firebolt/engine-tls-bundle.crt"
 	// DataVolumeName is the name of the data volume inside the StatefulSet's
@@ -379,7 +379,7 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-# Engine TLS (FB-896 #2): packdb uses the listener certificate_file as BOTH the
+# Engine TLS: packdb uses the listener certificate_file as BOTH the
 # served chain and its own client-side CA bundle for HTTPS startup checks, so it
 # must carry the leaf AND the issuing CA. A CA-backed cert-manager issuer splits
 # these across tls.crt (leaf) and ca.crt (issuer), so assemble a combined bundle

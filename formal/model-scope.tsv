@@ -15,8 +15,8 @@
 #
 #   * auto-stop (computeAutoStopDecision) -- covered by a rapid harness with
 #     hand-written precedence invariants (engine_autostop_property_test.go),
-#     which is not a spec binding (FB-2618)
-#   * gateway wake-on-zero (FB-2618)
+#     which is not a spec binding
+#   * gateway wake-on-zero
 #   * FireboltEngineClass merge / drift detection (stsMatchesSpec and the
 #     effective* resolvers)
 #   * drain probing and its timeouts (deliberately deferred: fuzzed time is the

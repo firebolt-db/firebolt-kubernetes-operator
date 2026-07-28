@@ -626,7 +626,7 @@ func engineWithHash(name, instanceRef, hash string) *computev1alpha1.FireboltEng
 
 // adminSecretForConvergence returns the admin password Secret the auth spec
 // references. enginesConvergedOn now reads its ResourceVersion and folds it
-// into the expected authHash (FB-896 #4), so every subtest must seed it.
+// into the expected authHash, so every subtest must seed it.
 func adminSecretForConvergence() *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: adminSecretNameForController, Namespace: "ns-1"},
@@ -665,7 +665,7 @@ var convergenceSigningCertPEM = mustGenSigningCertPEM()
 // signingSecretForConvergence returns the signing-key Secret the keys fixture
 // (ID "signing-1") references. enginesConvergedOn now reads each rendered
 // signing key's public-key fingerprint (from tls.crt) and folds it into the
-// expected authHash (FB-896 #4), so every subtest must seed a Secret carrying
+// expected authHash, so every subtest must seed a Secret carrying
 // both tls.key (the existence gate) and a parseable tls.crt.
 func signingSecretForConvergence() *corev1.Secret {
 	return &corev1.Secret{
@@ -851,7 +851,7 @@ func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string)
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace, Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}},
 		Data: map[string][]byte{
-			// A parseable tls.crt alongside the (fake) tls.key so the FB-896 #4
+			// A parseable tls.crt alongside the (fake) tls.key so the #4
 			// public-key fingerprint fold can read a real public key. Seeded once
 			// and read back, so a random cert per Secret is fine.
 			corev1.TLSPrivateKeyKey: []byte("fake-pem-" + kid),
@@ -862,7 +862,7 @@ func signingKeySecretFor(instance *computev1alpha1.FireboltInstance, kid string)
 
 // markSigningCertReady simulates cert-manager completing issuance by setting
 // the signing Certificate the operator already applied for kid to Ready for
-// its current generation. applySigningCertificate (FB-896 #4) now gates
+// its current generation. applySigningCertificate now gates
 // readiness on this in addition to the Secret carrying a private key, so a
 // test that seeds signingKeySecretFor and expects readiness must also mark the
 // Certificate ready. Requires the fake client to be built
@@ -918,7 +918,7 @@ func updateSecretCert(t *testing.T, cli client.Client, name string, certPEM []by
 	}
 }
 
-// TestApplySigningCertificate_RegenerationUnderStableKidWarns covers FB-896 #4:
+// TestApplySigningCertificate_RegenerationUnderStableKidWarns covers
 // the operator warns when a signing key's material is genuinely replaced under
 // its STABLE kid (the public key changes), but NOT when cert-manager merely
 // re-issues the certificate while reusing the key (a revision bump with the same
@@ -968,7 +968,7 @@ func TestApplySigningCertificate_RegenerationUnderStableKidWarns(t *testing.T) {
 
 	// Cert-only reissuance (issuer-capped renewal / cmctl renew): SAME private
 	// key, new certificate bytes. The public key — and the fingerprint — are
-	// unchanged, so NO warning and NO re-record. This is the FB-896 #4 fix: a
+	// unchanged, so NO warning and NO re-record. This is the fix: a
 	// revision bump alone must not read as a key regeneration.
 	updateSecretCert(t, cli, secretName, signingCertForKey(t, keyA, 2))
 	if ready, err := r.applySigningCertificate(ctx, instance, key); err != nil || !ready {
@@ -1051,13 +1051,13 @@ func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.
 	}
 }
 
-// TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey covers FB-896 finding #7: an
+// TestEnsureSigningKeys_AlgSizeChangeMintsFreshKey covers an
 // active key issued as P-384 whose policy now asks for P-256 cannot be updated
 // in place (rotationPolicy:Never), so the rotation machine must mint a fresh
 // NAMED key carrying the new curve rather than accept the stale key as ready.
 // TestEnsureSigningKeys_AlgSizeDriftDoesNotMint verifies that a change to the
-// signing algorithm/size is NOT migrated in place by minting a fresh key
-// (FB-896 round-4 #1). packdb exposes one global signing_algorithm and cannot
+// signing algorithm/size is NOT migrated in place by minting a fresh key.
+// packdb exposes one global signing_algorithm and cannot
 // serve two key curves at once, so such a change is rejected at admission
 // (validateImmutableSigningKey) rather than migrated. Were the webhook
 // bypassed, the controller must fail static — keep the existing active key —
@@ -1108,7 +1108,7 @@ func TestEnsureSigningKeys_AlgSizeDriftDoesNotMint(t *testing.T) {
 	}
 }
 
-// TestEnsureAuth_DisableRetainsGenerationCounter covers FB-896 round-4 #3:
+// TestEnsureAuth_DisableRetainsGenerationCounter covers
 // disabling auth must preserve the monotonic SigningKeyGeneration so a later
 // re-enable mints a FRESH generation rather than resetting to 0 and reusing the
 // leftover signing-1 key material (which cert-manager reuses behind the
@@ -1307,7 +1307,7 @@ func TestEnsureSigningKeys_FullRotationLifecycle(t *testing.T) {
 		t.Fatalf("seeding initial signing key secret: %v", err)
 	}
 	// Prime: apply signing-1's Certificate and mark it Ready so the active key
-	// is considered ready (FB-896 #4); otherwise ensureSigningKeys would
+	// is considered ready; otherwise ensureSigningKeys would
 	// short-circuit before the rotation state machine ever runs. The priming
 	// reconcile itself returns not-ready and does not rotate.
 	if _, err := r.ensureSigningKeys(ctx, instance); err != nil {
@@ -1476,7 +1476,7 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 
 	// Prime: apply both signing Certificates and mark them Ready for their
-	// current generation, so the active key counts as ready (FB-896 #4) and the
+	// current generation, so the active key counts as ready and the
 	// ONLY thing gating promotion below is the lagging engine — the property
 	// this test exists to prove — not an un-issued Certificate. The priming
 	// reconcile returns not-ready (certs not yet marked) and does not rotate.
@@ -1487,8 +1487,8 @@ func TestEnsureSigningKeys_LaggingEngineBlocksPromotionAndRetireEligible(t *test
 	markSigningCertReady(t, cli, instance, "signing-2")
 
 	// enginesConvergedOn folds the admin Secret's ResourceVersion and each
-	// rendered signing key's public-key fingerprint into the expected hash
-	// (FB-896 #4), so the engine's simulated ObservedAuthHash must be computed
+	// rendered signing key's public-key fingerprint into the expected hash,
+	// so the engine's simulated ObservedAuthHash must be computed
 	// the same way to converge.
 	var adminSec, signing1Sec, signing2Sec corev1.Secret
 	if err := cli.Get(ctx, client.ObjectKey{Namespace: "ns-1", Name: adminSecretNameForController}, &adminSec); err != nil {

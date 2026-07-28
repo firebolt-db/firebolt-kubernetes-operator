@@ -604,7 +604,7 @@ func TestComputeEngineReconcile_S3_CreatingNotReady(t *testing.T) {
 }
 
 // TestComputeCreating_HoldsCutoverUntilGatewayTrustsGenerationCA covers the
-// FB-896 #4 cutover gate: with engine TLS enabled, a ready new generation must
+// Cutover gate: with engine TLS enabled, a ready new generation must
 // NOT advance to Switching (the Service-selector flip) until the gateway has
 // confirmed it trusts that generation's certificate CA
 // (InstanceInfo.EngineTrustBundleReady, published as Status.RolledEngineTrustCAs).
@@ -1304,7 +1304,7 @@ func TestComputeEngineReconcile_StableStampsObservedAuthHash(t *testing.T) {
 	}
 }
 
-// TestComputeEngineReconcile_StableServingCertReissue covers FB-896 #1: a stable
+// TestComputeEngineReconcile_StableServingCertReissue covers a stable
 // generation whose serving certificate has been re-issued (a changed live
 // fingerprint vs the recorded baseline) rolls a new blue-green generation, so
 // running pods stop serving the stale leaf; a first observation just records the
@@ -1504,7 +1504,7 @@ func TestAuthHash_StableAcrossRotationPolicyChange(t *testing.T) {
 	}
 }
 
-// TestAuthHash_ChangesWithAdminSecretVersion covers FB-896 finding #4: an
+// TestAuthHash_ChangesWithAdminSecretVersion covers an
 // in-place admin-password rotation keeps the Secret name/key identical but
 // bumps its ResourceVersion, and authHash must fold that in so every engine
 // rolls onto the new password (packdb reads password_file only at startup).
@@ -1541,7 +1541,7 @@ func TestAuthHash_ChangesWithAdminSecretVersion(t *testing.T) {
 	}
 }
 
-// TestAuthHash_ChangesWithSigningKeySecretVersion covers FB-896 #3: a signing
+// TestAuthHash_ChangesWithSigningKeySecretVersion covers a signing
 // key reissued under the SAME kid and SAME Secret name but with new key bytes
 // (e.g. cert-manager re-creating a deleted signing Secret) changes only its
 // Secret's ResourceVersion — ID and SecretName are unchanged. authHash must
@@ -2963,7 +2963,7 @@ func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
 		t.Errorf("engine.nodes length = %d, want %d", len(nodes), testSpec().Replicas)
 	}
 	// Node hosts must be full FQDNs (…svc.cluster.local), which is what the
-	// per-generation engine TLS cert's wildcard SAN matches (FB-896 #1). A
+	// per-generation engine TLS cert's wildcard SAN matches. A
 	// short .svc suffix would fail packdb's HTTPS startup verification.
 	for i, n := range nodes {
 		host, _ := n.(map[string]interface{})["host"].(string)
@@ -3256,7 +3256,7 @@ func TestEngineShutdownWaitSeconds(t *testing.T) {
 	}
 }
 
-// TestTLSHash_ReflectsCertPolicy covers FB-896 round-4 #5: an in-place engine
+// TestTLSHash_ReflectsCertPolicy covers an in-place engine
 // serving-cert key algorithm/size change must change tlsHash so a new
 // generation reissues the per-generation certificate, while the issuer — which
 // is immutable and NOT folded — must never change the hash (folding it would

@@ -11,6 +11,6 @@ index 6d9ffe0..653c41a 100644
 -		return
 -	}
 -
- 	// FB-896 #4: hold the blue-green cutover (the Service-selector flip in
+ 	// Hold the blue-green cutover (the Service-selector flip in
  	// computeSwitching) until the gateway has rolled out trust for THIS
  	// generation's certificate CA. A generation minted under a CA rotated behind

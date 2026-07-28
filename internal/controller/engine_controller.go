@@ -1443,7 +1443,7 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 	}
 
 	if inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled {
-		// FB-896 #4: unblock the engine roll on the PROVISIONED fact — the anchor
+		// Unblock the engine roll on the PROVISIONED fact — the anchor
 		// Secret recorded in Status.EngineTLS (written only once the anchor cert is
 		// Ready, in ensureEngineTLSCertificate) — NOT on
 		// InstanceConditionEngineTLSReady. That condition is now convergence-gated
@@ -1465,10 +1465,10 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
 
 		// Read the current generation's serving-certificate Secret once. It drives
-		// two independent signals below: its tls.crt is the FB-896 #1 serving-cert
+		// two independent signals below: its tls.crt is the serving-cert
 		// drift fingerprint (a cert-manager re-issuance of the served leaf must
 		// roll a new generation, since packdb reads the cert only at startup), and
-		// its ca.crt is the FB-896 #4 trust-bundle cutover gate. A NotFound is
+		// its ca.crt is the trust-bundle cutover gate. A NotFound is
 		// benign — the fresh generation's cert is not written yet, or engine TLS
 		// was just enabled — leaving both signals at their empty/vacuous default.
 		gen := engine.Status.CurrentGeneration
@@ -1496,7 +1496,7 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 			}
 		}
 
-		// FB-896 #4 cutover gate: the gateway must already trust THIS engine's
+		// Cutover gate: the gateway must already trust THIS engine's
 		// current-generation certificate CA before its Service selector may flip
 		// to that generation (see computeCreating). Confirm the generation cert's
 		// CA fingerprint appears in the set the gateway has confirmed-rolled-out

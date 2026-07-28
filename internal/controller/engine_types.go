@@ -62,8 +62,8 @@ type EngineReconcileResult struct {
 	EnsureStatefulSet *appsv1.StatefulSet
 	EnsureClusterSvc  *corev1.Service
 
-	// EnsureEngineTLSCert is the per-generation engine TLS server Certificate
-	// (FB-896 #1), set only when engine TLS is enabled. cert-manager issues its
+	// EnsureEngineTLSCert is the per-generation engine TLS server Certificate,
+	// set only when engine TLS is enabled. cert-manager issues its
 	// Secret, which the generation's StatefulSet mounts and serves. nil when
 	// engine TLS is disabled.
 	EnsureEngineTLSCert *certmanagerv1.Certificate

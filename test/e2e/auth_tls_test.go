@@ -38,7 +38,7 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/test/testhelpers"
 )
 
-// This suite is the first automated end-to-end exercise of the FB-896 auth/TLS
+// This suite is the first automated end-to-end exercise of the auth/TLS
 // feature (signing keys, engine/gateway TLS). It relies on cert-manager and the
 // CA ClusterIssuer installed by SynchronizedBeforeSuite (see e2e_suite_test.go).
 
@@ -167,7 +167,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 
 		// engineHTTPSURL targets the engine's TLS listener on the routing Service
 		// FQDN — which is one of the per-generation cert's SANs — so a verifying
-		// curl proves both the SAN (FB-896 #1) and the CA chain / bundle (#2).
+		// curl proves both the SAN and the CA chain / bundle.
 		engineHTTPSURL := fmt.Sprintf("https://%s-service.%s.svc.cluster.local:%d/",
 			engineName, testNamespace, controller.EngineHTTPQueryPort)
 
@@ -238,7 +238,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 			}
 		})
 
-		It("engine serves TLS with a valid per-generation certificate (FB-896 #1/#2)", func() {
+		It("engine serves TLS with a valid per-generation certificate", func() {
 			By("installing the CA into the client pod")
 			ca, err := engineTrustCAPEM(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -251,7 +251,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 			Expect(curlTLS(ctx, clientPod, engineHTTPSURL, "")).To(HaveOccurred())
 		})
 
-		It("labels the per-generation engine TLS Secret (FB-896 #4 cleanup premise)", func() {
+		It("labels the per-generation engine TLS Secret", func() {
 			// Positive control for the deletion assertion below. The Certificate
 			// is owner-referenced to the engine, so k8s GC removes it on delete
 			// regardless of the round-4 sweep — the Secret is the one round-4 had
@@ -267,7 +267,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 				"per-generation engine TLS Secret is not labeled %s — the #4 cleanup sweep would miss it", controller.LabelEngine)
 		})
 
-		It("rejects an in-place signingAlgorithm change (FB-896 #1 — regression test for round-4 immutability)", func() {
+		It("rejects an in-place signingAlgorithm change", func() {
 			cl, err := getCRDClient()
 			Expect(err).NotTo(HaveOccurred())
 			key := types.NamespacedName{Name: instanceName, Namespace: testNamespace}
@@ -288,7 +288,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 			}).WithTimeout(30 * time.Second).WithPolling(pollInterval).Should(Succeed())
 		})
 
-		It("reclaims per-generation engine Certificates and Secrets on engine deletion (FB-896 #4)", func() {
+		It("reclaims per-generation engine Certificates and Secrets on engine deletion", func() {
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 

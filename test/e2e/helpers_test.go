@@ -158,7 +158,7 @@ func StartOperator(instanceName string, opts ...EngineOperatorOption) (*Operator
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
 	// The operator provisions cert-manager Certificates for signing keys and
-	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// engine/gateway TLS, so the in-process manager's client must know
 	// the cert-manager types or Certificate creates fail with "no kind is
 	// registered".
 	if err := certmanagerv1.AddToScheme(scheme); err != nil {
@@ -1560,7 +1560,7 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
 	// The operator provisions cert-manager Certificates for signing keys and
-	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// engine/gateway TLS, so the in-process manager's client must know
 	// the cert-manager types or Certificate creates fail with "no kind is
 	// registered".
 	if err := certmanagerv1.AddToScheme(scheme); err != nil {
@@ -1664,7 +1664,7 @@ func StartClassOperator() (*ClassOperator, error) {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
 	// The operator provisions cert-manager Certificates for signing keys and
-	// engine/gateway TLS (FB-896), so the in-process manager's client must know
+	// engine/gateway TLS, so the in-process manager's client must know
 	// the cert-manager types or Certificate creates fail with "no kind is
 	// registered".
 	if err := certmanagerv1.AddToScheme(scheme); err != nil {

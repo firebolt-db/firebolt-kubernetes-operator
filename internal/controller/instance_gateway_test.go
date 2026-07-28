@@ -37,7 +37,7 @@ import (
 )
 
 // TestGatewayRolloutComplete covers the shared rollout-observation primitive
-// (FB-896 #1/#4): unlike isGatewayReady's ReadyReplicas > 0, it must report
+// : unlike isGatewayReady's ReadyReplicas > 0, it must report
 // true only when every replica is on the latest pod template and available —
 // i.e. no old pods from a prior (looser/less-trusting) config remain.
 func TestGatewayRolloutComplete(t *testing.T) {
@@ -97,7 +97,7 @@ func TestGatewayRolloutComplete(t *testing.T) {
 	})
 }
 
-// TestGatewayRollingUpdateStrategy covers FB-896 #1: while the gateway is
+// TestGatewayRollingUpdateStrategy covers while the gateway is
 // fail-closed pending a tighter posture (gatewayDownstreamTLSPending), the
 // rollout must drop old pods to zero endpoints before new ones start
 // (MaxUnavailable=100%, MaxSurge=0) so the looser listener cannot keep serving
@@ -156,7 +156,7 @@ func TestGatewayRollingUpdateStrategy(t *testing.T) {
 	}
 }
 
-// TestGatewayTLSSecretVersions covers FB-896 findings #2/#5/#6: an in-place
+// TestGatewayTLSSecretVersions covers an in-place
 // bring-your-own cert rotation must roll the gateway (#5); the fail-closed
 // provisioning window (mTLS configured, client-CA not yet present) must NOT
 // error and abort the roll (#2); and an in-place engine-CA reissue must roll
@@ -260,8 +260,8 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 	})
 
 	t.Run("#6/#4 engine-CA bundle RV folded while re-encryption is active", func(t *testing.T) {
-		// The gateway mounts the assembled trust BUNDLE, not the anchor directly
-		// (FB-896 #4), so it is the bundle Secret's RV that must be folded.
+		// The gateway mounts the assembled trust BUNDLE, not the anchor directly,
+		// so it is the bundle Secret's RV that must be folded.
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("inst-engine-ca-bundle")).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		inst := &computev1alpha1.FireboltInstance{
@@ -280,7 +280,7 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 	})
 }
 
-// TestEngineFleetTLSState covers FB-896 finding #3: the gateway may only switch
+// TestEngineFleetTLSState covers the gateway may only switch
 // its upstream protocol based on the engine fleet's OBSERVED serving state, not
 // on certificate existence. allOnTLS gates the enable ramp (switch to TLS only
 // when every engine has rolled onto it); anyOnTLS gates the disable drain (keep
