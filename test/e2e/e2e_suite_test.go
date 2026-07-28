@@ -58,12 +58,13 @@ const (
 	instanceReadyTimeout     = 300 * time.Second
 	pollInterval             = 1 * time.Second
 
-	// e2eGatewayWakeClusterRole is the name of the chart-managed
-	// ClusterRole that grants get/list/patch on fireboltengines to the
-	// gateway ServiceAccount. The suite creates it once in
-	// SynchronizedBeforeSuite (and deletes it in SynchronizedAfterSuite)
-	// and StartInstanceOperator passes it to every per-instance
-	// FireboltInstanceReconciler via GatewayWakeClusterRole.
+	// e2eGatewayWakeClusterRole is the name of the suite's stand-in for
+	// the chart-managed ClusterRole that grants get/list/watch on
+	// endpointslices to the gateway ServiceAccount — the wake-agent
+	// sidecar's entire, read-only Kubernetes grant. The suite creates it
+	// once in SynchronizedBeforeSuite (and deletes it in
+	// SynchronizedAfterSuite) and StartInstanceOperator passes it to every
+	// per-instance FireboltInstanceReconciler via GatewayWakeClusterRole.
 	e2eGatewayWakeClusterRole = "firebolt-gateway-wake-e2e"
 )
 
@@ -350,17 +351,19 @@ var _ = SynchronizedAfterSuite(func() {
 })
 
 // ensureGatewayWakeClusterRole creates (or refreshes) the cluster-wide
-// gateway-wake ClusterRole that earlier operator versions used to mint as
-// a per-instance Role. The chart ships an equivalent ClusterRole at
+// gateway-wake ClusterRole. The chart ships an equivalent ClusterRole at
 // install time; the E2E suite runs the operator in-process and bypasses
-// Helm, so the equivalent setup happens here.
+// Helm, so the equivalent setup happens here. The rules MUST mirror
+// helm/firebolt-operator/templates/clusterrole-gateway-wake.yaml: the
+// gateway pod terminates untrusted traffic, so its grant is read-only —
+// nothing bound to a gateway ServiceAccount may write to the API.
 func ensureGatewayWakeClusterRole(ctx context.Context, cs *kubernetes.Clientset) {
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: e2eGatewayWakeClusterRole},
 		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{"compute.firebolt.io"},
-			Resources: []string{"fireboltengines"},
-			Verbs:     []string{"get", "list", "patch"},
+			APIGroups: []string{"discovery.k8s.io"},
+			Resources: []string{"endpointslices"},
+			Verbs:     []string{"get", "list", "watch"},
 		}},
 	}
 	createCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
