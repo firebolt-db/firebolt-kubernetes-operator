@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Ask that a change to a model-bound function moves its spec and fixture too.
+# Two passes over formal/model-scope.tsv: enforce that the manifest is
+# complete (every state-machine-shaped function is bound to a spec or listed
+# UNMODELLED with a reason), then ask that a change to a model-bound function
+# moves its spec and fixture too.
 #
 # This is a review prompt, not a proof. The state-cover suite already fails when
 # the reconciler and the model disagree *within the modelled state space*; what
@@ -25,6 +28,60 @@ if [ ! -f "$MANIFEST" ]; then
   echo "ERROR: $MANIFEST not found (run from the repository root)" >&2
   exit 1
 fi
+
+# --- Completeness: every state-machine-shaped function is in the manifest. ---
+#
+# The manifest's value is naming what is NOT modelled, and that is the part
+# that rots: a newly added state machine simply never gets a row, and nothing
+# notices. So the candidate set is derived mechanically -- any function under
+# internal/ (tests excluded) named compute[A-Z]*, step[A-Z]*, or set*Rollup --
+# and every candidate must either be bound to a spec or listed as UNMODELLED
+# with a non-empty reason. The reason requirement is what keeps the UNMODELLED
+# bucket from becoming a rubber stamp.
+#
+# Deliberately NO Model-scope-ok escape hatch here: the fix is a one-line
+# manifest edit, and an escape hatch would let the list rot silently, which is
+# the exact failure this pass exists to prevent. If the UNMODELLED bucket grows
+# past a handful of rows, the convention is matching helpers rather than
+# machines -- tighten the convention, do not rubber-stamp rows.
+
+completeness=0
+
+missing_reason="$(awk -F'\t' '!/^[[:space:]]*(#|$)/ && $3 == "UNMODELLED" && $4 == "" { print $1 }' "$MANIFEST")"
+if [ -n "$missing_reason" ]; then
+  while IFS= read -r fn; do
+    echo "ERROR: $MANIFEST lists ${fn} as UNMODELLED without a reason." >&2
+    echo "       The reason column is required: it is what makes the gap a decision" >&2
+    echo "       instead of an oversight." >&2
+    completeness=$((completeness + 1))
+  done <<<"$missing_reason"
+fi
+
+manifest_funcs="$(awk -F'\t' '!/^[[:space:]]*(#|$)/ { print $1 }' "$MANIFEST")"
+
+# grep reads the tree to completion (no -q), so there is no SIGPIPE edge.
+candidates="$(grep -rEn --include='*.go' --exclude='*_test.go' \
+  '^func (\([^)]*\) )?(compute[A-Z]|step[A-Z]|set[A-Z][A-Za-z]*Rollup)' internal/ || true)"
+
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  file="${line%%:*}"
+  decl="${line#*:}"
+  decl="${decl#*:}"
+  fn="$(sed -E 's/^func +(\([^)]*\) +)?([A-Za-z0-9_]+)\(.*/\2/' <<<"$decl")"
+  case $'\n'"${manifest_funcs}"$'\n' in
+  *$'\n'"$fn"$'\n'*) continue ;;
+  esac
+  echo "ERROR: ${file} defines ${fn}(), which is shaped like a state-machine entry" >&2
+  echo "       point but has no row in ${MANIFEST}. Either bind it to a spec, or add" >&2
+  echo "       \"${fn}	${file}	UNMODELLED	<reason>\" so the gap is a decision." >&2
+  completeness=$((completeness + 1))
+done <<<"$candidates"
+
+if [ "$completeness" -ne 0 ]; then
+  exit 1
+fi
+echo "OK: every state-machine-shaped function is bound to a spec or UNMODELLED with a reason"
 
 # Three dots: compare against the merge base, so commits that landed on main
 # after this branch started are not mistaken for part of the change.
@@ -57,6 +114,9 @@ reported_specs=""
 
 while IFS="$(printf '\t')" read -r func file spec fixture; do
   case "$func" in '' | \#*) continue ;; esac
+  # UNMODELLED rows have no spec or fixture to move; they exist for the
+  # completeness pass above and for readers.
+  case "$spec" in UNMODELLED) continue ;; esac
 
   # grep here reads its input to completion (no -q), so there is no SIGPIPE.
   headers="$(git diff -U0 "$RANGE" -- "$file" | grep '^@@' || true)"
@@ -112,7 +172,7 @@ Either:
     in a commit message or the PR body. A pure refactor, a comment, a log line
     or an error-message change is a perfectly good reason.
 
-If the change belongs to a machine that has no spec at all, see the list of
-unmodelled machines at the top of formal/model-scope.tsv.
+If the change belongs to a machine that has no spec at all, see the
+UNMODELLED rows in formal/model-scope.tsv.
 MSG
 exit 1
