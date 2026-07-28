@@ -165,6 +165,60 @@ func TestShedRequestStillCountsAsDemand(t *testing.T) {
 	}
 }
 
+// Engine names come from an untrusted header and pruning is time-based, so
+// a sustained stream of unique garbage names must hit a hard size bound
+// rather than grow the maps until the container's memory limit does the
+// bounding. Engines already tracked keep the stamp-before-shed contract:
+// their stamps refresh even when the tracker is full.
+func TestDemandTrackerCapsTrackedEngines(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1_700_000_000, 0)
+	d := newDemandTracker(10*time.Minute, func() time.Time { return now })
+
+	for i := 0; i < maxTrackedEngines; i++ {
+		d.Stamp(fmt.Sprintf("engine-%d", i))
+	}
+	now = now.Add(time.Minute)
+
+	d.Stamp("intruder")
+	d.Stamp("engine-0") // known name: must refresh despite the full tracker
+
+	d.mu.RLock()
+	tracked := len(d.last)
+	_, intruderKnown := d.last["intruder"]
+	refreshed := d.last["engine-0"]
+	dropped := d.dropped
+	d.mu.RUnlock()
+
+	if tracked != maxTrackedEngines {
+		t.Errorf("tracked engines = %d, want capped at %d", tracked, maxTrackedEngines)
+	}
+	if intruderKnown {
+		t.Error("stamp past the size cap was admitted")
+	}
+	if !refreshed.Equal(now) {
+		t.Errorf("known engine stamp = %v, want refreshed to %v", refreshed, now)
+	}
+	if dropped != 1 {
+		t.Errorf("dropped = %d, want 1", dropped)
+	}
+
+	// A shed for an unadmitted name must not sneak the name into the shed
+	// map either, and the drop has to be visible on the exposition.
+	if d.AcquireHold("intruder", 0) {
+		t.Fatal("AcquireHold admitted a request at a cap of 0")
+	}
+	d.mu.RLock()
+	_, shedKnown := d.shed["intruder"]
+	d.mu.RUnlock()
+	if shedKnown {
+		t.Error("shed count created an entry for an untracked engine")
+	}
+	if !strings.Contains(d.Render(), MetricDemandDroppedTotal+" 1") {
+		t.Errorf("dropped stamps not visible in render:\n%s", d.Render())
+	}
+}
+
 func TestReadinessTrackerWaitChanReleasesOnReady(t *testing.T) {
 	tr := newReadinessTracker()
 

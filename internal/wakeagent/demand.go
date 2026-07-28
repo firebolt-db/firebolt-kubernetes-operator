@@ -38,7 +38,25 @@ const (
 	// MetricSheddedTotal counts requests rejected because the hold cap was
 	// already reached.
 	MetricSheddedTotal = "firebolt_gateway_wake_shed_total"
+	// MetricDemandDroppedTotal counts demand stamps dropped because the
+	// tracker already holds maxTrackedEngines names. Unlabeled: labeling it
+	// by engine would recreate the growth the cap exists to stop.
+	MetricDemandDroppedTotal = "firebolt_gateway_wake_demand_dropped_total"
 )
+
+// maxTrackedEngines bounds how many engine names the tracker holds at once.
+//
+// Names arrive in an untrusted header and are never checked against engines
+// that exist, and eviction is time-based: entries younger than the retention
+// window (10 minutes) survive every prune. So without a size bound, a
+// sustained stream of unique garbage names grows the maps for a full
+// retention window — at the hold listener's request rate, easily past the
+// agent container's 128Mi memory limit (gatewayWakeAgentMemoryLimit) —
+// and the OOM kill takes the wake feature down exactly when someone is
+// probing it. Each tracked name costs a few hundred bytes across the maps,
+// so 4096 entries stay in the low single-digit MiB while being far more
+// engines than a namespace realistically runs.
+const maxTrackedEngines = 4096
 
 // demandTracker records, per engine, when the gateway last saw a request
 // for a stopped engine.
@@ -56,6 +74,9 @@ type demandTracker struct {
 	last    map[string]time.Time
 	pending map[string]int
 	shed    map[string]int64
+	// dropped counts stamps for new engine names rejected because the
+	// tracker was already at maxTrackedEngines.
+	dropped int64
 	// retention bounds how long an engine's entry survives without being
 	// refreshed. Entries are dropped on read so a gateway that has seen
 	// thousands of engines over its lifetime does not grow without bound,
@@ -79,9 +100,19 @@ func newDemandTracker(retention time.Duration, now func() time.Time) *demandTrac
 }
 
 // Stamp records demand for the engine as of now.
+//
+// A known engine always refreshes, even when the tracker is full — demand
+// is stamped before the hold cap is consulted, and that ordering must hold
+// for every engine already being watched. Only a stamp that would add a
+// new name past maxTrackedEngines is dropped, because admitting it would
+// let unique garbage names grow the maps without bound between prunes.
 func (d *demandTracker) Stamp(engine string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if _, known := d.last[engine]; !known && len(d.last) >= maxTrackedEngines {
+		d.dropped++
+		return
+	}
 	d.last[engine] = d.now()
 }
 
@@ -102,7 +133,12 @@ func (d *demandTracker) AcquireHold(engine string, limit int) bool {
 		total += n
 	}
 	if limit >= 0 && total >= limit {
-		d.shed[engine]++
+		// Count the shed against the engine only when it is tracked. When
+		// its stamp was dropped at the size cap, a per-engine count here
+		// would re-open the unbounded growth the cap closed.
+		if _, known := d.last[engine]; known {
+			d.shed[engine]++
+		}
 		return false
 	}
 	d.pending[engine]++
@@ -211,5 +247,12 @@ func (d *demandTracker) Render() string {
 	for _, r := range rows {
 		fmt.Fprintf(&b, "%s{engine=%q} %d\n", MetricSheddedTotal, r.engine, r.shed)
 	}
+	d.mu.RLock()
+	dropped := d.dropped
+	d.mu.RUnlock()
+	b.WriteString("# HELP " + MetricDemandDroppedTotal +
+		" Demand stamps dropped because the tracker was at its size cap.\n")
+	b.WriteString("# TYPE " + MetricDemandDroppedTotal + " counter\n")
+	fmt.Fprintf(&b, "%s %d\n", MetricDemandDroppedTotal, dropped)
 	return b.String()
 }
