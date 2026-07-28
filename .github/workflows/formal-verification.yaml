@@ -49,7 +49,7 @@ jobs:
             exit 0
           fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-[a-z-]*state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/check-counterexamples\.sh$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/check-counterexamples\.sh$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
