@@ -234,7 +234,8 @@ telemetry:
   # when the default Scarf image repositories are unchanged, this also switches
   # operator and engine pulls to GHCR, and the operator stamps DO_NOT_TRACK=1
   # on every engine container it deploys so engine usage telemetry is disabled
-  # too (a user-supplied DO_NOT_TRACK on the engine template still wins).
+  # too (a user-supplied DO_NOT_TRACK in the engine template's container
+  # env still wins; envFrom sources cannot override the injected entry).
   # User-supplied image repositories are preserved. DO_NOT_TRACK and
   # SCARF_NO_ANALYTICS on the operator pod disable its runtime events only.
   enabled: true

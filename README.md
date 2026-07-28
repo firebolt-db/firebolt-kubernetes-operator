@@ -72,7 +72,9 @@ You can opt out in any of these ways:
   switches the default operator and engine repositories to GHCR (custom
   image repositories remain unchanged), and sets `DO_NOT_TRACK=1` on every
   deployed engine container so the engines' own usage telemetry is disabled
-  as well. An engine template that sets `DO_NOT_TRACK` itself keeps its value.
+  as well. An engine or class template that sets `DO_NOT_TRACK` in its
+  container `env` keeps its value; `envFrom` sources cannot override the
+  injected entry, because Kubernetes gives `env` precedence over `envFrom`.
 - Install the chart from `oci://ghcr.io/firebolt-db/helm-charts` to bypass Scarf
   for the chart download as well. Helm selects the chart repository before it
   reads chart values.
