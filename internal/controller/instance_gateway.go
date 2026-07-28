@@ -1462,8 +1462,19 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 	// Gated by the same predicate as the Envoy config, not just by the
 	// image being set. A user-supplied ServiceAccount opts out of
 	// operator-managed RBAC, so an agent injected against it could never
-	// watch EndpointSlices — and would sit unready, taking the gateway pod
-	// out of its Service.
+	// watch EndpointSlices, so its informer would never sync. An unsynced
+	// agent answers DecisionUnsynced and lets every request straight through
+	// without recording demand (readinessTracker.Synced), so wake would never
+	// fire and stopped engines would keep 503ing — silently, and for the
+	// lifetime of the pod.
+	//
+	// The cost is wake, not availability: the sidecar carries no probes at all,
+	// deliberately, so even a wedged agent cannot drop the gateway pod out of
+	// its Service (see the container definition, which explains why an earlier
+	// readiness probe here was a mistake). Omitting the agent rather than
+	// shipping one that can only ever no-op keeps the degraded mode a single
+	// documented state — reported as WakeOnZeroDisabled — instead of a sidecar
+	// and a projected token that look functional and are not.
 	wakeAgent := wakeAgentConfig{}
 	if r.wakeAgentEnabled(instance) {
 		wakeAgent = wakeAgentConfig{
