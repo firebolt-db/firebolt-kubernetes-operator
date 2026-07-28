@@ -10,21 +10,28 @@
 # review prompt. A change that legitimately does not affect the model passes by
 # saying so: put `Model-scope-ok: <reason>` in a commit message or the PR body.
 #
-# What is NOT here matters as much as what is. These machines ship with no
-# model at all, so no formal target says anything about them:
+# What is NOT here matters as much as what is. No state-cover fixture binds
+# these machines to their code, so `make formal-verify` says nothing about them.
+# The first has a spec and no Go binding; the rest have no spec at all:
 #
-#   * auto-stop (computeAutoStopDecision) -- covered by a rapid harness with
-#     hand-written precedence invariants (engine_autostop_property_test.go),
-#     which is not a spec binding
-#   * gateway wake-on-zero
+#   * the wake agent's hold path (internal/wakeagent: demandTracker,
+#     readinessTracker) -- MODELLED by formal/WakeAgentHold.tla but not bound to
+#     Go, and deliberately so rather than by omission: the state it holds is
+#     unexported in-memory bookkeeping in a package that must not import the
+#     controller (or controller-runtime) at all, so there is no materialisable
+#     state for a state-cover harness to project. Its two invariants
+#     (Inv_NoStrandedWaiter, Inv_WaiterRefsAccurate) are therefore checked by
+#     TLC only; internal/wakeagent's own unit tests are what hold a line under
+#     the Go side. Binding it needs an exported test seam on the tracker, which
+#     is a decision about that package's API rather than a gap in this table
 #   * FireboltEngineClass merge / drift detection (stsMatchesSpec and the
 #     effective* resolvers)
 #   * drain probing and its timeouts (deliberately deferred: fuzzed time is the
 #     highest false-positive axis)
 #
-# So "the TLA+ suite passes" means "the three modelled machines still agree with
-# their specs", not "this change is verified". Adding a machine here means
-# writing a spec for it; SigningKeyRotation.tla is the smallest worked example,
+# So "the TLA+ suite passes" means "the modelled machines still agree with their
+# specs", not "this change is verified". Adding a machine here means writing a
+# spec for it; SigningKeyRotation.tla is the smallest worked example,
 # counterexample config included.
 computeEngineReconcile	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 terminalPhase	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
@@ -38,3 +45,6 @@ computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.
 stepSigningKeyRotation	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
 promoteSigningKey	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
 signingKeysForRender	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+computeAutoStopDecision	internal/controller/engine_autostop.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
+pollOnce	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
+replace	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go

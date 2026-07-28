@@ -31,3 +31,8 @@ creating-advance-without-pods-ready.patch	TestTLAEngineStateCover	result not in 
 switching-flip-active-without-service.patch	TestTLAEngineStateCover	Inv_ServiceKnownGen
 cleaning-keeps-draining-generation.patch	TestTLAEngineStateCover	Inv_DrainingPhase|Inv_TerminalNoDraining
 rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not in the TLA+ reconciler closure
+# The wake check moved BELOW the stopped early return: the one precedence rule
+# without which wake-on-zero cannot work at all, since an auto-stopped engine IS
+# an engine at zero replicas. EngineWakeNaiveStoppedFirst.cfg pins the same
+# inversion in the model, where it violates WakeIsNotLost.
+autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result not in the TLA+ reconciler closure

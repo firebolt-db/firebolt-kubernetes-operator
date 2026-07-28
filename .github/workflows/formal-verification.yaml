@@ -114,6 +114,20 @@ jobs:
             -config formal/SigningKeyRotation.cfg \
             formal/SigningKeyRotation.tla
 
+      - name: Run TLC — EngineWake
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/EngineWake.cfg \
+            formal/EngineWake.tla
+
+      - name: Run TLC — WakeAgentHold
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/WakeAgentHold.cfg \
+            formal/WakeAgentHold.tla
+
       - name: Every naive config must still produce its pinned violation
         # Delegates to the same script and table the Makefile target uses. This
         # step used to inline one config, and inlining is what made it wrong: the

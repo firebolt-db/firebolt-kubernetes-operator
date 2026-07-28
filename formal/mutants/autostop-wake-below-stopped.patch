@@ -1,0 +1,26 @@
+diff --git a/internal/controller/engine_autostop.go b/internal/controller/engine_autostop.go
+index 337d66a..5011833 100644
+--- a/internal/controller/engine_autostop.go
++++ b/internal/controller/engine_autostop.go
+@@ -177,10 +177,6 @@ func computeAutoStopDecision(
+ 	// either. Users who want an engine to stay down set
+ 	// autoStop.enabled: false, which returns at the top of this function
+ 	// before wake is ever consulted.
+-	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
+-		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
+-	}
+-
+ 	if scheduleActive(as.Schedule, now) {
+ 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
+ 	}
+@@ -193,6 +189,10 @@ func computeAutoStopDecision(
+ 		}
+ 	}
+ 
++	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
++		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
++	}
++
+ 	if obs.ScrapeFailed {
+ 		// Refresh LastActivityTime alongside the no-scale decision: a
+ 		// scrape-failure window must look just as un-idle to the next
