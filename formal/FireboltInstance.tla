@@ -12,9 +12,13 @@
 \* when the reconcile returned early.
 \*
 \* Verified properties:
-\*   Safety          - TypeOK invariant: valid phase and boolean component flags
-\*   EventuallyReady - once all components stabilise, phase reaches Ready
-\*   ReadyIsStable   - Ready persists as long as all components remain available
+\*   Safety                  - TypeOK invariant: valid phase and boolean
+\*                             component flags
+\*   PhaseReflectsComponents - every ReconcileRun writes a phase that reflects
+\*                             ALL components, not a subset of them
+\*   EventuallyReady         - once all components stabilise, phase reaches Ready
+\*   ReadyIsStable           - Ready persists as long as all components remain
+\*                             available
 \*
 \* To check with TLC:
 \*   java -jar tla2tools.jar -config FireboltInstance.cfg FireboltInstance.tla
@@ -42,6 +46,24 @@
 
 EXTENDS Integers, TLC
 
+CONSTANTS
+    \* TRUE narrows the readiness roll-up to postgres alone — the early-return
+    \* bug the design notes below say the implementation avoids (stopping at
+    \* the first pipeline step and rolling up only what was checked). FALSE in
+    \* FireboltInstance.cfg, which checks the design as it ships;
+    \* FireboltInstanceNaiveRollup.cfg flips it and must then violate
+    \* PhaseReflectsComponents (`make formal-check-counterexample` enforces
+    \* this). Same shape as the guard-removal flags in FireboltEngine.tla.
+    \*
+    \* The property that makes this flag falsifiable is phrased over
+    \* AllComponentsUp, never over AllReady: temporal properties stated in
+    \* terms of AllReady move their hypothesis and conclusion together when
+    \* the roll-up definition breaks, so they stay true about the broken
+    \* predicate. AllComponentsUp is the ground truth the roll-up must match.
+    RollupOneComponent
+
+ASSUME RollupOneComponent \in BOOLEAN
+
 Components == {"postgres", "metadata", "gateway"}
 
 VARIABLES
@@ -52,8 +74,19 @@ vars == <<phase, compAvail>>
 
 Phases == {"uninitialized", "provisioning", "ready", "degraded"}
 
-\* All three component conditions are True.
-AllReady == \A c \in Components : compAvail[c]
+\* The ground truth: every component condition is True. Used ONLY by the
+\* verified properties, never by the reconciler actions, so a broken roll-up
+\* definition cannot drag the properties along with it.
+AllComponentsUp == \A c \in Components : compAvail[c]
+
+\* The readiness roll-up the reconciler computes. Models the output of
+\* setInstanceReadyRollup that computePhase consumes. This is the definition
+\* under test: PhaseReflectsComponents asserts that phases derived from it
+\* agree with AllComponentsUp.
+AllReady ==
+    IF RollupOneComponent
+    THEN compAvail["postgres"]
+    ELSE \A c \in Components : compAvail[c]
 
 \* Derive next phase from current component availability.
 \* Models computePhase(instance) called after setInstanceReadyRollup.
@@ -129,6 +162,28 @@ Safety ==
     /\ TypeOK
 
 \* ---------------------------------------------------------------------------
+\* Action properties
+\* ---------------------------------------------------------------------------
+
+\* Every phase the reconciler writes reflects ALL components. This cannot be a
+\* state invariant: between an environment flap and the next ReconcileRun the
+\* phase legitimately lags the components (see the design decisions above), so
+\* the honest statement is about ReconcileRun's postcondition, not about every
+\* reachable state. Phrased over AllComponentsUp rather than AllReady on
+\* purpose — see the RollupOneComponent comment.
+\*
+\*   * ready is written iff every component is available
+\*   * degraded is only written on a genuine degradation from ready/degraded
+\*   * provisioning is only re-written while still provisioning
+PhaseReflectsComponents ==
+    [][ReconcileRun =>
+           /\ ((phase' = "ready") <=> AllComponentsUp')
+           /\ ((phase' = "degraded") =>
+                   (~AllComponentsUp' /\ phase \in {"ready", "degraded"}))
+           /\ ((phase' = "provisioning") =>
+                   (~AllComponentsUp' /\ phase = "provisioning"))]_vars
+
+\* ---------------------------------------------------------------------------
 \* Liveness
 \* ---------------------------------------------------------------------------
 
@@ -161,6 +216,7 @@ Spec ==
 
 \* Theorems (checked by TLC)
 THEOREM Spec => []Safety
+THEOREM Spec => PhaseReflectsComponents
 THEOREM Spec => EventuallyReady
 THEOREM Spec => ReadyIsStable
 
