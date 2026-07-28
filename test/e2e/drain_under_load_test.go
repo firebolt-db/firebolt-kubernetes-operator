@@ -208,15 +208,28 @@ wait
 }
 
 // drainHoldFailure explains a hold-window failure in terms of whether the
-// spec's own premise held, because the two causes need opposite responses and
+// spec's own premise held, because the three causes need different responses and
 // the failure output could not previously tell them apart: the anti-vacuity
 // check sat after the hold assertion, so a failing run never reached it.
-func drainHoldFailure(samples []int64, idle int) string {
+//
+// The no-samples case is separate on purpose. It is reached when every scrape
+// failed, which means the premise was never OBSERVED — not that it held. Folding
+// it in with "no idle sample seen" would print "non-zero at every sample" over an
+// empty list and point at the operator, which is precisely the misdiagnosis this
+// function exists to prevent.
+func drainHoldFailure(samples []int64, idle, scrapeErrors int) string {
 	rendered := make([]string, 0, len(samples))
 	for _, s := range samples {
 		rendered = append(rendered, strconv.FormatInt(s, 10))
 	}
 	joined := strings.Join(rendered, ",")
+
+	if len(samples) == 0 {
+		return fmt.Sprintf("INCONCLUSIVE, and the premise was never observed: no usable gauge "+
+			"sample was obtained during the hold window (%d scrape attempts failed or returned "+
+			"unparsable metrics). Whether the pod was busy is unknown, so this run says nothing "+
+			"about the operator either way. Fix the scrape path first.", scrapeErrors)
+	}
 	if idle > 0 {
 		return fmt.Sprintf("INCONCLUSIVE, not a product failure: the load generator left the "+
 			"old-generation pod idle — running+suspended read 0 on %d of %d samples [%s]. "+
@@ -225,9 +238,10 @@ func drainHoldFailure(samples []int64, idle int) string {
 			idle, len(samples), joined)
 	}
 	return fmt.Sprintf("LIKELY CONTRACT VIOLATION: the draining generation was released even "+
-		"though running+suspended was non-zero at every sample [%s]. Sampling is coarser than "+
-		"the drain probe, so an unobserved idle instant is not fully excluded, but the operator "+
-		"releasing a generation with queries in flight is the first thing to rule out.", joined)
+		"though running+suspended was non-zero at every one of %d samples [%s]; failed scrapes: "+
+		"%d. Sampling is coarser than the drain probe, so an unobserved idle instant is not fully "+
+		"excluded, but the operator releasing a generation with queries in flight is the first "+
+		"thing to rule out.", len(samples), joined, scrapeErrors)
 }
 
 var _ = Describe("Firebolt Engine Drain", func() {
@@ -297,21 +311,27 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			// assertion: the phase check below is unconditional, so any release
 			// fails the spec whether or not a sample caught the pod busy.
 			var activeSamples []int64
-			idleSamples := 0
+			idleSamples, scrapeErrors := 0, 0
 			Consistently(func(g Gomega) {
-				if body, err := scrapeEnginePodMetrics(ctx, clientPod, oldPod.Status.PodIP); err == nil {
-					if v, ok := parseActiveQueries(body); ok {
-						activeSamples = append(activeSamples, v)
-						if v == 0 {
-							idleSamples++
-						}
+				// A failed or unparsable scrape is counted, not ignored: "the pod
+				// was busy at every sample" and "there were no samples" are
+				// different findings, and only the count tells them apart.
+				body, err := scrapeEnginePodMetrics(ctx, clientPod, oldPod.Status.PodIP)
+				if err != nil {
+					scrapeErrors++
+				} else if v, ok := parseActiveQueries(body); ok {
+					activeSamples = append(activeSamples, v)
+					if v == 0 {
+						idleSamples++
 					}
+				} else {
+					scrapeErrors++
 				}
 
 				engine, err := GetEngine(ctx, engineName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(string(engine.Status.Phase)).To(Equal(string(computev1alpha1.PhaseDraining)),
-					drainHoldFailure(activeSamples, idleSamples))
+					drainHoldFailure(activeSamples, idleSamples, scrapeErrors))
 				g.Expect(engine.Status.DrainingGeneration).NotTo(BeNil())
 
 				pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, oldPod.Name, metav1.GetOptions{})
@@ -322,7 +342,9 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			// Belt-and-braces on the premise for a run that PASSED: a hold that
 			// never saw the pod busy proved nothing, and would otherwise be
 			// indistinguishable from a real one.
-			Expect(activeSamples).NotTo(BeEmpty(), "no gauge sample was taken during the hold window")
+			Expect(activeSamples).NotTo(BeEmpty(),
+				"no usable gauge sample was taken during the hold window (%d scrape attempts "+
+					"failed), so the pod was never observed busy", scrapeErrors)
 			Expect(idleSamples).To(BeZero(),
 				"the pod went idle during the hold window (%d of %d samples read 0); the hold "+
 					"proved nothing even though it passed", idleSamples, len(activeSamples))
