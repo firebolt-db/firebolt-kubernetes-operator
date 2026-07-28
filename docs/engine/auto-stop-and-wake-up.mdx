@@ -104,6 +104,10 @@ The first query pays the engine's cold start, typically tens of seconds. Set you
 
 Requests are held, not buffered in full: the agent reads nothing but the engine name, and Envoy's flow control stalls the client's upload rather than accumulating its body. The number of simultaneously held requests is capped from the gateway's memory budget; past the cap, requests get `503` with `Retry-After` while the wake still proceeds.
 
+### Formal model
+
+The demand path and the agent's hold path are both specified in TLA+ and model-checked in CI: `formal/EngineWake.tla` covers the agent's stamp, the Firebolt Operator's cached copy of it and the auto-stop decision that reads it, and `formal/WakeAgentHold.tla` covers the readiness waiter that releases a held query. Between them they establish that an engine only ever scales up on demand that is still within the TTL at the moment of the decision, that demand for a running engine never changes its replica count, and that a held query is always releasable when endpoints appear. See [Formal verification](../architecture#formal-verification) for what each specification proves and for the one lost-wakeup case the design accepts.
+
 ### Wake and deliberately stopped engines
 
 Auto-stop cannot distinguish an engine it parked from one you set to `replicas: 0` by hand — both are engines at zero replicas — so a query through the gateway will start either. To keep an engine down, set `spec.autoStop.enabled: false` alongside `replicas: 0`; auto-stop then reports `Disabled` and leaves the engine alone.
