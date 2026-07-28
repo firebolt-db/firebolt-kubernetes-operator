@@ -395,6 +395,8 @@ formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/SigningKeyRotation.cfg formal/SigningKeyRotation.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/EngineWake.cfg formal/EngineWake.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/WakeAgentHold.cfg formal/WakeAgentHold.tla
 
 .PHONY: formal-check-counterexample
 formal-check-counterexample: tla2tools ## Assert every naive config still produces its pinned violation.
