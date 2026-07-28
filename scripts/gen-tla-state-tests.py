@@ -313,9 +313,13 @@ def check_labels_are_spec_actions(
 def reconciler_closure(
     start: int,
     reconciler_edges: Dict[int, List[int]],
+    transitive: bool = True,
 ) -> FrozenSet[int]:
-    """States reachable from `start` via 1+ reconciler edges, plus `start`
-    itself iff a legitimate stutter is permitted there.
+    """States one Go call may legitimately land in, starting from `start`.
+
+    With `transitive` (the default), states reachable via 1+ reconciler edges;
+    otherwise only the direct reconciler successors. Either way `start` itself is
+    included iff a legitimate stutter is permitted there.
 
     The spec models each reconciler action atomically, but Go's compute layer
     legitimately fires several TLA actions in one Reconcile when their
@@ -325,6 +329,16 @@ def reconciler_closure(
     MintReady together). The closure therefore tracks the transitive set of
     states reachable via reconciler-only edges -- the upper bound on what one
     Reconcile can produce without touching environment state.
+
+    That upper bound is only sound where the Go entry point really can batch.
+    Where one call is one model action -- a pure decision function whose arms are
+    mutually exclusive -- the transitive set is strictly WEAKER than what the
+    model says, because it accepts the successor's successor as well as the
+    successor. When the difference is projection-visible that is a hole: the wake
+    model's scale-down step goes `Idle` then `Stopped` and its first quiet
+    observation goes `Initializing` then `ActivityObserved`, so a transitive
+    check would accept either reason token for a step the model pins to one.
+    Hence `transitive=False`, selected per model in MODELS.
 
     A stutter at `start` is legitimate iff `start` has no outgoing reconciler
     edges or has a self-loop reconciler edge. Including `start` unconditionally
@@ -351,6 +365,8 @@ def reconciler_closure(
         if n not in seen:
             seen.add(n)
             stack.append(n)
+    if not transitive:
+        return frozenset(seen)
     while stack:
         cur = stack.pop()
         for nxt in reconciler_edges.get(cur, ()):
@@ -409,6 +425,13 @@ class SpecConfig:
     cases_var: str
     # Comment above the pool. Interpolated with {n} = number of pooled states.
     pool_comment: str
+    # Whether one call of the Go entry point may realize SEVERAL consecutive
+    # reconciler actions of the spec. True for a whole reconcile pass, which
+    # batches every sub-step whose preconditions hold at once; False for an entry
+    # point that is one model action by construction, where accepting the
+    # transitive set would accept a successor the model does not permit. See
+    # reconciler_closure.
+    transitive_closure: bool = True
     # Drop states the Go harness deliberately never exercises.
     skip_state: Callable[[State], bool] = lambda _state: False
     # Output order. Identity means "order by the projected tuple itself".
@@ -871,12 +894,19 @@ type tlaWakeState struct {
 }
 
 // tlaWakeTestCase references tlaWakeStatePool by index. Start is the index of
-// the starting state; Closure is the set of indices the model considers
-// reachable from Start via 1+ reconciler-only transitions (plus Start itself
-// when a stutter is legitimate).
+// the starting state; Successors is the set of indices the model reaches from
+// Start in EXACTLY ONE reconciler transition (plus Start itself when a stutter
+// is legitimate, i.e. when the enabled arm changes nothing).
+//
+// One step, not the transitive closure the other fixtures carry, because one
+// call of computeAutoStopDecision is one reconciler action: its arms are
+// mutually exclusive. Accepting the transitive set would accept the successor's
+// successor too, and here that is projection-visible -- a scale-down would pass
+// while reporting Stopped instead of Idle, and a first quiet observation while
+// reporting ActivityObserved instead of Initializing.
 type tlaWakeTestCase struct {
-\tStart   int
-\tClosure []int
+\tStart      int
+\tSuccessors []int
 }
 
 """
@@ -1049,6 +1079,15 @@ MODELS: Dict[str, SpecConfig] = {
         pool_comment="// {n} unique reachable TLA+ states, projected to the "
         "decision function's inputs and outputs.",
         validate_actions=wake_check_actions,
+        # One call of computeAutoStopDecision is exactly one reconciler action:
+        # its arms are mutually exclusive and exactly one is enabled per state,
+        # so the model's ONE-STEP successor is what the Go result must equal.
+        # The other three models keep the transitive default because their Go
+        # entry point is a whole pass that genuinely batches: the engine's does
+        # EnsureService+Advance together, a rotation reconcile does
+        # MintStart+MintReady, and an instance reconcile initializes the phase
+        # and then computes the rollup in the same call.
+        transitive_closure=False,
         emit_invariants=True,
         invariants_var="tlaWakeRequiredInvariants",
         invariants_test_file="wake_tla_state_test.go",
@@ -1134,7 +1173,7 @@ def generate(cfg: SpecConfig, dot: Path, spec: Path, out: Path) -> str:
             continue
         emitted.add(key)
         closure: Set[int] = set()
-        for cid in reconciler_closure(nid, reconciler_edges):
+        for cid in reconciler_closure(nid, reconciler_edges, cfg.transitive_closure):
             closure.add(pool_idx(nodes[cid]))
         cases.append((pool_idx(nodes[nid]), sorted(closure)))
 

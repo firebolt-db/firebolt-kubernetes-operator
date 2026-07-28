@@ -1,0 +1,13 @@
+diff --git a/internal/controller/engine_autostop.go b/internal/controller/engine_autostop.go
+index 337d66a..3825152 100644
+--- a/internal/controller/engine_autostop.go
++++ b/internal/controller/engine_autostop.go
+@@ -239,7 +239,7 @@ func computeAutoStopDecision(
+ 
+ 	idleFor := now.Sub(status.LastActivityTime.Time)
+ 	if idleFor >= idleTimeout && spec.Replicas > idleReplicas {
+-		return decisionWithScale(spec.Replicas, idleReplicas, AutoStopReasonIdle, pollInterval)
++		return decisionWithScale(spec.Replicas, idleReplicas, AutoStopReasonStopped, pollInterval)
+ 	}
+ 
+ 	return AutoStopDecision{
