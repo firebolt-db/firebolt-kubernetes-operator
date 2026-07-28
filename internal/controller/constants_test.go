@@ -47,6 +47,61 @@ func TestUseDirectEngineRepositoryPreservesUserOverride(t *testing.T) {
 	}
 }
 
+// TestDisableEngineTelemetryInjectsDoNotTrack pins the engine-pod opt-out
+// behavior: DO_NOT_TRACK=1 is stamped only after DisableEngineTelemetry(),
+// it lands before user-supplied env (so a user value wins via Kubernetes'
+// last-occurrence duplicate resolution), and the default rendering stays
+// untouched.
+func TestDisableEngineTelemetryInjectsDoNotTrack(t *testing.T) {
+	t.Cleanup(func() { engineTelemetryDisabled = false })
+
+	findDoNotTrack := func(env []corev1.EnvVar) []int {
+		var idx []int
+		for i, e := range env {
+			if e.Name == EngineDoNotTrackEnvKey {
+				idx = append(idx, i)
+			}
+		}
+		return idx
+	}
+
+	engineTelemetryDisabled = false
+	if got := findDoNotTrack(buildEngineContainerEnv(&computev1alpha1.FireboltEngineSpec{}, nil)); len(got) != 0 {
+		t.Errorf("telemetry enabled: DO_NOT_TRACK unexpectedly injected at %v", got)
+	}
+
+	DisableEngineTelemetry()
+	env := buildEngineContainerEnv(&computev1alpha1.FireboltEngineSpec{}, nil)
+	idx := findDoNotTrack(env)
+	if len(idx) != 1 {
+		t.Fatalf("telemetry disabled: DO_NOT_TRACK occurrences = %d, want 1", len(idx))
+	}
+	if env[idx[0]].Value != "1" {
+		t.Errorf("DO_NOT_TRACK = %q, want %q", env[idx[0]].Value, "1")
+	}
+
+	// User env is appended after operator env, so a user-supplied value
+	// resolves last and wins.
+	spec := &computev1alpha1.FireboltEngineSpec{
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: computev1alpha1.EngineContainerName,
+					Env:  []corev1.EnvVar{{Name: EngineDoNotTrackEnvKey, Value: "0"}},
+				}},
+			},
+		},
+	}
+	env = buildEngineContainerEnv(spec, nil)
+	idx = findDoNotTrack(env)
+	if len(idx) != 2 {
+		t.Fatalf("with user override: DO_NOT_TRACK occurrences = %d, want 2 (operator then user)", len(idx))
+	}
+	if last := env[idx[len(idx)-1]]; last.Value != "0" {
+		t.Errorf("last DO_NOT_TRACK = %q, want user value %q", last.Value, "0")
+	}
+}
+
 // TestResolveImageRef pins the partial-override semantics that make
 // ImageSpec.Repository and ImageSpec.Tag independently optional. Each
 // dimension must fall back to its component default on its own so users
