@@ -2412,7 +2412,8 @@ func buildEngineTLSVolumeMounts(tls *ResolvedEngineTLSInfo) []corev1.VolumeMount
 
 // buildEngineContainerEnv returns the env stamped on the rendered
 // engine container: operator-injected vars first (POD_INDEX,
-// FB_AWS_EC2_METADATA_CLIENT_ENABLED), then class then engine user-supplied
+// FB_AWS_EC2_METADATA_CLIENT_ENABLED, and DO_NOT_TRACK when engine
+// telemetry is disabled), then class then engine user-supplied
 // entries in that order. Shared between
 // buildStatefulSet (write path) and engineContainerExtraFieldsMatch
 // (drift comparator) so a future env injection or reordering lands
@@ -2434,6 +2435,12 @@ func buildEngineContainerEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo
 			Name:  computev1alpha1.EngineAwsEC2MetadataClientEnabledEnvKey,
 			Value: "true",
 		},
+	}
+	if engineTelemetryDisabled {
+		out = append(out, corev1.EnvVar{
+			Name:  EngineDoNotTrackEnvKey,
+			Value: "1",
+		})
 	}
 	return append(out, effectiveEngineEnv(spec, classInfo)...)
 }
