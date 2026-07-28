@@ -389,6 +389,36 @@ def go_str(v: object) -> str:
     return f'"{v}"'
 
 
+def go_named_const(v: object, consts: Dict[str, str], what: str) -> str:
+    """Render a projected string as the existing Go constant that carries it.
+
+    Two reasons a model's emit hook reaches for this instead of go_str. It
+    single-sources the token's spelling: rename the constant or change its value
+    and the fixture either stops compiling or regenerates differently, rather
+    than agreeing with production by coincidence. And it keeps a fixture with
+    hundreds of cases from dominating the package's duplicate-literal count --
+    goconst tallies occurrences package-wide and reports them against whichever
+    line is not excluded, so a generated file can make a lint failure appear in
+    production code it has nothing to do with.
+
+    A missing entry fails generation rather than falling back to a quoted
+    literal, which would keep the fixture compiling while quietly giving up both
+    properties.
+
+    The mapping belongs to the model (see MODELS) because the vocabularies do
+    not match: a spec names a decision, Go names a status token, and the two
+    differ on purpose in at least one place.
+    """
+    ident = consts.get(str(v))
+    if ident is None:
+        raise SystemExit(
+            f"error: {what} value {v!r} has no Go constant in this model's "
+            "mapping.\n       Add it, or the fixture would restate the literal and "
+            "drift from production\n       the next time the constant changes."
+        )
+    return ident
+
+
 # ---------------------------------------------------------------------------
 # Per-model configuration
 # ---------------------------------------------------------------------------
@@ -890,7 +920,10 @@ type tlaWakeState struct {
 \tWakeAge  int // -1: the operator holds no demand for this engine
 \tIdleAge  int // -1: status.lastActivityTime is unset
 \tActivity string
-\tReason   string
+\t// Reason is emitted as the production constant that carries the token
+\t// (AutoStopReasonIdle and friends), so the fixture and status.autoStopReason
+\t// cannot drift to two spellings of the same decision.
+\tReason string
 }
 
 // tlaWakeTestCase references tlaWakeStatePool by index. Start is the index of
@@ -995,6 +1028,25 @@ def wake_project(state: State) -> StateKey:
     )
 
 
+# The model's reason tokens, mapped to the constants production writes to
+# status.autoStopReason. The fixture emits the IDENTIFIER, so the spelling of
+# every token is single-sourced from engine_autostop.go -- note that the
+# vocabularies already differ once ("ActivityObserved" is AutoStopReasonActivity),
+# which is exactly the kind of drift a quoted literal would hide.
+#
+# Activity is deliberately absent from this treatment: "quiet" / "busy" /
+# "scrapeFailed" are model abstractions of a metric scrape with no production
+# constant to point at, so a literal is the honest rendering.
+WAKE_REASON_CONSTS = {
+    "Stopped": "AutoStopReasonStopped",
+    "WakeRequested": "AutoStopReasonWakeRequested",
+    "ScrapeFailed": "AutoStopReasonScrapeFailed",
+    "ActivityObserved": "AutoStopReasonActivity",
+    "Idle": "AutoStopReasonIdle",
+    "Initializing": "AutoStopReasonInitializing",
+}
+
+
 def wake_go_state_lit(key: StateKey, _ctx: Ctx) -> str:
     """Positional tlaWakeState composite literal. The outer type is elided
     because the literal sits inside `[]tlaWakeState{ … }` (the pool). Field
@@ -1006,7 +1058,7 @@ def wake_go_state_lit(key: StateKey, _ctx: Ctx) -> str:
         f"{wake_age}, "
         f"{idle_age}, "
         f"{go_str(activity)}, "
-        f"{go_str(reason)}"
+        f"{go_named_const(reason, WAKE_REASON_CONSTS, 'reason')}"
         "}"
     )
 
@@ -1088,6 +1140,8 @@ MODELS: Dict[str, SpecConfig] = {
         # MintStart+MintReady, and an instance reconcile initializes the phase
         # and then computes the rollup in the same call.
         transitive_closure=False,
+        # go_state_lit emits the Reason field as the production constant that
+        # carries the token (WAKE_REASON_CONSTS) rather than as a quoted string.
         emit_invariants=True,
         invariants_var="tlaWakeRequiredInvariants",
         invariants_test_file="wake_tla_state_test.go",
