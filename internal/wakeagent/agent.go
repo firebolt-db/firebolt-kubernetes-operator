@@ -343,7 +343,7 @@ func (a *Agent) handleHold(w http.ResponseWriter, r *http.Request) {
 	defer a.demand.ReleaseHold(engine)
 
 	ready := a.readiness.WaitChan(engine)
-	defer a.readiness.DoneWaiting(engine)
+	defer a.readiness.DoneWaiting(engine, ready)
 	timer := time.NewTimer(a.cfg.HoldTimeout)
 	defer timer.Stop()
 
@@ -362,6 +362,15 @@ func (a *Agent) handleHold(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(DecisionHeader, DecisionReleased)
 		w.WriteHeader(http.StatusOK)
 	case <-timer.C:
+		// A wake that completes exactly at the deadline can lose the race
+		// between the channel close and the timer: both arms are readable
+		// and select picks either. The engine is routable, so answer 200
+		// rather than telling the client a lie it will retry through.
+		if a.readiness.IsReady(engine) {
+			w.Header().Set(DecisionHeader, DecisionReleased)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		w.Header().Set(DecisionHeader, DecisionTimeout)
 		w.Header().Set("Retry-After", "10")
 		http.Error(w, "engine did not become ready", http.StatusServiceUnavailable)

@@ -131,9 +131,20 @@ func (t *readinessTracker) WaitChan(engine string) <-chan struct{} {
 // DoneWaiting releases one reference taken by WaitChan, dropping the
 // channel once the last waiter has gone. Safe to call for a waiter whose
 // channel was already closed by setReady.
-func (t *readinessTracker) DoneWaiting(engine string) {
+//
+// The caller passes back the channel WaitChan gave it, and the release is
+// keyed on that identity rather than on the engine name alone. Refcounts
+// are per channel generation: once setReady retires a channel, a fresh
+// hold can register a new one under the same engine name, and a stale
+// release from the previous generation must not decrement — let alone
+// delete — the new waiter's registration, or that hold would be stranded
+// until its timeout.
+func (t *readinessTracker) DoneWaiting(engine string, ch <-chan struct{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if current, ok := t.waiters[engine]; !ok || current != ch {
+		return
+	}
 	n, ok := t.waiterRefs[engine]
 	if !ok {
 		return
