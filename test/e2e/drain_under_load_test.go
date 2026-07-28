@@ -20,14 +20,7 @@ limitations under the License.
 package e2e
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"net"
-	"os/exec"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -67,192 +60,14 @@ const (
 	// the pod template purely to trigger a blue-green rollout. No node
 	// carries a matching taint, so scheduling is unaffected.
 	drainRolloutTolerationKey = "firebolt.io/e2e-drain-under-load"
-
-	// drainLoadWorkers is how many queries the in-pod loop keeps in flight
-	// concurrently. Their execution windows overlap, so the union leaves no
-	// instant where the engine has nothing running.
-	//
-	// Deliberately 2, not more: the client pod has a 16Mi memory limit, and the
-	// real peak inside it during the hold window is three concurrent curls —
-	// these two load workers plus the metrics scrape that samples the gauge once
-	// a second — one more than the previous shape's peak of two. Whether that
-	// envelope fits 16Mi is ultimately proven by CI, not by this arithmetic.
-	// Raising the worker count would widen it further and would mean raising
-	// CreateClientPod's limit, which every other spec shares. Concurrency is not
-	// what fixes the flake anyway — moving the loop in-pod is, since that
-	// shrinks the hole between consecutive queries from a kubectl-exec
-	// round-trip to a local process spawn.
-	drainLoadWorkers = 2
-	// drainLoadStopFile is touched inside the client pod to end the loop.
-	drainLoadStopFile = "/tmp/e2e-drain-load-stop"
-	// drainLoadBackstop bounds the in-pod loop's own lifetime, in seconds, in
-	// case the test dies before it can touch the stop file. Must exceed
-	// rolloutToDrainingTimeout + drainHoldWindow, since the load has to stay up
-	// across the whole rollout wait and the hold.
-	drainLoadBackstop = 420
-	// drainLoadDrainTimeout bounds waiting for the in-pod loop to notice the
-	// stop file: one worker may be mid-query, and curl's own --max-time is 33s.
-	drainLoadDrainTimeout = 60 * time.Second
 )
 
-// lockedBuffer collects the exec's output. The command runs on its own
-// goroutine, so writes must not race a read that happens after a timeout.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-// keepPodBusy keeps queries continuously in flight against one pod IP until the
-// returned stop func is called, and reports how many completed.
-//
-// The loop runs INSIDE the client pod under a single long-lived kubectl exec,
-// and that is the entire point. Re-issuing a query from the test process costs a
-// kubectl-exec round-trip — API-server SPDY handshake plus a container process
-// spawn — during which no query is running on the engine and
-// firebolt_running_queries is legitimately 0. The drain probe samples that gauge
-// instantaneously, on every reconcile, so a scrape landing in one of those holes
-// correctly concludes the drain is complete and releases the generation. The
-// earlier shape here (two goroutines each looping kubectl exec) only lowered the
-// odds of both workers being between queries at the same instant; it could not
-// remove them, and a contended runner widens every hole, which is what made this
-// spec fail across unrelated branches. In-pod, re-issuing costs a local curl
-// spawn and drainLoadWorkers of them overlap, so the busy signal has no gap for
-// the probe to find.
-//
-// This matters because the spec asserts something STRONGER than the drain
-// contract. The contract is "do not release a generation with in-flight
-// queries"; the assertion is "stay in draining for drainHoldWindow while I load
-// it". Those coincide only while the load is genuinely gapless — during an idle
-// instant the operator is entitled to release, so a gap makes the spec fail on
-// correct behaviour. Fixing the premise is what keeps the strong assertion
-// honest; weakening the assertion instead (only failing when a release coincides
-// with an observed non-zero gauge) would let an operator that never checks at
-// all pass whenever it got lucky with the timing.
-//
-// Stopping is a file the test touches, not a kill: killing kubectl does not reap
-// the shell inside the container, and a loop left running would keep the pod busy
-// and stall the release assertion that follows.
-//
-// stop is idempotent: only the first call touches the stop file and waits for
-// the loop to drain; later calls return the same counts. That lets a
-// DeferCleanup guarantee the loop is stopped on any exit while the success
-// path keeps its own explicit call, which needs the counts before asserting.
+// keepPodBusy keeps queries in flight against ONE pod, bypassing the cluster
+// Service. That targeting is the point: the drain spec has to keep loading the
+// OLD generation after the selector has flipped away from it, which is exactly
+// the traffic the drain check exists to protect.
 func keepPodBusy(ctx context.Context, clientPod, podIP string) (stop func() (succeeded, failed int64)) {
-	url := fmt.Sprintf("http://%s/?query_label=e2e-drain-load&output_format=JSON_Compact",
-		net.JoinHostPort(podIP, "3473"))
-
-	// POSIX sh — the client pod is curlimages/curl, which is Alpine/BusyBox.
-	// The SQL arrives through the environment rather than being interpolated
-	// into the script, so no quoting in the query can break the shell.
-	script := fmt.Sprintf(`
-rm -f %[1]s
-deadline=$(( $(date +%%s) + %[2]d ))
-w=0
-while [ $w -lt %[3]d ]; do
-  w=$((w + 1))
-  (
-    while [ ! -f %[1]s ] && [ "$(date +%%s)" -lt "$deadline" ]; do
-      if curl -sSf --connect-timeout 2 --max-time 33 -X POST \
-          -H 'Content-Type: text/plain' --data-binary "$QUERY" %[4]q >/dev/null 2>&1; then
-        echo OK
-      else
-        echo FAIL
-      fi
-    done
-  ) &
-done
-wait
-`, drainLoadStopFile, drainLoadBackstop, drainLoadWorkers, url)
-
-	args := kubectlArgs("exec", clientPod, "-n", testNamespace, "--",
-		"env", "QUERY="+computeBoundQuery, "sh", "-c", script)
-	out := &lockedBuffer{}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stdout = out
-	cmd.Stderr = out
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer GinkgoRecover()
-		_ = cmd.Run() // a non-zero exit is reported through the counts below
-	}()
-
-	var stopOnce sync.Once
-	var succeeded, failed int64
-	return func() (int64, int64) {
-		stopOnce.Do(func() {
-			touch := exec.CommandContext(ctx, "kubectl", kubectlArgs(
-				"exec", clientPod, "-n", testNamespace, "--", "touch", drainLoadStopFile)...)
-			if err := touch.Run(); err != nil {
-				GinkgoWriter.Printf("could not touch %s (loop will stop at its backstop): %v\n",
-					drainLoadStopFile, err)
-			}
-			select {
-			case <-done:
-			case <-time.After(drainLoadDrainTimeout):
-				GinkgoWriter.Printf("in-pod load loop did not exit within %s\n", drainLoadDrainTimeout)
-			}
-			for _, line := range strings.Split(out.String(), "\n") {
-				switch strings.TrimSpace(line) {
-				case "OK":
-					succeeded++
-				case "FAIL":
-					failed++
-				}
-			}
-		})
-		return succeeded, failed
-	}
-}
-
-// drainHoldFailure explains a hold-window failure in terms of whether the
-// spec's own premise held, because the three causes need different responses and
-// the failure output could not previously tell them apart: the anti-vacuity
-// check sat after the hold assertion, so a failing run never reached it.
-//
-// The no-samples case is separate on purpose. It is reached when every scrape
-// failed, which means the premise was never OBSERVED — not that it held. Folding
-// it in with "no idle sample seen" would print "non-zero at every sample" over an
-// empty list and point at the operator, which is precisely the misdiagnosis this
-// function exists to prevent.
-func drainHoldFailure(samples []int64, idle, scrapeErrors int) string {
-	rendered := make([]string, 0, len(samples))
-	for _, s := range samples {
-		rendered = append(rendered, strconv.FormatInt(s, 10))
-	}
-	joined := strings.Join(rendered, ",")
-
-	if len(samples) == 0 {
-		return fmt.Sprintf("INCONCLUSIVE, and the premise was never observed: no usable gauge "+
-			"sample was obtained during the hold window (%d scrape attempts failed or returned "+
-			"unparsable metrics). Whether the pod was busy is unknown, so this run says nothing "+
-			"about the operator either way. Fix the scrape path first.", scrapeErrors)
-	}
-	if idle > 0 {
-		return fmt.Sprintf("INCONCLUSIVE, not a product failure: the load generator left the "+
-			"old-generation pod idle — running+suspended read 0 on %d of %d samples [%s]; failed "+
-			"scrapes: %d. Releasing a drain during an idle instant is permitted by the contract, "+
-			"so this run says nothing about the operator. Fix the load generator, not the operator.",
-			idle, len(samples), joined, scrapeErrors)
-	}
-	return fmt.Sprintf("LIKELY CONTRACT VIOLATION: the draining generation was released even "+
-		"though running+suspended was non-zero at every one of %d samples [%s]; failed scrapes: "+
-		"%d. Sampling is coarser than the drain probe, so an unobserved idle instant is not fully "+
-		"excluded, but the operator releasing a generation with queries in flight is the first "+
-		"thing to rule out.", len(samples), joined, scrapeErrors)
+	return keepURLBusy(ctx, clientPod, enginePodQueryURL(podIP), computeBoundQuery)
 }
 
 var _ = Describe("Firebolt Engine Drain", func() {
@@ -331,28 +146,14 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			// whether the premise held. Recording it does not weaken the
 			// assertion: the phase check below is unconditional, so any release
 			// fails the spec whether or not a sample caught the pod busy.
-			var activeSamples []int64
-			idleSamples, scrapeErrors := 0, 0
+			var held loadHoldTracker
 			Consistently(func(g Gomega) {
-				// A failed or unparsable scrape is counted, not ignored: "the pod
-				// was busy at every sample" and "there were no samples" are
-				// different findings, and only the count tells them apart.
-				body, err := scrapeEnginePodMetrics(ctx, clientPod, oldPod.Status.PodIP)
-				if err != nil {
-					scrapeErrors++
-				} else if v, ok := parseActiveQueries(body); ok {
-					activeSamples = append(activeSamples, v)
-					if v == 0 {
-						idleSamples++
-					}
-				} else {
-					scrapeErrors++
-				}
+				held.sample(ctx, clientPod, oldPod.Status.PodIP)
 
 				engine, err := GetEngine(ctx, engineName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(string(engine.Status.Phase)).To(Equal(string(computev1alpha1.PhaseDraining)),
-					drainHoldFailure(activeSamples, idleSamples, scrapeErrors))
+					held.failure("released the draining generation"))
 				g.Expect(engine.Status.DrainingGeneration).NotTo(BeNil())
 
 				pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, oldPod.Name, metav1.GetOptions{})
@@ -363,12 +164,12 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			// Belt-and-braces on the premise for a run that PASSED: a hold that
 			// never saw the pod busy proved nothing, and would otherwise be
 			// indistinguishable from a real one.
-			Expect(activeSamples).NotTo(BeEmpty(),
+			Expect(held.samples).NotTo(BeEmpty(),
 				"no usable gauge sample was taken during the hold window (%d scrape attempts "+
-					"failed), so the pod was never observed busy", scrapeErrors)
-			Expect(idleSamples).To(BeZero(),
+					"failed), so the pod was never observed busy", held.scrapeErrors)
+			Expect(held.idle).To(BeZero(),
 				"the pod went idle during the hold window (%d of %d samples read 0); the hold "+
-					"proved nothing even though it passed", idleSamples, len(activeSamples))
+					"proved nothing even though it passed", held.idle, len(held.samples))
 
 			By("Stopping the query load")
 			succeeded, failed := stopLoad()
