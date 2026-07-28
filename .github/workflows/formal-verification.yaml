@@ -189,7 +189,14 @@ jobs:
           # attacker-controlled text.
           MODEL_SCOPE_TEXT: ${{ github.event.pull_request.body }}
           BASE_REF: origin/${{ github.base_ref }}
-        run: scripts/ci/check-model-scope.sh "$BASE_REF" HEAD
+        # Invoked through `bash` so the step does not depend on the file mode
+        # surviving. The mode IS committed (100755), so this is not fixing a
+        # break; it removes a way to get a confusing one. A lost execute bit
+        # fails with "permission denied" and reads like infrastructure trouble
+        # rather than what it is, and the sibling scripts in release-main.yaml
+        # guard the same hazard with `chmod +x` — which mutates the checkout to
+        # re-assert something git already records.
+        run: bash scripts/ci/check-model-scope.sh "$BASE_REF" HEAD
 
   # Single stable required-check name for branch protection. Keeping the
   # required name "TLC model checker" on this gate (the worker jobs are "TLC"
