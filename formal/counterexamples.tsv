@@ -23,3 +23,4 @@
 # scripts/ci/check-counterexamples.sh also refuses any formal/*Naive*.cfg this
 # table omits: a naive config nothing runs looks like coverage and is not.
 SigningKeyRotationNaive.cfg	SigningKeyRotation.tla	Invariant NoValidationGap is violated
+FireboltEngineNaiveService.cfg	FireboltEngine.tla	Invariant Inv_ServiceKnownGen is violated

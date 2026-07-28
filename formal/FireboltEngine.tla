@@ -58,7 +58,15 @@ EXTENDS Integers, TLC
 
 CONSTANTS
     MaxGen,     \* upper bound on generation numbers (e.g. 2)
-    MaxSpec     \* upper bound on spec versions (e.g. 2)
+    MaxSpec,    \* upper bound on spec versions (e.g. 2)
+    SwitchWithoutService
+      \* TRUE removes the cutover gate in ReconcileSwitching_Complete: the
+      \* switch finalises even though the cluster Service still points at an
+      \* older generation. The shipped design is FALSE;
+      \* FireboltEngineNaiveService.cfg flips it and
+      \* `make formal-check-counterexample` requires that TLC still reports the
+      \* Inv_ServiceKnownGen violation. Same shape as AnchorAtDemotion in
+      \* SigningKeyRotation.tla.
 
 Gens     == 0..MaxGen
 SpecVers == 0..MaxSpec
@@ -332,7 +340,7 @@ ReconcileSwitching_Complete ==
     \* (first deployment, activeGen = -1) go directly to a terminal phase
     \* chosen by TerminalPhase (stable or stopped).
     /\ phase = "switching"
-    /\ svcTargetGen = currentGen
+    /\ (svcTargetGen = currentGen \/ SwitchWithoutService)
     /\ activeGen' = currentGen
     /\ \/ \* First deployment: no old generation to drain.
           /\ activeGen = -1
