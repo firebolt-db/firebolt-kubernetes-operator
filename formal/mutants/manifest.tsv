@@ -1,5 +1,7 @@
-# Pinned mutants: each row is a deliberately-broken reconciler that the TLA+
-# state-cover suite MUST still catch. Columns are tab-separated:
+# Pinned mutants: each row is a deliberately-broken reconciler that the named
+# Go test MUST still catch. Most rows name a state-cover test; the autostop
+# row names a rapid property harness (see its comment below). Columns are
+# tab-separated:
 #
 #   <patch file>\t<go test name>\t<message that must appear in the output>
 #
@@ -31,3 +33,24 @@ creating-advance-without-pods-ready.patch	TestTLAEngineStateCover	result not in 
 switching-flip-active-without-service.patch	TestTLAEngineStateCover	Inv_ServiceKnownGen
 cleaning-keeps-draining-generation.patch	TestTLAEngineStateCover	Inv_DrainingPhase|Inv_TerminalNoDraining
 rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not in the TLA+ reconciler closure
+#
+# The autostop row below is the negative control for the rapid layer, not the
+# state cover. Every other row names a state-cover test, which proves the
+# state cover can go red but says nothing about the four rapid property
+# harnesses. This row's defect is provably outside the state cover's reach:
+# computeAutoStopDecision is bound to no TLA+ spec (see the unmodelled list in
+# formal/model-scope.tsv), and the full TestTLA*StateCover suite passes with
+# the patch applied. The mutant inverts the wake-TTL comparison, so fresh
+# demand is ignored (a parked engine never wakes) and expired demand is
+# honored (a stale stamp resurrects a stopped engine).
+#
+# Determinism: the property harness fails on any draw with autoStop enabled
+# and a wake stamp present (~25% of draws), so a default run misses the
+# mutant with probability ~0.75^100 ~= 3e-13. Measured locally: caught in
+# 100/100 runs. No pinned rapid seed is needed; if the harness's draw
+# distribution changes, re-measure before relaxing this row.
+#
+# The example-based autostop unit tests catch this mutation too. The row
+# names the rapid harness anyway because its purpose is to prove THAT harness
+# can fail; the runner executes only the named test.
+autostop-wake-honors-expired-demand.patch	TestComputeAutoStopDecision_Properties	want "WakeRequested"|Reason = "WakeRequested"
