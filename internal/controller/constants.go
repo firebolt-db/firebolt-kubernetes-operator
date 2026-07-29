@@ -298,9 +298,10 @@ func UseDirectEngineRepository() {
 // EngineDoNotTrackEnvKey is the environment variable the engine's telemetry
 // SDK honors as an opt-out (the cross-vendor Do Not Track convention).
 // Intentionally NOT listed in operatorOwnedEngineEnvKeys: users are
-// documented to set it themselves, and user-supplied env is appended after
-// the operator's entries so a user value takes precedence (Kubernetes
-// resolves duplicate env names to the last occurrence).
+// documented to set it themselves. When a class or engine template supplies
+// it, the operator skips its own injection so the user value is the sole
+// entry — Server-Side Apply treats env as a map keyed by name and rejects
+// duplicates, so the two entries must never coexist.
 const EngineDoNotTrackEnvKey = "DO_NOT_TRACK"
 
 // engineTelemetryDisabled makes buildEngineContainerEnv stamp

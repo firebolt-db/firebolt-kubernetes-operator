@@ -2414,7 +2414,11 @@ func buildEngineTLSVolumeMounts(tls *ResolvedEngineTLSInfo) []corev1.VolumeMount
 // engine container: operator-injected vars first (POD_INDEX,
 // FB_AWS_EC2_METADATA_CLIENT_ENABLED, and DO_NOT_TRACK when engine
 // telemetry is disabled), then class then engine user-supplied
-// entries in that order. Shared between
+// entries in that order. DO_NOT_TRACK is skipped when the class or
+// engine template already sets it: the user value must be the only
+// entry because StatefulSets are written via Server-Side Apply, where
+// env is an associative list keyed by name and duplicate keys are
+// rejected. Shared between
 // buildStatefulSet (write path) and engineContainerExtraFieldsMatch
 // (drift comparator) so a future env injection or reordering lands
 // in both at once.
@@ -2436,13 +2440,24 @@ func buildEngineContainerEnv(spec *computev1alpha1.FireboltEngineSpec, classInfo
 			Value: "true",
 		},
 	}
-	if engineTelemetryDisabled {
+	userEnv := effectiveEngineEnv(spec, classInfo)
+	if engineTelemetryDisabled && !envContainsName(userEnv, EngineDoNotTrackEnvKey) {
 		out = append(out, corev1.EnvVar{
 			Name:  EngineDoNotTrackEnvKey,
 			Value: "1",
 		})
 	}
-	return append(out, effectiveEngineEnv(spec, classInfo)...)
+	return append(out, userEnv...)
+}
+
+// envContainsName reports whether any entry in env has the given name.
+func envContainsName(env []corev1.EnvVar, name string) bool {
+	for i := range env {
+		if env[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // effectiveEngineLifecycle resolves the Lifecycle hooks stamped on
