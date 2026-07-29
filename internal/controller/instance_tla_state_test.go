@@ -129,18 +129,6 @@ func projectInstanceSim(m *instanceSim) tlaInstanceState {
 	}
 }
 
-// instanceClosureContains reports whether `actual` is one of the TLA+ states
-// the model considers reachable from the test's starting state via 0+
-// reconciler-only transitions. closureIDs are indices into tlaInstanceStatePool.
-func instanceClosureContains(closureIDs []int, actual tlaInstanceState) bool {
-	for _, id := range closureIDs {
-		if tlaInstanceStatePool[id] == actual {
-			return true
-		}
-	}
-	return false
-}
-
 // tlaInstanceInvariants mirrors the Check predicates in instance_property_test.go.
 func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 	t.Helper()
@@ -209,7 +197,7 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			// Guard the fixture itself: if materialization does not reproduce the
 			// starting state, the closure assertion below proves nothing, and a
 			// projection that drops a field would go unnoticed.
-			if got := projectInstanceSim(m); got != start {
+			if got := projectInstanceSim(m); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
 
@@ -228,27 +216,11 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			tlaInstanceInvariants(t, m)
 
 			actual := projectInstanceSim(m)
-			if !instanceClosureContains(tc.Closure, actual) {
+			if !tlaClosureContains(tlaInstanceStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), formatInstanceClosure(tc.Closure))
+					start, actual, len(tc.Closure), tlaFormatClosure(tlaInstanceStatePool, tc.Closure))
 			}
 		})
 	}
 	t.Logf("instance state cover: ran %d cases", len(tlaInstanceStateCases))
-}
-
-// formatInstanceClosure renders the first few entries of a closure index list
-// for inclusion in a Fatalf message; pool indices are surfaced so errors
-// point straight back into tlaInstanceStatePool.
-func formatInstanceClosure(closureIDs []int) string {
-	const limit = 8
-	out := ""
-	for i, id := range closureIDs {
-		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
-			break
-		}
-		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaInstanceStatePool[id])
-	}
-	return out
 }

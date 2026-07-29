@@ -179,6 +179,28 @@ Enabling or disabling engine TLS on an already-running, traffic-serving fleet ha
 
 This window is bounded to the transition of a deliberate admin operation, and engine TLS is a new opt-in feature, so plaintext deployments see no regression. A fully hitless transition would require dual-listener (plaintext and TLS) support on the Engine side in packdb, which is outside the Firebolt Operator's scope.
 
+## Formal verification
+
+The Firebolt Operator's core state machines are specified in TLA+ and model-checked in CI, alongside the Go tests — five specifications today. The specifications are not documentation of the code — they are the argument for why the code's ordering constraints are the ones they are, and `make formal-verify` fails when the two disagree.
+
+| Specification | What it covers | What it proves |
+|---|---|---|
+| `FireboltEngine.tla` | the blue-green phase machine | no generation serves traffic without a StatefulSet, no drain is abandoned |
+| `FireboltInstance.tla` | the component readiness rollup | the phase matches what the components report |
+| `SigningKeyRotation.tla` | JWT signing-key rotation | no Engine ever signs with a key another cannot validate |
+| `EngineWake.tla` | wake-on-zero demand and auto-stop | an Engine only starts on demand that is current, and demand that keeps being observable is never lost |
+| `WakeAgentHold.tla` | the wake agent's readiness waiter | a held query is always releasable by a future readiness edge |
+
+Two properties hold the wake protocol together, and both are about the gap between two views of the same fact. The wake agent stamps demand and retains it for ten minutes; the Firebolt Operator polls that stamp into its own cache and honours it for five. So the cache legitimately holds stamps that are too old to act on, and re-observing one after a failed poll is normal rather than exceptional. `EngineWake.tla` therefore asserts on the transition, not on the state: an Engine's replica count only ever *grows* while the cache holds demand fresh within the TTL, and a running Engine's count only ever changes by being parked. The second is what the poller's filter to Engines at `replicas: 0` exists for — the agent stamps demand for any Engine with no ready endpoints, which includes a running Engine during a node drain, and wake sits above the idle check, so an unfiltered stamp would pin a hand-sized Engine at `activeReplicas` in the middle of its own outage.
+
+Progress is stated with the same care. Demand the Firebolt Operator keeps seeing always ends in a scale-up; a *single* observation can be lost, because a failed scrape replaces the demand cache wholesale and the stamp may age past the TTL before the next poll succeeds. That is a deliberate trade — the alternative is a cache that resurrects demand the agents no longer report — and it is bounded by the client's own retry. The one ordering the feature cannot survive losing is the wake check sitting *above* the `replicas == 0` early return in `computeAutoStopDecision`: an auto-stopped Engine is an Engine at zero replicas, so the other order makes wake impossible. Flipping it in the model breaks the liveness property, and flipping it in the reconciler breaks the state-cover suite; both are pinned.
+
+`WakeAgentHold.tla` settles a narrower question. The agent parks each held query on a channel it refcounts per Engine, and the readiness watch retires that channel when endpoints appear — so a later query registers a fresh channel under the same Engine name while an earlier query is still on its way out. Releasing by Engine name alone lets that late release delete the new registration, leaving a query parked on a channel nothing will ever close: it waits out its full timeout while the Engine it wanted is up and serving. Keying the release on the identity of the channel the query was handed is what makes this safe, and the model finds no stranded waiter under it.
+
+Every one of these claims is falsifiable by construction. Each specification carries boolean constants that remove exactly one shipped guard, [formal/counterexamples.tsv](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/counterexamples.tsv) records the violation each removal must still produce, and [formal/mutants/](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/mutants) does the same to the Go reconciler — a patch per deliberately-broken guard that the state-cover suite must still catch. A green model check is only evidence if the check could have gone red.
+
+What is *not* modelled is recorded too, in [formal/model-scope.tsv](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/model-scope.tsv): the FireboltEngineClass merge layer, drain timeouts, and the Go side of the wake agent's hold path (its state is unexported in-memory bookkeeping in a package that deliberately does not depend on controller-runtime). "The TLA+ suite passes" is never the same claim as "this change is verified".
+
 ## Design principles
 
 The Firebolt Operator uses a **level-triggered** (not edge-triggered) reconciliation model. Each invocation of `Reconcile` reads the full desired state (`.spec`) and the full observed state (cluster resources), computes the delta, and applies it. The reconciler does not depend on knowing _what changed_. It only depends on _what is_.
