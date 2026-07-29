@@ -49,9 +49,9 @@ func TestUseDirectEngineRepositoryPreservesUserOverride(t *testing.T) {
 
 // TestDisableEngineTelemetryInjectsDoNotTrack pins the engine-pod opt-out
 // behavior: DO_NOT_TRACK=1 is stamped only after DisableEngineTelemetry(),
-// it lands before user-supplied env (so a user value wins via Kubernetes'
-// last-occurrence duplicate resolution), and the default rendering stays
-// untouched.
+// injection is skipped when the user already supplies the key (Server-Side
+// Apply rejects duplicate env names, so the user entry must be the only
+// one), and the default rendering stays untouched.
 func TestDisableEngineTelemetryInjectsDoNotTrack(t *testing.T) {
 	t.Cleanup(func() { engineTelemetryDisabled = false })
 
@@ -80,8 +80,9 @@ func TestDisableEngineTelemetryInjectsDoNotTrack(t *testing.T) {
 		t.Errorf("DO_NOT_TRACK = %q, want %q", env[idx[0]].Value, "1")
 	}
 
-	// User env is appended after operator env, so a user-supplied value
-	// resolves last and wins.
+	// A user-supplied DO_NOT_TRACK suppresses the operator's injection:
+	// the rendered env must carry exactly one entry — the user's — or
+	// Server-Side Apply would reject the StatefulSet for a duplicate key.
 	spec := &computev1alpha1.FireboltEngineSpec{
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -94,11 +95,11 @@ func TestDisableEngineTelemetryInjectsDoNotTrack(t *testing.T) {
 	}
 	env = buildEngineContainerEnv(spec, nil)
 	idx = findDoNotTrack(env)
-	if len(idx) != 2 {
-		t.Fatalf("with user override: DO_NOT_TRACK occurrences = %d, want 2 (operator then user)", len(idx))
+	if len(idx) != 1 {
+		t.Fatalf("with user override: DO_NOT_TRACK occurrences = %d, want 1 (user entry only)", len(idx))
 	}
-	if last := env[idx[len(idx)-1]]; last.Value != "0" {
-		t.Errorf("last DO_NOT_TRACK = %q, want user value %q", last.Value, "0")
+	if got := env[idx[0]].Value; got != "0" {
+		t.Errorf("DO_NOT_TRACK = %q, want user value %q", got, "0")
 	}
 }
 
