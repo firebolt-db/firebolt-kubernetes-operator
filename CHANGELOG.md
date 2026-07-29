@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.1...firebolt-operator-v0.6.0) (2026-07-28)
+
+
+### Features
+
+* **cmd:** run the wake agent as a manager subcommand (FB-2553) ([36e8973](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/36e8973d2316d27e0ab9882d95170582dde7080d))
+* **controller:** wake stopped engines from gateway demand (FB-2553) ([7439de9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7439de9f5766f88be58ca2e7bd7cf8bafa39e855))
+* **gateway:** add a read-only wake agent for stopped-engine queries (FB-2553) ([5699b28](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5699b287b5980273833337277cea6675038656d0))
+
+
+### Bug Fixes
+
+* **controller:** say wake-on-zero is off with a user gateway ServiceAccount (FB-2553) ([6134029](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/613402994723426b193ad343f4babc19b784c57b))
+* **formal:** give mktemp a template so the mutant check runs on macOS (FB-2582) ([6c433c5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c433c5e38766a04051a90eb5730a9905f8fb8a5))
+* **formal:** never leave a mutant applied when the check aborts (FB-2582) ([db6a74e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/db6a74efee32cfda63fed3431e601206bba95071))
+* **formal:** pin the cleaning mutant by hazard, not by sort order (FB-2583) ([40772e2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40772e22cb70a7ef1599337049a3f4790f7557b8))
+* **formal:** stop re-downloading tla2tools on every formal target (FB-2609) ([8ffcc06](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8ffcc066cac4895663d11efd0d871977581b31db))
+* **gateway:** bound the demand tracker at a hard engine-name cap (FB-2553) ([e83154e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e83154e147f716092c14e12b1a9ae812f1cd0396))
+* **gateway:** key waiter release on channel identity, not engine name (FB-2553) ([340706f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/340706f53e55d36f031157f646ba5ea3a66b8886))
+* **gateway:** stop telling users to grant engine write RBAC (FB-2553) ([6390984](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/63909842088aeed3c223b587249dda697b95894d))
+* **gateway:** stop the wake agent from being able to take the gateway down (FB-2553) ([134b27c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/134b27c6169a870f4206d2c776158f14fd314666))
+
 ## [0.5.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.0...firebolt-operator-v0.5.1) (2026-07-27)
 
 
