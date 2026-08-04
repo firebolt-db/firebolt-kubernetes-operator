@@ -2,6 +2,25 @@
 
 appVersion: v0.1.1
 
+## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.3.0...firebolt-operator-chart-0.4.0) (2026-08-04)
+
+
+### Features
+
+* **controller:** wake stopped engines from gateway demand (FB-2553) ([7439de9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7439de9f5766f88be58ca2e7bd7cf8bafa39e855))
+
+
+### Bug Fixes
+
+* **security:** harden auth & TLS secret, certificate, and admission guards (FB-896) ([#89](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/89)) ([e7794ee](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e7794ee489ec149d686c0fbdf768422cf3927e80))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.5.0 ([73b1da8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/73b1da834c2f2f7d1b26b6b5c0d94b422a60f84a))
+* **deps:** set chart appVersion to v0.5.1 ([a1674d5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a1674d5c87db4ebdcfc7887aa68632065c65fe37))
+* **deps:** set chart appVersion to v0.6.0 ([4e4adb7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4e4adb700185a26a047dfcab1f3d9a8669c0752e))
+
 ## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.2.0...firebolt-operator-chart-0.3.0) (2026-07-27)
 
 
