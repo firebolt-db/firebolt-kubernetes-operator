@@ -17,11 +17,10 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/xml"
+	"encoding/json"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -44,13 +43,13 @@ const (
 func (r *FireboltInstanceReconciler) ensureMetadataResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	configXML := buildMetadataConfigXML(instance)
+	configYAML := buildMetadataConfigYAML(instance)
 
-	if err := r.ensureMetadataConfigMap(ctx, instance, configXML); err != nil {
+	if err := r.ensureMetadataConfigMap(ctx, instance, configYAML); err != nil {
 		return fmt.Errorf("ensuring metadata configmap: %w", err)
 	}
 
-	if err := r.ensureMetadataDeployment(ctx, instance, configXML); err != nil {
+	if err := r.ensureMetadataDeployment(ctx, instance, configYAML); err != nil {
 		return fmt.Errorf("ensuring metadata deployment: %w", err)
 	}
 
@@ -73,7 +72,7 @@ func metadataCredsSecretName(instance *computev1alpha1.FireboltInstance) string 
 	return pgCredentialsSecretName(instance.Name)
 }
 
-func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
+func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string {
 	pgHost := pgResourceName(instance.Name) + "." + instance.Namespace + ".svc.cluster.local"
 	pgPort := int32(PostgresPort)
 	pgDatabase := PostgresDBName
@@ -99,54 +98,48 @@ func buildMetadataConfigXML(instance *computev1alpha1.FireboltInstance) string {
 
 	// All string fields interpolated below originate from user-controlled
 	// CRD inputs (spec.id, spec.metadata.postgres.{host,database,schema})
-	// and MUST be XML-escaped to prevent injection of additional XML
-	// elements that would alter the pensieve configuration. The CRD also
-	// applies a Pattern admission check on host/database/schema as
-	// defense-in-depth.
-	return fmt.Sprintf(`<?xml version="1.0"?>
-<config>
-  <pensieve_lite>
-    <default_account_id>%s</default_account_id>
-    <host>0.0.0.0</host>
-    <port>%d</port>
-    <server_threads>0</server_threads>
-    <log_level>information</log_level>
-    <metadata_storage>
-      <postgresql>
-        <host>%s</host>
-        <port>%d</port>
-        <database>%s</database>
-        <schema>%s</schema>
-        <keepalive>
-          <enabled>1</enabled>
-          <idle_sec>120</idle_sec>
-          <interval_sec>30</interval_sec>
-          <count>5</count>
-        </keepalive>
-        <connect_timeout_sec>5</connect_timeout_sec>
-      </postgresql>
-      <garbage_collection>
-        <enabled>true</enabled>
-        <interval_ms>3600000</interval_ms>
-        <time_horizon_sec>86400</time_horizon_sec>
-      </garbage_collection>
-    </metadata_storage>
-  </pensieve_lite>
-</config>`,
-		xmlEscape(instance.Spec.ID), MetadataServicePort,
-		xmlEscape(pgHost), pgPort, xmlEscape(pgDatabase), xmlEscape(pgSchema))
+	// and MUST be rendered as quoted YAML scalars (via yamlString) to prevent
+	// injection of additional YAML keys that would alter the pensieve
+	// configuration. The CRD also applies a Pattern admission check on
+	// host/database/schema as defense-in-depth.
+	//
+	// dedicated-pensieve (metadata image) loads YAML config since FB-2743;
+	// the document root must be a YAML map (a scalar/sequence root is rejected).
+	return fmt.Sprintf(`pensieve_lite:
+  default_account_id: %s
+  host: 0.0.0.0
+  port: %d
+  server_threads: 0
+  log_level: information
+  metadata_storage:
+    postgresql:
+      host: %s
+      port: %d
+      database: %s
+      schema: %s
+      keepalive:
+        enabled: 1
+        idle_sec: 120
+        interval_sec: 30
+        count: 5
+      connect_timeout_sec: 5
+    garbage_collection:
+      enabled: true
+      interval_ms: 3600000
+      time_horizon_sec: 86400
+`,
+		yamlString(instance.Spec.ID), MetadataServicePort,
+		yamlString(pgHost), pgPort, yamlString(pgDatabase), yamlString(pgSchema))
 }
 
-// xmlEscape returns s with XML metacharacters replaced by their entity
-// references, suitable for safe interpolation as element content. Used
-// for every user-controlled field that buildMetadataConfigXML pastes
-// into the pensieve config template.
-func xmlEscape(s string) string {
-	var buf bytes.Buffer
-	// xml.EscapeText only fails when the writer fails; bytes.Buffer
-	// never returns an error from Write, so the error is unreachable.
-	_ = xml.EscapeText(&buf, []byte(s))
-	return buf.String()
+// yamlString renders s as a YAML-safe double-quoted scalar. A JSON string
+// literal is always a valid YAML double-quoted scalar (YAML is a JSON
+// superset), so json.Marshal yields correct quoting and escaping for every
+// user-controlled field interpolated into the pensieve config template,
+// preventing YAML injection. json.Marshal never returns an error for a string.
+func yamlString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func metadataConfigMapName(instanceName string) string {
@@ -170,7 +163,7 @@ func metadataConfigMapName(instanceName string) string {
 // bumped when the resulting object matches what is already stored,
 // so the Deployment controller does not see spurious rollouts even
 // though the operator applies on every reconcile.
-func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
+func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context, instance *computev1alpha1.FireboltInstance, configYAML string) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 
 	name := metadataConfigMapName(instance.Name)
@@ -184,7 +177,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 			Labels:    labels,
 		},
 		Data: map[string]string{
-			"config.xml": configXML,
+			"config.yaml": configYAML,
 		},
 	}
 
@@ -208,8 +201,8 @@ func (r *FireboltInstanceReconciler) ensureMetadataConfigMap(ctx context.Context
 // routine node maintenance with no availability gain, because there's no
 // peer to fail over to). The time to add a PDB is when metadata grows a
 // genuine multi-replica HA story (quorum, leader election); revisit then.
-func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configXML string) error {
-	desired := buildMetadataDeployment(instance, configXML)
+func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, configYAML string) error {
+	desired := buildMetadataDeployment(instance, configYAML)
 	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
@@ -234,7 +227,7 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 // is false because pensieve does not call the Kubernetes API; an attacker
 // with code execution inside the container therefore has neither a SA
 // token to reach the API server nor a writable rootfs to stage payloads on.
-func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configXML string) *appsv1.Deployment {
+func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configYAML string) *appsv1.Deployment {
 	name := instance.Name + SuffixMetadataService
 	labels := instanceLabels(instance.Name, "metadata")
 
@@ -243,7 +236,7 @@ func buildMetadataDeployment(instance *computev1alpha1.FireboltInstance, configX
 		replicas = *instance.Spec.Metadata.Replicas
 	}
 
-	configHash := contentHash(configXML)
+	configHash := contentHash(configYAML)
 
 	// Surge=0 + maxUnavailable=1 means the old pod is terminated before the
 	// new one is created. The metadata service assumes single-writer against
@@ -307,7 +300,7 @@ func effectiveMetadataPodTemplate(
 		Name:            computev1alpha1.MetadataContainerName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
-		Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.xml"},
+		Command:         []string{"/dedicated-pensieve", "--config", "/configs/config.yaml"},
 		Ports: []corev1.ContainerPort{
 			{Name: "grpc", ContainerPort: int32(MetadataServicePort), Protocol: corev1.ProtocolTCP},
 		},

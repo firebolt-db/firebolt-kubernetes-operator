@@ -17,17 +17,17 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/xml"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-func TestBuildMetadataConfigXMLSchema(t *testing.T) {
+func TestBuildMetadataConfigYAMLSchema(t *testing.T) {
 	tests := []struct {
 		name     string
 		postgres *computev1alpha1.PostgresSpec
@@ -36,7 +36,7 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 		{
 			name:     "internal postgres uses default schema",
 			postgres: nil,
-			want:     "<schema>public</schema>",
+			want:     `schema: "public"`,
 		},
 		{
 			name: "external postgres without schema falls back to public",
@@ -45,7 +45,7 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 				Database:             "fb",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "creds"},
 			},
-			want: "<schema>public</schema>",
+			want: `schema: "public"`,
 		},
 		{
 			name: "external postgres with custom schema is honored",
@@ -55,7 +55,7 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 				Schema:               "firebolt_metadata",
 				CredentialsSecretRef: corev1.LocalObjectReference{Name: "creds"},
 			},
-			want: "<schema>firebolt_metadata</schema>",
+			want: `schema: "firebolt_metadata"`,
 		},
 	}
 
@@ -70,7 +70,7 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 					},
 				},
 			}
-			got := buildMetadataConfigXML(inst)
+			got := buildMetadataConfigYAML(inst)
 			if !strings.Contains(got, tc.want) {
 				t.Errorf("expected %q in rendered config; got:\n%s", tc.want, got)
 			}
@@ -78,108 +78,94 @@ func TestBuildMetadataConfigXMLSchema(t *testing.T) {
 	}
 }
 
-// TestBuildMetadataConfigXML_EscapesUserFields locks in XML escaping:
+// TestBuildMetadataConfigYAML_EscapesUserFields locks in YAML quoting:
 // every user-controlled string interpolated into the pensieve config
-// template must be XML-escaped. Without escaping, a malicious operator
-// could inject extra XML elements (e.g. a second <host>) and redirect
-// the metadata service to an attacker-controlled PostgreSQL.
+// template must be rendered as a quoted YAML scalar. Without quoting, a
+// malicious operator could inject extra YAML keys (e.g. a second host) and
+// redirect the metadata service to an attacker-controlled PostgreSQL.
 //
 // This test pretends the CRD admission Pattern (which also rejects
 // these strings at admission time) is bypassed — controller-internal
 // code must remain safe even if a future change widens the pattern.
-func TestBuildMetadataConfigXML_EscapesUserFields(t *testing.T) {
+func TestBuildMetadataConfigYAML_EscapesUserFields(t *testing.T) {
 	inst := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns"},
 		Spec: computev1alpha1.FireboltInstanceSpec{
 			ID: "acc<1>",
 			Metadata: computev1alpha1.MetadataSpec{
 				Postgres: &computev1alpha1.PostgresSpec{
-					Host:                 `evil</host><port>9999</port><host>attacker.example`,
-					Database:             `db&name`,
-					Schema:               `s"chema'`,
+					Host:                 "evil\ninjected: pwned\nhost: attacker.example",
+					Database:             `db: "name"`,
+					Schema:               `s'chema"`,
 					CredentialsSecretRef: corev1.LocalObjectReference{Name: "creds"},
 				},
 			},
 		},
 	}
 
-	got := buildMetadataConfigXML(inst)
+	got := buildMetadataConfigYAML(inst)
 
-	if strings.Contains(got, "</host><port>9999</port><host>") {
-		t.Errorf("host injection not escaped — attacker-controlled XML appears literally:\n%s", got)
+	// The rendered document must parse as YAML with a map root and round-trip
+	// each user field to its exact value. If any field were interpolated
+	// unquoted, the newline / colon payloads above would either break the parse
+	// or surface as an injected sibling key — both caught here.
+	var doc struct {
+		PensieveLite struct {
+			DefaultAccountID string `json:"default_account_id"`
+			MetadataStorage  struct {
+				PostgreSQL struct {
+					Host     string `json:"host"`
+					Database string `json:"database"`
+					Schema   string `json:"schema"`
+				} `json:"postgresql"`
+			} `json:"metadata_storage"`
+		} `json:"pensieve_lite"`
 	}
-	if strings.Contains(got, "<host>attacker.example</host>") {
-		t.Errorf("injected attacker host element appears literally:\n%s", got)
+	if err := yaml.Unmarshal([]byte(got), &doc); err != nil {
+		t.Fatalf("rendered config must be well-formed YAML: %v\n%s", err, got)
 	}
-	wantSubstrings := []string{
-		"acc&lt;1&gt;",
-		"evil&lt;/host&gt;&lt;port&gt;9999&lt;/port&gt;&lt;host&gt;attacker.example",
-		"db&amp;name",
-		"s&#34;chema&#39;",
+	pg := doc.PensieveLite.MetadataStorage.PostgreSQL
+	if pg.Host != inst.Spec.Metadata.Postgres.Host {
+		t.Errorf("host round-trip: got %q, want %q (injection leaked)", pg.Host, inst.Spec.Metadata.Postgres.Host)
 	}
-	for _, s := range wantSubstrings {
-		if !strings.Contains(got, s) {
-			t.Errorf("expected escaped substring %q in rendered config; got:\n%s", s, got)
-		}
+	if pg.Database != inst.Spec.Metadata.Postgres.Database {
+		t.Errorf("database round-trip: got %q, want %q", pg.Database, inst.Spec.Metadata.Postgres.Database)
+	}
+	if pg.Schema != inst.Spec.Metadata.Postgres.Schema {
+		t.Errorf("schema round-trip: got %q, want %q", pg.Schema, inst.Spec.Metadata.Postgres.Schema)
+	}
+	if doc.PensieveLite.DefaultAccountID != inst.Spec.ID {
+		t.Errorf("default_account_id round-trip: got %q, want %q", doc.PensieveLite.DefaultAccountID, inst.Spec.ID)
 	}
 
-	// The rendered document must still be a single well-formed XML
-	// document with exactly the expected element structure: a single
-	// pensieve_lite/metadata_storage/postgresql/host element, not two.
-	type postgresql struct {
-		Host     []string `xml:"host"`
-		Database []string `xml:"database"`
-		Schema   []string `xml:"schema"`
+	// Defense-in-depth: the injected top-level key from the host payload must
+	// not appear as a real map key (it is contained inside the quoted scalar).
+	var raw map[string]any
+	if err := yaml.Unmarshal([]byte(got), &raw); err != nil {
+		t.Fatalf("rendered config must parse into a map: %v\n%s", err, got)
 	}
-	type metadataStorage struct {
-		Postgres postgresql `xml:"postgresql"`
-	}
-	type pensieveLite struct {
-		DefaultAccountID string          `xml:"default_account_id"`
-		Storage          metadataStorage `xml:"metadata_storage"`
-	}
-	type config struct {
-		XMLName xml.Name     `xml:"config"`
-		Lite    pensieveLite `xml:"pensieve_lite"`
-	}
-	var doc config
-	if err := xml.Unmarshal([]byte(got), &doc); err != nil {
-		t.Fatalf("rendered config must be well-formed XML: %v\n%s", err, got)
-	}
-	if got, want := len(doc.Lite.Storage.Postgres.Host), 1; got != want {
-		t.Errorf("postgresql host elements: got %d, want %d (injected element leaked)", got, want)
-	}
-	if got, want := doc.Lite.Storage.Postgres.Host[0], inst.Spec.Metadata.Postgres.Host; got != want {
-		t.Errorf("host element text round-trip: got %q, want %q", got, want)
-	}
-	if got, want := doc.Lite.Storage.Postgres.Database[0], inst.Spec.Metadata.Postgres.Database; got != want {
-		t.Errorf("database element text round-trip: got %q, want %q", got, want)
-	}
-	if got, want := doc.Lite.Storage.Postgres.Schema[0], inst.Spec.Metadata.Postgres.Schema; got != want {
-		t.Errorf("schema element text round-trip: got %q, want %q", got, want)
-	}
-	if got, want := doc.Lite.DefaultAccountID, inst.Spec.ID; got != want {
-		t.Errorf("default_account_id round-trip: got %q, want %q", got, want)
+	if _, leaked := raw["injected"]; leaked {
+		t.Errorf("injected top-level key leaked into the config:\n%s", got)
 	}
 }
 
-// TestBuildMetadataConfigXML_GarbageCollectionKeys pins the GC key names to the
+// TestBuildMetadataConfigYAML_GarbageCollectionKeys pins the GC key names to the
 // dialect the dedicated-pensieve server actually reads
 // (pensieve_lite.metadata_storage.garbage_collection.{enabled,time_horizon_sec,interval_ms}).
-// An earlier template rendered <interval_seconds>/<max_age_seconds>, key names no server
+// An earlier template rendered interval_seconds/max_age_seconds, key names no server
 // version has ever read, so GC silently ran on the server defaults (60s interval, 1h
 // horizon) instead of the values below.
-func TestBuildMetadataConfigXML_GarbageCollectionKeys(t *testing.T) {
-	got := buildMetadataConfigXML(mkMetadataInstance())
+func TestBuildMetadataConfigYAML_GarbageCollectionKeys(t *testing.T) {
+	got := buildMetadataConfigYAML(mkMetadataInstance())
 	for _, want := range []string{
-		"<interval_ms>3600000</interval_ms>",
-		"<time_horizon_sec>86400</time_horizon_sec>",
+		"interval_ms: 3600000",
+		"time_horizon_sec: 86400",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in rendered config; got:\n%s", want, got)
 		}
 	}
-	for _, stale := range []string{"<interval_seconds>", "<max_age_seconds>"} {
+	for _, stale := range []string{"interval_seconds", "max_age_seconds"} {
 		if strings.Contains(got, stale) {
 			t.Errorf("stale GC key %q must not be rendered (the server never read it); got:\n%s", stale, got)
 		}
@@ -202,7 +188,7 @@ func mkMetadataInstance() *computev1alpha1.FireboltInstance {
 }
 
 func TestBuildMetadataDeploymentPodSecurityContext(t *testing.T) {
-	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigYAML(mkMetadataInstance()))
 
 	psc := dep.Spec.Template.Spec.SecurityContext
 	if psc == nil {
@@ -233,7 +219,7 @@ func TestBuildMetadataDeploymentPodSecurityContext(t *testing.T) {
 }
 
 func TestBuildMetadataDeploymentContainerSecurityContext(t *testing.T) {
-	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigYAML(mkMetadataInstance()))
 
 	if got, want := len(dep.Spec.Template.Spec.Containers), 1; got != want {
 		t.Fatalf("containers: got %d, want %d", got, want)
@@ -275,7 +261,7 @@ func TestBuildMetadataDeploymentContainerSecurityContext(t *testing.T) {
 // is backed defensively; without an emptyDir mount there, any runtime
 // write under /tmp would fail on a read-only fs.
 func TestBuildMetadataDeploymentWritableTmpVolume(t *testing.T) {
-	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigYAML(mkMetadataInstance()))
 	pod := dep.Spec.Template.Spec
 
 	var tmp *corev1.Volume
@@ -310,7 +296,7 @@ func TestBuildMetadataDeploymentWritableTmpVolume(t *testing.T) {
 // floci incident motivated turning the legacy service-link env block off
 // across every operator-managed PodSpec; this test is the lock-in.
 func TestBuildMetadataDeploymentDisablesServiceLinks(t *testing.T) {
-	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigXML(mkMetadataInstance()))
+	dep := buildMetadataDeployment(mkMetadataInstance(), buildMetadataConfigYAML(mkMetadataInstance()))
 	esl := dep.Spec.Template.Spec.EnableServiceLinks
 	if esl == nil || *esl {
 		t.Errorf("EnableServiceLinks: got %+v, want *false", esl)
