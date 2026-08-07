@@ -451,6 +451,176 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 			t.Errorf("gatewayTLSSecretVersions = %q, missing CRL must be skipped", got)
 		}
 	})
+
+	t.Run("engine CRL without crl.pem is omitted from the roll hash", func(t *testing.T) {
+		// A Secret that exists but lacks crl.pem must not change the hash:
+		// folding it would roll onto an unmountable volume. Preflight surfaces
+		// the misconfiguration separately (checkGatewayCRLSecrets).
+		emptyCRL := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "engine-crl", Namespace: "ns-1"},
+			Data:       map[string][]byte{"other.pem": []byte("not-a-crl")},
+		}
+		cli := fake.NewClientBuilder().WithScheme(sch).
+			WithObjects(tlsSecret("inst-engine-ca-bundle"), emptyCRL).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Engine: &computev1alpha1.TLSListenerSpec{
+						Enabled:      true,
+						CRLSecretRef: &corev1.LocalObjectReference{Name: "engine-crl"},
+					},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			},
+		}
+		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(got, "engine-crl=") {
+			t.Errorf("gatewayTLSSecretVersions = %q, want unusable CRL omitted from the roll hash", got)
+		}
+	})
+}
+
+// TestCheckGatewayCRLSecrets pins the CRL preflight: once a CRL is
+// configured under an open mount gate, the Secret must exist and carry
+// non-empty crl.pem. Failures are for GatewayReady=False/CRLSecretPreflightFailed
+// — they do not clear TLS status or drain the listener.
+func TestCheckGatewayCRLSecrets(t *testing.T) {
+	sch := authTestScheme(t)
+
+	t.Run("no CRL configured is fine", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS:  &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"},
+			},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+					Engine:  &computev1alpha1.TLSListenerSpec{Enabled: true},
+				},
+			},
+		}
+		if err := r.checkGatewayCRLSecrets(context.Background(), inst); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("engine CRL missing crl.pem fails", func(t *testing.T) {
+		emptyCRL := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "engine-crl", Namespace: "ns-1"},
+			Data:       map[string][]byte{"other.pem": []byte("x")},
+		}
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(emptyCRL).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Engine: &computev1alpha1.TLSListenerSpec{
+						Enabled:      true,
+						CRLSecretRef: &corev1.LocalObjectReference{Name: "engine-crl"},
+					},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			},
+		}
+		err := r.checkGatewayCRLSecrets(context.Background(), inst)
+		if err == nil {
+			t.Fatal("expected preflight error for missing crl.pem, got nil")
+		}
+		if !strings.Contains(err.Error(), "crl.pem") {
+			t.Errorf("error = %v, want it to name crl.pem", err)
+		}
+	})
+
+	t.Run("engine CRL not mounted yet is not checked", func(t *testing.T) {
+		// engineUpstreamTLSReady is false (Reencrypting unset) — do not
+		// preflight a Secret the pod would not mount.
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Engine: &computev1alpha1.TLSListenerSpec{
+						Enabled:      true,
+						CRLSecretRef: &corev1.LocalObjectReference{Name: "engine-crl"},
+					},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls"},
+			},
+		}
+		if err := r.checkGatewayCRLSecrets(context.Background(), inst); err != nil {
+			t.Fatalf("unmounted CRL must not fail preflight: %v", err)
+		}
+	})
+
+	t.Run("client CRL missing Secret fails when mTLS is ready", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Gateway: &computev1alpha1.TLSListenerSpec{
+						Enabled:           true,
+						ClientCASecretRef: &corev1.LocalObjectReference{Name: "client-ca"},
+						CRLSecretRef:      &corev1.LocalObjectReference{Name: "client-crl"},
+					},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				GatewayTLS: &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"},
+			},
+		}
+		err := r.checkGatewayCRLSecrets(context.Background(), inst)
+		if err == nil {
+			t.Fatal("expected preflight error for missing client CRL Secret, got nil")
+		}
+		if !strings.Contains(err.Error(), "client-crl") {
+			t.Errorf("error = %v, want it to name the client CRL Secret", err)
+		}
+	})
+
+	t.Run("usable engine CRL passes", func(t *testing.T) {
+		crl := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "engine-crl", Namespace: "ns-1"},
+			Data:       map[string][]byte{"crl.pem": []byte("crl-bytes")},
+		}
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(crl).Build()
+		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+		inst := &computev1alpha1.FireboltInstance{
+			ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+			Spec: computev1alpha1.FireboltInstanceSpec{
+				TLS: &computev1alpha1.TLSSpec{
+					Engine: &computev1alpha1.TLSListenerSpec{
+						Enabled:      true,
+						CRLSecretRef: &corev1.LocalObjectReference{Name: "engine-crl"},
+					},
+				},
+			},
+			Status: computev1alpha1.FireboltInstanceStatus{
+				EngineTLS: &computev1alpha1.EngineTLSStatus{SecretName: "inst-engine-tls", Reencrypting: true},
+			},
+		}
+		if err := r.checkGatewayCRLSecrets(context.Background(), inst); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
 
 // TestEngineFleetTLSState covers the gateway may only switch
