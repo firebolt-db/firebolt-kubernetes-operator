@@ -22,6 +22,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -338,6 +340,38 @@ func TestScrapeAgentRequiresClientsetForProxyMode(t *testing.T) {
 	_, err := tr.scrapeAgent(context.Background(), pod, computev1alpha1.MetricScrapeModeApiserverProxy)
 	if err == nil {
 		t.Fatal("scrapeAgent() succeeded in proxy mode with no clientset")
+	}
+}
+
+// A spoofed gateway returning 302 to an internal URL must not be chased:
+// the operator process carries broader network identity than the pod.
+func TestScrapeAgentDoesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+
+	var baitHit atomic.Bool
+	bait := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		baitHit.Store(true)
+	}))
+	t.Cleanup(bait.Close)
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, bait.URL+"/latest/meta-data/", http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	host, port := splitHostPort(t, redirector.Listener.Addr().String())
+	tr := &WakeDemandTracker{DemandPort: port}
+	pod := gatewayPod("gw-0", host, corev1.PodRunning)
+
+	_, err := tr.scrapeAgent(context.Background(), pod, computev1alpha1.MetricScrapeModePodIP)
+	if err == nil {
+		t.Fatal("scrapeAgent() succeeded against a redirecting agent")
+	}
+	if !strings.Contains(err.Error(), "302") {
+		t.Errorf("error should surface the redirect status, got %v", err)
+	}
+	if baitHit.Load() {
+		t.Fatal("wake demand client followed a redirect to the bait server")
 	}
 }
 
