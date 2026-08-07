@@ -18,12 +18,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -145,6 +147,72 @@ func TestPodIPScraper_Non200Surfaced(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "503") {
 		t.Errorf("expected 503 in error, got %v", err)
+	}
+}
+
+// Both pod-IP scrape clients must refuse redirects; otherwise a spoofed
+// pod can bounce the operator at cloud metadata or other internal URLs.
+func TestScrapeHTTPClientsRefuseRedirects(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		client *http.Client
+	}{
+		{name: "metricsHTTPClient", client: metricsHTTPClient},
+		{name: "wakeDemandHTTPClient", client: wakeDemandHTTPClient},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.client.CheckRedirect == nil {
+				t.Fatal("CheckRedirect is nil; client would follow Go's default of up to 10 redirects")
+			}
+			if err := tc.client.CheckRedirect(&http.Request{}, nil); !errors.Is(err, http.ErrUseLastResponse) {
+				t.Fatalf("CheckRedirect() = %v, want http.ErrUseLastResponse", err)
+			}
+		})
+	}
+}
+
+// A spoofed engine returning 302 to an internal URL must not be chased.
+func TestPodIPScraperDoesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+
+	var baitHit atomic.Bool
+	bait := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		baitHit.Store(true)
+	}))
+	t.Cleanup(bait.Close)
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, bait.URL+"/latest/meta-data/", http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	host, _ := hostPortFromURL(t, redirector.URL)
+	realAddr := strings.TrimPrefix(redirector.URL, "http://")
+	scraper := &podIPScraper{client: &http.Client{
+		CheckRedirect: metricsHTTPClient.CheckRedirect,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				d := net.Dialer{}
+				return d.DialContext(ctx, network, realAddr)
+			},
+		},
+	}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "engine-0", Namespace: "ns"},
+		Status:     corev1.PodStatus{PodIP: host, Phase: corev1.PodRunning},
+	}
+
+	_, err := scraper.Scrape(context.Background(), pod)
+	if err == nil {
+		t.Fatal("Scrape() succeeded against a redirecting metrics endpoint")
+	}
+	if !strings.Contains(err.Error(), "302") {
+		t.Errorf("error should surface the redirect status, got %v", err)
+	}
+	if baitHit.Load() {
+		t.Fatal("metrics scrape client followed a redirect to the bait server")
 	}
 }
 
