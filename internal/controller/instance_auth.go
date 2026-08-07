@@ -250,13 +250,14 @@ func (r *FireboltInstanceReconciler) checkAdminPasswordSecret(ctx context.Contex
 // checkSecretKeyPresent verifies a Secret exists in namespace and carries
 // a non-empty value for key, without creating, modifying, or otherwise
 // inspecting its contents. Shared by the instance controller's admin-
-// password preflight (checkAdminPasswordSecret) and the engine
-// controller's auth-secret preflight (resolveInstanceInfo in
-// engine_controller.go) — both need the exact same "does the Secret this
-// pod will mount actually exist and have the key it claims" check, on
-// different reconciler receiver types. label names the Secret's role
-// in error messages (e.g. "admin password secret", "signing key
-// secret").
+// password preflight (checkAdminPasswordSecret), the gateway CRL
+// preflight (checkGatewayCRLSecrets), and the engine controller's
+// auth-secret preflight (resolveInstanceInfo in engine_controller.go) —
+// all need the exact same "does the Secret this pod will mount actually
+// exist and have the key it claims" check, on different reconciler
+// receiver types. label names the Secret's role in error messages
+// (e.g. "admin password secret", "signing key secret",
+// "gateway engine CRL secret").
 func checkSecretKeyPresent(ctx context.Context, cli client.Client, namespace, name, key, label string) (string, error) {
 	var secret corev1.Secret
 	err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret)
