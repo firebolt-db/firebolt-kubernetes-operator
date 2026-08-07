@@ -1360,6 +1360,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 //   - the upstream engine-CA anchor (Status.EngineTLS), gated on
 //     engineUpstreamTLSReady exactly like its mount, so an in-place engine-CA
 //     reissue rolls the gateway and Envoy reloads trusted_ca.
+//   - the engine CRL (spec.tls.engine.crlSecretRef), gated on
+//     engineUpstreamTLSReady exactly like its mount.
+//   - the client CRL (spec.tls.gateway.crlSecretRef), gated inside the
+//     downstream-ready + client-CA branch exactly like its mount.
 //
 // A missing Secret is tolerated (skipped, not an error): it only means the hash
 // omits that entry until the Secret lands, and a later reconcile folds it in.
@@ -1371,6 +1375,9 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		names = append(names, instance.Status.GatewayTLS.SecretName)
 		if ref := gatewayClientCASecretRef(instance); ref != nil {
 			names = append(names, ref.Name)
+			if crl := gatewayCRLSecretRef(instance); crl != nil {
+				names = append(names, crl.Name)
+			}
 		}
 	}
 	if engineUpstreamTLSReady(instance) {
@@ -1380,6 +1387,9 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		// set changes (a generation added under a rotated CA, or an old CA pruned),
 		// rolling the gateway so Envoy reloads trusted_ca.
 		names = append(names, engineCABundleSecretName(instance.Name))
+		if crl := engineCRLSecretRef(instance); crl != nil {
+			names = append(names, crl.Name)
+		}
 	}
 	var parts []string
 	for _, name := range names {
