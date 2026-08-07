@@ -295,6 +295,29 @@ func UseDirectEngineRepository() {
 	DefaultEngineImage = resolveImageRef(nil, DefaultEngineRepository, DefaultEngineTag)
 }
 
+// EngineDoNotTrackEnvKey is the environment variable the engine's telemetry
+// SDK honors as an opt-out (the cross-vendor Do Not Track convention).
+// Intentionally NOT listed in operatorOwnedEngineEnvKeys: users are
+// documented to set it themselves. When a class or engine template supplies
+// it, the operator skips its own injection so the user value is the sole
+// entry — Server-Side Apply treats env as a map keyed by name and rejects
+// duplicates, so the two entries must never coexist.
+const EngineDoNotTrackEnvKey = "DO_NOT_TRACK"
+
+// engineTelemetryDisabled makes buildEngineContainerEnv stamp
+// EngineDoNotTrackEnvKey=1 on every rendered engine container, so disabling
+// operator telemetry also disables usage telemetry inside the engines it
+// deploys. Because the write path and the drift comparator share
+// buildEngineContainerEnv, flipping this rolls existing engines through the
+// normal blue-green path.
+var engineTelemetryDisabled = false
+
+// DisableEngineTelemetry opts deployed engines out of usage telemetry; see
+// engineTelemetryDisabled.
+func DisableEngineTelemetry() {
+	engineTelemetryDisabled = true
+}
+
 // resolveImageRef returns "repository:tag" for a component, using fields from
 // the user-supplied ImageSpec when present and falling back to the supplied
 // component defaults otherwise. A nil spec, an empty repository, or an empty
