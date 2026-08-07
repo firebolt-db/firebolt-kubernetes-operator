@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.6.0...firebolt-operator-v0.6.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **metadata:** render dedicated-pensieve config as YAML, not XML (FB-2877) ([#120](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/120)) ([6fabbb5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6fabbb5fbe94cc19ee88991b6a494c0c32a97873))
+
+
+### Dependencies
+
+* **deps:** bump github.com/cert-manager/cert-manager from 1.20.3 to 1.21.0 ([#116](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/116)) ([2ce757d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2ce757d3f4b4d5ee9b7c95b8d6d4ec4bd62a2983))
+* **deps:** bump github.com/go-logr/logr from 1.4.3 to 1.4.4 ([#117](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/117)) ([d57c786](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d57c786789d8f1ed112a54bfb9fc1d41d1900134))
+* **deps:** bump github.com/prometheus/client_golang from 1.23.2 to 1.24.1 in the prometheus group across 1 directory ([#114](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/114)) ([c3abba2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c3abba2c40c572c1547c1a2ca316d8dc596226f9))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260803130231.8ec167d19785 ([40df5e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40df5e311bb2df4a888e581037c4a8e2e3b39898))
+
 ## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.1...firebolt-operator-v0.6.0) (2026-07-28)
 
 
