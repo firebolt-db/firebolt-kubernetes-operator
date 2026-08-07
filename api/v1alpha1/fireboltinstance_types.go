@@ -703,7 +703,9 @@ type TLSListenerSpec struct {
 	//   - spec.tls.engine: engine certificates, as the gateway verifies them
 	//     when re-encrypting upstream.
 	//   - spec.tls.gateway: client certificates, and therefore meaningful only
-	//     alongside ClientCASecretRef (rejected at admission otherwise).
+	//     alongside ClientCASecretRef (rejected by ValidateTLS / admission, and
+	//     by the controller as GatewayTLSReady=False/TLSSpecInvalid when
+	//     webhooks are off).
 	//
 	// Certificate lifetimes are bounded by default (see DefaultCertDurationTLS),
 	// which limits exposure but does not end it: without a CRL a leaked serving
