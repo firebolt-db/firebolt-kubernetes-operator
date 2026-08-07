@@ -1261,6 +1261,25 @@ func TestValidateTLS(t *testing.T) {
 			wantError: true,
 		},
 		{
+			name: "gateway client CRL without client CA is rejected",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:      true,
+				CertManager:  &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				CRLSecretRef: &corev1.LocalObjectReference{Name: "clients-crl"},
+			}},
+			wantError: true,
+		},
+		{
+			name: "gateway client CRL with client CA is valid",
+			tls: &TLSSpec{Gateway: &TLSListenerSpec{
+				Enabled:           true,
+				CertManager:       &CertManagerSpec{IssuerRef: CertManagerIssuerRef{Name: "internal-ca"}},
+				ClientCASecretRef: &corev1.LocalObjectReference{Name: "clients-ca"},
+				CRLSecretRef:      &corev1.LocalObjectReference{Name: "clients-crl"},
+			}},
+			wantError: false,
+		},
+		{
 			name: "engine mutual TLS is rejected (only gateway supports it)",
 			tls: &TLSSpec{Engine: &TLSListenerSpec{
 				Enabled:           true,

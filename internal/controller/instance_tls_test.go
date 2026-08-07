@@ -1904,3 +1904,81 @@ func TestEnsureGatewayTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 		t.Errorf("GatewayTLSReady = %s/%s, want False/TLSSpecInvalid", cond.Status, cond.Reason)
 	}
 }
+
+// TestEnsureGatewayTLS_ClientCRLWithoutClientCASurfacesTLSSpecInvalid pins
+// the webhook-off counterpart for ValidateTLS's "crlSecretRef requires
+// clientCASecretRef" rule: one-way gateway TLS with a client CRL is dead
+// config that reads as revocation being enforced. The controller must stamp
+// GatewayTLSReady=False/TLSSpecInvalid rather than provisioning.
+func TestEnsureGatewayTLS_ClientCRLWithoutClientCASurfacesTLSSpecInvalid(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:      true,
+					CertManager:  &computev1alpha1.CertManagerSpec{IssuerRef: computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"}},
+					CRLSecretRef: &corev1.LocalObjectReference{Name: "clients-crl"},
+				},
+			},
+		},
+	}
+
+	err := r.ensureGatewayTLS(context.Background(), instance)
+	if err == nil {
+		t.Fatal("expected error for client CRL without client CA, got nil")
+	}
+	if !strings.Contains(err.Error(), "clientCASecretRef") {
+		t.Errorf("error = %v, want it to name clientCASecretRef", err)
+	}
+
+	cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady)
+	if cond == nil {
+		t.Fatal("GatewayTLSReady condition not set")
+	}
+	if cond.Status != metav1.ConditionFalse || cond.Reason != "TLSSpecInvalid" {
+		t.Errorf("GatewayTLSReady = %s/%s, want False/TLSSpecInvalid", cond.Status, cond.Reason)
+	}
+	if instance.Status.GatewayTLS != nil {
+		t.Error("Status.GatewayTLS must stay nil when the TLS spec is invalid")
+	}
+}
+
+// TestEnsureGatewayTLS_DisabledWithCRLSurfacesTLSSpecInvalid pins that a
+// gateway TLS block with Enabled=false and crlSecretRef set still re-runs
+// ValidateTLS (the early Disabled return used to skip it), so webhook-off
+// installs cannot leave forbidden inert CRL config reporting Disabled/Ready.
+func TestEnsureGatewayTLS_DisabledWithCRLSurfacesTLSSpecInvalid(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Gateway: &computev1alpha1.TLSListenerSpec{
+					Enabled:      false,
+					CRLSecretRef: &corev1.LocalObjectReference{Name: "clients-crl"},
+				},
+			},
+		},
+	}
+
+	err := r.ensureGatewayTLS(context.Background(), instance)
+	if err == nil {
+		t.Fatal("expected error for CRL on a disabled gateway listener, got nil")
+	}
+
+	cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionGatewayTLSReady)
+	if cond == nil {
+		t.Fatal("GatewayTLSReady condition not set")
+	}
+	if cond.Status != metav1.ConditionFalse || cond.Reason != "TLSSpecInvalid" {
+		t.Errorf("GatewayTLSReady = %s/%s, want False/TLSSpecInvalid (not Disabled)", cond.Status, cond.Reason)
+	}
+}
