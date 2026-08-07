@@ -396,10 +396,11 @@ func TestGatewayTLSSecretVersions(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "client-crl", Namespace: "ns-1"},
 			Data:       map[string][]byte{"crl.pem": []byte("client-crl")},
 		}
-		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(crl).Build()
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(tlsSecret("gw-tls"), crl).Build()
 		r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
 		inst := gwEnabled()
 		inst.Spec.TLS.Gateway.CRLSecretRef = &corev1.LocalObjectReference{Name: "client-crl"}
+		inst.Status.GatewayTLS = &computev1alpha1.GatewayTLSStatus{SecretName: "gw-tls"}
 		got, err := r.gatewayTLSSecretVersions(context.Background(), inst)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
