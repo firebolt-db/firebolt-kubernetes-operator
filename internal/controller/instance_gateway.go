@@ -1351,15 +1351,18 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 // The tracked set mirrors the pod-template mounts exactly, keyed off the same
 // predicates the mount logic uses (see effectiveGatewayPodTemplate):
 //   - the downstream server cert (Status.GatewayTLS) and — only once downstream
-//     TLS is READY — the mTLS client-CA, both gated on gatewayDownstreamTLSReady.
-//     During the fail-closed provisioning window (Status.GatewayTLS nil, and a
-//     bring-your-own client-CA that may not exist yet) neither is mounted, so
-//     neither is read: a hard Get on the not-yet-created client-CA here used to
-//     abort the whole gateway roll, so the fail-closed Deployment never came up
-//     and the prior plaintext/one-way-TLS listener stayed up (fail-open).
-//   - the upstream engine-CA anchor (Status.EngineTLS), gated on
-//     engineUpstreamTLSReady exactly like its mount, so an in-place engine-CA
-//     reissue rolls the gateway and Envoy reloads trusted_ca.
+//     TLS is READY — the mTLS client-CA and its CRL
+//     (spec.tls.gateway.crlSecretRef), all gated on
+//     gatewayDownstreamTLSReady. During the fail-closed provisioning window
+//     (Status.GatewayTLS nil, and a bring-your-own client-CA that may not exist
+//     yet) none is mounted, so none is read: a hard Get on the not-yet-created
+//     client-CA here used to abort the whole gateway roll, so the fail-closed
+//     Deployment never came up and the prior plaintext/one-way-TLS listener
+//     stayed up (fail-open).
+//   - the upstream engine-CA anchor (Status.EngineTLS) and its CRL
+//     (spec.tls.engine.crlSecretRef), gated on engineUpstreamTLSReady exactly
+//     like their mounts, so an in-place engine-CA reissue rolls the gateway and
+//     Envoy reloads trusted_ca.
 //
 // A missing Secret is tolerated (skipped, not an error): it only means the hash
 // omits that entry until the Secret lands, and a later reconcile folds it in.
@@ -1371,6 +1374,9 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		names = append(names, instance.Status.GatewayTLS.SecretName)
 		if ref := gatewayClientCASecretRef(instance); ref != nil {
 			names = append(names, ref.Name)
+			if crl := gatewayCRLSecretRef(instance); crl != nil {
+				names = append(names, crl.Name)
+			}
 		}
 	}
 	if engineUpstreamTLSReady(instance) {
@@ -1380,6 +1386,9 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		// set changes (a generation added under a rotated CA, or an old CA pruned),
 		// rolling the gateway so Envoy reloads trusted_ca.
 		names = append(names, engineCABundleSecretName(instance.Name))
+		if crl := engineCRLSecretRef(instance); crl != nil {
+			names = append(names, crl.Name)
+		}
 	}
 	var parts []string
 	for _, name := range names {

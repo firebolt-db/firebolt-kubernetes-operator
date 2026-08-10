@@ -33,6 +33,29 @@ FLOCI_BUCKET="${FLOCI_BUCKET:-${ENGINE_NAME}-bucket}"
 FLOCI_ENDPOINT="http://floci.${NAMESPACE}.svc.cluster.local:4566"
 UI_PORT=9100
 
+# run_probe_pod NAME SCRIPT
+# One-shot in-cluster curl probe. Avoid `kubectl run -i --rm`: attaching races a
+# fast-exiting container and often returns only the echo lines (missing the
+# curl body), which falsely fails the workspace contract. Create → wait
+# Succeeded → logs → delete is deterministic.
+run_probe_pod() {
+  local name="$1"
+  local script="$2"
+  kubectl delete pod "$name" -n "$NAMESPACE" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kubectl run "$name" -n "$NAMESPACE" --restart=Never \
+    --image="${CURL_IMAGE}" --command -- sh -c "$script" >/dev/null
+  if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/${name}" \
+      -n "$NAMESPACE" --timeout=60s >/dev/null 2>&1; then
+    kubectl logs "$name" -n "$NAMESPACE" 2>/dev/null || true
+    kubectl delete pod "$name" -n "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    return 1
+  fi
+  kubectl logs "$name" -n "$NAMESPACE"
+  local rc=$?
+  kubectl delete pod "$name" -n "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  return "$rc"
+}
+
 echo "=== verify-ui-sidecar (namespace=${NAMESPACE}) ==="
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -107,9 +130,8 @@ pod_ip=$(kubectl get pod "$engine_pod" -n "$NAMESPACE" -o jsonpath='{.status.pod
 echo "Probing the Engine Web UI at ${pod_ip}:${UI_PORT} (index + /config.js)..."
 attempts=6
 for i in $(seq 1 "$attempts"); do
-  if output=$(kubectl run "ui-probe-$i" -n "$NAMESPACE" --rm -i --restart=Never \
-      --image="${CURL_IMAGE}" --quiet -- sh -c \
-      "curl -sf -o /dev/null http://${pod_ip}:${UI_PORT}/ && curl -sf http://${pod_ip}:${UI_PORT}/config.js" 2>/dev/null); then
+  if output=$(run_probe_pod "ui-probe-$i" \
+      "curl -sf -o /dev/null http://${pod_ip}:${UI_PORT}/ && curl -sf http://${pod_ip}:${UI_PORT}/config.js"); then
     if printf '%s' "$output" | grep -q "__FIREBOLT_CORE_CONFIG__"; then
       echo "UI index answers 200 and /config.js carries the runtime config:"
       printf '%s\n' "$output"
@@ -142,9 +164,7 @@ default_database=$(printf '%s' "$output" | sed -n 's/.*defaultDatabase: "\([^"]*
 default_database="${default_database:-firebolt}"
 # `|| true` keeps a no-match grep (exit 1, fatal under `set -euo pipefail`)
 # from killing the script before the empty-chunk check below can report it.
-chunk=$(kubectl run "ui-chunk" -n "$NAMESPACE" --rm -i --restart=Never \
-  --image="${CURL_IMAGE}" --quiet -- sh -c \
-  "curl -sf http://${pod_ip}:${UI_PORT}/" 2>/dev/null \
+chunk=$(run_probe_pod "ui-chunk" "curl -sf http://${pod_ip}:${UI_PORT}/" \
   | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 || true)
 if [[ -z "$chunk" ]]; then
   echo "index.html references no hashed bundle chunk (assets/index-*.js)"
@@ -153,10 +173,9 @@ if [[ -z "$chunk" ]]; then
 fi
 
 echo "Replaying the workspace request contract (chunk=${chunk}, database=${default_database})..."
-attempts=3
+attempts=6
 for i in $(seq 1 "$attempts"); do
-  if output=$(kubectl run "ui-contract-$i" -n "$NAMESPACE" --rm -i --restart=Never \
-      --image="${CURL_IMAGE}" --quiet -- sh -c "
+  if output=$(run_probe_pod "ui-contract-$i" "
       set -e
       base=http://${pod_ip}:${UI_PORT}
       echo '-- SPA bundle chunk'
@@ -168,7 +187,7 @@ for i in $(seq 1 "$attempts"); do
       echo '-- workspace query execution (SQL editor shape)'
       curl -sf -X POST \"\${base}/query?output_format=JSON_Compact&database=${default_database}\" \
         -H 'Content-Type: application/json' -H 'Authorization: Bearer lite' \
-        -d 'SELECT 42;'" 2>/dev/null); then
+        -d 'SELECT 42;'"); then
     if printf '%s' "$output" | grep -q '"data"' && printf '%s' "$output" | grep -q '42'; then
       echo "Workspace request contract satisfied; SELECT 42 returned data:"
       printf '%s\n' "$output" | tail -3
