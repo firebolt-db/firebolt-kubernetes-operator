@@ -365,9 +365,12 @@ func (t *WakeDemandTracker) gatewayPods(ctx context.Context, namespace string) (
 
 // wakeDemandHTTPClient mirrors metricsHTTPClient's settings and for the
 // same reason: gateway pod IPs are reused across rollouts, so a cached idle
-// connection can land on a pod other than the one just listed.
+// connection can land on a pod other than the one just listed. CheckRedirect
+// refuses every redirect so a spoofed gateway pod cannot bounce the demand
+// scrape at an arbitrary internal URL (same SSRF class as metricsHTTPClient).
 var wakeDemandHTTPClient = &http.Client{
-	Timeout: wakeDemandScrapeTimeout,
+	Timeout:       wakeDemandScrapeTimeout,
+	CheckRedirect: refuseRedirects,
 	Transport: &http.Transport{
 		DisableKeepAlives:     true,
 		DialContext:           (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
