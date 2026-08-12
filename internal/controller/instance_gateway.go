@@ -1366,6 +1366,10 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 //
 // A missing Secret is tolerated (skipped, not an error): it only means the hash
 // omits that entry until the Secret lands, and a later reconcile folds it in.
+// CRL Secrets are folded only when they carry a non-empty crl.pem: a bad edit
+// that drops the key must not change the hash (and must not start a roll onto
+// an unmountable volume). checkGatewayCRLSecrets surfaces that misconfiguration
+// on GatewayReady separately — this helper never fails closed the listener.
 // Returns "" when the gateway mounts no TLS Secret (plaintext or
 // fail-closed-pending), leaving the hash input untouched.
 func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
@@ -1375,7 +1379,13 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		if ref := gatewayClientCASecretRef(instance); ref != nil {
 			names = append(names, ref.Name)
 			if crl := gatewayCRLSecretRef(instance); crl != nil {
-				names = append(names, crl.Name)
+				ok, err := r.gatewayCRLSecretUsable(ctx, instance.Namespace, crl.Name)
+				if err != nil {
+					return "", err
+				}
+				if ok {
+					names = append(names, crl.Name)
+				}
 			}
 		}
 	}
@@ -1387,7 +1397,13 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		// rolling the gateway so Envoy reloads trusted_ca.
 		names = append(names, engineCABundleSecretName(instance.Name))
 		if crl := engineCRLSecretRef(instance); crl != nil {
-			names = append(names, crl.Name)
+			ok, err := r.gatewayCRLSecretUsable(ctx, instance.Namespace, crl.Name)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				names = append(names, crl.Name)
+			}
 		}
 	}
 	var parts []string
@@ -1402,6 +1418,48 @@ func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Contex
 		parts = append(parts, name+"="+secret.ResourceVersion)
 	}
 	return strings.Join(parts, ","), nil
+}
+
+// gatewayCRLSecretUsable reports whether the named Secret exists and carries a
+// non-empty crl.pem. Missing / empty Secrets return (false, nil) so the roll
+// hash can omit them without aborting ensureGateway; API errors are returned.
+// Paired with checkGatewayCRLSecrets, which turns the same unusable state into
+// GatewayReady=False without draining the listener.
+func (r *FireboltInstanceReconciler) gatewayCRLSecretUsable(ctx context.Context, namespace, name string) (bool, error) {
+	var secret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading gateway CRL secret %s/%s for rollout hash: %w", namespace, name, err)
+	}
+	return len(secret.Data[tlsCRLSecretKey]) > 0, nil
+}
+
+// checkGatewayCRLSecrets preflights every CRL Secret the gateway pod would
+// mount under the current readiness gates. crlSecretRef is optional; once set
+// (and the matching mount gate is open) the Secret must exist and carry
+// non-empty crl.pem. A failure does NOT clear Status.GatewayTLS or omit the
+// client listener — CRL is an optional revocation add-on on top of CA trust —
+// but callers stamp GatewayReady=False so a bad edit is visible, while
+// gatewayTLSSecretVersions omits the unusable Secret so the Deployment does
+// not roll onto an unmountable volume.
+func (r *FireboltInstanceReconciler) checkGatewayCRLSecrets(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	if gatewayDownstreamTLSReady(instance) && gatewayClientCASecretRef(instance) != nil {
+		if ref := gatewayCRLSecretRef(instance); ref != nil {
+			if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, tlsCRLSecretKey, "gateway client CRL secret"); err != nil {
+				return err
+			}
+		}
+	}
+	if engineUpstreamTLSReady(instance) {
+		if ref := engineCRLSecretRef(instance); ref != nil {
+			if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, tlsCRLSecretKey, "gateway engine CRL secret"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // gatewayConfigHash returns the value stamped onto the gateway pod template's

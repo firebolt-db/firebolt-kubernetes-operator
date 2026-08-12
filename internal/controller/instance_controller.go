@@ -334,6 +334,18 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			computev1alpha1.InstanceConditionGatewayReady, "EnsureFailed", err)
 	}
 
+	// CRL Secrets are optional; once referenced (and mounted) they must
+	// carry crl.pem. ensureGateway already ran with the unusable Secret
+	// omitted from the roll hash so a bad edit cannot wedge new pods.
+	// Surface GatewayReady=False without clearing TLS status / draining
+	// the listener — a broken CRL must not take the Gateway offline.
+	if err := r.checkGatewayCRLSecrets(ctx, instance); err != nil {
+		instance.Status.GatewayReady = false
+		instance.Status.GatewayEndpoint = ""
+		return ctrl.Result{}, r.failWithCondition(ctx, instance,
+			computev1alpha1.InstanceConditionGatewayReady, "CRLSecretPreflightFailed", err)
+	}
+
 	gwReady, err := r.isGatewayReady(ctx, instance)
 	if err != nil {
 		return ctrl.Result{}, r.failWithCondition(ctx, instance,
