@@ -29,34 +29,59 @@ concurrency:
 
 jobs:
   detect:
-    name: Detect docs-only change
+    name: Detect expensive-test shortcut
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
+      release_please: ${{ steps.detect.outputs.release_please }}
+      skip_expensive: ${{ steps.detect.outputs.skip_expensive }}
+      skip_reason: ${{ steps.detect.outputs.skip_reason }}
     steps:
-      - name: Determine whether the PR changed only docs
+      - name: Determine whether the PR can skip Kind tests
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # The docs-only short-circuit only applies to pull_request events.
-          # A workflow_dispatch run is an explicit request to run the suite,
-          # so always run it (no PR diff exists to inspect anyway).
+          write_outputs() {
+            {
+              echo "docs_only=$1"
+              echo "release_please=$2"
+              echo "skip_expensive=$3"
+              echo "skip_reason=$4"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          # Shortcuts only apply to pull_request events. workflow_dispatch is
+          # an explicit request to run the suite (no PR diff to inspect).
           if [ "${EVENT_NAME}" != "pull_request" ]; then
             echo "Event '${EVENT_NAME}' is not a pull_request; running full suite."
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            write_outputs false false false ""
             exit 0
           fi
+
+          # Trusted release-please PRs only rewrite release metadata
+          # (version.txt / CHANGELOG / manifest / chart version fields).
+          # Require same-repo head + the release writer bot so a fork or
+          # hand-rolled branch named like release-please still runs Kind.
+          if [[ "${HEAD_REF}" == release-please--* && "${HEAD_REPO}" == "${REPO}" && "${PR_AUTHOR}" == "fireboltdb-ci-writer[bot]" ]]; then
+            echo "Trusted release-please branch '${HEAD_REF}'; skipping Kind-backed worker."
+            write_outputs false true true release_please
+            exit 0
+          fi
+
           # List the PR's changed files via the compare API (no checkout
           # needed). "docs" = markdown anywhere, plus docs/.
-          # Fail-safe: any uncertainty leaves docs_only=false so the full
-          # suite still runs.
+          # Fail-safe: any uncertainty leaves skip_expensive=false so the
+          # full suite still runs.
           files="$(gh api --paginate \
             "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
             --jq '.files[].filename' 2>/dev/null || true)"
@@ -65,15 +90,15 @@ jobs:
           non_docs="$(printf '%s\n' "${files}" \
             | grep -vE '\.mdx?$|^docs/' || true)"
           if [ -n "${files}" ] && [ -z "${non_docs}" ]; then
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            write_outputs true false true docs_only
           else
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            write_outputs false false false ""
           fi
 
   test-e2e:
     name: E2E Tests (${{ matrix.variant }})
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true'
+    if: needs.detect.outputs.skip_expensive != 'true'
     runs-on: ubuntu-16core-64gb-600ssd-amd64
     permissions:
       contents: read
@@ -252,11 +277,12 @@ jobs:
 
   # Single stable required-check name for branch protection. Matrix legs
   # (E2E Tests (dev/latest)) are not reliably emitted as per-combination
-  # checks when skipped, so a docs-only PR would leave them Pending and
-  # block the merge. This gate runs `if: always()`, collapses both matrix
-  # legs into one `needs.test-e2e.result`, and fails closed if `detect`
-  # itself failed (which would otherwise skip the heavy job and report a
-  # false success).
+  # checks when skipped, so a docs-only or release-please PR would leave
+  # them Pending and block the merge. This gate runs `if: always()`,
+  # collapses both matrix legs into one `needs.test-e2e.result`, and fails
+  # closed if `detect` itself failed (which would otherwise skip the heavy
+  # job and report a false success). An intentional skip must set
+  # skip_expensive=true.
   e2e-required:
     name: E2E Tests
     needs: [detect, test-e2e]
@@ -267,12 +293,25 @@ jobs:
       - name: Verify gated jobs
         env:
           DETECT: ${{ needs.detect.result }}
+          SKIP_EXPENSIVE: ${{ needs.detect.outputs.skip_expensive }}
+          SKIP_REASON: ${{ needs.detect.outputs.skip_reason }}
           E2E: ${{ needs.test-e2e.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect did not succeed (result=$DETECT)"; exit 1
           fi
           case "$E2E" in
-            success|skipped) echo "gate satisfied (test-e2e=$E2E)";;
-            *) echo "::error::test-e2e result=$E2E"; exit 1;;
+            success)
+              echo "gate satisfied (test-e2e=$E2E)"
+              ;;
+            skipped)
+              if [ "$SKIP_EXPENSIVE" = "true" ]; then
+                echo "gate satisfied (test-e2e=skipped, reason=$SKIP_REASON)"
+              else
+                echo "::error::test-e2e was skipped but skip_expensive=$SKIP_EXPENSIVE"; exit 1
+              fi
+              ;;
+            *)
+              echo "::error::test-e2e result=$E2E"; exit 1
+              ;;
           esac

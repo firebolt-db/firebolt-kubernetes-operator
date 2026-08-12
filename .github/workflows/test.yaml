@@ -6,8 +6,46 @@ on:
 permissions: {}
 
 jobs:
+  detect:
+    name: Detect test shortcut
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      skip_test: ${{ steps.detect.outputs.skip_test }}
+      skip_reason: ${{ steps.detect.outputs.skip_reason }}
+    steps:
+      - name: Determine whether the PR can skip unit tests
+        id: detect
+        env:
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          write_outputs() {
+            {
+              echo "skip_test=$1"
+              echo "skip_reason=$2"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          # Trusted release-please PRs only rewrite release metadata
+          # (version.txt / CHANGELOG / manifest / chart version fields).
+          # Require same-repo head + the release writer bot so a fork or
+          # hand-rolled branch named like release-please still runs tests.
+          if [[ "${HEAD_REF}" == release-please--* && "${HEAD_REPO}" == "${REPO}" && "${PR_AUTHOR}" == "fireboltdb-ci-writer[bot]" ]]; then
+            echo "Trusted release-please branch '${HEAD_REF}'; skipping unit-test worker."
+            write_outputs true release_please
+            exit 0
+          fi
+
+          write_outputs false ""
+
   test:
     name: Run on Ubuntu (${{ matrix.variant }})
+    needs: detect
+    if: needs.detect.outputs.skip_test != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -57,22 +95,41 @@ jobs:
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
-  # Single stable required-check name for branch protection. The unit
-  # matrix legs (Run on Ubuntu (dev/latest)) were never required directly;
-  # this gate exposes one stable name. The unit suite always runs (no
-  # `detect`), so the gate simply requires `test` to have succeeded.
+  # Single stable required-check name for branch protection. Matrix legs
+  # (Run on Ubuntu (dev/latest)) are not reliably emitted as per-combination
+  # checks when skipped, so a trusted release-please PR would leave them
+  # Pending and block the merge. This gate runs `if: always()`, collapses
+  # both matrix legs into one `needs.test.result`, and fails closed if
+  # `detect` itself failed. An intentional skip must set skip_test=true.
   unit-tests:
     name: Unit Tests
-    needs: [test]
+    needs: [detect, test]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Verify gated jobs
         env:
+          DETECT: ${{ needs.detect.result }}
+          SKIP_TEST: ${{ needs.detect.outputs.skip_test }}
+          SKIP_REASON: ${{ needs.detect.outputs.skip_reason }}
           TEST: ${{ needs.test.result }}
         run: |
-          if [ "$TEST" != "success" ]; then
-            echo "::error::test result=$TEST"; exit 1
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::detect did not succeed (result=$DETECT)"; exit 1
           fi
-          echo "gate satisfied (test=$TEST)"
+          case "$TEST" in
+            success)
+              echo "gate satisfied (test=$TEST)"
+              ;;
+            skipped)
+              if [ "$SKIP_TEST" = "true" ]; then
+                echo "gate satisfied (test=skipped, reason=$SKIP_REASON)"
+              else
+                echo "::error::test was skipped but skip_test=$SKIP_TEST"; exit 1
+              fi
+              ;;
+            *)
+              echo "::error::test result=$TEST"; exit 1
+              ;;
+          esac

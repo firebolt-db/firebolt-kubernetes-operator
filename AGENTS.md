@@ -273,9 +273,15 @@ Every third-party binary that CI or the Makefile downloads (`kind`, `yq`, `helm-
 
 ### Required checks / rollup gates
 
-GitHub branch protection requires checks by **job `name`** (not workflow name). A check counts as passing when it is `success`, `skipped`, or `neutral` — but **where** the skip happens matters: a workflow skipped by an `on:` filter stays *Pending* (blocks the PR), whereas a job skipped by a job-level `if:` reports *Success*. Matrix-leg names are also not reliably emitted when the leg is skipped. To keep path/branch-conditional workflows compatible with required checks (docs-only PRs must not block forever, but real failures must still fail closed), each conditional or matrix workflow exposes **one stable required-check name backed by a rollup gate job**.
+GitHub branch protection requires checks by **job `name`** (not workflow name). A check counts as passing when it is `success`, `skipped`, or `neutral` — but **where** the skip happens matters: a workflow skipped by an `on:` filter stays *Pending* (blocks the PR), whereas a job skipped by a job-level `if:` reports *Success*. Matrix-leg names are also not reliably emitted when the leg is skipped. To keep path/branch-conditional workflows compatible with required checks (docs-only and trusted release-please PRs must not block forever, but real failures must still fail closed), each conditional or matrix workflow exposes **one stable required-check name backed by a rollup gate job**.
 
-Gate convention: the gate job runs `if: always()`, `needs` the `detect` job plus the heavy/worker job, has `permissions: {}`, uses inline `run:` only (no new pinned action — keeps the action-lint/zizmor surface unchanged), and passes only when `detect` succeeded **and** the gated job is `success` or (intentionally) `skipped`. A failed `detect` fails the gate closed (a skipped heavy job would otherwise count as a false success). `needs.<job>.result` collapses all matrix legs into one result.
+Gate convention: the gate job runs `if: always()`, `needs` the `detect` job plus the heavy/worker job, has `permissions: {}`, uses inline `run:` only (no new pinned action — keeps the action-lint/zizmor surface unchanged), and passes only when `detect` succeeded **and** the gated job is `success` or (intentionally) `skipped` with the matching skip output set. A failed `detect` fails the gate closed (a skipped heavy job would otherwise count as a false success). `needs.<job>.result` collapses all matrix legs into one result.
+
+**Trusted release-please shortcut.** Release-please PRs only rewrite release metadata (`version.txt`, `CHANGELOG.md`, `.release-please-manifest.json`, chart `version` / `appVersion`). Their code was already gated on the feature PRs that landed on `main`, so the expensive workers skip on those PRs while the rollup gates stay green:
+
+- Predicate (must match all three): `github.head_ref` starts with `release-please--`, head repo is this repository (not a fork), and `github.event.pull_request.user.login` is `fireboltdb-ci-writer[bot]`.
+- Applied in `test-e2e.yaml`, `test-helm.yaml`, `test.yaml`, and `formal-verification.yaml` (sets `relevant`/`mutants` false so TLC and Mutants skip). Do **not** skip via workflow-level `on:` / branch filters — that leaves required checks Pending.
+- Forks or hand-rolled branches named like `release-please--*` still run the full suites (fail closed). `formal-verification.yaml` push-to-`main` is unchanged and still always runs TLC/mutants.
 
 Canonical required-check names (each is a gate job except Lint / PR Title):
 
