@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.6.0...firebolt-operator-v0.6.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **controller:** preflight gateway CRL secrets without draining (FB-2928) ([#124](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/124)) ([3ebae32](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3ebae327145569e9175a4de3766f69f605cfac68))
+* **controller:** refuse HTTP redirects on pod-IP scrape clients (FB-2668) ([#122](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/122)) ([979ddcd](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/979ddcd1ddde7f58d66a1fa32c3a12ed1f576cd3))
+* **controller:** roll gateway on CRL secret updates (FB-2667) ([#123](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/123)) ([1866493](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1866493c1df0e1464126ac1ee56f8765901b046b))
+* **controller:** surface gateway CRL without client CA when webhooks off (FB-2929) ([#126](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/126)) ([4cb763c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4cb763c0a719e52280029f0711378424c67b1863))
+* **metadata:** render dedicated-pensieve config as YAML, not XML (FB-2877) ([#120](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/120)) ([6fabbb5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6fabbb5fbe94cc19ee88991b6a494c0c32a97873))
+
+
+### Dependencies
+
+* **deps:** bump github.com/cert-manager/cert-manager from 1.20.3 to 1.21.0 ([#116](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/116)) ([2ce757d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2ce757d3f4b4d5ee9b7c95b8d6d4ec4bd62a2983))
+* **deps:** bump github.com/cert-manager/cert-manager from 1.21.0 to 1.21.1 ([#129](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/129)) ([b2fd401](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b2fd401155fe118980d30bbdd56f0d1796fce379))
+* **deps:** bump github.com/go-logr/logr from 1.4.3 to 1.4.4 ([#117](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/117)) ([d57c786](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d57c786789d8f1ed112a54bfb9fc1d41d1900134))
+* **deps:** bump github.com/oklog/ulid/v2 from 2.1.1 to 2.1.2 ([#115](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/115)) ([01469c5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/01469c51ecad98ac7aafbe1d9faca7c1d3e27663))
+* **deps:** bump github.com/prometheus/client_golang from 1.23.2 to 1.24.1 in the prometheus group across 1 directory ([#114](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/114)) ([c3abba2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c3abba2c40c572c1547c1a2ca316d8dc596226f9))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260803130231.8ec167d19785 ([40df5e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40df5e311bb2df4a888e581037c4a8e2e3b39898))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260808171517.d7585f66d216 ([#127](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/127)) ([2a67b1f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2a67b1f1c71de2473ff796f41a6b9e7a2f2553fa))
+* **deps:** bump the kubernetes group across 1 directory with 4 updates ([#113](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/113)) ([7a2a42c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7a2a42c8a494abe359e5f2b0092163a8c5953994))
+
 ## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.1...firebolt-operator-v0.6.0) (2026-07-28)
 
 
