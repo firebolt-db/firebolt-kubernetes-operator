@@ -51,12 +51,14 @@ jobs:
       - name: Validate Helm templates
         run: make helm-template > /dev/null
 
+      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv. Fetching to a
+      # file rather than piping curl into tar is the point: the tarball is
+      # verified before anything unpacks it.
       - name: Install helm-docs
-        env:
-          HELM_DOCS_VERSION: "1.14.2"
         run: |
-          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION}_Linux_x86_64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin helm-docs
+          scripts/ci/fetch-verified.sh helm-docs ./helm-docs.tar.gz
+          sudo tar -xzf ./helm-docs.tar.gz -C /usr/local/bin helm-docs
+          rm -f ./helm-docs.tar.gz
           helm-docs --version
 
       - name: Verify Helm chart READMEs are up to date

@@ -80,18 +80,21 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # Keyed on the pin manifest so bumping the tla2tools version (or its
+      # digest) invalidates the cache instead of restoring the old jar forever.
       - name: Cache TLA+ tools
-        id: cache-tla
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tla2tools.jar
-          key: tla2tools-v1.8.0
+          key: tla2tools-${{ hashFiles('scripts/ci/pinned-tools.tsv') }}
 
+      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv. tlaplus
+      # publishes no checksum file, so the pin is what makes a re-cut release
+      # tag visible instead of silently executed under `java -cp`. Run
+      # unconditionally: a restored cache entry is re-verified against the pin
+      # and replaced if it does not match, so cache contents are not trusted.
       - name: Download TLA+ tools
-        if: steps.cache-tla.outputs.cache-hit != 'true'
-        run: |
-          wget -q -O tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+        run: scripts/ci/fetch-verified.sh tla2tools tla2tools.jar
 
       - name: Run TLC — FireboltEngine
         run: |
