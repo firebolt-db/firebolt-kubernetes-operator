@@ -167,7 +167,26 @@ func engineTLSAnchorDNSName(instanceName, namespace string) string {
 // in Reconcile.
 func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	tls := instance.Spec.TLS
-	if tls == nil || tls.Engine == nil || !tls.Engine.Enabled {
+	if tls == nil || tls.Engine == nil {
+		instance.Status.EngineTLS = nil
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionTrue,
+			"Disabled", "spec.tls.engine is unset or disabled")
+		return nil
+	}
+
+	// Defense-in-depth against a bypassed validating webhook, mirroring
+	// ensureAuth's re-check of ValidateAuth. Run whenever an engine TLS block
+	// exists — including Enabled=false — so forbidden inert fields
+	// (clientCASecretRef / crlSecretRef on a disabled listener) still surface
+	// as EngineTLSReady=False/TLSSpecInvalid rather than reporting Disabled.
+	if errs := computev1alpha1.ValidateTLS(instance); len(errs) > 0 {
+		err := errs.ToAggregate()
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
+			"TLSSpecInvalid", err.Error())
+		return err
+	}
+
+	if !tls.Engine.Enabled {
 		// Deferred teardown: while the engine fleet is still draining off TLS
 		// (some engine still serves it), keep Status.EngineTLS populated with
 		// Reencrypting=true so the gateway retains the trust anchor and keeps
@@ -194,15 +213,6 @@ func (r *FireboltInstanceReconciler) ensureEngineTLS(ctx context.Context, instan
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionTrue,
 			"Disabled", "spec.tls.engine is unset or disabled")
 		return nil
-	}
-
-	// Defense-in-depth against a bypassed validating webhook, mirroring
-	// ensureAuth's re-check of ValidateAuth.
-	if errs := computev1alpha1.ValidateTLS(instance); len(errs) > 0 {
-		err := errs.ToAggregate()
-		setInstanceCondition(instance, computev1alpha1.InstanceConditionEngineTLSReady, metav1.ConditionFalse,
-			"TLSSpecInvalid", err.Error())
-		return err
 	}
 
 	ready, err := r.ensureEngineTLSCertificate(ctx, instance)
@@ -1045,7 +1055,7 @@ func gatewayTLSDNSNames(instance *computev1alpha1.FireboltInstance) []string {
 // both read Status.GatewayTLS.
 func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	tls := instance.Spec.TLS
-	if tls == nil || tls.Gateway == nil || !tls.Gateway.Enabled {
+	if tls == nil || tls.Gateway == nil {
 		instance.Status.GatewayTLS = nil
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionTrue,
 			"Disabled", "spec.tls.gateway is unset or disabled")
@@ -1053,12 +1063,23 @@ func (r *FireboltInstanceReconciler) ensureGatewayTLS(ctx context.Context, insta
 	}
 
 	// Defense-in-depth against a bypassed validating webhook, mirroring
-	// ensureEngineTLS's re-check of ValidateTLS.
+	// ensureEngineTLS's re-check of ValidateTLS. Run whenever a gateway TLS
+	// block exists — including Enabled=false — so a client crlSecretRef without
+	// clientCASecretRef (or either field on a disabled listener) cannot sit as
+	// dead config that reads as revocation being enforced while the condition
+	// reports Disabled/Ready.
 	if errs := computev1alpha1.ValidateTLS(instance); len(errs) > 0 {
 		err := errs.ToAggregate()
 		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionFalse,
 			"TLSSpecInvalid", err.Error())
 		return err
+	}
+
+	if !tls.Gateway.Enabled {
+		instance.Status.GatewayTLS = nil
+		setInstanceCondition(instance, computev1alpha1.InstanceConditionGatewayTLSReady, metav1.ConditionTrue,
+			"Disabled", "spec.tls.gateway is unset or disabled")
+		return nil
 	}
 
 	ready, staging, err := r.ensureGatewayTLSCertificate(ctx, instance)
