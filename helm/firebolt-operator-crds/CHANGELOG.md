@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.2.1...firebolt-operator-crds-chart-0.2.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **controller:** surface gateway CRL without client CA when webhooks off (FB-2929) ([#126](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/126)) ([4cb763c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4cb763c0a719e52280029f0711378424c67b1863))
+
 ## [0.2.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.2.0...firebolt-operator-crds-chart-0.2.1) (2026-08-03)
 
 
