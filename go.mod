@@ -6,7 +6,7 @@ require (
 	github.com/cert-manager/cert-manager v1.21.1
 	github.com/distribution/reference v0.6.0
 	github.com/go-logr/logr v1.4.4
-	github.com/oklog/ulid/v2 v2.1.1
+	github.com/oklog/ulid/v2 v2.1.2
 	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.24.1
