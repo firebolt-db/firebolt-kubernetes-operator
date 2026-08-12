@@ -17,25 +17,50 @@ concurrency:
 
 jobs:
   detect:
-    name: Detect docs-only change
+    name: Detect expensive-test shortcut
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
+      release_please: ${{ steps.detect.outputs.release_please }}
+      skip_expensive: ${{ steps.detect.outputs.skip_expensive }}
+      skip_reason: ${{ steps.detect.outputs.skip_reason }}
     steps:
-      - name: Determine whether the PR changed only docs
+      - name: Determine whether the PR can skip Kind tests
         id: detect
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          write_outputs() {
+            {
+              echo "docs_only=$1"
+              echo "release_please=$2"
+              echo "skip_expensive=$3"
+              echo "skip_reason=$4"
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          # Trusted release-please PRs only rewrite release metadata
+          # (version.txt / CHANGELOG / manifest / chart version fields).
+          # Require same-repo head + the release writer bot so a fork or
+          # hand-rolled branch named like release-please still runs Kind.
+          if [[ "${HEAD_REF}" == release-please--* && "${HEAD_REPO}" == "${REPO}" && "${PR_AUTHOR}" == "fireboltdb-ci-writer[bot]" ]]; then
+            echo "Trusted release-please branch '${HEAD_REF}'; skipping Kind-backed worker."
+            write_outputs false true true release_please
+            exit 0
+          fi
+
           # List the PR's changed files via the compare API (no checkout
           # needed). "docs" = markdown anywhere, plus docs/.
-          # Fail-safe: any uncertainty leaves docs_only=false so the full
-          # suite still runs.
+          # Fail-safe: any uncertainty leaves skip_expensive=false so the
+          # full suite still runs.
           files="$(gh api --paginate \
             "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
             --jq '.files[].filename' 2>/dev/null || true)"
@@ -44,15 +69,15 @@ jobs:
           non_docs="$(printf '%s\n' "${files}" \
             | grep -vE '\.mdx?$|^docs/' || true)"
           if [ -n "${files}" ] && [ -z "${non_docs}" ]; then
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            write_outputs true false true docs_only
           else
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            write_outputs false false false ""
           fi
 
   test-helm:
     name: test-helm
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true'
+    if: needs.detect.outputs.skip_expensive != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -183,7 +208,8 @@ jobs:
   # is a single job that already reports success when skipped, but this
   # gate closes the `detect` fail-open hole (a failed `detect` would skip
   # the heavy job and report a false success) and gives branch protection
-  # one stable name independent of the worker job.
+  # one stable name independent of the worker job. An intentional skip must
+  # set skip_expensive=true (docs-only or trusted release-please).
   helm-required:
     name: Helm Tests
     needs: [detect, test-helm]
@@ -194,12 +220,25 @@ jobs:
       - name: Verify gated jobs
         env:
           DETECT: ${{ needs.detect.result }}
+          SKIP_EXPENSIVE: ${{ needs.detect.outputs.skip_expensive }}
+          SKIP_REASON: ${{ needs.detect.outputs.skip_reason }}
           HELM: ${{ needs.test-helm.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect did not succeed (result=$DETECT)"; exit 1
           fi
           case "$HELM" in
-            success|skipped) echo "gate satisfied (test-helm=$HELM)";;
-            *) echo "::error::test-helm result=$HELM"; exit 1;;
+            success)
+              echo "gate satisfied (test-helm=$HELM)"
+              ;;
+            skipped)
+              if [ "$SKIP_EXPENSIVE" = "true" ]; then
+                echo "gate satisfied (test-helm=skipped, reason=$SKIP_REASON)"
+              else
+                echo "::error::test-helm was skipped but skip_expensive=$SKIP_EXPENSIVE"; exit 1
+              fi
+              ;;
+            *)
+              echo "::error::test-helm result=$HELM"; exit 1
+              ;;
           esac

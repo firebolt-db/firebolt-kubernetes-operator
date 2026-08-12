@@ -23,6 +23,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -34,11 +38,24 @@ jobs:
           # The mutant check has a WIDER scope than TLC: it asserts the
           # state-cover suite still catches a broken reconciler, so it depends
           # on the reconciler itself, not only on the model.
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "mutants=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          # Trusted release-please PRs only rewrite release metadata
+          # (version.txt / CHANGELOG / manifest / chart version fields).
+          # Require same-repo head + the release writer bot so a fork or
+          # hand-rolled branch named like release-please still path-scopes
+          # normally (and fail-open still runs workers when uncertain).
+          if [[ "${HEAD_REF}" == release-please--* && "${HEAD_REPO}" == "${REPO}" && "${PR_AUTHOR}" == "fireboltdb-ci-writer[bot]" ]]; then
+            echo "Trusted release-please branch '${HEAD_REF}'; skipping TLC/mutants workers."
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "mutants=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           files="$(gh api --paginate \
             "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
             --jq '.files[].filename' 2>/dev/null || true)"
