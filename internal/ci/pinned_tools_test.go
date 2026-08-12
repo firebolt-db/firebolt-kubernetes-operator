@@ -164,10 +164,83 @@ func scannedFiles(t *testing.T) []string {
 	return files
 }
 
+// logicalLine is one shell/Make command after joining backslash continuations,
+// with the 1-based file line where the command started.
+type logicalLine struct {
+	text      string
+	startLine int
+}
+
+// joinContinuedLines folds `\`-continued physical lines into logical commands
+// so a curl/wget with the URL on the next line still matches the guard.
+func joinContinuedLines(content string) []logicalLine {
+	physical := strings.Split(content, "\n")
+	out := make([]logicalLine, 0, len(physical))
+	for i := 0; i < len(physical); {
+		start := i + 1
+		var b strings.Builder
+		for {
+			line := physical[i]
+			continued := strings.HasSuffix(strings.TrimRight(line, " \t"), `\`)
+			if continued {
+				line = strings.TrimRight(line, " \t")
+				line = strings.TrimSuffix(line, `\`)
+			}
+			if b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(line)
+			i++
+			if !continued || i >= len(physical) {
+				break
+			}
+		}
+		out = append(out, logicalLine{text: b.String(), startLine: start})
+	}
+	return out
+}
+
+var downloaderPattern = regexp.MustCompile(`\b(curl|wget)\b`)
+
+// unverifiedDownloadLines returns logical lines that fetch over https with
+// curl/wget and are not exempted. Used by TestNoUnverifiedBinaryDownloads and
+// unit-tested with synthetic continued-line fixtures.
+func unverifiedDownloadLines(content string) []logicalLine {
+	var bad []logicalLine
+	for _, line := range joinContinuedLines(content) {
+		if !downloaderPattern.MatchString(line.text) || !strings.Contains(line.text, "https://") {
+			continue
+		}
+		if strings.Contains(line.text, exemptMarker) {
+			continue
+		}
+		bad = append(bad, line)
+	}
+	return bad
+}
+
+func TestUnverifiedDownloadLinesCatchesSplitURL(t *testing.T) {
+	content := "wget -q -O ./kind \\\n  https://example.com/kind\n"
+	got := unverifiedDownloadLines(content)
+	if len(got) != 1 {
+		t.Fatalf("got %d hits, want 1: %#v", len(got), got)
+	}
+	if got[0].startLine != 1 {
+		t.Errorf("startLine = %d, want 1", got[0].startLine)
+	}
+	if !strings.Contains(got[0].text, "wget") || !strings.Contains(got[0].text, "https://example.com/kind") {
+		t.Errorf("joined text missing wget/url: %q", got[0].text)
+	}
+
+	exempt := "curl -fsSL https://api.example.com/status # " + exemptMarker + " not an artifact\n"
+	if hits := unverifiedDownloadLines(exempt); len(hits) != 0 {
+		t.Errorf("exempt line should be ignored, got %#v", hits)
+	}
+}
+
 func TestNoUnverifiedBinaryDownloads(t *testing.T) {
 	root := repoRoot(t)
 	helperPath := filepath.Join(root, helperRel)
-	downloader := regexp.MustCompile(`\b(curl|wget)\b`)
 
 	for _, path := range scannedFiles(t) {
 		// The helper is the one place allowed to reach out to the network.
@@ -182,18 +255,26 @@ func TestNoUnverifiedBinaryDownloads(t *testing.T) {
 		if err != nil {
 			rel = path
 		}
-		for i, line := range strings.Split(string(raw), "\n") {
-			if !downloader.MatchString(line) || !strings.Contains(line, "https://") {
-				continue
-			}
-			if strings.Contains(line, exemptMarker) {
-				continue
-			}
+		for _, line := range unverifiedDownloadLines(string(raw)) {
 			t.Errorf("%s:%d fetches over https with curl/wget outside the digest-verified helper:\n  %s\n"+
 				"Pin the artifact in %s and fetch it with `%s <name> <dest>`, or annotate the line "+
 				"with `# %s <reason>` if it is not an executable artifact.",
-				rel, i+1, strings.TrimSpace(line), manifestRel, helperRel, exemptMarker)
+				rel, line.startLine, strings.TrimSpace(line.text), manifestRel, helperRel, exemptMarker)
 		}
+	}
+}
+
+func TestTLA2ToolsMakeRuleDependsOnManifest(t *testing.T) {
+	// Order-only LOCALBIN alone would leave a stale jar after a pin bump; the
+	// manifest must be a real prerequisite so make re-runs fetch-verified.sh.
+	path := filepath.Join(repoRoot(t), "Makefile")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	want := "$(TLA2TOOLS): " + manifestRel + " | $(LOCALBIN)"
+	if !strings.Contains(string(raw), want) {
+		t.Errorf("Makefile tla2tools rule must depend on the pin manifest:\n  want a line containing %q", want)
 	}
 }
 

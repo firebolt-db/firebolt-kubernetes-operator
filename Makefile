@@ -379,11 +379,13 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
 
 # Version and SHA-256 live in scripts/ci/pinned-tools.tsv, shared with CI.
-# Order-only prerequisite (the `|`) so bin/'s mtime does not count: as a normal
-# prerequisite, any rule that writes into bin/ bumps the directory past the jar
-# and the download runs again. Together with hoisting LOCALBIN (see above) this
-# stops every formal target re-fetching 4.5MB, and lets caching bin/ in CI work.
-$(TLA2TOOLS): | $(LOCALBIN)
+# A real prerequisite on the manifest so a pin bump re-runs fetch-verified.sh
+# (and refuses a stale jar). Order-only on LOCALBIN so bin/'s mtime does not
+# count: as a normal prerequisite, any rule that writes into bin/ bumps the
+# directory past the jar and the download runs again. Together with hoisting
+# LOCALBIN (see above) this stops every formal target re-fetching 4.5MB, and
+# lets caching bin/ in CI work.
+$(TLA2TOOLS): scripts/ci/pinned-tools.tsv | $(LOCALBIN)
 	scripts/ci/fetch-verified.sh tla2tools "$(TLA2TOOLS)"
 
 .PHONY: tla2tools

@@ -268,7 +268,8 @@ Every third-party binary that CI or the Makefile downloads (`kind`, `yq`, `helm-
 - Fetch to a file, then unpack or install. Never pipe a download into `tar`/`sh` — that executes bytes before they are checked.
 - Bumping a version means replacing the URL **and** the digest together. Take the digest from the project's own published checksum file (`<url>.sha256sum` for kind, `checksums` for yq, `checksums.txt` for helm-docs); tlaplus publishes none, so `tla2tools.jar` is pinned from the artifact and a mismatch means the tag was re-cut.
 - The helper verifies an existing destination instead of trusting it, so it is safe to run over a restored `actions/cache` entry. The `formal-verification.yaml` TLA+ cache is keyed on `hashFiles('scripts/ci/pinned-tools.tsv')` and its download step runs unconditionally for that reason.
-- [`internal/ci/pinned_tools_test.go`](internal/ci/pinned_tools_test.go) (a test-only package, run by `make test`) keeps the manifest well-formed and fails any `curl`/`wget` of an `https://` URL in a workflow, the `Makefile`, or `scripts/**` that bypasses the helper. A line that fetches something other than an executable artifact can opt out with a `# fetch-verified-exempt: <reason>` comment.
+- The Makefile `$(TLA2TOOLS)` rule depends on `scripts/ci/pinned-tools.tsv` (real prerequisite) and `| $(LOCALBIN)` (order-only), so a pin bump re-runs the helper while other writes into `bin/` do not.
+- [`internal/ci/pinned_tools_test.go`](internal/ci/pinned_tools_test.go) (a test-only package, run by `make test`) keeps the manifest well-formed and fails any `curl`/`wget` of an `https://` URL in a workflow, the `Makefile`, or `scripts/**` that bypasses the helper — including backslash-continued lines where the URL is on the next physical line. A line that fetches something other than an executable artifact can opt out with a `# fetch-verified-exempt: <reason>` comment.
 
 ### Required checks / rollup gates
 
