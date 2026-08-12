@@ -218,6 +218,18 @@ func TestBuildPostgresStatefulSetDisablesServiceLinks(t *testing.T) {
 	}
 }
 
+// The postgres pod runs under the namespace default ServiceAccount and
+// never talks to the Kubernetes API, so its token must not be projected
+// into the container filesystem where a compromised postgres process
+// could reach it.
+func TestBuildPostgresStatefulSetDisablesServiceAccountTokenAutomount(t *testing.T) {
+	sts := buildPostgresStatefulSet(mkPostgresInstance())
+	amt := sts.Spec.Template.Spec.AutomountServiceAccountToken
+	if amt == nil || *amt {
+		t.Errorf("AutomountServiceAccountToken: got %+v, want *false (postgres does not call the Kubernetes API)", amt)
+	}
+}
+
 // validatePostgresSecret is the gate ensurePostgresSecret runs against
 // any pre-existing Secret it observes before deciding to skip the
 // write — both on the cached Get fast path and on the

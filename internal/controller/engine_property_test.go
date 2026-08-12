@@ -130,6 +130,27 @@ type engineSim struct {
 	// podsDrained reflects whether the draining gen has zero active queries.
 	// Reset to false whenever a new drainingGen is established.
 	podsDrained bool
+
+	// specDirty records that the spec (or the referenced class) changed and no
+	// reconcile has caught up yet. It exists for Inv_QuiescedPhaseMatchesSpec,
+	// which only applies once the reconciler has quiesced.
+	//
+	// The spec gets "quiesced" for free: its EnvChangeSpec always bumps
+	// specVer, so StsMatchesSpec(currentGen) goes FALSE and the invariant's
+	// guard disables itself until reconciliation catches up.
+	//
+	// Go needs this flag because stsMatchesSpec alone does not close the
+	// window. A reconcile can bring the StatefulSet into line with a new
+	// spec and be observed before its status write lands: at that instant
+	// stsMatchesSpec is already TRUE while the terminal phase still names
+	// the old intent. That lag is correct behavior for exactly one
+	// reconcile, and only a random walk that mutates the spec and observes
+	// between the two writes can see it.
+	//
+	// Set by every spec/class-mutating action, cleared by a Reconcile that
+	// writes status. Crash variants leave it set on purpose: a reconcile that
+	// died before its status write has not caught up.
+	specDirty bool
 }
 
 // buildState constructs the EngineState to pass to computeEngineReconcile
@@ -321,6 +342,7 @@ func (m *engineSim) Reconcile(t *rapid.T) {
 	if isTerminalPhase(m.status.Phase) {
 		m.gcStaleResources()
 	}
+	m.specDirty = false
 }
 
 // CrashReconcile applies only the resource writes — not the status update.
@@ -373,6 +395,7 @@ func (m *engineSim) CacheCatchesUp(_ *rapid.T) {
 // that breaks one branch (e.g. forgets to compare resources on the
 // engine container) gets caught.
 func (m *engineSim) ApplySpecChange(t *rapid.T) {
+	m.specDirty = true
 	if m.spec.Template == nil {
 		m.spec.Template = &corev1.PodTemplateSpec{}
 	}
@@ -408,6 +431,7 @@ func (m *engineSim) ApplySpecChange(t *rapid.T) {
 // stsMatchesSpec uses for engine spec edits applies here via the
 // AnnotationEngineClassHash comparison.
 func (m *engineSim) ApplyClassChange(t *rapid.T) {
+	m.specDirty = true
 	v := rapid.IntRange(0, 99).Draw(t, "classVersion")
 	if v == 0 {
 		m.classInfo = nil
@@ -451,6 +475,13 @@ func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
 // the carrier because both effective* paths use it and the field is
 // scalar (no value-equality subtlety).
 func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
+	// Like every other spec/class-mutating action. Inert for
+	// Inv_QuiescedPhaseMatchesSpec today, since that invariant only fires on
+	// a replicas-vs-phase mismatch and this action leaves replicas alone —
+	// but specDirty's contract is "set by every spec/class-mutating action",
+	// and an action that quietly opts out is a trap for the next invariant
+	// that leans on it.
+	m.specDirty = true
 	v := rapid.IntRange(1, 99).Draw(t, "conflictVersion")
 	if m.spec.Template == nil {
 		m.spec.Template = &corev1.PodTemplateSpec{}
@@ -493,6 +524,7 @@ func setSimContainerResources(tmpl *corev1.PodTemplateSpec, res corev1.ResourceR
 // Range includes 0 so that PhaseStopped is reachable.
 func (m *engineSim) ScaleReplicas(t *rapid.T) {
 	m.spec.Replicas = int32(rapid.IntRange(0, 5).Draw(t, "replicas"))
+	m.specDirty = true
 }
 
 // PodsBecomesReady marks the current generation's pods as all Running+Ready.
@@ -521,81 +553,62 @@ func (m *engineSim) DeleteEngine(_ *rapid.T) {
 	}
 }
 
-// ---------- Invariant checks (mirrors formal/FireboltEngine.tla Safety) ----------
+// ---------- Invariant checks ----------
 
-// Check is called by rapid after every action. All resource invariants run
-// against m.api (the api truth). The cache is only the controller's input;
-// transient cache/api divergence is the input space, not the bug surface.
+// Check is called by rapid after every action. The invariants themselves live in
+// engine_invariants_test.go, shared with the TLA+ state cover and keyed by the
+// spec's Safety conjunct names, so the two harnesses cannot drift apart or fall
+// behind the spec. All of them read m.api (the api truth); the cache is only the
+// controller's input, and transient cache/api divergence is the input space, not
+// the bug surface.
 func (m *engineSim) Check(t *rapid.T) {
-	s := &m.status
-
-	// Inv_TerminalConsistency: terminal phase => CurrentGeneration == ActiveGeneration
-	if isTerminalPhase(s.Phase) && s.CurrentGeneration != s.ActiveGeneration {
-		t.Fatalf("Inv_TerminalConsistency: phase=%s but CurrentGen=%d != ActiveGen=%d",
-			s.Phase, s.CurrentGeneration, s.ActiveGeneration)
-	}
-
-	// Inv_TerminalNoDraining: terminal phase => DrainingGeneration == nil
-	if isTerminalPhase(s.Phase) && s.DrainingGeneration != nil {
-		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
-			s.Phase, *s.DrainingGeneration)
-	}
-
-	// Inv_ActiveHasSTS: ActiveGeneration >= 0 => STS for that gen exists
-	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
-		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS in cluster",
-			s.ActiveGeneration)
-	}
-
-	// Inv_ServiceKnownGen + Inv_ServiceValid: once traffic is active, the
-	// cluster service selector points to a gen in {activeGen, currentGen}
-	// and that gen's STS exists.
-	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
-		if !ok {
-			t.Fatalf("cluster service missing %s label", LabelGeneration)
-		}
-		targetGen, err := strconv.Atoi(genStr)
-		if err != nil {
-			t.Fatalf("invalid %s label on cluster service: %v", LabelGeneration, err)
-		}
-		if targetGen != s.ActiveGeneration && targetGen != s.CurrentGeneration {
-			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d ∉ {activeGen=%d, currentGen=%d}",
-				targetGen, s.ActiveGeneration, s.CurrentGeneration)
-		}
-		if m.api.stses[targetGen] == nil {
-			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS in cluster", targetGen)
-		}
-	}
-
-	// Inv_NoOrphanedResources: terminal phase => only currentGen resources survive.
-	// GC runs as part of Reconcile when phase is terminal, so any stale gens still
-	// present after a Reconcile call indicate a GC gap.
-	if isTerminalPhase(s.Phase) {
-		for gen := range m.api.stses {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but STS gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-		for gen := range m.api.configMaps {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but ConfigMap gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-		for gen := range m.api.headlessSvcs {
-			if gen != s.CurrentGeneration {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but HeadlessSvc gen=%d survives (currentGen=%d)",
-					s.Phase, gen, s.CurrentGeneration)
-			}
-		}
-	}
+	checkEngineInvariants(t, m)
 }
 
-func TestEngineStateMachine(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		m := &engineSim{
+// rapidStartStates are the indices into tlaStatePool that a walk may start from.
+//
+// Starting every walk from a brand-new engine wasted almost all of the harness's
+// effort. Measured over a default run, ~99.4% of Check calls landed in
+// `creating`, well under 1% in `switching` / `stable` / `stopped`, and
+// `draining` / `cleaning` were never reached at all -- 0 out of ~34k checks even
+// at -rapid.steps=300. Those phases are reachable in principle, but only via a
+// specific ~5-action ordering drawn from 9 equally-likely actions, twice over (an
+// engine has to finish one generation before a second switch can drain the
+// first), so uniform random selection effectively never assembles it. Every
+// invariant conditioned on a terminal phase or an active generation was
+// therefore vacuous here, and the state cover was doing all the real work.
+//
+// So draw the starting state from the model instead: materializeTLAState already
+// builds any reachable modeled state for the state cover, and a walk seeded from
+// a random one starts spread across the whole reachable space rather than
+// crawling out of a single corner.
+//
+// Gated states are excluded for exactly the reason the state cover skips them
+// (tlaShouldGateOut): the compute layer only runs when the outer Reconcile's
+// instance and class gates are open, and this harness calls the compute layer
+// directly. States on the model's MaxGen ceiling are kept -- unlike the state
+// cover, this harness has no closure oracle to disagree with, and a Go-side
+// generation bump past the model's bound is legitimate behavior worth walking.
+var rapidStartStates = func() []int {
+	idxs := make([]int, 0, len(tlaStatePool))
+	for i := range tlaStatePool {
+		if tlaShouldGateOut(tlaStatePool[i]) {
+			continue
+		}
+		idxs = append(idxs, i)
+	}
+	return idxs
+}()
+
+// drawEngineSimStart picks the state a walk begins from. Index -1 is the
+// from-scratch engine the harness used to always start with: a first reconcile
+// against an empty cluster. It is kept as its own case both because it is the
+// canonical entry point and because rapid shrinks towards the low end of a
+// range, so a minimal reproduction starts there when it can.
+func drawEngineSimStart(t *rapid.T) *engineSim {
+	idx := rapid.IntRange(-1, len(rapidStartStates)-1).Draw(t, "startState")
+	if idx < 0 {
+		return &engineSim{
 			spec: *testSpec(),
 			status: computev1alpha1.FireboltEngineStatus{
 				Phase:             computev1alpha1.PhaseCreating,
@@ -606,6 +619,12 @@ func TestEngineStateMachine(t *testing.T) {
 			cache:       newClusterView(),
 			podsDrained: true,
 		}
-		t.Repeat(rapid.StateMachineActions(m))
+	}
+	return materializeTLAState(tlaStatePool[rapidStartStates[idx]])
+}
+
+func TestEngineStateMachine(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		t.Repeat(rapid.StateMachineActions(drawEngineSimStart(t)))
 	})
 }

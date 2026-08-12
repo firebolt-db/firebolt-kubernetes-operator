@@ -110,15 +110,15 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl restart docker
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -168,6 +168,13 @@ jobs:
       # regression against the injected pod spec surfaces here.
       - name: Verify engine web UI sidecar
         run: make helm-test-ui KIND_CLUSTER="${KIND_CLUSTER}"
+
+      - name: Verify wake-on-zero
+        # The only check that exercises the real wake path: a chart-installed
+        # operator means the wake-agent sidecar runs from the actual operator
+        # image, inside the gateway pod, where Envoy's loopback call can reach
+        # it. The Go e2e suite runs the operator in-process and cannot.
+        run: make helm-test-wake KIND_CLUSTER="${KIND_CLUSTER}"
 
       - name: Verify website quickstart bundle
         run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"

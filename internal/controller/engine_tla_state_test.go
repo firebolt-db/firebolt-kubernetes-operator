@@ -83,7 +83,7 @@ func tlaSpecForState(s tlaState) computev1alpha1.FireboltEngineSpec {
 // (Previously this used the container image; the image moved out of
 // FireboltEngineSpec into FireboltEngineClass, so SA is the carrier now.)
 func tlaMakeSTS(spec *computev1alpha1.FireboltEngineSpec, gen, stsSpecVer int) *appsv1.StatefulSet {
-	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, nil)
+	sts := buildStatefulSet(spec, propEngineName, propNamespace, gen, InstanceInfo{}, nil)
 	sts.Spec.Template.Spec.ServiceAccountName = fmt.Sprintf("sa-v%d", stsSpecVer)
 	return sts
 }
@@ -172,9 +172,15 @@ func materializeTLAState(s tlaState) *engineSim {
 }
 
 // projectEngineSim extracts the TLA+ observable variables from the simulated
-// cluster state. instanceReady is preserved from the input state because the
-// compute layer cannot change it — the gate is enforced by the outer Reconcile.
-func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
+// cluster state. instanceReady and classReady are preserved from the input state
+// because the compute layer cannot change either — both gates are enforced by
+// the outer Reconcile.
+//
+// Every field of tlaState must be populated here. The round-trip guard in
+// TestTLAEngineStateCover (materialize → project == start) is what enforces
+// that: a field left at its zero value silently narrows what
+// tlaClosureContains compares, which weakens every assertion in the suite.
+func projectEngineSim(m *engineSim, instanceReady, classReady bool) tlaState {
 	st := tlaState{
 		Phase:         string(m.status.Phase),
 		CurrentGen:    m.status.CurrentGeneration,
@@ -186,6 +192,7 @@ func projectEngineSim(m *engineSim, instanceReady bool) tlaState {
 		PodsReady:     m.podsReady,
 		PodsDrained:   m.podsDrained,
 		InstanceReady: instanceReady,
+		ClassReady:    classReady,
 	}
 	for g := range st.StsSpecVer {
 		st.StsSpecVer[g] = -1
@@ -303,96 +310,38 @@ func tlaModelBoundary(s tlaState) bool {
 	}
 }
 
-// tlaInvariants verifies the same Safety predicates checked in the rapid
-// property test (engine_property_test.go's engineSim.Check) plus the TLA+
-// safety invariants that depend only on observable simulated state.
+// tlaInvariants runs the shared invariant registry (engine_invariants_test.go),
+// the same set the rapid harness checks after every action. Keyed by the spec's
+// Safety conjunct names, so a conjunct added to formal/FireboltEngine.tla fails
+// TestEngineInvariantsMatchSpec until it is implemented here too.
 func tlaInvariants(t *testing.T, m *engineSim) {
 	t.Helper()
-	s := &m.status
-
-	if isTerminalPhase(s.Phase) && s.CurrentGeneration != s.ActiveGeneration {
-		t.Fatalf("Inv_TerminalConsistency: phase=%s but CurrentGen=%d != ActiveGen=%d",
-			s.Phase, s.CurrentGeneration, s.ActiveGeneration)
-	}
-	if isTerminalPhase(s.Phase) && s.DrainingGeneration != nil {
-		t.Fatalf("Inv_TerminalNoDraining: phase=%s but DrainingGen=%d",
-			s.Phase, *s.DrainingGeneration)
-	}
-	if s.ActiveGeneration >= 0 && m.api.stses[s.ActiveGeneration] == nil {
-		t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d has no STS", s.ActiveGeneration)
-	}
-	if s.DrainingGeneration != nil && s.Phase != computev1alpha1.PhaseDraining && s.Phase != computev1alpha1.PhaseCleaning {
-		t.Fatalf("Inv_DrainingPhase: DrainingGen=%d but phase=%s",
-			*s.DrainingGeneration, s.Phase)
-	}
-	if s.DrainingGeneration != nil && *s.DrainingGeneration >= s.CurrentGeneration {
-		t.Fatalf("Inv_DrainingOlderThanCurrent: DrainingGen=%d, CurrentGen=%d",
-			*s.DrainingGeneration, s.CurrentGeneration)
-	}
-	if s.ActiveGeneration > s.CurrentGeneration {
-		t.Fatalf("Inv_GenOrder: ActiveGen=%d > CurrentGen=%d",
-			s.ActiveGeneration, s.CurrentGeneration)
-	}
-	if m.api.clusterSvc != nil && s.ActiveGeneration >= 0 {
-		genStr, ok := m.api.clusterSvc.Spec.Selector[LabelGeneration]
-		if !ok {
-			t.Fatalf("cluster service missing %s label", LabelGeneration)
-		}
-		targetGen, err := strconv.Atoi(genStr)
-		if err != nil {
-			t.Fatalf("invalid %s label on cluster service: %v", LabelGeneration, err)
-		}
-		if targetGen != s.ActiveGeneration && targetGen != s.CurrentGeneration {
-			t.Fatalf("Inv_ServiceKnownGen: svcTargetGen=%d not in {activeGen=%d, currentGen=%d}",
-				targetGen, s.ActiveGeneration, s.CurrentGeneration)
-		}
-		if m.api.stses[targetGen] == nil {
-			t.Fatalf("Inv_ServiceValid: svcTargetGen=%d has no STS", targetGen)
-		}
-	}
+	checkEngineInvariants(t, m)
 }
 
-// closureContains reports whether `actual` is one of the TLA+ states the model
-// considers reachable from the test's starting state. A real Reconcile call
-// may perform several model sub-steps in one shot (the spec models reconciles
-// atomically per sub-action; the implementation batches), so the resulting
-// state is checked for closure membership rather than equality with any
-// single specific successor. The closure includes the starting state itself
-// only when the model permits a stutter there (no reconciler action enabled
-// or a self-loop edge); otherwise a no-op Reconcile is rejected.
+// Coverage pins. These are hand-maintained on purpose: they cannot live in the
+// generated fixture, because the fixture is regenerated from the spec and
+// therefore always agrees with itself. A spec change that collapses the state
+// space, or a widened skip predicate that swallows states the compute layer
+// used to be checked against, leaves `make formal-verify` green — the fixture
+// still matches the generator's output, there are simply far fewer cases in it,
+// and the test only logged the counts.
 //
-// closureIDs are indices into tlaStatePool.
-func closureContains(closureIDs []int, actual tlaState) bool {
-	for _, id := range closureIDs {
-		if tlaStateEqual(tlaStatePool[id], actual) {
-			return true
-		}
-	}
-	return false
-}
-
-func tlaStateEqual(a, b tlaState) bool {
-	if a.Phase != b.Phase ||
-		a.CurrentGen != b.CurrentGen ||
-		a.ActiveGen != b.ActiveGen ||
-		a.DrainingGen != b.DrainingGen ||
-		a.SpecVer != b.SpecVer ||
-		a.SpecWantsStop != b.SpecWantsStop ||
-		a.SvcTargetGen != b.SvcTargetGen ||
-		a.PodsReady != b.PodsReady ||
-		a.PodsDrained != b.PodsDrained ||
-		a.InstanceReady != b.InstanceReady {
-		return false
-	}
-	for i := range a.StsSpecVer {
-		if a.StsSpecVer[i] != b.StsSpecVer[i] {
-			return false
-		}
-	}
-	return true
-}
+// Pinning them in hand-written code forces any movement in coverage to appear
+// as an edit in the diff. If one of these assertions fails, the question to
+// answer in the commit message is *why* coverage moved — then update the number.
+const (
+	tlaExpectedCases           = 6404
+	tlaExpectedRan             = 3512
+	tlaExpectedSkippedGate     = 2856
+	tlaExpectedSkippedBoundary = 36
+)
 
 func TestTLAEngineStateCover(t *testing.T) {
+	if len(tlaEngineStateCases) != tlaExpectedCases {
+		t.Fatalf("fixture has %d cases, expected %d: the state space moved. Regenerate with `make formal-gen`, then update tlaExpectedCases and say why in the commit",
+			len(tlaEngineStateCases), tlaExpectedCases)
+	}
 	skippedGate := 0
 	skippedBoundary := 0
 	for i := range tlaEngineStateCases {
@@ -411,6 +360,17 @@ func TestTLAEngineStateCover(t *testing.T) {
 			start.DrainingGen, start.SpecVer)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAState(start)
+
+			// Guard the fixture itself: if materialization does not reproduce the
+			// starting state, every closure assertion below is meaningless. It
+			// also forces projectEngineSim to populate every tlaState field — a
+			// dropped field fails the round-trip for any state whose value
+			// differs from that field's zero value. Every state-cover harness
+			// carries this guard, through the same shared comparison.
+			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady); !tlaProjectionEqual(got, start) {
+				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
+			}
+
 			result := computeEngineReconcile(
 				&m.spec, &m.status, m.buildState(),
 				propEngineName, propNamespace, 0, testInstanceInfo(), nil,
@@ -425,30 +385,29 @@ func TestTLAEngineStateCover(t *testing.T) {
 			}
 			tlaInvariants(t, m)
 
-			actual := projectEngineSim(m, start.InstanceReady)
-			if !closureContains(tc.Closure, actual) {
+			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady)
+			if !tlaClosureContains(tlaStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), formatClosure(tc.Closure))
+					start, actual, len(tc.Closure), tlaFormatClosure(tlaStatePool, tc.Closure))
 			}
 		})
 	}
+	ran := len(tlaEngineStateCases) - skippedGate - skippedBoundary
 	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
-		len(tlaEngineStateCases)-skippedGate-skippedBoundary, len(tlaEngineStateCases),
-		skippedGate, skippedBoundary)
-}
+		ran, len(tlaEngineStateCases), skippedGate, skippedBoundary)
 
-// formatClosure renders the first few entries of a closure index list for
-// inclusion in a Fatalf message. Each entry is prefixed by its pool index so
-// errors point straight back into tlaStatePool.
-func formatClosure(closureIDs []int) string {
-	const limit = 8
-	out := ""
-	for i, id := range closureIDs {
-		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
-			break
-		}
-		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaStatePool[id])
+	// The skip predicates are the other way coverage can quietly vanish: widen
+	// tlaShouldGateOut or tlaModelBoundary and states stop being exercised with
+	// no fixture change at all, so `make formal-verify` cannot see it.
+	if skippedGate != tlaExpectedSkippedGate {
+		t.Errorf("tlaShouldGateOut skipped %d cases, expected %d: the gate predicate changed. Justify the new coverage and update tlaExpectedSkippedGate",
+			skippedGate, tlaExpectedSkippedGate)
 	}
-	return out
+	if skippedBoundary != tlaExpectedSkippedBoundary {
+		t.Errorf("tlaModelBoundary skipped %d cases, expected %d: the boundary predicate changed. Justify the new coverage and update tlaExpectedSkippedBoundary",
+			skippedBoundary, tlaExpectedSkippedBoundary)
+	}
+	if ran != tlaExpectedRan {
+		t.Errorf("ran %d cases against computeEngineReconcile, expected %d", ran, tlaExpectedRan)
+	}
 }

@@ -63,6 +63,8 @@ func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 	for _, c := range []string{
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
+		computev1alpha1.InstanceConditionEngineTLSReady,
+		computev1alpha1.InstanceConditionGatewayTLSReady,
 	} {
 		setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
 	}
@@ -75,6 +77,59 @@ func TestSetInstanceReadyRollup_TrueWhenAllComponentsTrue(t *testing.T) {
 	}
 	if ready.Reason != "AllComponentsReady" {
 		t.Fatalf("unexpected reason: %q", ready.Reason)
+	}
+}
+
+// TestSetInstanceReadyRollup_HeldWhileTLSPending locks in the fix for the
+// gateway TLS "downgrade window": with metadata, gateway, and engine TLS all
+// ready but the gateway's downstream certificate still provisioning, the
+// Instance must NOT report Ready — otherwise it would advertise Ready while
+// the client-facing listener is still serving plaintext. The blocker's reason
+// (CertificatePending) must surface on the headline condition.
+func TestSetInstanceReadyRollup_HeldWhileTLSPending(t *testing.T) {
+	inst := newInstance()
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
+		metav1.ConditionTrue, "Ready", "ok")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
+		metav1.ConditionTrue, "Ready", "gateway deployment rolled out")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionEngineTLSReady,
+		metav1.ConditionTrue, "Disabled", "spec.tls.engine is unset or disabled")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayTLSReady,
+		metav1.ConditionFalse, "CertificatePending", "waiting for cert-manager to issue the gateway TLS certificate")
+
+	setInstanceReadyRollup(inst)
+
+	ready := apimeta.FindStatusCondition(inst.Status.Conditions, computev1alpha1.InstanceConditionReady)
+	if ready == nil || ready.Status != metav1.ConditionFalse {
+		t.Fatalf("expected Ready=False while gateway TLS pending, got %+v", ready)
+	}
+	if ready.Reason != "CertificatePending" {
+		t.Fatalf("expected Reason from GatewayTLSReady blocker, got %q", ready.Reason)
+	}
+	if !strings.Contains(ready.Message, computev1alpha1.InstanceConditionGatewayTLSReady) {
+		t.Fatalf("expected message to name GatewayTLSReady, got %q", ready.Message)
+	}
+}
+
+// TestSetInstanceReadyRollup_ReadyWhenTLSDisabled proves the TLS conditions
+// never block a non-TLS instance: ensure*TLS report them True with reason
+// "Disabled" when the feature is off, so the roll-up still reaches Ready.
+func TestSetInstanceReadyRollup_ReadyWhenTLSDisabled(t *testing.T) {
+	inst := newInstance()
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionMetadataReady,
+		metav1.ConditionTrue, "Ready", "ok")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayReady,
+		metav1.ConditionTrue, "Ready", "ok")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionEngineTLSReady,
+		metav1.ConditionTrue, "Disabled", "spec.tls.engine is unset or disabled")
+	setInstanceCondition(inst, computev1alpha1.InstanceConditionGatewayTLSReady,
+		metav1.ConditionTrue, "Disabled", "spec.tls.gateway is unset or disabled")
+
+	setInstanceReadyRollup(inst)
+
+	ready := apimeta.FindStatusCondition(inst.Status.Conditions, computev1alpha1.InstanceConditionReady)
+	if ready == nil || ready.Status != metav1.ConditionTrue {
+		t.Fatalf("expected Ready=True with TLS disabled, got %+v", ready)
 	}
 }
 
@@ -145,6 +200,8 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 				for _, c := range []string{
 					computev1alpha1.InstanceConditionMetadataReady,
 					computev1alpha1.InstanceConditionGatewayReady,
+					computev1alpha1.InstanceConditionEngineTLSReady,
+					computev1alpha1.InstanceConditionGatewayTLSReady,
 				} {
 					setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
 				}
@@ -188,6 +245,8 @@ func TestComputePhase_TracksConditionReady(t *testing.T) {
 				for _, c := range []string{
 					computev1alpha1.InstanceConditionMetadataReady,
 					computev1alpha1.InstanceConditionGatewayReady,
+					computev1alpha1.InstanceConditionEngineTLSReady,
+					computev1alpha1.InstanceConditionGatewayTLSReady,
 				} {
 					setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
 				}
@@ -222,6 +281,8 @@ func TestSetInstanceReadyRollup_RecoversFromFalseToTrue(t *testing.T) {
 	for _, c := range []string{
 		computev1alpha1.InstanceConditionMetadataReady,
 		computev1alpha1.InstanceConditionGatewayReady,
+		computev1alpha1.InstanceConditionEngineTLSReady,
+		computev1alpha1.InstanceConditionGatewayTLSReady,
 	} {
 		setInstanceCondition(inst, c, metav1.ConditionTrue, "Ready", "ok")
 	}

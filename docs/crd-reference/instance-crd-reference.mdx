@@ -30,9 +30,42 @@ and [Instance reconciliation](../instance/instance-reconciliation#component-pod-
 | `spec.gateway.replicas` | No | `2` | Number of gateway pods. See [Gateway sizing](../instance/gateway/gateway-sizing). |
 | `spec.gateway.metricsPort` | No | `9090` | Container port exposing Envoy's Prometheus metrics endpoint. The Firebolt Operator stamps a corresponding `metrics` port on the container. |
 | `spec.gateway.template` | No | (Firebolt Operator default) | Pod template merged with the Firebolt Operator-rendered Envoy container. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates). Image: `spec.gateway.template.spec.containers[name=="envoy"].image`. When `imagePullPolicy` is unset, the Kubernetes tag rule applies. |
-| `spec.auth` | No | disabled | Authentication configuration. Not enforced yet. Reserved for future engine-level auth. |
-| `spec.auth.mode` | Yes* | - | `disabled`, `native`, or `openid` |
-| `spec.auth.oidc` | Yes* | - | OIDC config (required when mode is `openid`) |
+| `spec.auth` | No | disabled | Instance-wide authentication. Applies to every Engine in the Instance; there is no per-Engine authentication. See [Authentication and transport encryption](../security#authentication-and-transport-encryption). |
+| `spec.auth.enabled` | No | `false` | Turn authentication on. When `true`, `spec.auth.local` is required. |
+| `spec.auth.local` | Yes* | - | The local user store and the JWT parameters every Engine shares. |
+| `spec.auth.local.admin.name` | No | `firebolt` | Admin username. |
+| `spec.auth.local.admin.password.name` | **Yes** | - | Secret holding the admin password. You create it; the Firebolt Operator never generates one. |
+| `spec.auth.local.admin.password.key` | **Yes** | - | Key within that Secret. |
+| `spec.auth.local.passwordLogin` | No | `admin_only` | Who may log in by password once OIDC is configured: `admin_only` or `any_user`. Ignored when `spec.auth.oidc` is absent. |
+| `spec.auth.local.signingAlgorithm` | No | `ES384` | JWT signing algorithm. Immutable once set, and must pair with the signing key's algorithm and size. |
+| `spec.auth.local.tokenExpiry` | No | (packdb default) | Lifetime of issued access tokens, as a Go duration. |
+| `spec.auth.local.maxTokenAge` | No | (packdb default `1d`) | Upper bound on a token's `iat` age. Sets the floor for `retainDuration`. |
+| `spec.auth.local.clockSkewTolerance` | No | (packdb default `30s`) | Permitted clock drift when validating temporal claims. Added to the `retainDuration` floor. |
+| `spec.auth.local.signingKeys` | No | (single permanent key) | JWT signing-key policy. cert-manager only; there is no bring-your-own path for signing keys. |
+| `spec.auth.local.signingKeys.certManager.issuerRef.name` | **Yes** | - | `Issuer` or `ClusterIssuer` that issues signing keys. Immutable once set. |
+| `spec.auth.local.signingKeys.certManager.issuerRef.kind` | No | `ClusterIssuer` | `Issuer` or `ClusterIssuer`. |
+| `spec.auth.local.signingKeys.certManager.algorithm` | No | `ECDSA` | `ECDSA` or `RSA`. Immutable once set. |
+| `spec.auth.local.signingKeys.certManager.size` | No | `384` | Key size. Immutable once set, and must pair with `signingAlgorithm`. |
+| `spec.auth.local.signingKeys.rotationInterval` | No | (no rotation) | How often to rotate the signing key, as a Go duration. Setting it opts the Instance into operator-coordinated rotation; leaving it unset keeps a single permanent key. Requires `retainDuration`. |
+| `spec.auth.local.signingKeys.retainDuration` | No | - | How long a demoted key keeps validating tokens, measured from confirmed post-promotion convergence. Required with `rotationInterval`, and must be at least `maxTokenAge + clockSkewTolerance`. |
+| `spec.auth.oidc` | No | - | Trusted OIDC providers whose tokens Engines accept, in addition to local login. |
+| `spec.auth.oidc.providers[].name` | **Yes** | - | Provider identifier, as advertised to clients. |
+| `spec.auth.oidc.providers[].discoveryURL` | **Yes** | - | The provider's OIDC discovery document URL. |
+| `spec.auth.oidc.providers[].usernameMapping` | **Yes** | - | Template mapping token claims to a Firebolt username, e.g. `{{ email }}`. |
+| `spec.auth.oidc.providers[].audience` | No | (the Instance resource) | Expected `aud` when the provider mints its own audience rather than honouring the `resource` parameter. |
+| `spec.auth.oidc.providers[].jitProvisioning` | No | disabled | Create users automatically on first login. |
+| `spec.auth.preferredAuthorizationServer` | No | - | Which authorization server clients should default to: `_local`, or a configured provider name. Advisory to clients only. |
+| `spec.tls` | No | disabled | Transport encryption. Engine and Gateway TLS are independent and separately opt-in. |
+| `spec.tls.engine` | No | disabled | Terminates TLS on each Engine's query listener. TLS **replaces** plaintext on the same port. |
+| `spec.tls.gateway` | No | disabled | Terminates client-facing TLS on the Gateway listener. |
+| `spec.tls.*.enabled` | No | `false` | Turn this listener's TLS on. Requires exactly one of `certManager` or `secretRef`. |
+| `spec.tls.*.certManager.issuerRef.name` | Yes* | - | `Issuer` or `ClusterIssuer` that issues this certificate. Immutable while TLS stays enabled. |
+| `spec.tls.*.certManager.issuerRef.kind` | No | `ClusterIssuer` | `Issuer` or `ClusterIssuer`. |
+| `spec.tls.*.certManager.algorithm` | No | `ECDSA` | `ECDSA` or `RSA`. |
+| `spec.tls.*.certManager.size` | No | `384` | Key size. |
+| `spec.tls.*.secretRef.name` | Yes* | - | Bring-your-own certificate: a Secret carrying `tls.crt` and `tls.key`. Mutually exclusive with `certManager`. |
+| `spec.tls.*.clientCASecretRef.name` | No | - | Client CA to verify client certificates against. On the Gateway this upgrades the listener to mutual TLS. Replacing it is a tightening transition and is staged fail-closed. |
+| `spec.tls.*.dnsNames` | No | (in-cluster Service names) | Extra SANs the Firebolt Operator cannot derive itself, such as an externally-visible hostname. |
 
 \* Required when the parent field is set.
 
@@ -101,6 +134,27 @@ as `GatewayPodTemplateRules` and `MetadataPodTemplateRules`.
 | `status.gatewayReady` | Whether the gateway Deployment has a ready replica. |
 | `status.metadataEndpoint` | In-cluster metadata gRPC endpoint (cleared when metadata is not ready). |
 | `status.gatewayEndpoint` | In-cluster gateway HTTP endpoint (cleared when gateway is not ready). |
-| `status.conditions` | `Ready`, `MetadataReady`, `GatewayReady`. |
+| `status.conditions` | `Ready`, `MetadataReady`, `GatewayReady`, `AuthReady`, `EngineTLSReady`, `GatewayTLSReady`. See [Conditions](#conditions). |
+| `status.auth` | Provisioned auth material and rotation progress. Present only when `spec.auth` is enabled, or when a previously-enabled Instance still holds its generation counter. |
+| `status.auth.signingKeys[]` | Each tracked signing key: `id`, `secretName`, `phase` (`Active`, `ValidationOnly`, `Removing`), `algorithm`, `size`, `createdAt`, `demotedAt`, `retireEligibleAt`. |
+| `status.auth.signingKeyGeneration` | Monotonic counter behind each key's `id`. Never decreases, so a re-enabled Instance never reuses a retired key's identifier. |
+| `status.auth.pendingRotationStep` | The rotation step waiting for the fleet to converge: `AwaitingPromotion`, `AwaitingRetireAnchor`, or `AwaitingRemoval`. Empty when nothing is waiting. |
+| `status.auth.pendingSince` | When the current pending step began waiting. Preserved across reconciles, so it measures the wait rather than the last reconcile. |
+| `status.auth.laggingEngines` | Engines the pending step is waiting for, truncated for large fleets. |
+| `status.auth.laggingEngineCount` | How many engines the pending step is waiting for, including any truncated from the list above. |
+| `status.engineTLS` | Provisioned engine-listener TLS: `secretName`, `createdAt`, and `reencrypting` — whether the Gateway is currently re-encrypting to Engines, which tracks the whole fleet's observed protocol rather than the certificate's existence. |
+| `status.gatewayTLS` | Provisioned Gateway TLS: `secretName`, `createdAt`, `mode` (`TLS` or `MutualTLS`), and `clientCAFingerprint`. Cleared for the whole fail-closed window of a tightening transition, so its presence means the listener is actually serving that posture. |
+| `status.rolledEngineTrustCAs` | Fingerprints of the Engine CAs the Gateway has confirmed it trusts. A generation's Service selector may not flip until its CA appears here. |
+
+## Conditions
+
+| Condition | In the `Ready` roll-up | Meaning |
+|-----------|------------------------|---------|
+| `Ready` | - | Roll-up of the conditions below that participate. |
+| `MetadataReady` | Yes | Metadata service (and its PostgreSQL) are usable. |
+| `GatewayReady` | Yes | Gateway has a ready replica. |
+| `EngineTLSReady` | Yes | Engine TLS is provisioned **and** the whole fleet re-encrypts. Convergence-gated, so `Ready` never advertises a secure posture the fleet has not reached. |
+| `GatewayTLSReady` | Yes | Gateway TLS is provisioned and the secure listener is serving. |
+| `AuthReady` | **No** | Auth material is provisioned. Deliberately excluded from the roll-up: auth provisioning has no bearing on whether the Metadata Service or Gateway are usable. Stays `True` with reason `RotationWaitingForEngines` while a signing-key rotation is parked, since the Active key still signs and validates. |
 
 Short name: `fire`.

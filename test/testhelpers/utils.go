@@ -82,23 +82,115 @@ func UninstallCertManager() {
 	}
 }
 
-// InstallCertManager installs the cert manager bundle.
+// InstallCertManager installs the cert manager bundle and waits for all three
+// of its deployments to become Available. Waiting on the controller and
+// cainjector in addition to the webhook (rather than the webhook alone) avoids
+// a race where an Issuer/Certificate applied immediately afterward is admitted
+// but never processed because the controller isn't up yet.
 func InstallCertManager() error {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
 	cmd := exec.Command("kubectl", "apply", "-f", url)
 	if _, err := Run(cmd); err != nil {
 		return err
 	}
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd = exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
+	// These can take time if cert-manager was re-installed after uninstalling
+	// on a cluster.
+	for _, dep := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook"} {
+		cmd = exec.Command("kubectl", "wait", "deployment.apps/"+dep,
+			"--for", "condition=Available",
+			"--namespace", "cert-manager",
+			"--timeout", "5m",
+		)
+		if _, err := Run(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// E2ECAClusterIssuerName is the CA-backed ClusterIssuer that e2e FireboltInstances
+// reference for signing keys and engine/gateway TLS. A CA-backed issuer (not a
+// plain SelfSigned one) is required: the engine-TLS readiness gate gates on ca.crt
+// being present on the issued Secret, which only a CA issuer populates.
+const E2ECAClusterIssuerName = "e2e-ca"
+
+const (
+	e2eSelfSignedClusterIssuer = "e2e-selfsigned"
+	e2eCASecretName            = "e2e-ca-tls"
+)
+
+// caIssuerManifest is the SelfSigned-root -> CA Certificate -> CA ClusterIssuer
+// chain (mirrors examples/instance-auth-tls.yaml). The CA Certificate lives in
+// the cert-manager namespace because a ClusterIssuer looks up its ca.secretName
+// in the cluster-resource namespace (cert-manager by default).
+const caIssuerManifest = `apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: e2e-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: e2e-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: e2e-ca
+  secretName: e2e-ca-tls
+  privateKey:
+    algorithm: ECDSA
+    size: 384
+  issuerRef:
+    name: e2e-selfsigned
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: e2e-ca
+spec:
+  ca:
+    secretName: e2e-ca-tls
+`
+
+// EnsureCAClusterIssuer applies the CA issuer chain and waits for the CA
+// Certificate to be Ready so the ClusterIssuer is usable before returning.
+// Requires cert-manager installed and its webhook Available (see InstallCertManager).
+func EnsureCAClusterIssuer() error {
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(caIssuerManifest)
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
+	cmd = exec.Command("kubectl", "wait", "certificate/"+E2ECAClusterIssuerName,
+		"--for", "condition=Ready",
+		"--namespace", "cert-manager",
+		"--timeout", "2m",
+	)
 	_, err := Run(cmd)
 	return err
+}
+
+// DeleteCAClusterIssuer removes the CA issuer chain created by
+// EnsureCAClusterIssuer. Best-effort: errors are warned, not fatal.
+func DeleteCAClusterIssuer() {
+	cmd := exec.Command("kubectl", "delete", "clusterissuer",
+		E2ECAClusterIssuerName, e2eSelfSignedClusterIssuer, "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+	cmd = exec.Command("kubectl", "delete", "certificate", E2ECAClusterIssuerName,
+		"-n", "cert-manager", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+	cmd = exec.Command("kubectl", "delete", "secret", e2eCASecretName,
+		"-n", "cert-manager", "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed

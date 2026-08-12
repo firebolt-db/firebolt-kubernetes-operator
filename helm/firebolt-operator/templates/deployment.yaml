@@ -85,7 +85,11 @@ spec:
             {{- with .Values.engineResourceBounds.maxEphemeralStorage }}
             - --engine-max-ephemeral-storage={{ . }}
             {{- end }}
+            {{- if .Values.wakeAgent.enabled }}
             - --gateway-wake-cluster-role={{ include "firebolt-operator.gatewayWakeClusterRoleName" . }}
+            - --wake-agent-image={{ $imageRepository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+            - --wake-agent-image-pull-policy={{ .Values.image.pullPolicy }}
+            {{- end }}
             {{- if eq .Values.telemetry.enabled false }}
             - --telemetry=false
             {{- end }}

@@ -16,6 +16,7 @@ jobs:
       contents: read
     outputs:
       relevant: ${{ steps.detect.outputs.relevant }}
+      mutants: ${{ steps.detect.outputs.mutants }}
     steps:
       - name: Determine whether formal specs/fixture changed
         id: detect
@@ -29,19 +30,35 @@ jobs:
           # On a PR, TLC's result depends only on the TLA+ specs, the
           # fixture generator, and the generated fixture — not docs and
           # not most Go changes. Fail-safe: any uncertainty -> true.
+          #
+          # The mutant check has a WIDER scope than TLC: it asserts the
+          # state-cover suite still catches a broken reconciler, so it depends
+          # on the reconciler itself, not only on the model.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "mutants=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           files="$(gh api --paginate \
             "repos/${REPO}/compare/${BASE_SHA}...${HEAD_SHA}" \
             --jq '.files[].filename' 2>/dev/null || true)"
           printf '%s\n' "${files:-<none>}"
-          if [ -z "${files}" ]; then echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ -z "${files}" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "mutants=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/check-counterexamples\.sh$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+          if printf '%s\n' "${files}" \
+            | grep -qE '^formal/|^internal/controller/|^Makefile$|^\.github/workflows/formal-verification\.yaml$'; then
+            echo "mutants=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mutants=false" >> "$GITHUB_OUTPUT"
           fi
 
   tlc:
@@ -53,12 +70,12 @@ jobs:
       contents: read
     steps:
       - name: Clone the code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '21'
@@ -93,32 +110,114 @@ jobs:
             -config formal/FireboltInstance.cfg \
             formal/FireboltInstance.tla
 
-      - name: Verify Phase 3 state-cover fixture is up to date
+      - name: Run TLC — SigningKeyRotation
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/SigningKeyRotation.cfg \
+            formal/SigningKeyRotation.tla
+
+      - name: Run TLC — EngineWake
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/EngineWake.cfg \
+            formal/EngineWake.tla
+
+      - name: Run TLC — WakeAgentHold
+        run: |
+          java -cp tla2tools.jar tlc2.TLC \
+            -workers 2 \
+            -config formal/WakeAgentHold.cfg \
+            formal/WakeAgentHold.tla
+
+      - name: Every naive config must still produce its pinned violation
+        # Delegates to the same script and table the Makefile target uses. This
+        # step used to inline one config, and inlining is what made it wrong: the
+        # table grew to six negative controls while a hardcoded copy would have
+        # gone on checking one of them and reporting success.
+        # Through `bash`, matching the model-scope step: the invocation does not
+        # need to depend on the file mode.
+        run: bash scripts/ci/check-counterexamples.sh tla2tools.jar
+
+      - name: Verify state-cover fixtures are up to date
         run: |
           # Reuse the cached tla2tools.jar at the location the Makefile expects.
           mkdir -p bin
           cp tla2tools.jar bin/tla2tools.jar
-          java -cp bin/tla2tools.jar tlc2.TLC -workers 2 \
-            -config formal/FireboltEngine.cfg \
-            -dump dot,actionlabels formal/FireboltEngine.dot \
-            formal/FireboltEngine.tla
-          python3 scripts/gen-tla-state-tests.py \
-            --dot formal/FireboltEngine.dot \
-            --out internal/controller/engine_tla_states_data_test.go
-          if ! git diff --quiet -- internal/controller/engine_tla_states_data_test.go; then
-            echo "::error::TLA+ state-cover fixture is stale; run 'make formal-gen' and commit"
-            git --no-pager diff -- internal/controller/engine_tla_states_data_test.go
-            exit 1
-          fi
+          # formal-verify regenerates every fixture and diffs them all, so CI and
+          # the Makefile cannot disagree about which specs are covered.
+          make formal-verify
+
+  # The negative control for the Go side. TLC proves the specs hold; this proves
+  # the state-cover suite still catches a reconciler that breaks them. Needs Go
+  # only — no Java, no TLC — so it is a separate job rather than more steps on
+  # `tlc`, and it is scoped to changes that can affect it (the reconciler, the
+  # mutants, the Makefile).
+  mutants:
+    name: Mutants
+    needs: detect
+    if: needs.detect.outputs.mutants == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Every pinned mutant must still fail the state-cover suite
+        run: make formal-check-mutants
+
+  # Ask that a change to a model-bound function moves its spec and fixture too.
+  # Deliberately NOT wired into the tlc-required gate: this is a review prompt
+  # with an escape hatch, not a proof. Runs on every PR because the script is a
+  # couple of git diffs and a no-op when nothing model-bound changed, so path
+  # scoping would cost more than it saves.
+  model-scope:
+    name: Model scope
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Need the merge base with the target branch, not a shallow tip.
+          fetch-depth: 0
+
+      - name: A change to a modelled machine should move its model
+        env:
+          # Through env, never inlined into the script body: the PR body is
+          # attacker-controlled text.
+          MODEL_SCOPE_TEXT: ${{ github.event.pull_request.body }}
+          BASE_REF: origin/${{ github.base_ref }}
+        # Invoked through `bash` so the step does not depend on the file mode
+        # surviving. The mode IS committed (100755), so this is not fixing a
+        # break; it removes a way to get a confusing one. A lost execute bit
+        # fails with "permission denied" and reads like infrastructure trouble
+        # rather than what it is, and the sibling scripts in release-main.yaml
+        # guard the same hazard with `chmod +x` — which mutates the checkout to
+        # re-assert something git already records.
+        run: bash scripts/ci/check-model-scope.sh "$BASE_REF" HEAD
 
   # Single stable required-check name for branch protection. Keeping the
-  # required name "TLC model checker" on this gate (the worker job is now
-  # "TLC") means branch protection does not change for TLC. The gate runs
-  # `if: always()`, passes when the path-scoped worker was `success` or
-  # (intentionally) `skipped`, and fails closed if `detect` failed.
+  # required name "TLC model checker" on this gate (the worker jobs are "TLC"
+  # and "Mutants") means branch protection does not change when workers are
+  # added or renamed. The gate runs `if: always()`, passes when each
+  # path-scoped worker was `success` or (intentionally) `skipped`, and fails
+  # closed if `detect` failed.
   tlc-required:
     name: TLC model checker
-    needs: [detect, tlc]
+    needs: [detect, tlc, mutants]
     if: always()
     runs-on: ubuntu-latest
     permissions: {}
@@ -127,6 +226,7 @@ jobs:
         env:
           DETECT: ${{ needs.detect.result }}
           TLC: ${{ needs.tlc.result }}
+          MUTANTS: ${{ needs.mutants.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect did not succeed (result=$DETECT)"; exit 1
@@ -134,4 +234,8 @@ jobs:
           case "$TLC" in
             success|skipped) echo "gate satisfied (tlc=$TLC)";;
             *) echo "::error::tlc result=$TLC"; exit 1;;
+          esac
+          case "$MUTANTS" in
+            success|skipped) echo "gate satisfied (mutants=$MUTANTS)";;
+            *) echo "::error::mutants result=$MUTANTS"; exit 1;;
           esac

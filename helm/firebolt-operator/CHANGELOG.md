@@ -2,6 +2,38 @@
 
 appVersion: v0.1.1
 
+## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.3.0...firebolt-operator-chart-0.4.0) (2026-08-04)
+
+
+### Features
+
+* **controller:** wake stopped engines from gateway demand (FB-2553) ([7439de9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7439de9f5766f88be58ca2e7bd7cf8bafa39e855))
+
+
+### Bug Fixes
+
+* **security:** harden auth & TLS secret, certificate, and admission guards (FB-896) ([#89](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/89)) ([e7794ee](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e7794ee489ec149d686c0fbdf768422cf3927e80))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.5.0 ([73b1da8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/73b1da834c2f2f7d1b26b6b5c0d94b422a60f84a))
+* **deps:** set chart appVersion to v0.5.1 ([a1674d5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a1674d5c87db4ebdcfc7887aa68632065c65fe37))
+* **deps:** set chart appVersion to v0.6.0 ([4e4adb7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4e4adb700185a26a047dfcab1f3d9a8669c0752e))
+
+## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.2.0...firebolt-operator-chart-0.3.0) (2026-07-27)
+
+
+### Features
+
+* **api:** add spec.auth and spec.tls to FireboltInstance with validation and RBAC (FB-896) ([59f792b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/59f792b43c2dd2b59c3be11a9310f392d046dad0))
+* **controller:** provision auth, TLS, and coordinated signing-key rotation (FB-896) ([63d000a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/63d000aced7d64273dab54bd68b2aa36029caa81))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.4.1 ([2397638](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2397638b3d526d36744191c05e3d3c5b4dcb774f))
+
 ## [0.2.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.1.4...firebolt-operator-chart-0.2.0) (2026-07-21)
 
 

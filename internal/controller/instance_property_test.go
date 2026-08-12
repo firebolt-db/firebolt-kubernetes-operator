@@ -99,6 +99,15 @@ func (m *instanceSim) writeComponentConditions() {
 		m.metadataReadyFromComponents(), "Ready", "Provisioning")
 	setBool(computev1alpha1.InstanceConditionGatewayReady,
 		m.gatewayReadyFromComponents(), "Ready", "Provisioning")
+	// The formal model does not track TLS provisioning, so it represents a
+	// TLS-disabled instance: ensure*TLS report these True with reason
+	// "Disabled" when the feature is off, so they never gate Ready here. The
+	// TLS-pending gate is covered directly by
+	// TestSetInstanceReadyRollup_HeldWhileTLSPending.
+	setInstanceCondition(m.instance, computev1alpha1.InstanceConditionEngineTLSReady,
+		metav1.ConditionTrue, "Disabled", "")
+	setInstanceCondition(m.instance, computev1alpha1.InstanceConditionGatewayTLSReady,
+		metav1.ConditionTrue, "Disabled", "")
 }
 
 // ---------- State-machine actions ----------
@@ -182,6 +191,8 @@ func (m *instanceSim) Check(t *rapid.T) {
 		for _, c := range []string{
 			computev1alpha1.InstanceConditionMetadataReady,
 			computev1alpha1.InstanceConditionGatewayReady,
+			computev1alpha1.InstanceConditionEngineTLSReady,
+			computev1alpha1.InstanceConditionGatewayTLSReady,
 		} {
 			cond := apimeta.FindStatusCondition(s.Conditions, c)
 			if cond == nil || cond.Status != metav1.ConditionTrue {

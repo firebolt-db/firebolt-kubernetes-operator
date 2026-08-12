@@ -96,6 +96,12 @@ func materializeTLAInstanceState(s tlaInstanceState) *instanceSim {
 		writeAvailCondition(m.instance,
 			computev1alpha1.InstanceConditionGatewayReady,
 			s.GatewayAvail)
+		// The model abstracts away TLS: represent a TLS-disabled instance
+		// (conditions True/"Disabled") so they never gate the roll-up.
+		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionEngineTLSReady,
+			metav1.ConditionTrue, "Disabled", "")
+		setInstanceCondition(m.instance, computev1alpha1.InstanceConditionGatewayTLSReady,
+			metav1.ConditionTrue, "Disabled", "")
 		setInstanceReadyRollup(m.instance)
 	}
 	return m
@@ -121,18 +127,6 @@ func projectInstanceSim(m *instanceSim) tlaInstanceState {
 		MetadataAvail: m.compAvail["metadata"],
 		GatewayAvail:  m.compAvail["gateway"],
 	}
-}
-
-// instanceClosureContains reports whether `actual` is one of the TLA+ states
-// the model considers reachable from the test's starting state via 0+
-// reconciler-only transitions. closureIDs are indices into tlaInstanceStatePool.
-func instanceClosureContains(closureIDs []int, actual tlaInstanceState) bool {
-	for _, id := range closureIDs {
-		if tlaInstanceStatePool[id] == actual {
-			return true
-		}
-	}
-	return false
 }
 
 // tlaInstanceInvariants mirrors the Check predicates in instance_property_test.go.
@@ -169,6 +163,8 @@ func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 		for _, c := range []string{
 			computev1alpha1.InstanceConditionMetadataReady,
 			computev1alpha1.InstanceConditionGatewayReady,
+			computev1alpha1.InstanceConditionEngineTLSReady,
+			computev1alpha1.InstanceConditionGatewayTLSReady,
 		} {
 			cond := apimeta.FindStatusCondition(s.Conditions, c)
 			if cond == nil || cond.Status != metav1.ConditionTrue {
@@ -178,7 +174,17 @@ func tlaInstanceInvariants(t *testing.T, m *instanceSim) {
 	}
 }
 
+// tlaInstanceExpectedCases pins the size of the state cover. Hand-maintained
+// deliberately: the fixture is generated from the spec, so it always agrees with
+// itself and `make formal-verify` stays green even if the state space collapses.
+// See the same reasoning in engine_tla_state_test.go.
+const tlaInstanceExpectedCases = 32
+
 func TestTLAInstanceStateCover(t *testing.T) {
+	if len(tlaInstanceStateCases) != tlaInstanceExpectedCases {
+		t.Fatalf("fixture has %d cases, expected %d: the state space moved. Regenerate with `make formal-gen`, then update tlaInstanceExpectedCases and say why in the commit",
+			len(tlaInstanceStateCases), tlaInstanceExpectedCases)
+	}
 	for i := range tlaInstanceStateCases {
 		tc := tlaInstanceStateCases[i]
 		start := tlaInstanceStatePool[tc.Start]
@@ -187,6 +193,13 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			start.PostgresAvail, start.MetadataAvail, start.GatewayAvail)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAInstanceState(start)
+
+			// Guard the fixture itself: if materialization does not reproduce the
+			// starting state, the closure assertion below proves nothing, and a
+			// projection that drops a field would go unnoticed.
+			if got := projectInstanceSim(m); !tlaProjectionEqual(got, start) {
+				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
+			}
 
 			// Mirror instanceSim.Reconcile in engine_property_test.go style:
 			// init-seed branch when Phase is empty, otherwise the full
@@ -203,27 +216,11 @@ func TestTLAInstanceStateCover(t *testing.T) {
 			tlaInstanceInvariants(t, m)
 
 			actual := projectInstanceSim(m)
-			if !instanceClosureContains(tc.Closure, actual) {
+			if !tlaClosureContains(tlaInstanceStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
-					start, actual, len(tc.Closure), formatInstanceClosure(tc.Closure))
+					start, actual, len(tc.Closure), tlaFormatClosure(tlaInstanceStatePool, tc.Closure))
 			}
 		})
 	}
 	t.Logf("instance state cover: ran %d cases", len(tlaInstanceStateCases))
-}
-
-// formatInstanceClosure renders the first few entries of a closure index list
-// for inclusion in a Fatalf message; pool indices are surfaced so errors
-// point straight back into tlaInstanceStatePool.
-func formatInstanceClosure(closureIDs []int) string {
-	const limit = 8
-	out := ""
-	for i, id := range closureIDs {
-		if i >= limit {
-			out += fmt.Sprintf("    ... (%d more)\n", len(closureIDs)-limit)
-			break
-		}
-		out += fmt.Sprintf("    [pool %d] %+v\n", id, tlaInstanceStatePool[id])
-	}
-	return out
 }

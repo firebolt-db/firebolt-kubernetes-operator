@@ -58,13 +58,67 @@ EXTENDS Integers, TLC
 
 CONSTANTS
     MaxGen,     \* upper bound on generation numbers (e.g. 2)
-    MaxSpec     \* upper bound on spec versions (e.g. 2)
+    MaxSpec,    \* upper bound on spec versions (e.g. 2)
+    \* The five flags below each remove ONE shipped guard. All are FALSE in
+    \* FireboltEngine.cfg -- that config checks the design as it ships. Each has a
+    \* FireboltEngineNaive*.cfg that flips exactly one of them and names the
+    \* invariant TLC must then report; `make formal-check-counterexample` runs
+    \* them and fails if any stops failing. Same shape as AnchorAtDemotion in
+    \* SigningKeyRotation.tla.
+    \*
+    \* They exist because a passing invariant is only evidence if it could have
+    \* failed. Five of the eleven invariants in this spec are falsifiable by
+    \* removing a guard, and those five are the ones flagged here. The other six
+    \* are not, for reasons worth writing down rather than leaving as a gap:
+    \* Inv_GenOrder and Inv_DrainingOlderThanCurrent hold structurally (activeGen
+    \* and drainingGen are only ever assigned currentGen or a smaller gen, so no
+    \* guard removal reaches them -- only a mutated WRITE would);
+    \* Inv_TerminalNoDraining is implied by Inv_DrainingPhase, since
+    \* TerminalPhases and {draining, cleaning} are disjoint;
+    \* Inv_TerminalConsistency and Inv_QuiescedPhaseMatchesSpec likewise need a
+    \* changed assignment rather than a dropped conjunct; and TypeOK cannot be
+    \* violated by any guard change. The four needing a mutated write are NOT
+    \* pinned anywhere today: formal/mutants/manifest.tsv mutates the Go
+    \* reconciler, not this spec, and none of its rows targets them. Covering
+    \* them takes the AnchorAtDemotion flag shape (change a write, not drop a
+    \* guard) and is a deliberate follow-up, not coverage that already exists.
+    SwitchWithoutService,
+      \* TRUE removes the cutover gate in ReconcileSwitching_Complete: the
+      \* switch finalises even though the cluster Service still points at an
+      \* older generation. Violates Inv_ServiceKnownGen.
+    GCOutsideTerminalPhase,
+      \* TRUE removes the phase gate on GCOrphans, which in the implementation
+      \* is the `phase \in {PhaseStable, PhaseStopped}` check in Reconcile that
+      \* decides whether gcOrphanedResources runs at all. Mid-rollout the
+      \* still-serving generation is neither currentGen nor drainingGen, so GC
+      \* deletes the StatefulSet traffic is landing on. Violates Inv_ActiveHasSTS.
+    GCCurrentGeneration,
+      \* TRUE removes GCOrphans' `g # currentGen` exclusion, so GC deletes the
+      \* generation it is meant to be keeping. Violates Inv_TerminalHasSTS.
+    AdvanceWithoutMatchingSTS,
+      \* TRUE removes `StsMatchesSpec(currentGen)` from ReconcileCreating_Advance,
+      \* so creating advances to switching before the new generation's
+      \* StatefulSet exists; the Service selector is then flipped to a generation
+      \* that has none. Violates Inv_ServiceValid.
+    DriftDuringDrain
+      \* TRUE lets ReconcileTerminal_Drift fire in draining/cleaning, modelling
+      \* drift detection that is not gated on phase. Starting a new generation
+      \* mid-drain abandons drainingGen, leaking the StatefulSet it was going to
+      \* delete. Violates Inv_DrainingPhase.
 
 Gens     == 0..MaxGen
 SpecVers == 0..MaxSpec
 
 Phases == {"uninitialized", "stable", "creating", "switching", "draining", "cleaning", "stopped"}
 TerminalPhases == {"stable", "stopped"}
+
+\* Phase gates, widened by the counterexample flags. Written as sets rather than
+\* inline disjunctions so the guard at the use site still reads as one membership
+\* test and the shipped behaviour is what you get with every flag FALSE.
+GCPhases    == IF GCOutsideTerminalPhase THEN Phases ELSE TerminalPhases
+DriftPhases == IF DriftDuringDrain
+               THEN TerminalPhases \cup {"draining", "cleaning"}
+               ELSE TerminalPhases
 
 VARIABLES
     phase,          \* current reconciler phase
@@ -214,7 +268,7 @@ ReconcileInit ==
 ReconcileTerminal_Drift ==
     \* Spec changed or STS missing -> bump currentGen, go to creating.
     \* This is the only path out of a terminal phase.
-    /\ phase \in TerminalPhases
+    /\ phase \in DriftPhases
     /\ instanceReady
     /\ classReady
     /\ ~StsMatchesSpec(currentGen)
@@ -229,10 +283,10 @@ ReconcileTerminal_Drift ==
 \* Models gcOrphanedResources() in engine_gc.go, which is gated on
 \* phase \in {PhaseStable, PhaseStopped} in the top-level Reconcile.
 GCOrphans ==
-    /\ phase \in TerminalPhases
+    /\ phase \in GCPhases
     /\ \E g \in Gens :
            /\ StsExists(g)
-           /\ g # currentGen
+           /\ (g # currentGen \/ GCCurrentGeneration)
            /\ g # drainingGen   \* drainingGen=-1 never equals any gen in Gens
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
@@ -306,7 +360,7 @@ ReconcileCreating_Advance ==
     /\ phase = "creating"
     /\ instanceReady
     /\ classReady
-    /\ StsMatchesSpec(currentGen)
+    /\ (StsMatchesSpec(currentGen) \/ AdvanceWithoutMatchingSTS)
     /\ svcTargetGen # -1
     /\ podsReady
     /\ phase' = "switching"
@@ -332,7 +386,7 @@ ReconcileSwitching_Complete ==
     \* (first deployment, activeGen = -1) go directly to a terminal phase
     \* chosen by TerminalPhase (stable or stopped).
     /\ phase = "switching"
-    /\ svcTargetGen = currentGen
+    /\ (svcTargetGen = currentGen \/ SwitchWithoutService)
     /\ activeGen' = currentGen
     /\ \/ \* First deployment: no old generation to drain.
           /\ activeGen = -1

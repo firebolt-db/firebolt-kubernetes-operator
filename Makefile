@@ -39,6 +39,16 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+# Defined up here, not next to the `$(LOCALBIN): mkdir` rule down in Build
+# Dependencies, because rule TARGETS are expanded when the makefile is read.
+# While this lived below the Formal Verification section, `$(TLA2TOOLS):`
+# expanded to the literal `/tla2tools.jar` -- a path that never exists, so the
+# rule fired on every single invocation. The recipe still wrote to the right
+# place (recipes expand at execution time, by which point LOCALBIN is set), which
+# is why it looked like it worked. Rule LOOKUP is order-independent, so the mkdir
+# rule can stay where it is.
+LOCALBIN ?= $(shell pwd)/bin
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -105,7 +115,10 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 .PHONY: build
 build: manifests generate ## Build manager binary.
 	# Always target Linux (for Kind/K8s); GOARCH from host matches the cluster node arch (same as Dockerfile.ci TARGETARCH).
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
+	# ./cmd, not cmd/main.go: the package is more than one file (the
+	# wake-agent subcommand lives in cmd/wakeagent.go) and naming a single
+	# file silently omits the rest.
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -tags "$(GO_BUILD_TAGS)" -ldflags "$(LDFLAGS)" -o bin/manager ./cmd
 
 .PHONY: kubectl-firebolt
 kubectl-firebolt: ## Build the kubectl-firebolt plugin for the host platform (install on PATH to use as `kubectl firebolt`).
@@ -268,6 +281,17 @@ helm-test-ui: ## Verify the engine web UI sidecar (uiSidecar: true) serves on a 
 	fi
 	./scripts/ci/verify-ui-sidecar.sh "$(HELM_TEST_UI_NS)"
 
+.PHONY: helm-test-wake
+HELM_TEST_WAKE_NS ?= helm-verify-wake
+helm-test-wake: ## Verify wake-on-zero end to end on a chart-installed operator (kind).
+	@ctx="$$( $(KUBECTL) config current-context 2>/dev/null || true )"; \
+	if [ "$$ctx" != "$(HELM_TEST_CONTEXT)" ]; then \
+		echo "Refusing to run helm-test-wake on kube context '$$ctx' (expected '$(HELM_TEST_CONTEXT)')." >&2; \
+		echo "Switch context or override HELM_TEST_CONTEXT / KIND_CLUSTER explicitly." >&2; \
+		exit 1; \
+	fi
+	./scripts/ci/verify-wake-on-zero.sh "$(HELM_TEST_WAKE_NS)"
+
 .PHONY: helm-test-crds
 HELM_TEST_CRDS_NS ?= helm-verify-crds
 helm-test-crds: ## Verify the CRD chart installs within Helm's 1 MiB release-Secret cap (kind).
@@ -355,7 +379,11 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 TLA2TOOLS ?= $(LOCALBIN)/tla2tools.jar
 
 # Version and SHA-256 live in scripts/ci/pinned-tools.tsv, shared with CI.
-$(TLA2TOOLS): $(LOCALBIN)
+# Order-only prerequisite (the `|`) so bin/'s mtime does not count: as a normal
+# prerequisite, any rule that writes into bin/ bumps the directory past the jar
+# and the download runs again. Together with hoisting LOCALBIN (see above) this
+# stops every formal target re-fetching 4.5MB, and lets caching bin/ in CI work.
+$(TLA2TOOLS): | $(LOCALBIN)
 	scripts/ci/fetch-verified.sh tla2tools "$(TLA2TOOLS)"
 
 .PHONY: tla2tools
@@ -365,9 +393,65 @@ tla2tools: $(TLA2TOOLS) ## Download tla2tools.jar locally if necessary.
 formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltEngine.cfg formal/FireboltEngine.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/SigningKeyRotation.cfg formal/SigningKeyRotation.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/EngineWake.cfg formal/EngineWake.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/WakeAgentHold.cfg formal/WakeAgentHold.tla
+
+.PHONY: formal-check-counterexample
+formal-check-counterexample: tla2tools ## Assert every naive config still produces its pinned violation.
+	@# Table-driven off formal/counterexamples.tsv: adding a negative control is a
+	@# one-line change, and the script refuses any formal/*Naive*.cfg the table
+	@# omits, so a config cannot be added without also being run.
+	@scripts/ci/check-counterexamples.sh "$(TLA2TOOLS)"
+
+.PHONY: formal-check-mutants
+formal-check-mutants: ## Assert each pinned mutant still makes the state-cover suite fail.
+	@# formal-check-counterexample proves the *spec* still expresses a hazard.
+	@# This proves the *state-cover suite* still catches a broken reconciler:
+	@# every row in formal/mutants/manifest.tsv is applied in turn and the named
+	@# test must fail with the named message. Requiring the specific message
+	@# rather than a non-zero `go test` exit matters — a patch that no longer
+	@# applies cleanly, or one that stops compiling, also exits non-zero and
+	@# would otherwise look like a passing negative control.
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "ERROR: working tree is dirty. formal-check-mutants applies and reverts patches in place," >&2; \
+		echo "       so it refuses to run rather than risk your uncommitted work." >&2; \
+		exit 1; \
+	fi
+	@fail=0; applied=""; log=""; \
+	trap 'if [ -n "$$applied" ]; then git apply -R "formal/mutants/$$applied" >/dev/null 2>&1 || true; fi; \
+	      if [ -n "$$log" ]; then rm -f "$$log" || true; fi; :' EXIT HUP INT TERM; \
+	while IFS="$$(printf '\t')" read -r patch test want; do \
+		case "$$patch" in ''|\#*) continue;; esac; \
+		echo "mutant: $$patch"; \
+		if ! git apply "formal/mutants/$$patch" 2>/dev/null; then \
+			echo "ERROR: $$patch no longer applies. Re-point it at the current code -- do not delete it." >&2; \
+			fail=1; continue; \
+		fi; \
+		applied="$$patch"; \
+		log=$$(mktemp "$${TMPDIR:-/tmp}/formal-mutants.XXXXXX"); \
+		go test ./internal/controller/ -run "$$test" -count=1 >"$$log" 2>&1 || true; \
+		git apply -R "formal/mutants/$$patch"; \
+		applied=""; \
+		pat=$$(mktemp "$${TMPDIR:-/tmp}/formal-mutants-pat.XXXXXX"); \
+		printf '%s\n' "$$want" | tr '|' '\n' > "$$pat"; \
+		if grep -qF -f "$$pat" "$$log"; then \
+			rm -f "$$pat"; \
+			echo "  OK: $$test still fails with \"$$want\""; \
+		else \
+			rm -f "$$pat"; \
+			echo "ERROR: $$patch did not make $$test fail with \"$$want\"." >&2; \
+			echo "       Either the guard it removes is no longer load-bearing, or the suite stopped checking it." >&2; \
+			tail -20 "$$log" >&2; \
+			fail=1; \
+		fi; \
+		rm -f "$$log"; log=""; \
+	done < formal/mutants/manifest.tsv; \
+	if [ "$$fail" -ne 0 ]; then exit 1; fi; \
+	echo "OK: every pinned mutant still fails the test its row names"
 
 .PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.dot.
+formal-dump: tla2tools ## Dump the TLC state graph of every spec to formal/*.dot.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/FireboltEngine.cfg \
 		-dump dot,actionlabels formal/FireboltEngine.dot \
@@ -376,19 +460,43 @@ formal-dump: tla2tools ## Dump the TLC state graphs for both specs to formal/*.d
 		-config formal/FireboltInstance.cfg \
 		-dump dot,actionlabels formal/FireboltInstance.dot \
 		formal/FireboltInstance.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/SigningKeyRotation.cfg \
+		-dump dot,actionlabels formal/SigningKeyRotation.dot \
+		formal/SigningKeyRotation.tla
+	@# WakeAgentHold.tla is deliberately absent: it has no state-cover fixture, so
+	@# nothing consumes its state graph. See formal/model-scope.tsv for why the
+	@# agent-side half is not bound to Go.
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
+		-config formal/EngineWake.cfg \
+		-dump dot,actionlabels formal/EngineWake.dot \
+		formal/EngineWake.tla
 
 .PHONY: formal-gen
 formal-gen: formal-dump ## Regenerate the TLA+ state-cover test fixtures from the TLC state graphs.
-	python3 scripts/gen-tla-state-tests.py \
+	@# One generator, one --model per machine. The projection, the env-action
+	@# filter and the emitted Go names live in that script's MODELS registry, not
+	@# here, so adding a spec is a config entry plus a line below.
+	python3 scripts/gen-tla-state-tests.py --model engine \
 		--dot formal/FireboltEngine.dot \
+		--spec formal/FireboltEngine.tla \
 		--out internal/controller/engine_tla_states_data_test.go
-	python3 scripts/gen-tla-instance-state-tests.py \
+	python3 scripts/gen-tla-state-tests.py --model instance \
 		--dot formal/FireboltInstance.dot \
+		--spec formal/FireboltInstance.tla \
 		--out internal/controller/instance_tla_states_data_test.go
+	python3 scripts/gen-tla-state-tests.py --model rotation \
+		--dot formal/SigningKeyRotation.dot \
+		--spec formal/SigningKeyRotation.tla \
+		--out internal/controller/rotation_tla_states_data_test.go
+	python3 scripts/gen-tla-state-tests.py --model wake \
+		--dot formal/EngineWake.dot \
+		--spec formal/EngineWake.tla \
+		--out internal/controller/wake_tla_states_data_test.go
 
 .PHONY: formal-verify
 formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any generated file changed.
-	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go; do \
+	@for f in internal/controller/engine_tla_states_data_test.go internal/controller/instance_tla_states_data_test.go internal/controller/rotation_tla_states_data_test.go internal/controller/wake_tla_states_data_test.go; do \
 		if ! git diff --quiet -- "$$f"; then \
 			echo "ERROR: TLA+ state-cover fixture $$f is out of date. Run 'make formal-gen' and commit the result." >&2; \
 			git --no-pager diff -- "$$f"; \
@@ -399,7 +507,6 @@ formal-verify: formal-gen ## CI guard: regenerate the fixtures and fail if any g
 ##@ Dependencies
 
 ## Location to install dependencies to
-LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p "$(LOCALBIN)"
 
@@ -429,7 +536,10 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   [ -n "$$v" ] || { echo "Set ENVTEST_K8S_VERSION manually (k8s.io/api replace has no tag)" >&2; exit 1; }; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
-GOLANGCI_LINT_VERSION ?= v2.9.0
+# Keep in lockstep with the version the lint workflow runs
+# (.github/workflows/lint.yaml, golangci-lint-action `version:`) so a clean
+# local `make lint` and a green CI Lint check are the same claim.
+GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

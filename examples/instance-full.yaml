@@ -69,13 +69,9 @@ spec:
                 cpu: 100m
                 memory: 256Mi
 
-  # Reserved: persisted but not yet enforced at the engine level.
-  auth:
-    mode: openid
-    oidc:
-      issuerURL: https://company.okta.com/oauth2/default
-      clientID: firebolt
-      clientSecretRef:
-        name: oidc-client-secret
-      claimMappings:
-        username: email
+  # Authentication (native + OIDC) and TLS are Instance-wide, opt-in, and
+  # cert-manager-backed. They are omitted here so this example deploys on a
+  # bare cluster with no external prerequisites (it is the config the CI
+  # quickstart smoke test applies). For a fully worked auth + TLS example —
+  # including the required cert-manager issuer and admin-password Secret —
+  # see examples/instance-auth-tls.yaml.

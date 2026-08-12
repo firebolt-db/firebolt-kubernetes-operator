@@ -43,6 +43,12 @@ test/e2e/pod-logs
 
 # Formal-verification artifacts (regenerated via `make formal-dump`)
 formal/*.dot
+# TLC trace-exploration spec it writes beside a spec whenever a run reports a
+# violation — including the counterexample formal-check-counterexample expects.
+formal/*_TTrace_*.tla
+formal/*_TTrace_*.bin
+# TLC's on-disk state queue, written into the working directory.
+states/
 
 # Python bytecode (docs validation scripts)
 __pycache__/

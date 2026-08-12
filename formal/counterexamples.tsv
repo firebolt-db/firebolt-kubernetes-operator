@@ -1,0 +1,41 @@
+# Naive configs and the violation each one must still produce.
+#
+# <config>	<spec>	<expected TLC line>
+#
+# Read this as the negative controls for `make formal-check`. Each config flips
+# one boolean CONSTANT that removes a shipped guard from the spec, and the third
+# column is the line TLC must print as a result. A row that stops matching means
+# one of two things, and they are not interchangeable: either the guard is no
+# longer load-bearing (the design changed, and the row should be deleted with a
+# note saying why), or the invariant has gone vacuous (it can no longer fail, so
+# every green run that cites it is worthless). Do not relax the expectation
+# without deciding which of the two happened.
+#
+# The expected line is matched literally (grep -F) against the whole TLC log, so
+# it works for temporal properties as well as invariants. Copy it from a real
+# failing run rather than typing it from memory: TLC words the three cases
+# differently, and the differences are not guessable —
+#   "Invariant X is violated"          a state invariant
+#   "Action property X is violated"     a [][A]_vars property
+#   "Temporal property X was violated"  a liveness property (note: was, not is)
+#
+# Each config lists ONE invariant under INVARIANTS rather than Safety (or,
+# when the pinned violation is an action property, ONE property under
+# PROPERTIES). With `INVARIANTS Safety` TLC prints only "Invariant Safety is
+# violated" with no attribution, so the row could pass on a violation of some
+# other conjunct — a negative control that does not control for anything
+# specific.
+#
+# scripts/ci/check-counterexamples.sh also refuses any formal/*Naive*.cfg this
+# table omits: a naive config nothing runs looks like coverage and is not.
+SigningKeyRotationNaive.cfg	SigningKeyRotation.tla	Invariant NoValidationGap is violated
+FireboltEngineNaiveService.cfg	FireboltEngine.tla	Invariant Inv_ServiceKnownGen is violated
+FireboltEngineNaiveGCPhase.cfg	FireboltEngine.tla	Invariant Inv_ActiveHasSTS is violated
+FireboltEngineNaiveGCCurrent.cfg	FireboltEngine.tla	Invariant Inv_TerminalHasSTS is violated
+FireboltEngineNaiveAdvance.cfg	FireboltEngine.tla	Invariant Inv_ServiceValid is violated
+FireboltEngineNaiveDrift.cfg	FireboltEngine.tla	Invariant Inv_DrainingPhase is violated
+FireboltInstanceNaiveRollup.cfg	FireboltInstance.tla	Action property PhaseReflectsComponents is violated
+EngineWakeNaiveStoppedFirst.cfg	EngineWake.tla	Temporal property WakeIsNotLost was violated
+EngineWakeNaiveStaleDemand.cfg	EngineWake.tla	Action property ScaleUpOnlyOnFreshDemand is violated
+EngineWakeNaiveUnfilteredPoll.cfg	EngineWake.tla	Invariant Inv_DemandOnlyForStoppedEngines is violated
+WakeAgentHoldNaiveNameRelease.cfg	WakeAgentHold.tla	Invariant Inv_NoStrandedWaiter is violated

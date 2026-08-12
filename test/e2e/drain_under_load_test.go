@@ -21,8 +21,6 @@ package e2e
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -64,35 +62,12 @@ const (
 	drainRolloutTolerationKey = "firebolt.io/e2e-drain-under-load"
 )
 
-// keepPodBusy loops the compute-bound query back-to-back against one pod IP
-// until stop is closed. Two workers so the busy signal has no gaps between
-// consecutive queries (kubectl-exec startup leaves ~0.5s holes with one).
-func keepPodBusy(ctx context.Context, clientPod, podIP string, stop <-chan struct{}) (wait func() (succeeded, failed int64)) {
-	var wg sync.WaitGroup
-	var succeeded, failed atomic.Int64
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer GinkgoRecover()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				if _, err := RunQueryAgainstPodIP(ctx, clientPod, podIP, computeBoundQuery); err != nil {
-					failed.Add(1)
-				} else {
-					succeeded.Add(1)
-				}
-			}
-		}()
-	}
-	return func() (int64, int64) {
-		wg.Wait()
-		return succeeded.Load(), failed.Load()
-	}
+// keepPodBusy keeps queries in flight against ONE pod, bypassing the cluster
+// Service. That targeting is the point: the drain spec has to keep loading the
+// OLD generation after the selector has flipped away from it, which is exactly
+// the traffic the drain check exists to protect.
+func keepPodBusy(ctx context.Context, clientPod, podIP string) (stop func() (succeeded, failed int64)) {
+	return keepURLBusy(ctx, clientPod, enginePodQueryURL(podIP), computeBoundQuery)
 }
 
 var _ = Describe("Firebolt Engine Drain", func() {
@@ -138,8 +113,25 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			Expect(oldPod.Status.PodIP).NotTo(BeEmpty())
 
 			By("Starting continuous queries against the old-generation pod")
-			stop := make(chan struct{})
-			waitForLoad := keepPodBusy(ctx, clientPod, oldPod.Status.PodIP, stop)
+			stopLoad := keepPodBusy(ctx, clientPod, oldPod.Status.PodIP)
+			// A failing assertion below must still stop the in-pod loop (a loop
+			// left running would keep the pod busy into the next spec) and must
+			// still record the load evidence, which otherwise only the success
+			// path printed. stopLoad is idempotent, so the explicit call on the
+			// success path keeps its ordering and counts.
+			DeferCleanup(func() {
+				succeeded, failed := stopLoad()
+				GinkgoWriter.Printf("Old-generation load (cleanup): %d succeeded, %d failed\n",
+					succeeded, failed)
+			})
+
+			// The hold below is far enough from here that ramp-up cannot pollute
+			// it — the rollout wait sits in between. Waiting anyway pins the
+			// premise before the rollout is triggered, so a load loop that never
+			// produced traffic fails here, with that as the reason, instead of
+			// surfacing later as a drain that released "too early".
+			By("Waiting for the load to actually reach the old-generation pod")
+			waitForLoadInFlight(ctx, clientPod, oldPod.Status.PodIP)
 
 			By("Triggering a blue-green rollout via a no-op toleration")
 			Expect(UpdateEngineScheduling(ctx, engineName, nil, []corev1.Toleration{{
@@ -158,11 +150,18 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			}, rolloutToDrainingTimeout, pollInterval).Should(Succeed())
 
 			By("Verifying the busy old generation is held in draining")
+			// The gauge is sampled alongside the phase so a failure can say
+			// whether the premise held. Recording it does not weaken the
+			// assertion: the phase check below is unconditional, so any release
+			// fails the spec whether or not a sample caught the pod busy.
+			var held loadHoldTracker
 			Consistently(func(g Gomega) {
+				held.sample(ctx, clientPod, oldPod.Status.PodIP)
+
 				engine, err := GetEngine(ctx, engineName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(string(engine.Status.Phase)).To(Equal(string(computev1alpha1.PhaseDraining)),
-					"draining generation was released while its pod had queries in flight")
+					held.failure("released the draining generation"))
 				g.Expect(engine.Status.DrainingGeneration).NotTo(BeNil())
 
 				pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, oldPod.Name, metav1.GetOptions{})
@@ -170,9 +169,18 @@ var _ = Describe("Firebolt Engine Drain", func() {
 				g.Expect(pod.DeletionTimestamp).To(BeNil(), "old-generation pod is terminating while busy")
 			}, drainHoldWindow, 1*time.Second).Should(Succeed())
 
+			// Belt-and-braces on the premise for a run that PASSED: a hold that
+			// never saw the pod busy proved nothing, and would otherwise be
+			// indistinguishable from a real one.
+			Expect(held.samples).NotTo(BeEmpty(),
+				"no usable gauge sample was taken during the hold window (%d scrape attempts "+
+					"failed), so the pod was never observed busy", held.scrapeErrors)
+			Expect(held.idle).To(BeZero(),
+				"the pod went idle during the hold window (%d of %d samples read 0); the hold "+
+					"proved nothing even though it passed", held.idle, len(held.samples))
+
 			By("Stopping the query load")
-			close(stop)
-			succeeded, failed := waitForLoad()
+			succeeded, failed := stopLoad()
 			GinkgoWriter.Printf("Old-generation load: %d succeeded, %d failed\n", succeeded, failed)
 			Expect(succeeded).To(BeNumerically(">", 0),
 				"no query completed against the old pod (%d failed); the hold assertion proved nothing", failed)

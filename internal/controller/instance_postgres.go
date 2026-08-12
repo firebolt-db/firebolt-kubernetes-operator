@@ -195,7 +195,7 @@ func validatePostgresSecret(s *corev1.Secret) error {
 // alongside the existing ones.
 func (r *FireboltInstanceReconciler) ensurePostgresStatefulSet(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	desired := buildPostgresStatefulSet(instance)
-	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"}
+	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: KindStatefulSet}
 
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
@@ -240,6 +240,9 @@ func buildPostgresStatefulSet(instance *computev1alpha1.FireboltInstance) *appsv
 					// PodSpec: kill legacy service-link env injection, DNS
 					// is the only service-discovery channel here.
 					EnableServiceLinks: boolPtr(false),
+					// postgres never calls the Kubernetes API, so keep the
+					// default ServiceAccount's token off the pod filesystem.
+					AutomountServiceAccountToken: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: boolPtr(true),
 						RunAsUser:    &pgUID,

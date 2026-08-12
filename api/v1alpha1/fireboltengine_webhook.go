@@ -202,8 +202,53 @@ func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *Fireb
 	class, refErrs := v.resolveEngineClass(ctx, eng)
 	errs = append(errs, refErrs...)
 	errs = append(errs, v.validateTemplate(eng)...)
+	errs = append(errs, v.validateSecretAliases(ctx, eng)...)
 	errs = append(errs, v.validateResources(eng, class)...)
 	return errs
+}
+
+// validateSecretAliases rejects a spec.template volume that reaches one of the
+// operator-managed Secrets belonging to the owning Instance, whatever the volume
+// is named. The reserved-volume-name rules cannot catch this: the name is the
+// author's to choose, and only the volume's source gives the aliasing away.
+//
+// The protected set is Instance-wide, not "what this engine's pod mounts": an
+// engine template has no business reaching the gateway's serving key or the
+// metadata Postgres credential either. See InstanceOperatorSecretNames.
+//
+// The Instance is read live so the rejection names Secrets that are really
+// mounted. An unreadable or absent Instance produces no finding — an engine may
+// legitimately be applied before its Instance exists, and the engine reconciler
+// re-runs this check every reconcile once it can resolve one. That, plus the
+// generation-numbered engine-TLS Secrets this cannot name, is why admission is
+// the early warning here and the reconciler is the guarantee.
+func (v *FireboltEngineCustomValidator) validateSecretAliases(ctx context.Context, eng *FireboltEngine) field.ErrorList {
+	if eng.Spec.Template == nil {
+		return nil
+	}
+	inst := &FireboltInstance{}
+	key := client.ObjectKey{Name: eng.Spec.InstanceRef, Namespace: eng.Namespace}
+	if err := v.Reader.Get(ctx, key, inst); err != nil {
+		return nil
+	}
+	protected := make(map[string]struct{})
+	for _, n := range InstanceOperatorSecretNames(inst) {
+		protected[n] = struct{}{}
+	}
+	if len(protected) == 0 {
+		return nil
+	}
+	isProtected := func(name string) bool {
+		_, hit := protected[name]
+		return hit
+	}
+	base := field.NewPath("spec", "template", "spec")
+	errs := ValidateNoSecretAliasVolumes(
+		eng.Spec.Template.Spec.Volumes, base.Child("volumes"), isProtected, "engine")
+	errs = append(errs, ValidateNoSecretRefEnv(
+		eng.Spec.Template.Spec.Containers, base.Child("containers"), isProtected, "engine")...)
+	return append(errs, ValidateNoSecretRefEnv(
+		eng.Spec.Template.Spec.InitContainers, base.Child("initContainers"), isProtected, "engine")...)
 }
 
 // validateTemplate runs the per-component pod-template allowlist on the

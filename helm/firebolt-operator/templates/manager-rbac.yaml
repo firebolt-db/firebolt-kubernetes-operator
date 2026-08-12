@@ -79,6 +79,18 @@ rules:
       - update
       - watch
   - apiGroups:
+      - cert-manager.io
+    resources:
+      - certificates
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses
@@ -118,6 +130,14 @@ rules:
       - list
       - patch
       - update
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
       - watch
   - apiGroups:
       - events.k8s.io
@@ -240,6 +260,18 @@ rules:
       - update
       - watch
   - apiGroups:
+      - cert-manager.io
+    resources:
+      - certificates
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses
@@ -279,6 +311,14 @@ rules:
       - list
       - patch
       - update
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - get
+      - list
       - watch
   - apiGroups:
       - events.k8s.io

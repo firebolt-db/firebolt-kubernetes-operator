@@ -1,0 +1,47 @@
+# Model scope: which production functions are bound to a TLA+ spec.
+#
+# Columns are tab-separated:
+#
+#   <func>\t<file>\t<spec>\t<state-cover fixture>
+#
+# scripts/ci/check-model-scope.sh reads this and, for a change that touches one
+# of these functions, asks that the spec and its fixture move too. It proves
+# nothing -- it turns "the model quietly stopped tracking the code" into a
+# review prompt. A change that legitimately does not affect the model passes by
+# saying so: put `Model-scope-ok: <reason>` in a commit message or the PR body.
+#
+# What is NOT here matters as much as what is, so unmodelled machines are rows
+# too, not prose:
+#
+#   <func>\t<file>\tUNMODELLED\t<reason>
+#
+# check-model-scope.sh enforces completeness mechanically: every function under
+# internal/ named compute[A-Z]*, step[A-Z]*, or set*Rollup (tests excluded)
+# must appear in this manifest, either bound to a spec or UNMODELLED with a
+# non-empty reason. A new state machine therefore cannot ship without either a
+# spec binding or a written-down decision not to have one. Rows for functions
+# outside the naming convention (stsMatchesSpec, Stamp, checkDrainComplete) are
+# listed for visibility even though the scan would not demand them.
+#
+# So "the TLA+ suite passes" means "the modelled machines still agree with
+# their specs", not "this change is verified". Modelling a machine means
+# writing a spec for it; SigningKeyRotation.tla is the smallest worked example,
+# counterexample config included.
+computeEngineReconcile	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+terminalPhase	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeStable	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeCreating	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeSwitching	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeDraining	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+computeCleaning	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+setInstanceReadyRollup	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
+computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
+stepSigningKeyRotation	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+promoteSigningKey	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+signingKeysForRender	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+computeAutoStopDecision	internal/controller/engine_autostop.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
+pollOnce	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
+replace	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
+Stamp	internal/wakeagent/demand.go	UNMODELLED	the agent's hold path is modelled by formal/WakeAgentHold.tla but deliberately not bound to Go: the tracker state is unexported in-memory bookkeeping in a package that must not import controller-runtime, so TLC alone checks Inv_NoStrandedWaiter / Inv_WaiterRefsAccurate and internal/wakeagent's unit tests hold the Go line; binding it needs an exported test seam on the tracker
+stsMatchesSpec	internal/controller/engine_reconcile.go	UNMODELLED	class merge and drift detection (stsMatchesSpec and the effective* resolvers) are stateless comparators; the specs abstract them as the specVer input
+checkDrainComplete	internal/controller/engine_state.go	UNMODELLED	drain probing and its timeouts are deliberately deferred: fuzzed time is the highest false-positive axis

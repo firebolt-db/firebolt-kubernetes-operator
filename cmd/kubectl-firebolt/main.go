@@ -170,7 +170,7 @@ name is not this argument.`,
 			if err != nil {
 				return err
 			}
-			return runForeground(pf)
+			return runForeground(pf, gatewayForwardScheme(cmd.Context(), c, args[0]))
 		},
 	}
 	cmd.Flags().IntVar(&localPort, "local-port", 0, "Bind kubectl to this local port instead of letting it pick a free one")
@@ -356,7 +356,7 @@ svc/<engine-name>-service.`,
 			if err != nil {
 				return err
 			}
-			return runForeground(pf)
+			return runForeground(pf, engineForwardScheme(cmd.Context(), c, args[0]))
 		},
 	}
 	cmd.Flags().IntVar(&localPort, "local-port", 0, "Bind kubectl to this local port instead of letting it pick a free one")
@@ -394,11 +394,45 @@ func warnNoStorage(engineType string) {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-func runForeground(pf *infra.PortForward) error {
+// runForeground streams a foreground port-forward until Ctrl+C. scheme is the
+// URL scheme to advertise ("https" or "http"); an empty scheme prints a
+// protocol-neutral endpoint, used when the Instance's TLS posture could not be
+// read so we never assert the wrong scheme (a TLS listener rejects plaintext).
+func runForeground(pf *infra.PortForward, scheme string) error {
 	defer pf.Close()
-	fmt.Printf("Forwarding on http://localhost:%d\n", pf.LocalPort())
+	if scheme == "" {
+		fmt.Printf("Forwarding on localhost:%d\n", pf.LocalPort())
+	} else {
+		fmt.Printf("Forwarding on %s://localhost:%d\n", scheme, pf.LocalPort())
+	}
 	fmt.Println("Ctrl+C to stop.")
 	return pf.Wait()
+}
+
+// gatewayForwardScheme reports the scheme for a gateway port-forward, degrading
+// to a protocol-neutral endpoint when the Instance cannot be read — never fail
+// the port-forward over it.
+func gatewayForwardScheme(ctx context.Context, c *infra.Client, instanceName string) string {
+	inst, err := c.GetInstance(ctx, instanceName)
+	if err != nil {
+		return infra.SchemeUnknown
+	}
+	return infra.GatewayServingScheme(inst)
+}
+
+// engineForwardScheme reports the scheme for an engine port-forward. Engine TLS
+// lives on the owning Instance (engines carry no TLS spec), reached via
+// spec.instanceRef; any unreadable state degrades to a protocol-neutral endpoint.
+func engineForwardScheme(ctx context.Context, c *infra.Client, engineName string) string {
+	eng, err := c.GetEngine(ctx, engineName)
+	if err != nil {
+		return infra.SchemeUnknown
+	}
+	inst, err := c.GetInstance(ctx, eng.Spec.InstanceRef)
+	if err != nil {
+		return infra.SchemeUnknown
+	}
+	return infra.EngineFleetServingScheme(inst)
 }
 
 func fmtReady(b *bool) string {

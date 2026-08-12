@@ -27,9 +27,11 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -59,11 +61,30 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(computev1alpha1.AddToScheme(scheme))
+	// Registered so the instance controller can apply cert-manager
+	// Certificate objects (the JWT signing keypair, and later TLS certs)
+	// through the same typed client as every other resource it manages.
+	// The operator does not run cert-manager's own controllers — it only
+	// creates Certificates and reads the Secrets cert-manager produces —
+	// so no other cert-manager scheme registration is needed here.
+	utilruntime.Must(certmanagerv1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
 
 func main() {
+	// Subcommand dispatch before flag.Parse: the same binary also runs the
+	// gateway's wake-agent sidecar (see cmd/wakeagent.go). Sniffing argv[1]
+	// rather than restructuring onto a CLI framework keeps the manager's
+	// existing flag surface byte-identical — every chart-rendered argument
+	// still parses exactly as it did.
+	if isWakeAgentInvocation(os.Args) {
+		if err := runWakeAgent(os.Args[2:]); err != nil {
+			setupLog.Error(err, "wake agent failed")
+			os.Exit(1)
+		}
+		return
+	}
 	var showVersion bool
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -76,6 +97,8 @@ func main() {
 	var watchNamespacesArg string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
 	var gatewayWakeClusterRole string
+	var wakeAgentImage string
+	var wakeAgentImagePullPolicy string
 	var telemetryEnabled bool
 	var telemetryEndpoint string
 	var tlsOpts []func(*tls.Config)
@@ -113,11 +136,16 @@ func main() {
 		"Maximum value (Kubernetes resource.Quantity, e.g. \"10Ti\") for FireboltEngine.spec.resources requests/limits ephemeral-storage. "+
 			"Empty disables the bound.")
 	flag.StringVar(&gatewayWakeClusterRole, "gateway-wake-cluster-role", "",
-		"Name of the chart-managed ClusterRole that grants get/list/patch on fireboltengines. "+
+		"Name of the chart-managed ClusterRole that grants get/list/watch on endpointslices. "+
 			"The operator binds this ClusterRole to each FireboltInstance's gateway ServiceAccount via "+
-			"a per-instance RoleBinding (so the gateway can stamp the wake annotation). "+
-			"Empty fails any FireboltInstance reconcile that requires operator-managed gateway RBAC; "+
-			"users supplying their own gateway ServiceAccount via spec.gateway.template.spec.serviceAccountName are unaffected.")
+			"a per-instance RoleBinding, so the wake-agent sidecar can observe when a stopped engine's "+
+			"endpoints appear. Empty skips the binding and disables wake-on-zero; query routing is unaffected.")
+	flag.StringVar(&wakeAgentImage, "wake-agent-image", "",
+		"Image for the gateway's wake-agent sidecar. Set by the chart to the operator's own image: "+
+			"the agent is a subcommand of this binary, so shipping them together keeps the operator and "+
+			"the demand endpoint it polls on the same version. Empty omits the sidecar and disables wake-on-zero.")
+	flag.StringVar(&wakeAgentImagePullPolicy, "wake-agent-image-pull-policy", "",
+		"Pull policy for the wake-agent sidecar. Empty applies Kubernetes' own tag-derived default.")
 	flag.BoolVar(&telemetryEnabled, "telemetry", true,
 		"Send a once-daily anonymous aggregate usage event. Set false to disable.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultEndpoint,
@@ -252,11 +280,24 @@ func main() {
 		instanceMetrics = fireboltmetrics.NewInstanceRecorder()
 	}
 
+	// Wake-on-zero. The tracker polls each gateway's read-only wake agent
+	// and caches the per-engine demand it reports; the engine reconciler
+	// reads that cache and does the scaling. Nothing in a gateway pod ever
+	// writes to the API, which is the point of the arrangement. Without an
+	// agent image there is no agent to poll, so wake stays off and autoStop
+	// behaves exactly as it did before the feature existed.
+	wakeDemand, err := setupWakeDemand(mgr, wakeAgentImage, watchNamespaces)
+	if err != nil {
+		setupLog.Error(err, "unable to register wake demand tracker")
+		os.Exit(1)
+	}
+
 	if err := (&controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		MetricsRecorder: engineMetrics,
 		ResourceBounds:  engineBounds,
+		WakeDemand:      wakeDemand,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngine")
 		os.Exit(1)
@@ -267,6 +308,9 @@ func main() {
 		Scheme:                 mgr.GetScheme(),
 		MetricsRecorder:        instanceMetrics,
 		GatewayWakeClusterRole: gatewayWakeClusterRole,
+
+		WakeAgentImage:           wakeAgentImage,
+		WakeAgentImagePullPolicy: corev1.PullPolicy(wakeAgentImagePullPolicy),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltInstance")
 		os.Exit(1)

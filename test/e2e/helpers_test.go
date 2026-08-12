@@ -30,11 +30,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -154,6 +156,13 @@ func StartOperator(instanceName string, opts ...EngineOperatorOption) (*Operator
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
+	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS, so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
@@ -1382,13 +1391,29 @@ func DeleteClientPod(ctx context.Context, podName string) {
 //     so failures carry DNS/connect/response timings that pinpoint the phase
 //     that stalled.
 func execCurlQuery(ctx context.Context, podName, url, query string, extraHeaders ...string) (string, error) {
+	return execCurlQueryWithDeadline(ctx, podName, url, query, defaultCurlMaxTimeSeconds, extraHeaders...)
+}
+
+// defaultCurlMaxTimeSeconds bounds an ordinary query against a running
+// engine. Wake-on-zero needs its own, much larger, value: a query to a
+// stopped engine is held by the gateway for as long as the engine takes to
+// start, so a client deadline shorter than the cold start kills the very
+// request that triggered the wake.
+const defaultCurlMaxTimeSeconds = 33
+
+func execCurlQueryWithDeadline(
+	ctx context.Context,
+	podName, url, query string,
+	maxTimeSeconds int,
+	extraHeaders ...string,
+) (string, error) {
 	const curlTimingFmt = "%{stderr}timings: code=%{http_code} dns=%{time_namelookup}s " +
 		"connect=%{time_connect}s starttransfer=%{time_starttransfer}s total=%{time_total}s\n"
 
 	curlArgs := []string{
 		"-sSf",
 		"--connect-timeout", "2",
-		"--max-time", "33",
+		"--max-time", strconv.Itoa(maxTimeSeconds),
 		"-w", curlTimingFmt,
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",
@@ -1462,18 +1487,6 @@ func GetEngine(ctx context.Context, name string) (*computev1alpha1.FireboltEngin
 	return engine, nil
 }
 
-// AnnotateEngine sets one annotation on the engine CR (retrying on
-// conflict). Used by the autoStop spec to stamp the gateway wake-up
-// annotation the way a real gateway would.
-func AnnotateEngine(ctx context.Context, name, key, value string) error {
-	return retryOnConflict(ctx, name, func(engine *computev1alpha1.FireboltEngine) {
-		if engine.Annotations == nil {
-			engine.Annotations = map[string]string{}
-		}
-		engine.Annotations[key] = value
-	})
-}
-
 // QueryResponse represents the JSON response from fb
 type QueryResponse struct {
 	Data [][]interface{} `json:"data"`
@@ -1545,6 +1558,13 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
+	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS, so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
 	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
@@ -1643,6 +1663,13 @@ func StartClassOperator() (*ClassOperator, error) {
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("failed to add computev1alpha1 to scheme: %w", err)
 	}
+	// The operator provisions cert-manager Certificates for signing keys and
+	// engine/gateway TLS, so the in-process manager's client must know
+	// the cert-manager types or Certificate creates fail with "no kind is
+	// registered".
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("failed to add certmanagerv1 to scheme: %w", err)
+	}
 
 	mgr, err := ctrl.NewManager(config, ctrl.Options{
 		Scheme: scheme,
@@ -1706,6 +1733,14 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 // the host, where kind pod IPs are unreachable, so specs that exercise the
 // drain check or autoStop scrape must use MetricScrapeModeApiserverProxy.
 func createInstance(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode) error {
+	return createInstanceWithMutate(ctx, name, metadataImage, metadataTag, scrapeMode, nil)
+}
+
+// createInstanceWithMutate builds the standard FireboltInstance and, when mutate
+// is non-nil, applies it immediately before the API write — the idiom createEngine
+// already uses for engines. Specs use this to enable Auth/TLS on an
+// otherwise-standard instance without duplicating the base spec.
+func createInstanceWithMutate(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode, mutate func(*computev1alpha1.FireboltInstance)) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
@@ -1759,6 +1794,9 @@ func createInstance(ctx context.Context, name, metadataImage, metadataTag string
 		},
 	}
 
+	if mutate != nil {
+		mutate(instance)
+	}
 	return cl.Create(ctx, instance)
 }
 
@@ -1851,7 +1889,15 @@ type TestInstanceLifecycle struct {
 // handle that TeardownTestInstance consumes. Engine-operator options (e.g.
 // WithGC) are forwarded to the engine operator it starts.
 func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
-	return setupTestInstance(ctx, name, "", opts...)
+	return setupTestInstance(ctx, name, "", nil, opts...)
+}
+
+// SetupTestInstanceWithMutate is SetupTestInstance with a mutate hook applied to
+// the FireboltInstance before creation (e.g. to enable spec.auth / spec.tls).
+// The instance must still reach the Ready phase — note EngineTLS/GatewayTLS roll
+// into Ready but AuthReady does not, so assert AuthReady separately.
+func SetupTestInstanceWithMutate(ctx context.Context, name string, mutate func(*computev1alpha1.FireboltInstance), opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+	return setupTestInstance(ctx, name, "", mutate, opts...)
 }
 
 // SetupTestInstanceWithScrapeMode is SetupTestInstance with an explicit
@@ -1860,15 +1906,15 @@ func SetupTestInstance(ctx context.Context, name string, opts ...EngineOperatorO
 // in-process operator scrapes pod metrics from the host, where kind pod IPs
 // (the PodIP default) are unreachable.
 func SetupTestInstanceWithScrapeMode(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
-	return setupTestInstance(ctx, name, scrapeMode, opts...)
+	return setupTestInstance(ctx, name, scrapeMode, nil, opts...)
 }
 
-func setupTestInstance(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
+func setupTestInstance(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, mutate func(*computev1alpha1.FireboltInstance), opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
 	instanceOp, err := StartInstanceOperator(name)
 	if err != nil {
 		return nil, fmt.Errorf("start instance operator for %s: %w", name, err)
 	}
-	if err := createInstance(ctx, name, metadataImage, metadataTag, scrapeMode); err != nil {
+	if err := createInstanceWithMutate(ctx, name, metadataImage, metadataTag, scrapeMode, mutate); err != nil {
 		instanceOp.Stop()
 		return nil, fmt.Errorf("create instance %s: %w", name, err)
 	}
@@ -2047,10 +2093,22 @@ func WaitForGatewayReplicas(ctx context.Context, instanceName string, expected i
 // from inside a client pod. The gateway routes the query to the specified
 // engine based on the X-Firebolt-Engine header.
 func RunQueryViaGateway(ctx context.Context, podName, instanceName, engineName, query string) (string, error) {
+	return RunQueryViaGatewayWithDeadline(ctx, podName, instanceName, engineName, query, defaultCurlMaxTimeSeconds)
+}
+
+// RunQueryViaGatewayWithDeadline is RunQueryViaGateway with an explicit
+// client deadline, for queries expected to be held while an auto-stopped
+// engine starts.
+func RunQueryViaGatewayWithDeadline(
+	ctx context.Context,
+	podName, instanceName, engineName, query string,
+	maxTimeSeconds int,
+) (string, error) {
 	serviceName := instanceName + controller.SuffixGateway
 	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?query_label=e2e-gateway-test&output_format=JSON_Compact",
 		serviceName, testNamespace)
-	return execCurlQuery(ctx, podName, url, query, "X-Firebolt-Engine: "+engineName)
+	return execCurlQueryWithDeadline(ctx, podName, url, query, maxTimeSeconds,
+		"X-Firebolt-Engine: "+engineName)
 }
 
 // GatewayBackgroundQueryRunner runs queries through the gateway in the background.
@@ -2240,6 +2298,9 @@ func getCRDClient() (client.Client, error) {
 		return nil, err
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 

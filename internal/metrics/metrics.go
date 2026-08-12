@@ -106,6 +106,47 @@ var InstanceLastReconciled = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "Unix timestamp of the last successful reconcile.",
 }, instanceLabels)
 
+// --- JWT signing-key rotation ---
+
+// InstanceSigningKeyGeneration reports the Instance's monotonic signing-key
+// generation counter, so a rotation that ran is visible after the fact.
+var InstanceSigningKeyGeneration = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "firebolt_instance_signing_key_generation",
+	Help: "Monotonic JWT signing-key generation counter.",
+}, instanceLabels)
+
+// InstanceSigningKeys counts the tracked signing keys by phase. More than one
+// Active is impossible; a non-zero ValidationOnly or Removing count means a
+// rotation is in flight.
+var InstanceSigningKeys = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "firebolt_instance_signing_keys",
+	Help: "JWT signing keys currently tracked, by phase.",
+}, append(instanceLabels, "phase"))
+
+// InstanceRotationPendingStep reports which rotation step is waiting on fleet
+// convergence: 1 for the pending step, 0 for the others, and 0 everywhere when
+// no rotation is waiting.
+var InstanceRotationPendingStep = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "firebolt_instance_signing_key_rotation_pending_step",
+	Help: "Signing-key rotation step awaiting engine convergence (1=pending, 0=not).",
+}, append(instanceLabels, "step"))
+
+// InstanceRotationPendingSeconds reports how long the pending rotation step has
+// been waiting, and 0 when none is. This is the series a stalled-rotation alert
+// fires on: rotation gates park indefinitely by design, so duration — not
+// existence — is what distinguishes a normal engine roll from a stuck fleet.
+var InstanceRotationPendingSeconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "firebolt_instance_signing_key_rotation_pending_seconds",
+	Help: "Seconds the current signing-key rotation step has been awaiting engine convergence (0 if none).",
+}, instanceLabels)
+
+// InstanceRotationLaggingEngines reports how many engines the pending rotation
+// step is waiting for — the true total, not the truncated name list in status.
+var InstanceRotationLaggingEngines = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "firebolt_instance_signing_key_rotation_lagging_engines",
+	Help: "Engines whose observed auth hash has not yet converged for the pending rotation step.",
+}, instanceLabels)
+
 func init() {
 	ctrlmetrics.Registry.MustRegister(
 		EnginePhase,
@@ -121,5 +162,10 @@ func init() {
 		InstanceCondition,
 		InstanceInfo,
 		InstanceLastReconciled,
+		InstanceSigningKeyGeneration,
+		InstanceSigningKeys,
+		InstanceRotationPendingStep,
+		InstanceRotationPendingSeconds,
+		InstanceRotationLaggingEngines,
 	)
 }

@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.1...firebolt-operator-v0.6.0) (2026-07-28)
+
+
+### Features
+
+* **cmd:** run the wake agent as a manager subcommand (FB-2553) ([36e8973](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/36e8973d2316d27e0ab9882d95170582dde7080d))
+* **controller:** wake stopped engines from gateway demand (FB-2553) ([7439de9](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7439de9f5766f88be58ca2e7bd7cf8bafa39e855))
+* **gateway:** add a read-only wake agent for stopped-engine queries (FB-2553) ([5699b28](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5699b287b5980273833337277cea6675038656d0))
+
+
+### Bug Fixes
+
+* **controller:** say wake-on-zero is off with a user gateway ServiceAccount (FB-2553) ([6134029](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/613402994723426b193ad343f4babc19b784c57b))
+* **formal:** give mktemp a template so the mutant check runs on macOS (FB-2582) ([6c433c5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c433c5e38766a04051a90eb5730a9905f8fb8a5))
+* **formal:** never leave a mutant applied when the check aborts (FB-2582) ([db6a74e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/db6a74efee32cfda63fed3431e601206bba95071))
+* **formal:** pin the cleaning mutant by hazard, not by sort order (FB-2583) ([40772e2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40772e22cb70a7ef1599337049a3f4790f7557b8))
+* **formal:** stop re-downloading tla2tools on every formal target (FB-2609) ([8ffcc06](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8ffcc066cac4895663d11efd0d871977581b31db))
+* **gateway:** bound the demand tracker at a hard engine-name cap (FB-2553) ([e83154e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e83154e147f716092c14e12b1a9ae812f1cd0396))
+* **gateway:** key waiter release on channel identity, not engine name (FB-2553) ([340706f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/340706f53e55d36f031157f646ba5ea3a66b8886))
+* **gateway:** stop telling users to grant engine write RBAC (FB-2553) ([6390984](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/63909842088aeed3c223b587249dda697b95894d))
+* **gateway:** stop the wake agent from being able to take the gateway down (FB-2553) ([134b27c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/134b27c6169a870f4206d2c776158f14fd314666))
+
+## [0.5.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.0...firebolt-operator-v0.5.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **security:** harden auth & TLS secret, certificate, and admission guards (FB-896) ([#89](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/89)) ([e7794ee](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e7794ee489ec149d686c0fbdf768422cf3927e80))
+
+
+### Dependencies
+
+* **deps:** bump github.com/google/cel-go from 0.26.0 to 0.29.0 ([#88](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/88)) ([6e5040d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6e5040d5ea74a07c853a766caeb4ae0812e97862))
+
+## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.1...firebolt-operator-v0.5.0) (2026-07-27)
+
+
+### Features
+
+* **api:** add spec.auth and spec.tls to FireboltInstance with validation and RBAC (FB-896) ([59f792b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/59f792b43c2dd2b59c3be11a9310f392d046dad0))
+* **controller:** provision auth, TLS, and coordinated signing-key rotation (FB-896) ([63d000a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/63d000aced7d64273dab54bd68b2aa36029caa81))
+
+
+### Bug Fixes
+
+* **cli:** derive the port-forward scheme from observed TLS state (FB-896) ([9e8a5a3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9e8a5a3a0476506a301a785e16c7a63ece81f4e8))
+* **controller:** disable service account token automount on postgres (FB-2516) ([e0ad19e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e0ad19eeb7824b5600749cbbbfd804f53a4193f7))
+* **gateway:** offer every engine-certificate curve on the upstream TLS context (FB-896) ([e5d36e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e5d36e32bb3b32c3c370752f406a235af32e9acd))
+
+
+### Dependencies
+
+* **deps:** bump golang from 1.26.4 to 1.26.5 ([#85](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/85)) ([75f008e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/75f008e15aecd6f880d8bcbbcdcce3356166046f))
+* **deps:** bump packdb engine/metadata to 5.0.1-0.20260727005216.d09b51086f14 ([96d5881](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96d58814a48268778ca207ff6e9b1fced7a0c9ae))
+
+## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.0...firebolt-operator-v0.4.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* **controller:** stop injecting core mode env (FB-1860) ([#74](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/74)) ([7f912e6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7f912e68e9678795d3e9bcf7192cc1653713acbb))
+
 ## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.3.2...firebolt-operator-v0.4.0) (2026-07-20)
 
 

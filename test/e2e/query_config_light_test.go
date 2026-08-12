@@ -27,4 +27,3 @@ var queryConfig = TestQueryConfig{
 	Mode:      QueryModeLight,
 	Suffix:    "-l",
 }
-

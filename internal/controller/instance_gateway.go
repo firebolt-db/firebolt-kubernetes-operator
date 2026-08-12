@@ -19,11 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -31,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/wakeagent"
 )
 
 // The dynamic forward proxy is configured in "sub cluster" mode rather
@@ -64,6 +67,42 @@ const (
 	gatewayAdminPort     int32 = 9901
 	gatewayServicePort   int32 = 80
 	gatewayConfigKey           = "envoy.yaml"
+
+	// gatewayWakeAgentHoldPort is the loopback port the wake-agent serves
+	// its hold endpoint on. Bound to 127.0.0.1 inside the pod, so it is
+	// reachable from Envoy and from nothing else.
+	gatewayWakeAgentHoldPort int32 = 9902
+
+	// gatewayWakeAgentDemandPort is the port the agent exposes per-engine
+	// wake demand on. Unlike the hold port this binds all interfaces: the
+	// operator polls it across the pod network to decide which stopped
+	// engines to scale back up.
+	gatewayWakeAgentDemandPort int32 = 9903
+
+	// Resource floor for the wake-agent sidecar. Small and flat: it holds
+	// per-engine timestamps and parked connections, nothing that scales
+	// with query volume. No CPU limit, so a burst of releases is not
+	// throttled into looking like a hung agent.
+	gatewayWakeAgentCPURequest    = "10m"
+	gatewayWakeAgentMemoryRequest = "32Mi"
+	gatewayWakeAgentMemoryLimit   = "128Mi"
+
+	// gatewayWakeAgentDrainSeconds keeps the agent alive past Envoy's own
+	// 8-second preStop drain so held requests are not reset on rollout.
+	gatewayWakeAgentDrainSeconds int64 = 12
+
+	// gatewayStreamIdleTimeoutSeconds is Envoy's own HCM default, stated
+	// explicitly so the wake hold's dependency on it is visible. Must stay
+	// comfortably above gatewayWakeHoldTimeoutMillis.
+	gatewayStreamIdleTimeoutSeconds = 300
+
+	// gatewayWakeHoldTimeoutMillis bounds the Lua httpCall to the wake
+	// agent. Deliberately longer than the agent's own hold timeout
+	// (wakeagent.DefaultHoldTimeout, 120s) so that when an engine never
+	// arrives it is the agent's 503 + Retry-After that reaches the client,
+	// not an opaque Lua-side timeout. Keep the two in that order if either
+	// is changed.
+	gatewayWakeHoldTimeoutMillis = 125_000
 
 	// gatewayPerConnectionBufferLimitBytes is the value the operator stamps
 	// onto Envoy's per_connection_buffer_limit_bytes on BOTH the listener
@@ -124,6 +163,75 @@ const (
 	// in-flight retries at once; still bounded so a pathological retry
 	// storm cannot consume the whole gateway.
 	gatewayMaxRetriesPerEngine = 256
+
+	// gatewayEngineCAMountPath is the directory the engine-listener TLS
+	// Secret's CA certificate is mounted at on the Envoy container,
+	// present only once engine TLS is enabled and ready (see
+	// engineUpstreamTLSReady). Referenced as the dynamic_forward_proxy
+	// cluster's trusted_ca in buildDFPUpstreamTLSTransportSocket.
+	gatewayEngineCAMountPath = "/etc/envoy/tls/engine-ca"
+
+	// engineTLSCASecretKey is the data key cert-manager writes the
+	// issuing CA certificate to in a Certificate's target Secret, when
+	// the issuer populates one (e.g. a CA-backed Issuer/ClusterIssuer —
+	// see cert-manager's Issuer.spec.ca doc comment, which documents
+	// "ca.crt" as the default key). Not a corev1-exported constant;
+	// cert-manager does not export one either.
+	engineTLSCASecretKey = "ca.crt"
+
+	// gatewayTLSMountPath is the directory the gateway's downstream
+	// (client-facing) TLS Secret is mounted at on the Envoy container,
+	// present only once gateway TLS is enabled and ready (see
+	// gatewayDownstreamTLSReady). Referenced as the client-facing
+	// listener's tls_certificates filenames in
+	// buildListenerDownstreamTLSTransportSocket.
+	gatewayTLSMountPath = "/etc/envoy/tls/gateway"
+
+	// gatewayEngineCRLMountPath is the directory the engine-certificate CRL
+	// (spec.tls.engine.crlSecretRef) is mounted at on the Envoy container,
+	// present only when the operator supplied one. Referenced as the
+	// dynamic_forward_proxy cluster's validation_context crl.
+	gatewayEngineCRLMountPath = "/etc/envoy/tls/engine-crl"
+
+	// gatewayClientCRLMountPath is the directory the client-certificate CRL
+	// (spec.tls.gateway.crlSecretRef) is mounted at on the Envoy container,
+	// present only when mutual TLS is on AND a CRL was supplied.
+	gatewayClientCRLMountPath = "/etc/envoy/tls/client-crl"
+
+	// tlsCRLSecretKey is the data key a CRL Secret must carry. Not a
+	// cert-manager or corev1 convention — there is none for CRLs — so the
+	// operator fixes one and the CRD documents it.
+	tlsCRLSecretKey = "crl.pem"
+
+	// gatewayDownstreamMinTLSVersion is the floor the client-facing listener
+	// enforces. Pinned rather than left to Envoy's default so the operator's
+	// posture is a property of the operator, not of whichever Envoy build the
+	// chart happens to ship: a base-image bump or an upstream default change
+	// must not be able to move the floor on the one listener untrusted clients
+	// reach. TLSv1_2 rather than TLSv1_3 because external clients (BI tools,
+	// older drivers) still legitimately negotiate 1.2.
+	gatewayDownstreamMinTLSVersion = "TLSv1_2"
+
+	// gatewayUpstreamMinTLSVersion and gatewayUpstreamMaxTLSVersion bound the
+	// gateway→engine hop. Both ends are operator-managed, so the floor is pinned
+	// for the same reason the downstream one is.
+	//
+	// The ceiling must be set alongside the floor. Envoy defaults a CLIENT
+	// context's maximum to TLSv1_2, so raising only the minimum to TLSv1_3 leaves
+	// an empty version range and BoringSSL refuses the connection outright with
+	// NO_SUPPORTED_VERSIONS_ENABLED — every query 503s before the engine is even
+	// dialed. The floor stays at 1.2 rather than 1.3 because nothing has
+	// established that the engine's TLS stack negotiates 1.3; the ceiling lets
+	// them use it when both can.
+	gatewayUpstreamMinTLSVersion = "TLSv1_2"
+	gatewayUpstreamMaxTLSVersion = "TLSv1_3"
+
+	// gatewayClientCAMountPath is the directory the client-CA Secret is
+	// mounted at on the Envoy container when mutual TLS is enabled on the
+	// gateway's client-facing listener (spec.tls.gateway.clientCASecretRef).
+	// Its ca.crt is the trusted_ca in the listener's DownstreamTlsContext
+	// validation_context — see buildListenerDownstreamTLSTransportSocket.
+	gatewayClientCAMountPath = "/etc/envoy/tls/client-ca"
 )
 
 // ensureGatewayResources creates or updates the ConfigMap, Deployment, Service,
@@ -138,24 +246,36 @@ const (
 func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx)
 
-	envoyYAML := buildEnvoyConfigYAML(instance)
+	envoyYAML := buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance))
 
-	// RBAC: the operator manages the gateway ServiceAccount, Role, and
-	// RoleBinding only when the user has NOT supplied a custom
-	// spec.gateway.template.spec.serviceAccountName. Setting that field
-	// is the explicit opt-out signal: the user is taking responsibility
-	// for the SA and the RBAC it needs (see
-	// docs/crd-reference/instance-crd-reference.mdx "Gateway custom ServiceAccount"
-	// for the verb set). Operator-managed RBAC would otherwise bind to
-	// a different SA name than the one the gateway pod runs as, and
-	// the wake-on-zero patch would silently 403 at runtime — worse
-	// than the loud "ServiceAccount not found" the kubelet logs when
-	// the user-supplied SA is missing.
+	// RBAC: the operator manages the gateway ServiceAccount, RoleBinding, and
+	// the binding to the chart's wake ClusterRole only when the user has NOT
+	// supplied a custom spec.gateway.template.spec.serviceAccountName. Setting
+	// that field is the explicit opt-out signal: the user takes over the
+	// gateway's identity, and wake-on-zero goes away with it (see
+	// wakeAgentEnabled) — no sidecar, no Lua hold, and no EndpointSlice grant
+	// for the operator to manage. Queries for auto-stopped engines then return
+	// 503 and do not wake them; schedule windows still scale engines up.
+	//
+	// This path also hands back the pod's token: the operator stops forcing
+	// automountServiceAccountToken: false, so the user's value applies. The log
+	// has to say both, because a user following it with the Kubernetes
+	// automount default would put a token in the Envoy container, which
+	// terminates untrusted traffic and needs no API access at all.
 	if userSA := userGatewayServiceAccountName(instance); userSA != "" {
 		log.Info(
-			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, so the user is responsible for the ServiceAccount and RBAC (get/list/patch on compute.firebolt.io/fireboltengines for wake-on-zero)",
+			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, "+
+				"so the user owns the ServiceAccount and wake-on-zero is disabled: "+
+				"queries for auto-stopped engines return 503 and do not wake them. "+
+				"automountServiceAccountToken is no longer forced to false on this path — "+
+				"set it explicitly on spec.gateway.template.spec unless a sidecar of your own needs API access",
 			"serviceAccountName", userSA,
 		)
+		if r.WakeAgentImage != "" && r.EventRecorder != nil {
+			r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "WakeOnZeroDisabled",
+				"Reconciling", "wake-on-zero is disabled because spec.gateway.template.spec.serviceAccountName is set; "+
+					"queries for auto-stopped engines return 503 and do not wake them")
+		}
 	} else if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
 		return fmt.Errorf("ensuring gateway RBAC: %w", err)
 	}
@@ -192,6 +312,91 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 	return dep.Status.ReadyReplicas > 0, nil
 }
 
+// gatewayRolloutComplete reports whether the gateway Deployment has fully
+// rolled out its current pod template: every replica is on the latest template
+// (no old pods from a prior config remain) and is available. Unlike
+// isGatewayReady's ReadyReplicas > 0 — which an *old* pod satisfies mid-roll —
+// this is the signal that a config change has actually propagated to every
+// serving pod. Two features gate on it: the fail-closed→secure staging in
+// ensureGatewayTLS (so old insecure pods are gone before the secure listener is
+// reported ready) and the engine-CA trust-bundle expansion in
+// ensureEngineCABundle (so a newly-trusted CA is actually loaded by every
+// gateway pod before old-CA engine generations are allowed to retire).
+//
+// Returns false (not an error) when the Deployment does not exist yet.
+func (r *FireboltInstanceReconciler) gatewayRolloutComplete(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
+// deploymentRolledOut reports whether every replica of dep is on its latest
+// pod template and available, with no surplus old-template pods lingering.
+// Pure so both gatewayRolloutComplete and gatewayFailClosedRolledOut share it.
+func deploymentRolledOut(dep *appsv1.Deployment) bool {
+	// Spec.Replicas defaults to 1 when unset, matching apps/v1 semantics; the
+	// operator always sets it explicitly (ensureGatewayDeployment), so this is
+	// only defensive.
+	desired := int32(1)
+	if dep.Spec.Replicas != nil {
+		desired = *dep.Spec.Replicas
+	}
+	// ObservedGeneration is compared against metadata.Generation so a status
+	// that predates the config write we just applied never reads as "rolled
+	// out". UpdatedReplicas == desired means every replica is on the newest
+	// template; Replicas == desired means no surplus old-template pods linger
+	// (MaxSurge can briefly push the total above desired mid-roll);
+	// AvailableReplicas == desired means they are all actually serving.
+	st := dep.Status
+	return st.ObservedGeneration >= dep.Generation &&
+		st.UpdatedReplicas == desired &&
+		st.Replicas == desired &&
+		st.AvailableReplicas == desired
+}
+
+// gatewayServingCurrentConfig reports whether the gateway is *actually serving*
+// the config that reflects the instance's current state right now — its running
+// pods are all on a pod template whose config-hash matches buildEnvoyConfigYAML
+// for the current instance, and that rollout is complete.
+//
+// The config-hash check is load-bearing, not redundant with
+// gatewayRolloutComplete: this may be evaluated BEFORE the gateway Deployment is
+// (re)applied in a reconcile, so the Deployment can still carry a previous
+// config that is itself "fully rolled out". Confirming the template's hash
+// matches the current desired config is what distinguishes "serving the current
+// config" from "serving a stale one that happens to be settled".
+//
+// Two callers rely on it: the staged tightening transition invokes
+// it with Status.GatewayTLS already nil, so buildEnvoyConfigYAML yields the
+// fail-closed config and this answers "is the fail-closed rollout done?"; the
+// engine-trust-bundle publish step invokes it in steady state, so
+// it answers "has the gateway rolled out the config embedding the current CA
+// bundle?" — the precondition for publishing Status.RolledEngineTrustCAs.
+func (r *FireboltInstanceReconciler) gatewayServingCurrentConfig(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	name := instance.Name + SuffixGateway
+	var dep appsv1.Deployment
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: instance.Namespace}, &dep); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	wantHash, err := r.gatewayConfigHash(ctx, instance, buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance)))
+	if err != nil {
+		return false, err
+	}
+	if dep.Spec.Template.Annotations[AnnotationConfigHash] != wantHash {
+		return false, nil
+	}
+	return deploymentRolledOut(&dep), nil
+}
+
 // buildEnvoyConfigYAML generates the Envoy static config for the gateway.
 //
 // Routing model:
@@ -201,7 +406,7 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 //   - The Lua filter validates the engine name matches an RFC 1123 DNS label
 //     (so it cannot inject a path into :authority, cross namespaces, etc.),
 //     strips the routing-only query parameter before forwarding, and rewrites
-//     :authority to "<engine>-service.<instance-ns>.svc.cluster.local:3473".
+//     :authority to "<engine>-service.<instance-ns>.svc.cluster.local:<port>".
 //   - The dynamic_forward_proxy cluster resolves that hostname at request time.
 //     With the engine Service being headless, DNS returns the set of ready pod
 //     IPs directly, bypassing Cilium LB and its endpoint-propagation lag.
@@ -209,16 +414,291 @@ func (r *FireboltInstanceReconciler) isGatewayReady(ctx context.Context, instanc
 // This config is deliberately engine-set agnostic so the ConfigMap never has to
 // be regenerated in response to engine create/delete/scale events.
 //
-// WARNING: the port number "3473" in the :authority rewrite below is
-// hardcoded and MUST be kept in sync with the "http-query" service port
-// exposed by FireboltEngine (see GetServicePorts / GetContainerPorts in
-// constants.go). Changing the engine query port without also updating
-// this Lua string will silently break gateway -> engine routing: Envoy
-// will try to connect to an arbitrary, unused port and every request
-// will fail with a 503 from the dynamic_forward_proxy cluster. There is
-// no compile-time link between the two today; consider extracting a
-// shared constant if you need to change this port.
-func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+// The port in the :authority rewrite below is EngineHTTPQueryPort, the same
+// constant backing the "http-query" service port exposed by FireboltEngine
+// (see GetServicePorts / GetContainerPorts in constants.go), so the two can't
+// drift apart at compile time.
+// engineUpstreamTLSReady reports whether the gateway should re-encrypt
+// gateway->engine traffic right now. It reads a single Status signal that the
+// instance controller (ensureEngineTLS in instance_tls.go) computes with full
+// engine-fleet awareness before this render runs: Status.EngineTLS.Reencrypting.
+//
+// Deliberately NOT gated on spec.tls.engine.Enabled: the enable and disable
+// transitions are asymmetric and both need fleet convergence, which only the
+// reconcile can evaluate. On enable, Reencrypting stays false until every
+// engine has rolled onto a TLS-serving generation (so the gateway does not
+// switch to TLS while engines still serve plaintext); on disable, ensureEngineTLS
+// retains Status.EngineTLS with Reencrypting=true until every engine has drained
+// back to plaintext (so the gateway keeps the trust anchor and TLS while any
+// engine still serves it). Keeping this a pure predicate over the pre-computed
+// Status keeps buildEnvoyConfigYAML a pure function of the FireboltInstance.
+func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Status.EngineTLS != nil && instance.Status.EngineTLS.Reencrypting
+}
+
+// buildDFPUpstreamTLSTransportSocket returns the dynamic_forward_proxy
+// cluster's transport_socket YAML block (indented to nest under the
+// cluster's other top-level keys — see buildEnvoyConfigYAML's %s
+// placeholder), or "" when engine TLS is not ready.
+//
+// Config approach verified against Envoy's own source
+// (extensions/clusters/dynamic_forward_proxy/cluster.cc): a
+// dynamic_forward_proxy Cluster's transport_socket is a full protobuf
+// field on the parent Cluster message, copied verbatim into every
+// per-authority sub-cluster sub_clusters_config synthesizes at runtime
+// (ClusterFactory::createClusterWithConfig does `config =
+// orig_cluster_config_` before overriding only name/cluster_type/
+// lb_policy/load_assignment) — so configuring TLS once here covers every
+// engine's sub-cluster with no per-authority enumeration needed.
+//
+// Uses a static match_typed_subject_alt_names suffix match against the
+// certificate's own SAN text, NOT Envoy's auto_sni/auto_san_validation
+// mechanism, for three reasons found during implementation research:
+//  1. auto_sni/auto_san_validation becomes a silent no-op (falls back to
+//     manually-set defaults only when upstream_http_protocol_options is
+//     entirely absent) the moment any typed_extension_protocol_options
+//     block is configured on the cluster, and the dynamic_forward_proxy
+//     cluster factory then refuses to load the cluster at all unless
+//     both are explicitly re-enabled — an easy trap to hit by adding
+//     unrelated HTTP-version config later.
+//  2. auto_sni/auto_san_validation are populated in the HTTP router
+//     filter's request path, which active health checks never traverse —
+//     so Option B's SAN check silently doesn't apply to health-check
+//     connections (chain verification via trusted_ca still does). The
+//     static matcher lives in validation_context alongside trusted_ca and
+//     applies uniformly to data-plane AND health-check connections.
+//  3. The certificate's SAN is a static, namespace-wide wildcard (see
+//     engineTLSWildcardDNSName in instance_tls.go) — matching against the
+//     certificate's own SAN text needs no per-authority hostname
+//     enumeration, which sub_clusters_config's dynamically-created,
+//     unbounded sub-cluster set would make impractical anyway.
+//
+// suffix (not exact) is required: an exact matcher would only match a
+// certificate whose SAN is literally the wildcard string
+// "*.<namespace>.svc.cluster.local" verbatim, never any real presented
+// hostname.
+//
+// ecdh_curves must be set explicitly and must list every curve an engine
+// certificate may use. Envoy defaults to X25519 and P-256 only, so BoringSSL
+// rejects a P-384 engine certificate — the operator's own default size — with
+// BAD_ECC_CERT, and the gateway cannot reach any engine. ValidateTLS accepts
+// ECDSA sizes 256, 384 and 521, so all three curves belong here; RSA
+// certificates are unaffected, since for them these curves only govern key
+// exchange. Adding a curve here is safe (the peer picks from the offered set)
+// and omitting one is not, so this list must grow with the accepted sizes.
+func buildDFPUpstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !engineUpstreamTLSReady(instance) {
+		return ""
+	}
+	// Trailing newline is required, not cosmetic: buildEnvoyConfigYAML
+	// substitutes this directly before the next line's own text (no
+	// separator newline in the template), so that a disabled/not-ready
+	// instance (empty string here) renders byte-identical to the
+	// pre-TLS config — avoiding a spurious config-hash change, and
+	// therefore a gateway rollout, for every instance that never touches
+	// spec.tls.engine.
+	// Revocation, when the operator supplied a CRL for engine certificates.
+	var crl string
+	if engineCRLSecretRef(instance) != nil {
+		crl = fmt.Sprintf("              crl:\n                filename: %s/%s\n",
+			gatewayEngineCRLMountPath, tlsCRLSecretKey)
+	}
+
+	return fmt.Sprintf(`      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_params:
+              tls_minimum_protocol_version: %s
+              tls_maximum_protocol_version: %s
+              ecdh_curves: [X25519, P-256, P-384, P-521]
+            validation_context:
+              trusted_ca:
+                filename: %s/%s
+%s              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    suffix: "%s.%s.svc.cluster.local"
+                - san_type: DNS
+                  matcher:
+                    safe_regex:
+                      regex: "^[a-z0-9-]+%s[0-9]+%s\\.%s\\.svc\\.cluster\\.local$"
+`,
+		gatewayUpstreamMinTLSVersion, gatewayUpstreamMaxTLSVersion,
+		gatewayEngineCAMountPath, engineTLSCASecretKey,
+		crl,
+		SuffixService, instance.Namespace,
+		SuffixGen, SuffixHL, instance.Namespace)
+}
+
+// gatewayDownstreamTLSReady reports whether the gateway's client-facing
+// listener should terminate TLS: spec.tls.gateway is enabled AND the
+// instance controller has finished provisioning the certificate
+// (Status.GatewayTLS populated by ensureGatewayTLS in instance_tls.go).
+// Gating on Status (not just Spec) mirrors engineUpstreamTLSReady:
+// rendering certificate_chain/private_key file paths before the
+// corresponding Secret is mounted would reference files that don't exist
+// yet.
+func gatewayDownstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS != nil
+}
+
+// gatewayDownstreamTLSPending reports the fail-closed window: the operator
+// has been asked to terminate client TLS on the gateway (spec.tls.gateway
+// enabled) but the certificate is not provisioned yet (Status.GatewayTLS
+// nil). During this window buildEnvoyConfigYAML omits the client-facing
+// listener entirely rather than serve plaintext on the client port — see
+// buildFailClosedEnvoyConfigYAML. A gateway with TLS disabled is not
+// pending: it serves plaintext by design.
+func gatewayDownstreamTLSPending(instance *computev1alpha1.FireboltInstance) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Gateway != nil && instance.Spec.TLS.Gateway.Enabled &&
+		instance.Status.GatewayTLS == nil
+}
+
+// gatewayDesiredMode returns the security posture spec.tls.gateway asks the
+// client-facing listener to serve: GatewayTLSModeMutual when a client CA is
+// configured (mTLS), else GatewayTLSModeOneWay. Returns "" when gateway TLS is
+// unset or disabled (plaintext).
+func gatewayDesiredMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil || !instance.Spec.TLS.Gateway.Enabled {
+		return ""
+	}
+	if instance.Spec.TLS.Gateway.ClientCASecretRef != nil {
+		return computev1alpha1.GatewayTLSModeMutual
+	}
+	return computev1alpha1.GatewayTLSModeOneWay
+}
+
+// gatewayServedMode returns the posture the gateway is currently serving,
+// derived from Status.GatewayTLS (nil ⇒ plaintext/pending). A populated status
+// written before Mode existed (upgrade) reads as one-way TLS, its only prior
+// meaning.
+func gatewayServedMode(instance *computev1alpha1.FireboltInstance) string {
+	if instance.Status.GatewayTLS == nil {
+		return ""
+	}
+	if instance.Status.GatewayTLS.Mode == "" {
+		return computev1alpha1.GatewayTLSModeOneWay
+	}
+	return instance.Status.GatewayTLS.Mode
+}
+
+// gatewayPostureLevel maps a posture to a strictness ordinal so the controller
+// can compare desired against served: plaintext(0) < one-way TLS(1) < mTLS(2).
+func gatewayPostureLevel(mode string) int {
+	switch mode {
+	case computev1alpha1.GatewayTLSModeMutual:
+		return 2
+	case computev1alpha1.GatewayTLSModeOneWay:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// gatewayPostureTightening reports whether the desired client-facing posture is
+// stricter than what the gateway currently serves — the only case that needs a
+// staged fail-closed rollout. Loosening (mTLS→one-way, TLS→off) and
+// steady state carry no fail-open risk and skip staging.
+func gatewayPostureTightening(instance *computev1alpha1.FireboltInstance) bool {
+	return gatewayPostureLevel(gatewayDesiredMode(instance)) > gatewayPostureLevel(gatewayServedMode(instance))
+}
+
+// gatewayClientCASecretRef returns the client-CA Secret reference configured
+// for mutual TLS on the gateway's client-facing listener, or nil when mTLS is
+// not configured.
+func gatewayClientCASecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Gateway.ClientCASecretRef
+}
+
+// gatewayCRLSecretRef returns the CRL for CLIENT certificates
+// (spec.tls.gateway.crlSecretRef), or nil when none is configured. Only
+// meaningful alongside a client CA; admission rejects it on its own.
+func gatewayCRLSecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Gateway.CRLSecretRef
+}
+
+// engineCRLSecretRef returns the CRL for ENGINE certificates
+// (spec.tls.engine.crlSecretRef), which the gateway loads when verifying engines
+// upstream, or nil when none is configured.
+func engineCRLSecretRef(instance *computev1alpha1.FireboltInstance) *corev1.LocalObjectReference {
+	if instance.Spec.TLS == nil || instance.Spec.TLS.Engine == nil {
+		return nil
+	}
+	return instance.Spec.TLS.Engine.CRLSecretRef
+}
+
+// buildListenerDownstreamTLSTransportSocket returns the client-facing
+// listener's filter_chain transport_socket YAML block (indented to nest
+// as a sibling of "filters:" within that filter_chain entry — see
+// buildEnvoyConfigYAML's %s placeholder), or "" when gateway TLS is not
+// ready.
+//
+// Trailing newline is required, not cosmetic, for the same reason as
+// buildDFPUpstreamTLSTransportSocket: an empty string here must render
+// byte-identical to the pre-TLS config so instances that never touch
+// spec.tls.gateway see no config-hash change — and therefore no gateway
+// rollout — when this feature ships.
+func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.FireboltInstance) string {
+	if !gatewayDownstreamTLSReady(instance) {
+		return ""
+	}
+
+	// Mutual TLS: when a client CA is configured, verify inbound client
+	// certificates against it and refuse connections that present none. The
+	// validation_context nests inside common_tls_context (sibling of
+	// tls_certificates); require_client_certificate is a DownstreamTlsContext
+	// field (sibling of common_tls_context). Both stay absent otherwise, so a
+	// one-way-TLS gateway renders byte-identically to before this feature.
+	var validationContext, requireClientCert string
+	if gatewayClientCASecretRef(instance) != nil {
+		var crl string
+		if gatewayCRLSecretRef(instance) != nil {
+			crl = fmt.Sprintf("                    crl:\n                      filename: %s/%s\n",
+				gatewayClientCRLMountPath, tlsCRLSecretKey)
+		}
+		validationContext = fmt.Sprintf(`                validation_context:
+                  trusted_ca:
+                    filename: %s/%s
+%s`, gatewayClientCAMountPath, engineTLSCASecretKey, crl)
+		requireClientCert = "              require_client_certificate: true\n"
+	}
+
+	return fmt.Sprintf(`          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_params:
+                  tls_minimum_protocol_version: %s
+                tls_certificates:
+                  - certificate_chain:
+                      filename: %s/%s
+                    private_key:
+                      filename: %s/%s
+%s%s`,
+		gatewayDownstreamMinTLSVersion,
+		gatewayTLSMountPath, corev1.TLSCertKey,
+		gatewayTLSMountPath, corev1.TLSPrivateKeyKey,
+		validationContext, requireClientCert)
+}
+
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnabled bool) string {
+	// Fail closed while a requested client TLS certificate is still
+	// provisioning: serve no client-facing listener at all rather than
+	// plaintext (see buildFailClosedEnvoyConfigYAML and
+	// gatewayDownstreamTLSPending).
+	if gatewayDownstreamTLSPending(instance) {
+		return buildFailClosedEnvoyConfigYAML(instance)
+	}
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
@@ -243,6 +723,22 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
+                # Set explicitly at Envoy's own default rather than left
+                # implicit, because two things now depend on it and neither
+                # is obvious from the surrounding config:
+                #
+                #   - A wake hold parks a stream with no bytes flowing for
+                #     up to gatewayWakeHoldTimeoutMillis. If this ever drops
+                #     below that, held queries die here instead of at the
+                #     agent, and the client gets a stream reset rather than
+                #     the agent's 503 + Retry-After.
+                #   - A long-running query that produces no output for this
+                #     long is also cut, which is why the value is not simply
+                #     raised: it is the only backstop on an idle stream now
+                #     that the route timeout is disabled.
+                #
+                # TestWakeHoldFitsInsideStreamIdleTimeout pins the ordering.
+                stream_idle_timeout: %ds
                 access_log:
                   - name: envoy.access_loggers.stdout
                     typed_config:
@@ -393,8 +889,9 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                               headers:replace(":path", stripped_path)
                             end
                             headers:replace("x-firebolt-engine", engine)
-                            headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:3473")
-                          end
+                            headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:%d")
+
+%s                          end
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
@@ -490,7 +987,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                                   typed_config:
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
-    - name: stats_listener
+%s    - name: stats_listener
       address:
         socket_address:
           address: 0.0.0.0
@@ -512,13 +1009,26 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                           route:
                             cluster: admin_stats
                 http_filters:
+                  # Always-present /healthz endpoint. The gateway's liveness
+                  # probe targets this listener (the metrics port), not the
+                  # client-facing listener, so the pod stays alive even while
+                  # the client listener is withheld during the fail-closed
+                  # TLS-provisioning window (see buildFailClosedEnvoyConfigYAML).
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
-      # Mirror the listener's per_connection_buffer_limit_bytes onto the
+%s      # Mirror the listener's per_connection_buffer_limit_bytes onto the
       # cluster so upstream connection buffers are sized identically. The
       # router consults the smaller of the two when deciding whether a
       # retry's request body fits, so leaving these in lockstep avoids a
@@ -679,23 +1189,100 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
                     socket_address:
                       address: 127.0.0.1
                       port_value: %d
+%sadmin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: %d
+`,
+		gatewayPerConnectionBufferLimitBytes,                // listener: per_connection_buffer_limit_bytes
+		gatewayContainerPort,                                // listener: port_value
+		gatewayStreamIdleTimeoutSeconds,                     // http_connection_manager: stream_idle_timeout
+		instance.Namespace,                                  // Lua: :authority rewrite
+		EngineHTTPQueryPort,                                 // Lua: :authority rewrite port
+		buildWakeHoldLua(wakeEnabled),                       // Lua: wake-agent hold (empty when wake is off)
+		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
+		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
+		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
+		gatewayPerConnectionBufferLimitBytes,                // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
+		gatewayMaxConnectionsPerEngine,                      // circuit_breakers: max_connections
+		gatewayMaxPendingRequestsPerEngine,                  // circuit_breakers: max_pending_requests
+		gatewayMaxRequestsPerEngine,                         // circuit_breakers: max_requests
+		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
+		gatewayAdminPort,                                    // admin_stats endpoint: port_value
+		buildWakeAgentCluster(wakeEnabled),                  // wake_agent cluster (empty when wake is off)
+		gatewayAdminPort,                                    // admin: port_value
+	)
+}
+
+// buildFailClosedEnvoyConfigYAML renders the gateway's Envoy config for the
+// fail-closed window (gatewayDownstreamTLSPending): client TLS was requested
+// but the certificate is not provisioned yet. The client-facing listener is
+// deliberately ABSENT — the client port refuses connections instead of
+// serving plaintext, and the readiness probe (which targets that port) keeps
+// the gateway NotReady until the certificate lands. Only the always-present
+// stats listener (serving /healthz for the liveness probe, plus
+// /stats/prometheus) and its admin backend remain, so the pod stays alive
+// through the wait. Once ensureGatewayTLS populates Status.GatewayTLS the full
+// config from buildEnvoyConfigYAML replaces this one and the gateway rolls.
+func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) string {
+	return fmt.Sprintf(`static_resources:
+  listeners:
+    - name: stats_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: stats
+                route_config:
+                  name: stats_route
+                  virtual_hosts:
+                    - name: stats
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/stats/prometheus"
+                          route:
+                            cluster: admin_stats
+                http_filters:
+                  - name: envoy.filters.http.health_check
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                      pass_through_mode: false
+                      headers:
+                        - name: ":path"
+                          string_match:
+                            exact: "/healthz"
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: admin_stats
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: admin_stats
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
 admin:
   address:
     socket_address:
       address: 127.0.0.1
       port_value: %d
 `,
-		gatewayPerConnectionBufferLimitBytes, // listener: per_connection_buffer_limit_bytes
-		gatewayContainerPort,                 // listener: port_value
-		instance.Namespace,                   // Lua: :authority rewrite
-		instance.Spec.Gateway.MetricsPort,    // stats_listener: port_value
-		gatewayPerConnectionBufferLimitBytes, // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
-		gatewayMaxConnectionsPerEngine,       // circuit_breakers: max_connections
-		gatewayMaxPendingRequestsPerEngine,   // circuit_breakers: max_pending_requests
-		gatewayMaxRequestsPerEngine,          // circuit_breakers: max_requests
-		gatewayMaxRetriesPerEngine,           // circuit_breakers: max_retries
-		gatewayAdminPort,                     // admin_stats endpoint: port_value
-		gatewayAdminPort,                     // admin: port_value
+		instance.Spec.Gateway.MetricsPort, // stats_listener: port_value
+		gatewayAdminPort,                  // admin_stats endpoint: port_value
+		gatewayAdminPort,                  // admin: port_value
 	)
 }
 
@@ -751,6 +1338,176 @@ func (r *FireboltInstanceReconciler) ensureGatewayConfigMap(ctx context.Context,
 	return applySSA(ctx, r.Client, desired)
 }
 
+// gatewayTLSSecretVersions returns a stable string incorporating the
+// ResourceVersion of every TLS Secret the gateway pod actually mounts by name,
+// folded into the gateway config hash so a Secret rotated in place — same
+// name, new bytes — rolls the gateway Deployment. Envoy loads these files only
+// at process start and the rendered config references them by name/mount, so
+// the config text alone never changes on an in-place rotation. ResourceVersion,
+// deliberately never the cert bytes: hashing key material would trip
+// weak-sensitive-data-hashing static analysis and buys nothing (RV already
+// changes on every write).
+//
+// The tracked set mirrors the pod-template mounts exactly, keyed off the same
+// predicates the mount logic uses (see effectiveGatewayPodTemplate):
+//   - the downstream server cert (Status.GatewayTLS) and — only once downstream
+//     TLS is READY — the mTLS client-CA and its CRL
+//     (spec.tls.gateway.crlSecretRef), all gated on
+//     gatewayDownstreamTLSReady. During the fail-closed provisioning window
+//     (Status.GatewayTLS nil, and a bring-your-own client-CA that may not exist
+//     yet) none is mounted, so none is read: a hard Get on the not-yet-created
+//     client-CA here used to abort the whole gateway roll, so the fail-closed
+//     Deployment never came up and the prior plaintext/one-way-TLS listener
+//     stayed up (fail-open).
+//   - the upstream engine-CA anchor (Status.EngineTLS) and its CRL
+//     (spec.tls.engine.crlSecretRef), gated on engineUpstreamTLSReady exactly
+//     like their mounts, so an in-place engine-CA reissue rolls the gateway and
+//     Envoy reloads trusted_ca.
+//
+// A missing Secret is tolerated (skipped, not an error): it only means the hash
+// omits that entry until the Secret lands, and a later reconcile folds it in.
+// CRL Secrets are folded only when they carry a non-empty crl.pem: a bad edit
+// that drops the key must not change the hash (and must not start a roll onto
+// an unmountable volume). checkGatewayCRLSecrets surfaces that misconfiguration
+// on GatewayReady separately — this helper never fails closed the listener.
+// Returns "" when the gateway mounts no TLS Secret (plaintext or
+// fail-closed-pending), leaving the hash input untouched.
+func (r *FireboltInstanceReconciler) gatewayTLSSecretVersions(ctx context.Context, instance *computev1alpha1.FireboltInstance) (string, error) {
+	var names []string
+	if gatewayDownstreamTLSReady(instance) {
+		names = append(names, instance.Status.GatewayTLS.SecretName)
+		if ref := gatewayClientCASecretRef(instance); ref != nil {
+			names = append(names, ref.Name)
+			if crl := gatewayCRLSecretRef(instance); crl != nil {
+				ok, err := r.gatewayCRLSecretUsable(ctx, instance.Namespace, crl.Name)
+				if err != nil {
+					return "", err
+				}
+				if ok {
+					names = append(names, crl.Name)
+				}
+			}
+		}
+	}
+	if engineUpstreamTLSReady(instance) {
+		// The gateway mounts the operator-assembled trust bundle, not the anchor
+		// Secret directly (see effectiveGatewayPodTemplate / ensureEngineCABundle),
+		// so fold the bundle's ResourceVersion: it changes whenever the trusted CA
+		// set changes (a generation added under a rotated CA, or an old CA pruned),
+		// rolling the gateway so Envoy reloads trusted_ca.
+		names = append(names, engineCABundleSecretName(instance.Name))
+		if crl := engineCRLSecretRef(instance); crl != nil {
+			ok, err := r.gatewayCRLSecretUsable(ctx, instance.Namespace, crl.Name)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				names = append(names, crl.Name)
+			}
+		}
+	}
+	var parts []string
+	for _, name := range names {
+		var secret corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret); err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
+			return "", fmt.Errorf("reading gateway TLS secret %s/%s for rollout hash: %w", instance.Namespace, name, err)
+		}
+		parts = append(parts, name+"="+secret.ResourceVersion)
+	}
+	return strings.Join(parts, ","), nil
+}
+
+// gatewayCRLSecretUsable reports whether the named Secret exists and carries a
+// non-empty crl.pem. Missing / empty Secrets return (false, nil) so the roll
+// hash can omit them without aborting ensureGateway; API errors are returned.
+// Paired with checkGatewayCRLSecrets, which turns the same unusable state into
+// GatewayReady=False without draining the listener.
+func (r *FireboltInstanceReconciler) gatewayCRLSecretUsable(ctx context.Context, namespace, name string) (bool, error) {
+	var secret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("reading gateway CRL secret %s/%s for rollout hash: %w", namespace, name, err)
+	}
+	return len(secret.Data[tlsCRLSecretKey]) > 0, nil
+}
+
+// checkGatewayCRLSecrets preflights every CRL Secret the gateway pod would
+// mount under the current readiness gates. crlSecretRef is optional; once set
+// (and the matching mount gate is open) the Secret must exist and carry
+// non-empty crl.pem. A failure does NOT clear Status.GatewayTLS or omit the
+// client listener — CRL is an optional revocation add-on on top of CA trust —
+// but callers stamp GatewayReady=False so a bad edit is visible, while
+// gatewayTLSSecretVersions omits the unusable Secret so the Deployment does
+// not roll onto an unmountable volume.
+func (r *FireboltInstanceReconciler) checkGatewayCRLSecrets(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
+	if gatewayDownstreamTLSReady(instance) && gatewayClientCASecretRef(instance) != nil {
+		if ref := gatewayCRLSecretRef(instance); ref != nil {
+			if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, tlsCRLSecretKey, "gateway client CRL secret"); err != nil {
+				return err
+			}
+		}
+	}
+	if engineUpstreamTLSReady(instance) {
+		if ref := engineCRLSecretRef(instance); ref != nil {
+			if _, err := checkSecretKeyPresent(ctx, r.Client, instance.Namespace, ref.Name, tlsCRLSecretKey, "gateway engine CRL secret"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// gatewayConfigHash returns the value stamped onto the gateway pod template's
+// AnnotationConfigHash: the rendered Envoy config folded with the
+// ResourceVersions of every TLS Secret the pod mounts (gatewayTLSSecretVersions),
+// so an in-place Secret rotation rolls the Deployment even when the config text
+// is unchanged. Shared by ensureGatewayDeployment (which stamps it) and
+// gatewayFailClosedRolledOut (which compares against it), so the two can never
+// disagree about what "the current config" hashes to.
+func (r *FireboltInstanceReconciler) gatewayConfigHash(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) (string, error) {
+	tlsVersions, err := r.gatewayTLSSecretVersions(ctx, instance)
+	if err != nil {
+		return "", err
+	}
+	configHashInput := envoyYAML
+	if tlsVersions != "" {
+		configHashInput = envoyYAML + "\x00" + tlsVersions
+	}
+	return contentHash(configHashInput), nil
+}
+
+// gatewayRollingUpdateStrategy picks the gateway Deployment's rollout strategy.
+// While the gateway is fail-closed pending a tighter posture
+// (gatewayDownstreamTLSPending — TLS enabled but Status.GatewayTLS not yet
+// populated: an enable, a one-way→mTLS or client-CA-swap staging step, or a
+// missing client-CA) it drops old pods to zero endpoints BEFORE new fail-closed
+// pods start (MaxUnavailable=100%, MaxSurge=0). Otherwise it uses the
+// zero-downtime default (MaxUnavailable=0, MaxSurge=25%).
+//
+// The client-facing Service has one selector and old Ready pods stay
+// endpoints under MaxUnavailable=0, so a plain rolling update to the fail-closed
+// config keeps the looser listener serving throughout the roll (fail-open).
+// Forcing old pods out first trades that for a brief reject-all
+// (connection-refused) window — the accepted posture for a deliberate tighten. A
+// fresh gateway (no old pods) sees only a harmless 0→N create; the subsequent
+// fail-closed→secure roll runs zero-downtime because fail-closed pods reject
+// during it, so there is no fail-open left to guard against.
+func gatewayRollingUpdateStrategy(instance *computev1alpha1.FireboltInstance) *appsv1.RollingUpdateDeployment {
+	if gatewayDownstreamTLSPending(instance) {
+		maxUnavailable := intstr.FromString("100%")
+		maxSurge := intstr.FromInt32(0)
+		return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+	}
+	maxUnavailable := intstr.FromInt32(0)
+	maxSurge := intstr.FromString("25%")
+	return &appsv1.RollingUpdateDeployment{MaxUnavailable: &maxUnavailable, MaxSurge: &maxSurge}
+}
+
 func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context, instance *computev1alpha1.FireboltInstance, envoyYAML string) error {
 	name := instance.Name + SuffixGateway
 	configMapName := name + "-config"
@@ -763,12 +1520,35 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		replicas = *gw.Replicas
 	}
 
-	configHash := contentHash(envoyYAML)
+	configHash, err := r.gatewayConfigHash(ctx, instance, envoyYAML)
+	if err != nil {
+		return err
+	}
 
-	maxSurge := intstr.FromString("25%")
-	maxUnavailable := intstr.FromInt32(0)
-
-	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels)
+	// Gated by the same predicate as the Envoy config, not just by the
+	// image being set. A user-supplied ServiceAccount opts out of
+	// operator-managed RBAC, so an agent injected against it could never
+	// watch EndpointSlices, so its informer would never sync. An unsynced
+	// agent answers DecisionUnsynced and lets every request straight through
+	// without recording demand (readinessTracker.Synced), so wake would never
+	// fire and stopped engines would keep 503ing — silently, and for the
+	// lifetime of the pod.
+	//
+	// The cost is wake, not availability: the sidecar carries no probes at all,
+	// deliberately, so even a wedged agent cannot drop the gateway pod out of
+	// its Service (see the container definition, which explains why an earlier
+	// readiness probe here was a mistake). Omitting the agent rather than
+	// shipping one that can only ever no-op keeps the degraded mode a single
+	// documented state — reported as WakeOnZeroDisabled — instead of a sidecar
+	// and a projected token that look functional and are not.
+	wakeAgent := wakeAgentConfig{}
+	if r.wakeAgentEnabled(instance) {
+		wakeAgent = wakeAgentConfig{
+			Image:           r.WakeAgentImage,
+			ImagePullPolicy: r.WakeAgentImagePullPolicy,
+		}
+	}
+	podTemplate := effectiveGatewayPodTemplate(instance, configMapName, configHash, labels, wakeAgent)
 
 	desired := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -781,11 +1561,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &maxUnavailable,
-					MaxSurge:       &maxSurge,
-				},
+				Type:          appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: gatewayRollingUpdateStrategy(instance),
 			},
 			Template: podTemplate,
 		},
@@ -900,11 +1677,157 @@ func gatewayMetricsPort(gw *computev1alpha1.GatewaySpec) int32 {
 //     (excluding operator-reserved names — webhook already rejected
 //     those, but the merge is defensive in case the webhook is off)
 //     appended.
+//
+// wakeAgentEnabled reports whether this instance's gateway runs the
+// wake-agent sidecar.
+//
+// It gates the Envoy config as well as the pod: rendering the Lua hold call
+// without an agent behind it would be worse than not having the feature,
+// because Envoy's httpCall synthesizes a 503 on a refused connection rather
+// than reporting failure (see wakeagent.DecisionHeader), so every query
+// would be answered from a loopback port with nothing listening on it.
+//
+// A user-supplied ServiceAccount opts out. The agent needs an EndpointSlice
+// read grant that only the operator-managed RoleBinding provides; running it
+// against an SA that lacks it would leave the informer permanently unsynced.
+func (r *FireboltInstanceReconciler) wakeAgentEnabled(instance *computev1alpha1.FireboltInstance) bool {
+	if r.WakeAgentImage == "" {
+		return false
+	}
+	return userGatewayServiceAccountName(instance) == ""
+}
+
+// buildWakeHoldLua renders the wake-on-zero hold, or nothing when wake is
+// disabled for this instance.
+func buildWakeHoldLua(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf(`
+                            -- Wake-on-zero. Ask the in-pod wake agent whether
+                            -- this engine is routable. For a running engine
+                            -- the agent answers from an in-memory map and
+                            -- returns immediately; for an auto-stopped one it
+                            -- parks this request while the operator scales the
+                            -- engine back up, then releases it once the
+                            -- engine's EndpointSlice shows a ready endpoint.
+                            --
+                            -- Why the agent and not Envoy alone: the engine
+                            -- Service is headless, so a stopped engine's name
+                            -- has no A records and the request fails at DNS
+                            -- resolution as a LOCAL REPLY. retry_policy acts
+                            -- on upstream responses, so the route's retries
+                            -- below never see it and cannot ride out a cold
+                            -- start.
+                            --
+                            -- MUST be the last thing this filter does. Envoy
+                            -- invalidates the header object across the
+                            -- coroutine yield httpCall performs, so any
+                            -- headers:replace() after this point fails with
+                            -- "object used outside of proper scope" — and
+                            -- fails silently as far as the client is
+                            -- concerned, leaving :authority unrewritten and
+                            -- the query routed at the gateway itself.
+                            --
+                            -- Fail open, and note how. httpCall does NOT
+                            -- return nil when it cannot reach the agent:
+                            -- Envoy synthesizes a 503 and delivers it through
+                            -- the success path, so status alone cannot tell a
+                            -- crashed agent from one that deliberately shed
+                            -- the request. Only a response carrying the
+                            -- agent's own decision header is honored; the
+                            -- synthesized one has no such header and falls
+                            -- through to normal routing.
+                            local wake_headers = handle:httpCall(
+                              "wake_agent",
+                              {
+                                [":method"] = "GET",
+                                [":path"] = "/hold?engine=" .. engine,
+                                [":authority"] = "wake_agent"
+                              },
+                              nil,
+                              %d
+                            )
+                            if wake_headers ~= nil
+                              and wake_headers["%s"] ~= nil
+                              and wake_headers[":status"] ~= "200" then
+                              handle:respond(
+                                {[":status"] = "503", ["retry-after"] = "10"},
+                                "engine is not available; retry shortly"
+                              )
+                              return
+                            end
+`, gatewayWakeHoldTimeoutMillis, wakeagent.DecisionHeader)
+}
+
+// buildWakeAgentCluster renders the loopback cluster the Lua filter calls,
+// or nothing when wake is disabled.
+func buildWakeAgentCluster(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf(`    # The wake-agent sidecar, reached over loopback from the Lua filter.
+    #
+    # No circuit breakers configured, so Envoy's defaults (1024 connections,
+    # requests and pending requests) apply. The agent's own hold cap is
+    # derived from Envoy's memory limit and can exceed that on a large
+    # gateway, in which case Envoy sheds first with a synthetic 503 — which
+    # the filter treats as "agent unreachable" and routes anyway. That is the
+    # safe direction, but it means the effective hold ceiling is the lower of
+    # the two.
+    - name: wake_agent
+      connect_timeout: 0.25s
+      type: STATIC
+      load_assignment:
+        cluster_name: wake_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: %d
+`, gatewayWakeAgentHoldPort)
+}
+
+// wakeAgentConfig carries what effectiveGatewayPodTemplate needs in order to
+// render the wake-agent sidecar.
+//
+// A zero value omits the sidecar entirely. That is the degraded mode for an
+// operator installed without --wake-agent-image: no agent runs, Envoy's Lua
+// call to the wake_agent cluster fails fast against a refused loopback
+// connection, and the filter falls through to ordinary routing. Wake stops
+// working; query routing does not.
+type wakeAgentConfig struct {
+	Image           string
+	ImagePullPolicy corev1.PullPolicy
+}
+
+// computev1alpha1.GatewayWakeAgentTokenVolumeName is the projected ServiceAccount token mounted
+// into the wake-agent container ONLY.
+//
+// The pod sets automountServiceAccountToken: false and then projects the
+// token into a single container. Containers in a pod share the network and
+// IPC namespaces but NOT the mount namespace, so Envoy's filesystem never
+// contains a credential — which matters because Envoy is the process
+// terminating untrusted traffic. A projected token also rotates, unlike the
+// legacy kubelet mount, and client-go re-reads the file for free.
+
+// serviceAccountTokenMountPath is where client-go's rest.InClusterConfig
+// expects to find token and ca.crt.
+const serviceAccountTokenMountPath = "/var/run/secrets/kubernetes.io/serviceaccount" //nolint:gosec // path, not a credential
+
+// wakeAgentTokenExpirationSeconds is the projected token's lifetime. The
+// kubelet refreshes it at 80% of this, and client-go picks the new value up
+// off disk.
+const wakeAgentTokenExpirationSeconds int64 = 3600
+
 func effectiveGatewayPodTemplate(
 	instance *computev1alpha1.FireboltInstance,
 	configMapName string,
 	configHash string,
 	baseLabels map[string]string,
+	wakeAgent wakeAgentConfig,
 ) corev1.PodTemplateSpec {
 	var userPodMeta metav1.ObjectMeta
 	var userPodSpec corev1.PodSpec
@@ -934,6 +1857,27 @@ exec 3<&- 3>&-
 sleep 8
 `, gatewayAdminPort)
 
+	// Both probes hit /healthz on the metrics port, NOT the client-facing
+	// port. Two independent reasons force this:
+	//
+	//   - Mutual TLS: when spec.tls.gateway.clientCASecretRef is set the
+	//     client listener sets require_client_certificate, so its TLS
+	//     handshake rejects any connection that presents no client cert —
+	//     and the kubelet's httpGet probe cannot present one. A probe against
+	//     the client listener would then fail forever, wedging the gateway
+	//     NotReady. The metrics port's stats listener is always plaintext.
+	//   - Fail-closed provisioning: while gateway TLS is requested but not
+	//     yet issued, the client listener is omitted entirely
+	//     (buildFailClosedEnvoyConfigYAML) and a probe there would get
+	//     connection-refused. The stats listener is always present.
+	//
+	// Drain still works: the preStop POST to /healthcheck/fail flips the
+	// health_check filter process-wide, so the stats listener's /healthz
+	// starts returning 503 and readiness drops — exactly as before, just on
+	// the metrics port. The client-facing security posture is unchanged: the
+	// client port serves TLS (mutual, when configured) or refuses connections
+	// while fail-closed, and Instance readiness gates on the separate
+	// GatewayTLSReady condition, not on this probe.
 	envoy := corev1.Container{
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
@@ -952,7 +1896,7 @@ sleep 8
 		},
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       15,
@@ -960,7 +1904,7 @@ sleep 8
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("http")},
+				HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromString("metrics"), Scheme: corev1.URISchemeHTTP},
 			},
 			InitialDelaySeconds: 1,
 			PeriodSeconds:       2,
@@ -985,6 +1929,8 @@ sleep 8
 		envoy.Resources = *userPrimary.Resources.DeepCopy()
 	}
 
+	wakeAgentContainer, wakeAgentVolume := buildWakeAgentContainer(wakeAgent, &envoy)
+
 	operatorVolumes := []corev1.Volume{
 		{
 			Name: computev1alpha1.GatewayConfigVolumeName,
@@ -1002,9 +1948,124 @@ sleep 8
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
+	// Present only once engine TLS is enabled and ready — see
+	// buildDFPUpstreamTLSTransportSocket's matching gate. Sources the
+	// operator-assembled trust BUNDLE (ensureEngineCABundle), not the
+	// single anchor Secret: the bundle's ca.crt is the union of every live
+	// generation's CA, so the gateway keeps trusting engines across a CA
+	// rotation behind the immutable issuer name. Projected to just ca.crt (the
+	// bundle carries only that key anyway); envoy.yaml points solely at the
+	// ca.crt path, and no private key ever belongs in the gateway pod.
+	if engineUpstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayEngineCAVolumeName,
+			MountPath: gatewayEngineCAMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayEngineCAVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: engineCABundleSecretName(instance.Name),
+					Items: []corev1.KeyToPath{
+						{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+					},
+				},
+			},
+		})
+		// Revocation for engine certificates, when supplied. Mounted alongside the
+		// trust bundle and referenced from the same validation_context, so a
+		// compromised engine key can be rejected before its certificate expires.
+		if ref := engineCRLSecretRef(instance); ref != nil {
+			envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+				Name:      computev1alpha1.GatewayEngineCRLVolumeName,
+				MountPath: gatewayEngineCRLMountPath,
+				ReadOnly:  true,
+			})
+			operatorVolumes = append(operatorVolumes, corev1.Volume{
+				Name: computev1alpha1.GatewayEngineCRLVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: ref.Name,
+						Items:      []corev1.KeyToPath{{Key: tlsCRLSecretKey, Path: tlsCRLSecretKey}},
+					},
+				},
+			})
+		}
+	}
+	// Present only once gateway TLS is enabled and ready — see
+	// gatewayDownstreamTLSReady's matching gate. Mounting the whole
+	// Secret (not just tls.crt/tls.key via Items) is fine: envoy.yaml
+	// only ever points at the tls.crt/tls.key paths, and there is nothing
+	// sensitive about any other key an issuer might add (e.g. ca.crt,
+	// which the gateway doesn't need for its own downstream cert here).
+	if gatewayDownstreamTLSReady(instance) {
+		envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.GatewayTLSVolumeName,
+			MountPath: gatewayTLSMountPath,
+			ReadOnly:  true,
+		})
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.GatewayTLSVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: instance.Status.GatewayTLS.SecretName},
+			},
+		})
+		// Mutual TLS: mount the client CA the listener verifies client
+		// certificates against, projected to ca.crt only. Gated together with
+		// the downstream cert (gatewayDownstreamTLSReady already requires the
+		// client-CA Secret to be present — see ensureGatewayTLSCertificate),
+		// and only when a client CA is configured — matching the
+		// validation_context in buildListenerDownstreamTLSTransportSocket.
+		if clientCA := gatewayClientCASecretRef(instance); clientCA != nil {
+			envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+				Name:      computev1alpha1.GatewayClientCAVolumeName,
+				MountPath: gatewayClientCAMountPath,
+				ReadOnly:  true,
+			})
+			operatorVolumes = append(operatorVolumes, corev1.Volume{
+				Name: computev1alpha1.GatewayClientCAVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: clientCA.Name,
+						Items: []corev1.KeyToPath{
+							{Key: engineTLSCASecretKey, Path: engineTLSCASecretKey},
+						},
+					},
+				},
+			})
+			// Revocation for client certificates, when supplied. Scoped inside the
+			// client-CA branch: a CRL without a CA to verify against is meaningless,
+			// and admission rejects that combination outright.
+			if ref := gatewayCRLSecretRef(instance); ref != nil {
+				envoy.VolumeMounts = append(envoy.VolumeMounts, corev1.VolumeMount{
+					Name:      computev1alpha1.GatewayClientCRLVolumeName,
+					MountPath: gatewayClientCRLMountPath,
+					ReadOnly:  true,
+				})
+				operatorVolumes = append(operatorVolumes, corev1.Volume{
+					Name: computev1alpha1.GatewayClientCRLVolumeName,
+					VolumeSource: corev1.VolumeSource{
+						Secret: &corev1.SecretVolumeSource{
+							SecretName: ref.Name,
+							Items:      []corev1.KeyToPath{{Key: tlsCRLSecretKey, Path: tlsCRLSecretKey}},
+						},
+					},
+				})
+			}
+		}
+	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
-	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName)
+	if wakeAgentContainer != nil {
+		containers = append(containers, *wakeAgentContainer)
+		operatorVolumes = append(operatorVolumes, *wakeAgentVolume)
+	}
+	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
+		computev1alpha1.GatewayConfigVolumeName, computev1alpha1.GatewayTmpVolumeName,
+		computev1alpha1.GatewayEngineCAVolumeName, computev1alpha1.GatewayTLSVolumeName,
+		computev1alpha1.GatewayClientCAVolumeName, computev1alpha1.GatewayEngineCRLVolumeName,
+		computev1alpha1.GatewayClientCRLVolumeName, computev1alpha1.GatewayWakeAgentTokenVolumeName)
 
 	sa := userPodSpec.ServiceAccountName
 	if sa == "" {
@@ -1019,7 +2080,16 @@ sleep 8
 			}),
 		},
 		Spec: corev1.PodSpec{
-			ServiceAccountName:            sa,
+			ServiceAccountName: sa,
+			// No kubelet-mounted token on this pod. Envoy terminates
+			// untrusted traffic and has no business holding a Kubernetes
+			// credential; the wake agent, which does need one, gets a
+			// projected token mounted into its container alone (see
+			// computev1alpha1.GatewayWakeAgentTokenVolumeName). Users who supply their own
+			// ServiceAccount are opted out — they own their pod's
+			// credential story, including any sidecar that needs API
+			// access.
+			AutomountServiceAccountToken:  automountForGateway(&userPodSpec),
 			TerminationGracePeriodSeconds: &gracePeriod,
 			EnableServiceLinks:            boolPtr(false),
 			NodeSelector:                  userPodSpec.NodeSelector,
@@ -1034,6 +2104,173 @@ sleep 8
 			Volumes:                       volumes,
 		},
 	}
+}
+
+// automountForGateway returns the pod's automountServiceAccountToken.
+//
+// False for operator-managed ServiceAccounts. When the user supplies their
+// own ServiceAccount they have taken ownership of the pod's RBAC (see
+// userGatewayServiceAccountName), so their explicit value is honored and
+// the absence of one leaves the field unset — Kubernetes' own default
+// applies rather than a decision the operator makes on their behalf.
+func automountForGateway(userPodSpec *corev1.PodSpec) *bool {
+	if userPodSpec.ServiceAccountName != "" {
+		return userPodSpec.AutomountServiceAccountToken
+	}
+	return boolPtr(false)
+}
+
+// buildWakeAgentContainer renders the wake-agent sidecar and the projected
+// token volume it alone mounts. Returns (nil, nil) when no image is
+// configured, which omits the sidecar (see wakeAgentConfig).
+//
+// envoy is read, not modified: the agent's memory-derived hold cap is
+// sourced from the Envoy container's own limit, because the memory a held
+// request consumes is Envoy's, not the agent's.
+func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*corev1.Container, *corev1.Volume) {
+	if cfg.Image == "" {
+		return nil, nil
+	}
+
+	var runAsUser int64 = 65532 // distroless nonroot, matching the operator image
+
+	args := []string{
+		"wake-agent",
+		fmt.Sprintf("--hold-port=%d", gatewayWakeAgentHoldPort),
+		fmt.Sprintf("--demand-port=%d", gatewayWakeAgentDemandPort),
+		fmt.Sprintf("--envoy-admin-url=http://127.0.0.1:%d", gatewayAdminPort),
+		fmt.Sprintf("--per-hold-bytes=%d", gatewayPerConnectionBufferLimitBytes),
+	}
+
+	env := []corev1.EnvVar{{
+		Name: "POD_NAMESPACE",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+		},
+	}}
+
+	// Only expose Envoy's memory limit when one is actually set. The
+	// downward API's resourceFieldRef does not report "unset" — for a
+	// container with no limit it substitutes the node's allocatable, which
+	// would size the hold cap off the whole machine rather than off the
+	// gateway's budget. Omitting the variable instead lets the agent fall
+	// back to its static cap, which is the honest answer when no limit
+	// exists to divide up.
+	if _, ok := envoy.Resources.Limits[corev1.ResourceMemory]; ok {
+		env = append(env, corev1.EnvVar{
+			Name: "ENVOY_MEMORY_LIMIT_BYTES",
+			ValueFrom: &corev1.EnvVarSource{
+				ResourceFieldRef: &corev1.ResourceFieldSelector{
+					ContainerName: computev1alpha1.GatewayContainerName,
+					Resource:      "limits.memory",
+				},
+			},
+		})
+	}
+
+	container := &corev1.Container{
+		Name:            computev1alpha1.GatewayWakeAgentContainerName,
+		Image:           cfg.Image,
+		ImagePullPolicy: cfg.ImagePullPolicy,
+		Args:            args,
+		Env:             env,
+		// Explicit requests and limits, not left unset. Adding an
+		// unbounded container would demote a previously Guaranteed
+		// gateway pod to Burstable, and would be rejected outright in a
+		// namespace whose LimitRange requires requests. The agent holds
+		// per-engine timestamps and parked connections and does nothing
+		// else, so the floor is small and flat.
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(gatewayWakeAgentCPURequest),
+				corev1.ResourceMemory: resource.MustParse(gatewayWakeAgentMemoryRequest),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse(gatewayWakeAgentMemoryLimit),
+			},
+		},
+		// Outlive Envoy's drain. Envoy's preStop flips /healthz to 503
+		// and sleeps 8s so in-flight work finishes; an agent that exited
+		// first would reset every request it is holding and, for the
+		// remainder of that window, leave newly arriving queries talking
+		// to a dead loopback port. Sleeping past it lets the holds end
+		// the way they normally do.
+		Lifecycle: &corev1.Lifecycle{
+			PreStop: &corev1.LifecycleHandler{
+				Sleep: &corev1.SleepAction{Seconds: gatewayWakeAgentDrainSeconds},
+			},
+		},
+		Ports: []corev1.ContainerPort{
+			{Name: "wake-demand", ContainerPort: gatewayWakeAgentDemandPort, Protocol: corev1.ProtocolTCP},
+		},
+		// No probes at all, and both omissions are deliberate.
+		//
+		// No readiness probe, because a pod is Ready only when EVERY
+		// container is. A probe here would let a wedged agent evict the
+		// whole gateway pod from its Service and take Envoy down with it —
+		// the exact outage the fail-open design exists to prevent, arriving
+		// through the back door. An earlier revision had one, with a comment
+		// claiming an unready agent "costs wake, not availability". That was
+		// simply wrong.
+		//
+		// No liveness probe, because restarting a wedged agent would reset
+		// every request it is currently holding, turning a degraded wake
+		// into client-visible errors.
+		//
+		// Nothing is lost by having neither. Envoy fails open when the agent
+		// does not answer, and the operator's demand poll just sees nothing
+		// — so a broken agent degrades to "wake stops working" on its own,
+		// with no probe needed to arrange it.
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                &runAsUser,
+			RunAsNonRoot:             boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      computev1alpha1.GatewayWakeAgentTokenVolumeName,
+			MountPath: serviceAccountTokenMountPath,
+			ReadOnly:  true,
+		}},
+	}
+
+	// The three sources kubelet's own automount projects, reproduced
+	// explicitly so exactly one container sees them. rest.InClusterConfig
+	// needs token and ca.crt on disk; namespace is projected for parity
+	// with the standard mount.
+	expiration := wakeAgentTokenExpirationSeconds
+	volume := &corev1.Volume{
+		Name: computev1alpha1.GatewayWakeAgentTokenVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{
+					{
+						ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+							Path:              "token",
+							ExpirationSeconds: &expiration,
+						},
+					},
+					{
+						ConfigMap: &corev1.ConfigMapProjection{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"},
+							Items:                []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
+						},
+					},
+					{
+						DownwardAPI: &corev1.DownwardAPIProjection{
+							Items: []corev1.DownwardAPIVolumeFile{{
+								Path:     "namespace",
+								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return container, volume
 }
 
 // splitUserContainers separates the user's template containers into
@@ -1081,7 +2318,22 @@ func envoyImagePullPolicy(primary *corev1.Container, image string) corev1.PullPo
 // webhook outage cannot let a user-rendered volume shadow an
 // operator-rendered one (which would silently break the matching
 // volumeMount on the operator container).
-func appendUserVolumes(operator []corev1.Volume, userVolumes []corev1.Volume, reserved ...string) []corev1.Volume {
+//
+// A user entry that reaches an operator-managed Secret under some other volume
+// name is dropped too. The reconcile-time template check is what tells the user
+// about it; this is the layer that holds even if a future caller skips that
+// check.
+//
+// isProtected decides which Secrets are off limits and must be the INSTANCE-WIDE
+// predicate (instanceProtectedSecret), not a set derived from the volumes this
+// component happens to render. Deriving it from the component's own volumes — as
+// this used to, via operatorMountedSecretNames — meant the gateway dropped only
+// gateway Secrets and the metadata pod only its own, leaving each free to alias
+// the admin password or a JWT signing key. A nil predicate protects nothing.
+func appendUserVolumes(
+	operator []corev1.Volume, userVolumes []corev1.Volume,
+	isProtected func(string) bool, reserved ...string,
+) []corev1.Volume {
 	if len(userVolumes) == 0 {
 		return operator
 	}
@@ -1093,6 +2345,9 @@ func appendUserVolumes(operator []corev1.Volume, userVolumes []corev1.Volume, re
 	out = append(out, operator...)
 	for i := range userVolumes {
 		if _, taken := reservedSet[userVolumes[i].Name]; taken {
+			continue
+		}
+		if aliasesProtectedSecret(&userVolumes[i], isProtected) {
 			continue
 		}
 		out = append(out, *userVolumes[i].DeepCopy())

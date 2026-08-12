@@ -44,12 +44,24 @@ const MetricScrapeModeDefault = computev1alpha1.MetricScrapeModePodIP
 // sync.Mutex during shutdown is the classic case).
 const scrapeTimeout = 10 * time.Second
 
+// refuseRedirects stops pod-IP scrapers from following Location headers.
+// A compromised or spoofed pod can return a 3xx pointing at cloud metadata
+// or other internal endpoints; chasing it would turn the operator process
+// into a blind SSRF client with the operator's network identity. The
+// scrape endpoints never redirect under normal operation.
+func refuseRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
 // metricsHTTPClient is shared across reconciles so we don't burn
 // ephemeral ports building a client per call. DisableKeepAlives because
 // pod IPs are reused across rollouts and a cached idle conn can land on
-// a different pod than the one we just listed.
+// a different pod than the one we just listed. CheckRedirect refuses
+// every redirect so a spoofed engine pod cannot bounce the scrape at an
+// arbitrary internal URL.
 var metricsHTTPClient = &http.Client{
-	Timeout: scrapeTimeout,
+	Timeout:       scrapeTimeout,
+	CheckRedirect: refuseRedirects,
 	Transport: &http.Transport{
 		DisableKeepAlives:     true,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,

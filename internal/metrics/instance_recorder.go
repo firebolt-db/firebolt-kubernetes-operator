@@ -22,6 +22,26 @@ var InstanceConditionTypes = []string{
 	computev1alpha1.InstanceConditionReady,
 	computev1alpha1.InstanceConditionMetadataReady,
 	computev1alpha1.InstanceConditionGatewayReady,
+	computev1alpha1.InstanceConditionAuthReady,
+	computev1alpha1.InstanceConditionEngineTLSReady,
+	computev1alpha1.InstanceConditionGatewayTLSReady,
+}
+
+// SigningKeyPhases enumerates the signing-key phases reported by
+// InstanceSigningKeys, so a phase that drops to zero keeps reporting 0 rather
+// than disappearing from the series.
+var SigningKeyPhases = []string{
+	string(computev1alpha1.SigningKeyActive),
+	string(computev1alpha1.SigningKeyValidationOnly),
+	string(computev1alpha1.SigningKeyRemoving),
+}
+
+// RotationSteps enumerates the rotation steps reported by
+// InstanceRotationPendingStep, for the same reason.
+var RotationSteps = []string{
+	string(computev1alpha1.RotationStepAwaitingPromotion),
+	string(computev1alpha1.RotationStepAwaitingRetireAnchor),
+	string(computev1alpha1.RotationStepAwaitingRemoval),
 }
 
 // InstanceRecorder records Prometheus metrics for FireboltInstance resources.
@@ -73,6 +93,46 @@ func (r *instanceRecorder) Record(instance *computev1alpha1.FireboltInstance) {
 	InstanceInfo.WithLabelValues(ns, name, instance.Spec.ID, pgMode).Set(1)
 
 	InstanceLastReconciled.WithLabelValues(ns, name).Set(float64(time.Now().Unix()))
+
+	r.recordSigningKeys(instance)
+}
+
+// recordSigningKeys reports the signing-key inventory and how long the current
+// rotation step has been parked. Every phase and step label is written on every
+// pass, including zeros, so a rotation that finishes leaves the series at 0
+// instead of leaving the last non-zero value to look permanent.
+func (r *instanceRecorder) recordSigningKeys(instance *computev1alpha1.FireboltInstance) {
+	ns, name := instance.Namespace, instance.Name
+	auth := instance.Status.Auth
+
+	byPhase := make(map[string]float64, len(SigningKeyPhases))
+	generation, pendingSeconds, lagging := 0, float64(0), 0
+	var pendingStep string
+	if auth != nil {
+		generation = auth.SigningKeyGeneration
+		lagging = auth.LaggingEngineCount
+		pendingStep = string(auth.PendingRotationStep)
+		for _, k := range auth.SigningKeys {
+			byPhase[string(k.Phase)]++
+		}
+		if auth.PendingSince != nil && pendingStep != "" {
+			pendingSeconds = time.Since(auth.PendingSince.Time).Seconds()
+		}
+	}
+
+	InstanceSigningKeyGeneration.WithLabelValues(ns, name).Set(float64(generation))
+	for _, phase := range SigningKeyPhases {
+		InstanceSigningKeys.WithLabelValues(ns, name, phase).Set(byPhase[phase])
+	}
+	for _, step := range RotationSteps {
+		val := float64(0)
+		if step == pendingStep {
+			val = 1
+		}
+		InstanceRotationPendingStep.WithLabelValues(ns, name, step).Set(val)
+	}
+	InstanceRotationPendingSeconds.WithLabelValues(ns, name).Set(pendingSeconds)
+	InstanceRotationLaggingEngines.WithLabelValues(ns, name).Set(float64(lagging))
 }
 
 func (r *instanceRecorder) Delete(namespace, name string) {
@@ -81,6 +141,11 @@ func (r *instanceRecorder) Delete(namespace, name string) {
 	InstanceCondition.DeletePartialMatch(match)
 	InstanceInfo.DeletePartialMatch(match)
 	InstanceLastReconciled.DeletePartialMatch(match)
+	InstanceSigningKeyGeneration.DeletePartialMatch(match)
+	InstanceSigningKeys.DeletePartialMatch(match)
+	InstanceRotationPendingStep.DeletePartialMatch(match)
+	InstanceRotationPendingSeconds.DeletePartialMatch(match)
+	InstanceRotationLaggingEngines.DeletePartialMatch(match)
 }
 
 // NoOpInstanceRecorder is a no-op implementation for use in tests

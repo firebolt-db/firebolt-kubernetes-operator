@@ -20,9 +20,11 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,9 +38,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -98,6 +102,13 @@ type FireboltEngineReconciler struct {
 	// Must be non-nil; use metrics.NoOpEngineRecorder{} in tests.
 	MetricsRecorder metrics.EngineRecorder
 
+	// WakeDemand reports when a gateway last received a query for an
+	// engine that had no ready endpoints, which autoStop honors as a
+	// request to scale back up. Nil is tolerated and means "no demand,
+	// ever" — the behavior when wake-on-zero is disabled, and the
+	// default in unit tests that do not exercise wake.
+	WakeDemand WakeDemandSource
+
 	// EventRecorder emits Kubernetes Events on the engine CR. Populated
 	// in SetupWithManager when nil; unit tests that exercise event-emitting
 	// paths should inject an events.FakeRecorder. Nil is tolerated: the
@@ -131,6 +142,8 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengineclasses/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
@@ -313,7 +326,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				Type:               computev1alpha1.ConditionInstanceReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: engine.Generation,
-				Reason:             "InstanceNotReady",
+				Reason:             ReasonInstanceNotReady,
 				Message:            instanceErr.Error(),
 			})
 			setReadyCondition(&engine.Status, current, engine.Generation)
@@ -344,9 +357,13 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// resource-bound gate to mirror the webhook's validateTemplate→validateResources
 	// order. Refuse to render until the template is fixed; mirrors the
 	// FireboltInstance controller's validateInstanceTemplates gate.
-	if tplErrs := validateEngineTemplate(engine); len(tplErrs) > 0 {
+	if tplErrs := validateEngineTemplates(engine, classInfo, instanceInfo); len(tplErrs) > 0 {
 		return r.handleTemplateRejected(ctx, engine, tplErrs)
 	}
+
+	// Reported, never blocking: the render drops these, and the roll that carries
+	// the clean generation is the remedy — see engineAliasedSecretVolumes.
+	r.reportAliasedSecretVolumes(ctx, engine, classInfo, instanceInfo)
 
 	// Defense-in-depth for the FireboltEngine validating webhook's
 	// resource-bound check. Webhook ON: admission already rejected
@@ -497,6 +514,56 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		}
 	}
 
+	// Per-generation engine TLS Certificates and their cert-manager-derived
+	// Secrets carry LabelEngine. The Certificate is owner-referenced to the
+	// engine so Kubernetes GC would eventually remove it, but cert-manager does
+	// not owner-reference the derived Secret, so without this explicit sweep the
+	// per-generation TLS Secret orphans once the engine is gone. Delete both by
+	// label, Certificate before Secret (a live Certificate recreates a deleted
+	// target Secret — see instance_controller.go's reconcileDelete). The
+	// Certificate List tolerates the Certificate kind being unavailable to this
+	// client (certKindUnavailable) — either its CRD isn't installed or the type
+	// isn't in the client scheme — in which case no such certs/secrets exist.
+	certList := &certmanagerv1.CertificateList{}
+	if err := r.List(ctx, certList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		if !certKindUnavailable(err) {
+			log.Error(err, "Failed to list Certificates for cleanup")
+			errs = append(errs, err)
+		}
+	} else {
+		for i := range certList.Items {
+			log.Info("Deleting Certificate", "name", certList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &certList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Certificate", "name", certList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
+	secretList := &corev1.SecretList{}
+	if err := r.List(ctx, secretList, client.InNamespace(ns), client.MatchingLabels{LabelEngine: engine.Name}); err != nil {
+		log.Error(err, "Failed to list Secrets for cleanup")
+		errs = append(errs, err)
+	} else {
+		for i := range secretList.Items {
+			// Label match alone is not proof of ownership. Anyone who can create a
+			// Secret in this namespace can stamp firebolt.io/engine on it, and a
+			// label-only sweep would then destroy it on engine deletion. Require
+			// evidence the operator's own machinery produced it: a cert-manager
+			// annotation naming a Certificate for one of THIS engine's generations.
+			if !engineOwnedSecret(&secretList.Items[i], engine.Name) {
+				log.Info("Skipping Secret that carries the engine label but is not operator-provisioned",
+					"name", secretList.Items[i].Name)
+				continue
+			}
+			log.Info("Deleting Secret", "name", secretList.Items[i].Name)
+			if err := r.deleteIfExists(ctx, &secretList.Items[i]); err != nil {
+				log.Error(err, "Failed to delete Secret", "name", secretList.Items[i].Name)
+				errs = append(errs, err)
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return fmt.Errorf("cleanup failed with %d errors, first: %w", len(errs), errs[0])
 	}
@@ -512,6 +579,36 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 
 	log.Info("Finalizer removed, deletion complete")
 	return nil
+}
+
+// engineOwnedSecret reports whether a labeled Secret really is one this engine's
+// reconcile produced, as opposed to a user Secret that merely carries the same
+// label. The operator's only Secrets here are cert-manager targets for the
+// per-generation TLS Certificates, so the proof is cert-manager's own
+// certificate-name annotation pointing at a Certificate named for this engine.
+//
+// Deliberately conservative: a Secret that fails this check is LEFT BEHIND rather
+// than deleted. Orphaning a Secret is recoverable; deleting someone else's is not.
+func engineOwnedSecret(secret *corev1.Secret, engineName string) bool {
+	certName := secret.Annotations[certmanagerv1.CertificateNameKey]
+	if certName == "" {
+		return false
+	}
+	return strings.HasPrefix(certName, engineName+SuffixGen) && strings.HasSuffix(certName, SuffixEngineTLS)
+}
+
+// certKindUnavailable reports whether a List/Get for cert-manager Certificates
+// failed only because the Certificate kind is unavailable to this client —
+// either its CRD isn't installed (IsNoMatchError, e.g. envtest, which installs
+// no cert-manager CRDs) or the type isn't registered in the client's scheme
+// (IsNotRegisteredError, e.g. a fake-client unit test with a minimal scheme).
+// Both mean no Certificates can exist for this client, so there is nothing to
+// reclaim. In production the operator registers certmanagerv1 and, wherever
+// engine TLS is used, cert-manager is installed — so neither fires, and a
+// genuinely missing registration would already have failed Certificate creation
+// (ensureEngineTLSCert) loudly, long before deletion.
+func certKindUnavailable(err error) bool {
+	return apimeta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err)
 }
 
 // appendExternalFinalizer adds obj to the report iff it carries one or
@@ -841,6 +938,144 @@ func validateEngineTemplate(engine *computev1alpha1.FireboltEngine) field.ErrorL
 	)
 }
 
+// validateEngineTemplates runs the template gates that must BLOCK a render: the
+// operator-owned-field allowlist, then Secret references pulled into a
+// container's environment. The allowlist runs first to mirror the webhook's order.
+//
+// Volume aliases are deliberately NOT here — see engineAliasedSecretVolumes for
+// why refusing to render is the wrong remedy for those.
+//
+// The Secret half depends on info, so it can only run after the instance gate has
+// resolved which Secrets this pod mounts.
+func validateEngineTemplates(
+	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+) field.ErrorList {
+	errs := validateEngineTemplate(engine)
+	return append(errs, validateEngineSecretEnvRefs(engine, classInfo, info)...)
+}
+
+// engineTemplates returns the templates that merge into the engine pod, paired
+// with the field path each is reported under. The class template is included
+// because only the engine knows which Instance — and therefore which Secrets —
+// the class is being rendered against.
+func engineTemplates(
+	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo,
+) []struct {
+	tpl  *corev1.PodTemplateSpec
+	path *field.Path
+} {
+	var out []struct {
+		tpl  *corev1.PodTemplateSpec
+		path *field.Path
+	}
+	if engine.Spec.Template != nil {
+		out = append(out, struct {
+			tpl  *corev1.PodTemplateSpec
+			path *field.Path
+		}{engine.Spec.Template, field.NewPath("spec", "template", "spec")})
+	}
+	if classInfo != nil && classInfo.Template != nil {
+		out = append(out, struct {
+			tpl  *corev1.PodTemplateSpec
+			path *field.Path
+		}{classInfo.Template, field.NewPath("spec", "engineClassRef", "template", "spec")})
+	}
+	return out
+}
+
+// validateEngineSecretEnvRefs rejects a template container that reads one of the
+// operator's own Secrets into its environment. An env reference is resolved once
+// at pod start and never re-synced, so declining to render is a complete remedy.
+func validateEngineSecretEnvRefs(
+	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+) field.ErrorList {
+	isProtected := engineProtectedSecret(info)
+	var errs field.ErrorList
+	for _, t := range engineTemplates(engine, classInfo) {
+		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
+			t.tpl.Spec.Containers, t.path.Child("containers"), isProtected, "engine")...)
+		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
+			t.tpl.Spec.InitContainers, t.path.Child("initContainers"), isProtected, "engine")...)
+	}
+	return errs
+}
+
+// reportAliasedSecretVolumes surfaces dropped Secret-alias volumes without
+// affecting the reconcile's outcome, so the roll that replaces the offending pod
+// still happens.
+func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
+	ctx context.Context, engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo, info InstanceInfo,
+) {
+	errs := engineAliasedSecretVolumes(engine, classInfo, info)
+	if len(errs) == 0 {
+		return
+	}
+	msg := errs.ToAggregate().Error()
+	logf.FromContext(ctx).Info("Dropping template volumes that reach operator-managed Secrets", "detail", msg)
+	if r.EventRecorder == nil {
+		return
+	}
+	r.EventRecorder.Eventf(engine, nil, corev1.EventTypeWarning, "SecretAliasVolumeDropped",
+		"Reconcile", "template volumes reaching operator-managed Secrets were dropped from the rendered pod: %s", msg)
+}
+
+// engineAliasedSecretVolumes reports template volumes that reach one of the
+// operator's own Secrets under a name of the author's choosing. It reports rather
+// than blocks, and that distinction is the whole point.
+//
+// A Secret volume is re-synced by the kubelet for the life of the pod, so a
+// volume that was harmless when it was rendered — say it named a Secret that did
+// not exist yet, marked optional — starts yielding real key material the moment
+// the operator creates that Secret. The remedy is to replace the pod, which means
+// rolling a new generation; refusing to render would freeze the engine on exactly
+// the generation that holds the exposed volume. appendUserPodVolumes drops these
+// from the rendered pod, so the new generation is clean, and this exists to say so
+// out loud.
+func engineAliasedSecretVolumes(
+	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+) field.ErrorList {
+	isProtected := engineProtectedSecret(info)
+	var errs field.ErrorList
+	for _, t := range engineTemplates(engine, classInfo) {
+		errs = append(errs, computev1alpha1.ValidateNoSecretAliasVolumes(
+			t.tpl.Spec.Volumes, t.path.Child("volumes"), isProtected, "engine")...)
+	}
+	return errs
+}
+
+// engineProtectedSecret reports which Secret names an engine template must not
+// reach: the Instance-wide operator-managed set the resolver recorded, plus any
+// engine's per-generation TLS Secret, matched by shape because their names carry
+// a generation number that no single reconcile can enumerate.
+//
+// Deliberately NOT scoped to this engine. The shape match used to be anchored on
+// "<this engine>-g", which let engine A's template alias engine B's serving
+// private key — B's Secret name does not start with A's, so the guard never
+// looked at it. Protection is a property of the Secret, not of which engine is
+// under review, so both halves of the predicate are now Instance-wide (see
+// instanceProtectedSecret / isGeneratedEngineTLSSecretName). Signing keys are
+// matched by shape for a second reason: they are protected from the first apply,
+// before any status names them.
+func engineProtectedSecret(info InstanceInfo) func(string) bool {
+	exact := make(map[string]struct{}, len(info.ProtectedSecretNames))
+	for _, n := range info.ProtectedSecretNames {
+		if n != "" {
+			exact[n] = struct{}{}
+		}
+	}
+	return func(name string) bool {
+		if name == "" {
+			return false
+		}
+		if _, hit := exact[name]; hit {
+			return true
+		}
+		return isGeneratedEngineTLSSecretName(name) ||
+			computev1alpha1.IsSigningKeySecretName(name)
+	}
+}
+
 // handleResourceBoundsViolation surfaces a ResourceBounds.Validate
 // failure on the engine's ConditionReady and short-circuits the
 // reconcile. The aggregated field-path error becomes the condition
@@ -1120,8 +1355,12 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
-// spec.instanceRef and returns its metadata endpoint and instance ID.
-// Reconciliation is blocked until the instance exists and has both fields populated.
+// spec.instanceRef and returns its metadata endpoint, instance ID, and (when
+// auth is enabled) the resolved auth config. Reconciliation is blocked until
+// the instance exists, has both the endpoint and ID populated, and — when
+// spec.auth.enabled — has finished provisioning auth (see the Auth gating
+// below), so an engine pod is never scheduled with a volumeMount pointing at
+// a Secret that doesn't exist yet.
 func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (InstanceInfo, error) {
 	inst := &computev1alpha1.FireboltInstance{}
 	key := types.NamespacedName{Name: engine.Spec.InstanceRef, Namespace: engine.Namespace}
@@ -1139,10 +1378,160 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has no instance ID yet", inst.Name)
 	}
 
-	return InstanceInfo{
+	info := InstanceInfo{
 		MetadataEndpoint: inst.Status.MetadataEndpoint,
 		InstanceID:       inst.Spec.ID,
-	}, nil
+	}
+
+	if inst.Spec.Auth != nil && inst.Spec.Auth.Enabled {
+		// Gate on the instance controller's own combined readiness signal
+		// (admin password Secret exists + signing key issued —
+		// InstanceConditionAuthReady, set in instance_auth.go's
+		// ensureAuth) rather than re-deriving readiness here. The
+		// Status.Auth nil/empty check is defense-in-depth against a
+		// stale/racy condition rather than the primary gate.
+		ready := apimeta.IsStatusConditionTrue(inst.Status.Conditions, computev1alpha1.InstanceConditionAuthReady)
+		if !ready || inst.Status.Auth == nil || len(inst.Status.Auth.SigningKeys) == 0 {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has auth enabled but it is not ready yet", inst.Name)
+		}
+		if inst.Spec.Auth.Local == nil {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has auth enabled but spec.auth.local is unset", inst.Name)
+		}
+
+		// Re-verify every Secret this engine's pod is about to mount
+		// exists right now, mirroring checkExternalPostgresSecret's
+		// reasoning: AuthReady only proves these Secrets existed as of
+		// the instance controller's last reconcile. Without this,
+		// a Secret deleted in the gap would surface only as a pod stuck
+		// in ContainerCreating, with the root cause invisible on the
+		// FireboltEngine CR.
+		admin := inst.Spec.Auth.Local.Admin.Password
+		adminRV, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, admin.Name, admin.Key, "admin password secret")
+		if err != nil {
+			return InstanceInfo{}, err
+		}
+		// Filtered through signingKeysForRender (Active + at most one
+		// other, Removing excluded) rather than the raw status list: a
+		// Removing key's Secret is deleted once every engine has
+		// confirmed it no longer needs it (see deleteSigningKey), and
+		// this engine's pod will never mount it either way — checking its
+		// existence here would only produce a spurious failure during
+		// that window.
+		renderKeys := signingKeysForRender(inst.Status.Auth.SigningKeys)
+		signingFPs := make(map[string]string, len(renderKeys))
+		for _, k := range renderKeys {
+			// Capture the signing key's public-key fingerprint (not its bytes)
+			// and fold it into authHash so a genuine same-kid key replacement
+			// rolls the fleet, while a cert-only reissuance that reuses the key
+			// does not — see ResolvedAuthInfo.SigningKeyFingerprints.
+			// enginesConvergedOn performs the identical read so the rotation gate
+			// stays matchable. The read also confirms tls.key is present, the same
+			// existence gate the previous ResourceVersion read provided.
+			fp, err := signingKeyFingerprint(ctx, r.Client, engine.Namespace, k.SecretName)
+			if err != nil {
+				return InstanceInfo{}, err
+			}
+			signingFPs[k.ID] = fp
+		}
+
+		info.Auth = &ResolvedAuthInfo{
+			Spec:                   inst.Spec.Auth,
+			SigningKeys:            renderKeys,
+			AdminSecretVersion:     adminRV,
+			SigningKeyFingerprints: signingFPs,
+		}
+	}
+
+	if inst.Spec.TLS != nil && inst.Spec.TLS.Engine != nil && inst.Spec.TLS.Engine.Enabled {
+		// Unblock the engine roll on the PROVISIONED fact — the anchor
+		// Secret recorded in Status.EngineTLS (written only once the anchor cert is
+		// Ready, in ensureEngineTLSCertificate) — NOT on
+		// InstanceConditionEngineTLSReady. That condition is now convergence-gated
+		// (True only once the whole fleet is re-encrypting), so gating the roll on
+		// it would deadlock the enable ramp: engines would never roll onto TLS, the
+		// fleet would never converge, and the condition would never flip True. Then
+		// re-verify the Secret this engine's pod is about to mount exists right now.
+		if inst.Status.EngineTLS == nil {
+			return InstanceInfo{}, fmt.Errorf("FireboltInstance %q has engine TLS enabled but it is not provisioned yet", inst.Name)
+		}
+		secretName := inst.Status.EngineTLS.SecretName
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSCertKey, "engine TLS secret"); err != nil {
+			return InstanceInfo{}, err
+		}
+		if _, err := checkSecretKeyPresent(ctx, r.Client, engine.Namespace, secretName, corev1.TLSPrivateKeyKey, "engine TLS secret"); err != nil {
+			return InstanceInfo{}, err
+		}
+
+		info.TLS = &ResolvedEngineTLSInfo{SecretName: secretName, CertManager: inst.Spec.TLS.Engine.CertManager}
+
+		// Read the current generation's serving-certificate Secret once. It drives
+		// two independent signals below: its tls.crt is the serving-cert
+		// drift fingerprint (a cert-manager re-issuance of the served leaf must
+		// roll a new generation, since packdb reads the cert only at startup), and
+		// its ca.crt is the trust-bundle cutover gate. A NotFound is
+		// benign — the fresh generation's cert is not written yet, or engine TLS
+		// was just enabled — leaving both signals at their empty/vacuous default.
+		gen := engine.Status.CurrentGeneration
+		var genSecret corev1.Secret
+		genSecretName := genResourceName(engine.Name, gen, SuffixEngineTLS)
+		genErr := r.Get(ctx, types.NamespacedName{Namespace: engine.Namespace, Name: genSecretName}, &genSecret)
+		if genErr != nil && !errors.IsNotFound(genErr) {
+			return InstanceInfo{}, fmt.Errorf("reading engine generation %d TLS secret %s: %w", gen, genSecretName, genErr)
+		}
+		if genErr == nil {
+			// Refuse a per-generation Secret this operator's Certificate did not
+			// produce. Its name is deterministic ("<engine>-g<N>-engine-tls") and
+			// rotationPolicy means cert-manager adopts a private key already sitting
+			// in the target Secret, so a pre-created Secret would otherwise become
+			// what this generation's pods serve. Fail the resolve rather than render
+			// a pod around planted key material — an engine that does not start is
+			// strictly better than one serving a key an attacker chose. See
+			// verifyCertManagerIssued.
+			if err := verifyCertManagerIssued(&genSecret, genSecretName); err != nil {
+				return InstanceInfo{}, fmt.Errorf("engine generation %d TLS secret %s/%s: %w",
+					gen, engine.Namespace, genSecretName, err)
+			}
+			if crt := genSecret.Data[corev1.TLSCertKey]; len(crt) > 0 {
+				info.TLS.ServingCertFP = caFingerprint(string(crt))
+			}
+		}
+
+		// Cutover gate: the gateway must already trust THIS engine's
+		// current-generation certificate CA before its Service selector may flip
+		// to that generation (see computeCreating). Confirm the generation cert's
+		// CA fingerprint appears in the set the gateway has confirmed-rolled-out
+		// (inst.Status.RolledEngineTrustCAs), using the same fingerprint the
+		// instance controller publishes with.
+		//
+		// The gate is VACUOUS until the gateway actually re-encrypts upstream
+		// (engineUpstreamTLSReady, i.e. Status.EngineTLS.Reencrypting). Before
+		// that the gateway talks plaintext to engines and verifies no certificate,
+		// so a cutover endangers nothing — and gating here would DEADLOCK the
+		// initial enable ramp: info.TLS is set the moment the anchor is ready
+		// (InstanceConditionEngineTLSReady), but Reencrypting only flips true once
+		// the fleet has cut over to TLS, and the trust bundle is only published
+		// once the gateway re-encrypts. Requiring trust before the first cutover
+		// would prevent the very convergence that produces the trust. Once the
+		// gateway IS re-encrypting, the check is strict per generation: a
+		// missing/keyless generation Secret, or a CA not yet in the rolled set
+		// (e.g. just after a CA rotation), leaves this false and the cutover
+		// simply waits. Same-CA rollouts find their CA already present.
+		if !engineUpstreamTLSReady(inst) {
+			info.EngineTrustBundleReady = true
+		} else if genErr == nil {
+			if ca := genSecret.Data[engineTLSCASecretKey]; len(ca) > 0 {
+				info.EngineTrustBundleReady = slices.Contains(inst.Status.RolledEngineTrustCAs, caFingerprint(string(ca)))
+			}
+		}
+	}
+
+	// The Instance-wide operator-managed Secret set — not just what THIS engine's
+	// pod mounts. An engine template has no business reaching the gateway's serving
+	// key or the metadata Postgres credential either, and a per-component set left
+	// exactly those routes open. instanceProtectedSecret adds the two names formed
+	// from suffixes private to this package.
+	info.ProtectedSecretNames = instanceProtectedSecretNames(inst)
+	return info, nil
 }
 
 func genResourceName(engineName string, gen int, suffix string) string {
@@ -1176,8 +1565,24 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
+		WatchesRawSource(r.wakeDemandSource()).
 		Named(name).
 		Complete(r)
+}
+
+// wakeDemandSource turns newly-observed gateway demand into an immediate
+// reconcile for the engine it names.
+//
+// Without it the demand poll only refreshes a cache that auto-stop reads on
+// its own pollInterval — a minute by default — so a held query would wait
+// most of that before scale-up even began. Returns an empty channel source
+// when wake is disabled, which never fires.
+func (r *FireboltEngineReconciler) wakeDemandSource() source.TypedSource[reconcile.Request] {
+	ch := make(chan event.GenericEvent)
+	if tracker, ok := r.WakeDemand.(*WakeDemandTracker); ok && tracker.Events != nil {
+		ch = tracker.Events
+	}
+	return source.Channel(ch, &handler.EnqueueRequestForObject{})
 }
 
 // engineClassToEngines maps a FireboltEngineClass event to reconcile requests

@@ -20,8 +20,6 @@ limitations under the License.
 package e2e
 
 import (
-	"sync"
-	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,7 +28,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
-	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
 // First end-to-end coverage for autoStop. Everything below rides the same
@@ -38,8 +35,9 @@ import (
 // ApiserverProxy), so this spec exercises the operator's idleness signal
 // against a real engine: continuous load must pin the engine at
 // activeReplicas past the idle timeout, quiet must scale it to
-// idleReplicas=0 (phase stopped), and a fresh gateway wake-up annotation
-// must bring it back.
+// idleReplicas=0 (phase stopped), and a stopped engine must stay stopped
+// while nothing is asking for it. Wake itself is not covered here — see the
+// comment on the final step for why.
 const (
 	// autoStopIdleTimeout / autoStopPollInterval are aggressive so the
 	// idle scale-down lands within a test-friendly window. The busy-hold
@@ -94,45 +92,55 @@ var _ = Describe("Firebolt Engine AutoStop", func() {
 			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
 			Expect(WaitForEngineStable(ctx, engineName, clusterReadyTimeout)).To(Succeed())
 
-			By("Keeping the engine busy past the idle timeout")
-			// Two workers so consecutive queries overlap and every autoStop
-			// poll observes in-flight work.
-			stop := make(chan struct{})
-			var wg sync.WaitGroup
-			var succeeded, failed atomic.Int64
-			for i := 0; i < 2; i++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					defer GinkgoRecover()
-					for {
-						select {
-						case <-stop:
-							return
-						default:
-						}
-						if _, err := RunQuery(ctx, clientPod, engineName, computeBoundQuery); err != nil {
-							failed.Add(1)
-						} else {
-							succeeded.Add(1)
-						}
-					}
-				}()
-			}
+			By("Resolving the engine pod, to sample its query gauges during the hold")
+			_, activeGen, err := GetEngineGeneration(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+			enginePods, err := EnginePodsForGeneration(ctx, engineName, activeGen)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(enginePods).To(HaveLen(1))
+			Expect(enginePods[0].Status.PodIP).NotTo(BeEmpty())
 
+			By("Keeping the engine busy past the idle timeout")
+			// The load loop runs inside the client pod (see keepURLBusy). It used
+			// to be two goroutines each paying a kubectl-exec round trip per
+			// query, which leaves holes where nothing is running on the engine —
+			// and autoStop is entitled to scale down in one of them, so the hold
+			// below failed on correct behaviour. Same defect as the drain spec had.
+			stopLoad := keepURLBusy(ctx, clientPod, engineServiceQueryURL(engineName), computeBoundQuery)
+			DeferCleanup(func() { stopLoad() })
+
+			By("Waiting for the load to actually reach the engine before holding")
+			waitForLoadInFlight(ctx, clientPod, enginePods[0].Status.PodIP)
+
+			// The gauge is sampled alongside the assertion so a failure can say
+			// whether the premise held. It does not weaken anything: the replica
+			// check is unconditional, so any scale-down fails the spec whether or
+			// not a sample caught the engine busy.
+			var held loadHoldTracker
 			Consistently(func(g Gomega) {
+				held.sample(ctx, clientPod, enginePods[0].Status.PodIP)
+
 				engine, err := GetEngine(ctx, engineName)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(engine.Spec.Replicas).To(Equal(int32(1)),
-					"autoStop scaled a busy engine down (reason=%s)", engine.Status.AutoStopReason)
+					"%s (autoStopReason=%s)", held.failure("scaled a busy engine down"),
+					engine.Status.AutoStopReason)
 				g.Expect(string(engine.Status.Phase)).To(Equal(string(computev1alpha1.PhaseStable)))
 			}, autoStopBusyHold, 2*time.Second).Should(Succeed())
 
-			close(stop)
-			wg.Wait()
-			GinkgoWriter.Printf("Busy-hold load: %d succeeded, %d failed\n", succeeded.Load(), failed.Load())
-			Expect(succeeded.Load()).To(BeNumerically(">", 0),
-				"no query completed (%d failed); the busy-hold assertion proved nothing", failed.Load())
+			// A hold that never saw the engine busy proved nothing, and would
+			// otherwise be indistinguishable from a real one.
+			Expect(held.samples).NotTo(BeEmpty(),
+				"no usable gauge sample was taken during the busy hold (%d scrape attempts "+
+					"failed), so the engine was never observed busy", held.scrapeErrors)
+			Expect(held.idle).To(BeZero(),
+				"the engine went idle during the busy hold (%d of %d samples read 0); the hold "+
+					"proved nothing even though it passed", held.idle, len(held.samples))
+
+			succeeded, failed := stopLoad()
+			GinkgoWriter.Printf("Busy-hold load: %d succeeded, %d failed\n", succeeded, failed)
+			Expect(succeeded).To(BeNumerically(">", 0),
+				"no query completed (%d failed); the busy-hold assertion proved nothing", failed)
 
 			By("Waiting for the idle engine to scale down to zero")
 			Eventually(func(g Gomega) {
@@ -144,26 +152,27 @@ var _ = Describe("Firebolt Engine AutoStop", func() {
 			}, autoStopScaleTimeout, pollInterval).Should(Succeed())
 			Expect(WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseStopped, clusterTransitionTimeout)).To(Succeed())
 
-			By("Stamping a wake-up request the way the gateway does")
-			Expect(AnnotateEngine(ctx, engineName, controller.AnnotationWakeRequested,
-				time.Now().UTC().Format(time.RFC3339))).To(Succeed())
-
-			By("Waiting for the engine to wake back up to activeReplicas")
-			Eventually(func(g Gomega) {
+			// Wake-on-zero is NOT covered here, and deliberately not
+			// faked. It needs the wake-agent sidecar running in the
+			// gateway pod, which needs the operator image present in the
+			// Kind registry — and scripts/load-e2e-images.sh only pulls
+			// third-party images; the operator itself runs in-process in
+			// this suite. Asserting a wake without the sidecar would
+			// either test nothing or test a stub.
+			//
+			// The real path is covered instead by
+			// scripts/ci/verify-wake-on-zero.sh, run from the test-helm
+			// job: that installs the chart, so the sidecar runs from the
+			// actual operator image inside the gateway pod, where Envoy's
+			// loopback call can reach it.
+			By("Verifying the stopped engine stays stopped without wake demand")
+			Consistently(func(g Gomega) {
 				engine, err := GetEngine(ctx, engineName)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(engine.Spec.Replicas).To(Equal(int32(1)),
-					"wake request was not honored (reason=%s)", engine.Status.AutoStopReason)
-			}, autoStopScaleTimeout, pollInterval).Should(Succeed())
-			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
-			Expect(WaitForEngineStable(ctx, engineName, clusterReadyTimeout)).To(Succeed())
-
-			By("Verifying the woken engine serves queries")
-			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
-			Expect(err).NotTo(HaveOccurred())
-			result, err := ParseQueryResult(output)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(queryConfig.Validator(result)).To(BeTrue(), "Query result validation failed")
+				g.Expect(engine.Spec.Replicas).To(Equal(int32(0)),
+					"a stopped engine scaled up with no wake demand (reason=%s)",
+					engine.Status.AutoStopReason)
+			}, 15*time.Second, 3*time.Second).Should(Succeed())
 
 			By("Deleting engine")
 			Expect(DeleteEngine(ctx, engineName)).To(Succeed())

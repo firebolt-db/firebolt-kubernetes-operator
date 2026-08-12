@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -111,6 +112,12 @@ func newReconcileDeleteTestEnv(t *testing.T, children ...runtime.Object) *reconc
 	}
 	if err := computev1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
+	}
+	// reconcileDelete sweeps per-generation TLS Certificates; register the
+	// cert-manager scheme so the fake client lists them (as a real cluster with
+	// cert-manager installed would) instead of erroring on an unknown kind.
+	if err := certmanagerv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("certmanager AddToScheme: %v", err)
 	}
 
 	now := metav1.Now()

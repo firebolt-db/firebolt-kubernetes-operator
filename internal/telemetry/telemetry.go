@@ -25,7 +25,7 @@ import (
 	"context"
 	"math/rand/v2"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -208,7 +208,7 @@ func engineVersions(engines []computev1alpha1.FireboltEngine, classes map[string
 	for version := range versions {
 		result = append(result, version)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return strings.Join(result, ",")
 }
 

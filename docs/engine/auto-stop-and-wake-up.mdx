@@ -15,7 +15,7 @@ Auto-stop reuses the **same Prometheus signal** the drain check consumes: `fireb
 `computeAutoStopDecision` is a pure function over `(spec, status, observation, now)`. Precedence, top-down:
 
 1. **Disabled**: If `spec.autoStop` is unset or `enabled=false`, auto-stop emits no decision and `spec.replicas` is fully user-owned.
-2. **Wake requested**: `metadata.annotations["firebolt.io/wake-requested"]` carries an RFC 3339 timestamp younger than `DefaultAutoStopWakeTTL` (5 minutes). Replicas are scaled to `activeReplicas`. Reason `WakeRequested`. See [Gateway wake-up protocol](#gateway-wake-up-protocol).
+2. **Wake requested**: a gateway received a query for this engine within `DefaultAutoStopWakeTTL` (5 minutes) while it had no ready endpoints. Replicas are scaled to `activeReplicas`. Reason `WakeRequested`. See [Gateway wake-up protocol](#gateway-wake-up-protocol).
 3. **Schedule active**: `now` falls inside any window in `spec.autoStop.schedule`. Replicas are pinned at `activeReplicas`. Schedule wins over both idle and stopped paths so an "always-on during business hours" policy can wake a parked engine.
 4. **Stopped**: `spec.replicas == 0`, no fresh wake annotation, no schedule window active. No-op.
 5. **Scrape failed or activity observed**: Refresh `status.lastActivityTime`, do not scale. Scrape failures are grouped with activity intentionally because a broken probe must never look quiet enough to scale down.
@@ -56,53 +56,78 @@ Auto-stop samples query activity once per `pollInterval` (default 1 minute), whi
 
 ## Gateway wake-up protocol
 
-A FireboltEngine that auto-stop has scaled to zero replicas needs a way to come back to life when a query arrives. The Firebolt Operator and the Envoy-based gateway exchange a single, level-driven signal for this:
+A FireboltEngine that auto-stop has scaled to zero replicas comes back to life when a query arrives for it. The query itself is the signal, and the query itself is what waits:
 
 ```text
-                       patch annotation
-                ┌─────────────────────────────┐
-   ┌──────────┐ │   metadata.annotations      │  ┌────────────┐
-   │ Gateway  ├─►   firebolt.io/wake-requested├─►│ Engine CR  │
-   │ (Envoy)  │ │   = "<RFC 3339 timestamp>"  │  └─────┬──────┘
-   └──────────┘ └─────────────────────────────┘        │ Watch fires
-                                                       ▼
-                                               ┌────────────┐
-                                               │ Auto-stop  │
-                                               │ runs:      │
-                                               │ wake fresh │
-                                               │ → Active   │
-                                               └─────┬──────┘
-                                                     │ patch spec.replicas
-                                                     ▼
-                                               ┌────────────┐
-                                               │ Blue-green │
-                                               │ creating   │
-                                               └────────────┘
+   ┌──────────┐  1. GET /hold?engine=X   ┌────────────┐
+   │ Gateway  ├─────────────────────────►│ Wake agent │
+   │ (Envoy)  │◄─────────────────────────┤ (sidecar)  │
+   └──────────┘  4. released, route it   └──┬──────┬──┘
+                                            │      │ watches
+                       2. last_demand_at    │      │ EndpointSlices
+                          scraped           │      ▼
+                                            │  ┌────────────┐
+                                            │  │  Engine    │
+                                            │  │  endpoints │
+                                            ▼  └─────▲──────┘
+                                     ┌────────────┐  │
+                                     │  Operator  │  │
+                                     │  auto-stop ├──┘
+                                     │  scales up │  3. spec.replicas
+                                     └────────────┘     = activeReplicas
 ```
 
-### Why an annotation
+1. A query arrives for engine X. Before routing, Envoy's Lua filter calls the wake agent on loopback. For a running engine the agent answers immediately from memory; for a stopped one it records demand and parks the request.
+2. The Firebolt Operator polls each gateway's demand endpoint every couple of seconds and sees fresh demand for an engine it knows is at zero replicas.
+3. Auto-stop scales the engine to `activeReplicas`, reporting `status.autoStopReason: WakeRequested`.
+4. The agent's EndpointSlice watch sees the engine's endpoints appear and releases the parked request. Envoy routes it, and the client gets an answer to the query it sent — not an error telling it to try again.
 
-- **Level-driven**: The annotation timestamp is part of the resource state. Any reconcile (Firebolt Operator restart, periodic poll, watch event) reads the same value and converges identically.
-- **Fire-and-forget**: a wake-up does not require a synchronous response. The gateway buffers the triggering query locally and retries against engine DNS once Envoy's active health checks observe a ready upstream.
-- **Coalescing**: 1000 simultaneous queries for the same stopped engine produce a handful of identical patches via K8s optimistic concurrency, not a thundering-herd RPC.
-- **Firebolt Operator-down tolerant**: K8s API still accepts the patch when the Firebolt Operator manager is restarting. The next reconciler instance picks it up.
+### Why the gateway holds no credential
 
-### Wake annotation TTL
+The gateway pod terminates untrusted traffic, so nothing in it may write to the Kubernetes API. The wake agent's entire grant is `get`, `list`, `watch` on EndpointSlices, and demand travels outward on a metrics endpoint rather than inward as an API write. The Firebolt Operator, which already holds write permission, is the only component that scales anything.
 
-`DefaultAutoStopWakeTTL` (5 minutes) bounds how long an unrefreshed annotation continues to trigger scale-up. Long enough to cover engine cold-start (image pull, blue-green creating phase) and short enough that an abandoned wake does not pin an engine after the gateway has given up. The gateway is expected to keep stamping the annotation while it has buffered queries waiting.
+The Envoy container holds no token at all. The pod sets `automountServiceAccountToken: false` and projects a short-lived, auto-rotating ServiceAccount token into the agent container alone — containers in a pod share the network namespace but not the mount namespace, so Envoy's filesystem never contains a credential.
 
-The annotation is honored only when `spec.autoStop.enabled=true`. Without an auto-stop policy the Firebolt Operator has no `activeReplicas` to scale to, and respecting a wake from a non-policy actor would silently override the user's `spec.replicas==0` intent.
+### Why an in-pod agent rather than Envoy alone
+
+The engine's cluster Service is headless. At zero replicas it has no endpoints, so its name has no A records and the request fails at DNS resolution, which Envoy emits as a *local reply*. Retry policies act on upstream responses, so the gateway's own retries never see it and cannot ride out a cold start. Something has to hold the request until the engine exists, and the component that holds it is also the cheapest place to report the demand.
+
+### Wake demand TTL
+
+`DefaultAutoStopWakeTTL` (5 minutes) bounds how long an unrefreshed demand timestamp continues to trigger scale-up. Long enough to cover engine cold-start (image pull, blue-green creating phase) and short enough that an abandoned wake does not pin an engine indefinitely.
+
+Demand is recorded as a timestamp, stamped when the request arrives, rather than as a count of requests currently waiting. A client that gives up before the Firebolt Operator's next poll still counts: it asked, and that is the reason to start the engine. This is also why a request shed under load still registers demand — the stamp happens before the capacity check.
+
+### What a query to a stopped engine costs
+
+The first query pays the engine's cold start, typically tens of seconds. Set your client's timeout above that or it will give up while the engine is still coming up. Subsequent queries are unaffected.
+
+Requests are held, not buffered in full: the agent reads nothing but the engine name, and Envoy's flow control stalls the client's upload rather than accumulating its body. The number of simultaneously held requests is capped from the gateway's memory budget; past the cap, requests get `503` with `Retry-After` while the wake still proceeds.
+
+### Formal model
+
+The demand path and the agent's hold path are both specified in TLA+ and model-checked in CI: `formal/EngineWake.tla` covers the agent's stamp, the Firebolt Operator's cached copy of it and the auto-stop decision that reads it, and `formal/WakeAgentHold.tla` covers the readiness waiter that releases a held query. Between them they establish that an engine only ever scales up on demand that is still within the TTL at the moment of the decision, that demand for a running engine never changes its replica count, and that a held query is always releasable when endpoints appear. See [Formal verification](../architecture#formal-verification) for what each specification proves and for the one lost-wakeup case the design accepts.
+
+### Wake and deliberately stopped engines
+
+Auto-stop cannot distinguish an engine it parked from one you set to `replicas: 0` by hand — both are engines at zero replicas — so a query through the gateway will start either. To keep an engine down, set `spec.autoStop.enabled: false` alongside `replicas: 0`; auto-stop then reports `Disabled` and leaves the engine alone.
+
+### Reaching a stopped engine
+
+Wake only fires for traffic through the gateway. Clients that resolve an engine's headless Service themselves and connect directly get no answer from a stopped engine and nothing wakes it, because a stopped engine has no endpoints for them to resolve in the first place. Route through the gateway if you rely on auto-stop.
 
 ### Gateway RBAC
 
-Each FireboltInstance now provisions per-gateway RBAC alongside the gateway Deployment:
+Each FireboltInstance provisions per-gateway RBAC alongside the gateway Deployment:
 
 | Resource | Name | Purpose |
 |---|---|---|
-| `ServiceAccount` | `<instance>-gateway` | Identity attached to gateway pods. |
-| `Role` | `<instance>-gateway-wake` | Grants `get`, `list`, `patch` on `fireboltengines` in the same namespace. |
-| `RoleBinding` | `<instance>-gateway-wake` | Binds the SA to the Role. |
+| `ServiceAccount` | `<instance>-gateway` | Identity attached to gateway pods. Used only by the wake-agent sidecar. |
+| `ClusterRole` | `<release>-gateway-wake` | Chart-managed. Grants `get`, `list`, `watch` on `endpointslices`. |
+| `RoleBinding` | `<instance>-gateway-wake` | Binds the ServiceAccount to that ClusterRole, scoped to the instance's namespace. |
 
-RBAC cannot restrict patch to a specific subresource or field, so the gateway holds patch on the whole CR. The wake protocol constrains the gateway to a strategic-merge patch that only touches `metadata.annotations[firebolt.io/wake-requested]`. Misuse beyond that is reviewed via Kubernetes audit logs, not enforced by RBAC.
+The ClusterRole is shipped by the Helm chart rather than created by the Firebolt Operator, which is what keeps `roles: create/update/patch` out of the Firebolt Operator's own RBAC.
 
-> **Note:** The gateway-side implementation (intercept routing for stopped engines, buffer the request, patch the annotation, retry against engine DNS) is not yet wired in. It would extend the Envoy Lua filter rendered by the Firebolt Operator in `internal/controller/instance_gateway.go`. This document defines the contract and the Firebolt Operator-side enforcement (RBAC, fresh-annotation handling). The Envoy-side hook is tracked as a follow-up.
+### Disabling wake
+
+Set `wakeAgent.enabled: false` in the chart. The sidecar is omitted and the RoleBinding is not created; a query for a stopped engine gets a `503` instead of waiting, and nothing wakes the engine. Query routing to running engines is unaffected.

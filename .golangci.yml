@@ -141,6 +141,13 @@ linters:
           - gosec
           - forcetypeassert
         path: _test\.go
+      # Validation code accumulates field.ErrorList by appending variadic
+      # spreads whose lengths are not known at the allocation site, so there
+      # is no honest capacity to preallocate. Sizing from the number of
+      # append CALLS would be a wrong number that only silences the linter.
+      - linters:
+          - prealloc
+        text: 'Consider preallocating (errs|out)'
       # Ginkgo and Gomega are designed around dot imports; this is the standard
       # usage pattern endorsed by the frameworks' documentation.
       - linters:
@@ -190,6 +197,12 @@ linters:
           - revive
           - errcheck
         text: "fmt\\.(Print|Fprint)"
+      # strings.Builder's Write* methods are documented to always return a nil
+      # error (the error is in the signature only to satisfy the io writer
+      # interfaces), so an unhandled return there is noise, not a hazard.
+      - linters:
+          - revive
+        text: "strings\\.Builder\\.Write"
     paths:
       - third_party$
       - builtin$
