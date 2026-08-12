@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.4.0...firebolt-operator-chart-0.4.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **controller:** surface gateway CRL without client CA when webhooks off (FB-2929) ([#126](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/126)) ([4cb763c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4cb763c0a719e52280029f0711378424c67b1863))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.6.1 ([d1d8b9f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d1d8b9f08e561d2cb5cfeb8c93154a50312c553a))
+
 ## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.3.0...firebolt-operator-chart-0.4.0) (2026-08-04)
 
 
