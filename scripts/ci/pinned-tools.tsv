@@ -28,4 +28,4 @@ yq         amd64  a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9e
 yq         arm64  0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156  https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64
 helm-docs  amd64  a8cf72ada34fad93285ba2a452b38bdc5bd52cc9a571236244ec31022928d6cc  https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz
 helm-docs  arm64  c3787212332386dcd122debef7848feb165aa701467ae3e3442df7638f3ac4e4  https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_arm64.tar.gz
-tla2tools  any    cc4803dce2a8ffaf0f5920a9dc39df4b5ee34ab4cb53fb58ac557277a7e516b3  https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+tla2tools  any    ab323b79802aedc3203b3f9af37c6aca3ed43f4e0225b36f2aa77b26de46c05f  https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar

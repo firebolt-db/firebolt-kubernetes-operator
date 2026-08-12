@@ -63,6 +63,11 @@ sha256_of() {
 }
 
 if [ -f "$dest" ] && [ "$(sha256_of "$dest")" = "$expected_sha" ]; then
+  # Advance mtime so Make rules that depend on the pin manifest (e.g.
+  # $(TLA2TOOLS): pinned-tools.tsv) treat the target as up to date after a
+  # digest hit. Leaving the file untouched would re-run this recipe forever
+  # whenever the manifest is newer than an already-correct jar.
+  touch "$dest"
   echo "fetch-verified: ${dest} already matches the pinned ${name} digest"
   exit 0
 fi
