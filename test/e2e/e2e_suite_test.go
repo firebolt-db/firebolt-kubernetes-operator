@@ -55,8 +55,13 @@ const (
 	clusterReadyTimeout      = 300 * time.Second
 	clusterTransitionTimeout = 300 * time.Second
 	resourceCleanupTimeout   = 120 * time.Second
-	instanceReadyTimeout     = 300 * time.Second
-	pollInterval             = 1 * time.Second
+	// generationSweepTimeout bounds the wait for the abandoned-generation sweep
+	// to converge on a live cluster. Kept at the suite's 15s ceiling for
+	// condition waits: the sweep runs on every reconcile, so an engine that has
+	// already settled is either clean within a poll or two, or not converging.
+	generationSweepTimeout = 15 * time.Second
+	instanceReadyTimeout   = 300 * time.Second
+	pollInterval           = 1 * time.Second
 
 	// e2eGatewayWakeClusterRole is the name of the suite's stand-in for
 	// the chart-managed ClusterRole that grants get/list/watch on

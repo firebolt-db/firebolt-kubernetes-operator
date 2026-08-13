@@ -1272,6 +1272,11 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 // runs the garbage collector that takes an abandoned generation's pods down with
 // its StatefulSet.
 //
+// It asserts convergence, not that an abandon happened: rapid spec edits share
+// one work-queue key and can coalesce, so a churn run may produce no abandoned
+// generation at all. The deterministic proof that the sweep reclaims one lives in
+// the controller tests.
+//
 // Objects without a generation label (the cluster Service) are out of scope, and
 // an object already terminating counts as still present: the assertion is that
 // the abandoned generations are actually gone, not merely marked.
