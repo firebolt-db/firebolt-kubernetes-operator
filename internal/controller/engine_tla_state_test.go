@@ -380,9 +380,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 					result.Status.Phase)
 			}
 			m.applyResult(&result, true)
-			if isTerminalPhase(m.status.Phase) {
-				m.gcStaleResources()
-			}
+			m.gcStaleResources()
 			tlaInvariants(t, m)
 
 			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady)
