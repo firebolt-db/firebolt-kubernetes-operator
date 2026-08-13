@@ -421,7 +421,11 @@ var _ = Describe("Firebolt Engine", func() {
 		)
 		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
-		const abandonedGen = 9000
+		// Planted below the generation the engine has reached, which is where an
+		// abandoned generation always is: the sweep refuses anything at or above
+		// the newest generation its keep set names, because that can only mean its
+		// view of the status is stale.
+		const abandonedGen = 1
 
 		BeforeAll(func() {
 			By("Setting up FireboltInstance with GC enabled and deletes gated")
@@ -457,9 +461,25 @@ var _ = Describe("Firebolt Engine", func() {
 			Expect(UpdateEngineScheduling(ctx, engineName, map[string]string{"firebolt.io/no-such-node": "true"}, nil, nil)).To(Succeed())
 			Expect(WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseCreating, generationSweepTimeout)).To(Succeed())
 
-			// The gate is armed first: the sweep runs on every reconcile and the
-			// engine requeues every few seconds while creating, so a generation
-			// planted before the gate could be reclaimed between the two calls and
+			// A second scheduling change abandons that half-built generation and
+			// moves the engine past it, which is what puts the generation about to
+			// be planted below the sweep's floor. The engine stays in creating
+			// throughout: its pods can never be scheduled.
+			By("Abandoning it so the engine moves past the generation being planted")
+			Expect(UpdateEngineScheduling(ctx, engineName, map[string]string{"firebolt.io/no-such-node": "elsewhere"}, nil, nil)).To(Succeed())
+			Expect(WaitForGenerationAtLeast(ctx, engineName, abandonedGen+1, generationSweepTimeout)).To(Succeed())
+
+			// Waiting for the abandon's own deletes to finish frees the names about
+			// to be planted, since a StatefulSet still terminating would refuse the
+			// create, and it is worth asserting on its own: the primary path is
+			// expected to clean up after itself, and the sweep is the net for when
+			// it does not.
+			By("Letting the abandon finish its own cleanup")
+			Expect(WaitForGenerationReclaimed(ctx, engineName, abandonedGen, generationSweepTimeout)).To(Succeed())
+
+			// The gate is armed before planting: the sweep runs on every reconcile
+			// and the engine requeues every few seconds while creating, so a
+			// generation planted first could be reclaimed between the two calls and
 			// the rejection would never be exercised.
 			By("Rejecting the operator's deletes for the generation about to be planted")
 			gate.Reject(abandonedGen)

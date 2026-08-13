@@ -111,12 +111,12 @@ CONSTANTS
       \* TRUE removes GCOrphans' generation floor, the `g < NewestKept(...)`
       \* conjunct, which is the guard that makes a stale keep set harmless. With
       \* it removed, a sweep whose view of currentGeneration lags deletes the
-      \* StatefulSet of the generation being created; the reconciler re-creates
-      \* it, the view falls further behind, and the engine never converges.
-      \* Violates EventuallyTerminal, and it is a liveness violation rather than
-      \* a safety one because destroying a generation mid-creation leaves every
-      \* state invariant intact -- which is exactly why the implementation shipped
-      \* the hazard.
+      \* StatefulSet of the generation being created. Violates
+      \* NoDeleteOfCurrentGeneration, an action property rather than an invariant
+      \* or a liveness property, because destroying a generation mid-creation
+      \* leaves every state invariant intact and the reconciler re-creates what
+      \* was removed, so the model still converges. That is exactly why the
+      \* implementation shipped the hazard.
     GCDrainingGeneration,
       \* TRUE removes GCOrphans' `g # drainingGen` exclusion, so the sweep takes
       \* the StatefulSet the drain is waiting on out from under it. Only
@@ -331,6 +331,14 @@ GCOrphans ==
     \* be any generation up to the real one: the keep set is built from a status
     \* read, and a read can be behind the writes of earlier passes. That is not a
     \* hypothetical -- it is what a cached read does under generation churn.
+    \*
+    \* Bounded above by currentGen because the implementation never sweeps on a
+    \* view it cannot vouch for: it reads the status from the API server, and a
+    \* read that fails ends the pass instead of falling back to the status the
+    \* reconcile was handed. That status can be ahead of the API server, since a
+    \* failed status write leaves a generation in memory that was never accepted,
+    \* and a view above currentGen would put the real current generation below the
+    \* floor.
     /\ \E gcView \in 0..currentGen :
        \E g \in Gens :
            /\ StsExists(g)

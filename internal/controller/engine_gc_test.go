@@ -1690,3 +1690,55 @@ func TestGCOrphanedResources_ReadsTheClusterServiceFromTheSameView(t *testing.T)
 		t.Errorf("the generation the live selector points at was deleted: %v", err)
 	}
 }
+
+// TestGCOrphanedResources_BailsWhenTheEngineIsUnreadable is the fail-closed side
+// of the status read. Falling back to the status the reconcile was handed is not
+// safe: that copy can be ahead of the API server, because applyEngineState
+// assigns the computed status before writing it and the write can fail, leaving a
+// generation in memory the API server never accepted. A floor built from it would
+// sit above the real current generation, which is the deletion the floor exists to
+// prevent.
+func TestGCOrphanedResources_BailsWhenTheEngineIsUnreadable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	const (
+		neverAccepted = 551 // in memory only, its status write failed
+		persisted     = 549
+	)
+
+	// The generation the API server actually has, which a floor of 551 would
+	// place below itself and delete.
+	live := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engineName, persisted, ""), Namespace: ns,
+		Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(persisted)},
+	}}
+	ownedByEngine(engineName, live)
+
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).Build()
+	failing := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*computev1alpha1.FireboltEngine); ok {
+				return goerrors.New("injected engine read failure")
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{
+		Client:          base,
+		APIReader:       failing,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+	}
+
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, neverAccepted, neverAccepted)); !backlogged {
+		t.Error("expected an unreadable engine status to report a backlog")
+	}
+	if err := base.Get(context.Background(), types.NamespacedName{Name: live.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("nothing may be deleted on a status the sweep could not verify: %v", err)
+	}
+}
