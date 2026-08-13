@@ -34,9 +34,10 @@ import (
 // gcOrphanedResources deletes StatefulSets, Services, ConfigMaps, and
 // per-generation TLS Certificates/Secrets that belong to this engine (by
 // LabelEngine) but whose LabelGeneration matches none of CurrentGeneration,
-// ActiveGeneration, or DrainingGeneration. It returns true when the per-pass
-// delete budget ran out with orphans still standing, so the caller can requeue
-// promptly instead of waiting out the phase's own interval.
+// ActiveGeneration, or DrainingGeneration. It returns true when the pass left
+// orphans standing, either because the per-pass delete budget ran out or because
+// a delete failed, so the caller can requeue promptly instead of waiting out the
+// phase's own interval.
 //
 // Why this exists: Kubernetes does not support multi-resource transactions.
 // When computeCreating abandons a generation mid-flight (spec changed while
@@ -56,10 +57,10 @@ import (
 // exactly the abandoned generations to delete. An engine that never reaches a
 // terminal phase — pods crash-looping, or a drift signal churning generations —
 // is the case that leaks, so gating the sweep on Stable/Stopped would exclude
-// precisely the engines that need it. That is also why Reconcile runs this
-// before its gates rather than after applying state: an engine parked on an
-// unready instance or a rejected template needs its abandoned generations back
-// too. GCOrphans in formal/FireboltEngine.tla models the sweep, and its
+// precisely the engines that need it. Reconcile defers this call for the same
+// reason: an engine parked on an unready instance or a rejected pod template
+// never gets past those gates, and it needs its abandoned generations back too.
+// GCOrphans in formal/FireboltEngine.tla models the sweep, and its
 // GCIgnoresActiveGen counterexample pins what the ActiveGeneration entry buys.
 func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine) bool {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
@@ -77,7 +78,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		keepGens[strconv.Itoa(*engine.Status.DrainingGeneration)] = true
 	}
 
-	budget := GCMaxDeletesPerPass
+	sweep := &orphanSweep{budget: GCMaxDeletesPerPass}
 
 	engineLabels := client.MatchingLabels{LabelEngine: engine.Name}
 	ns := client.InNamespace(engine.Namespace)
@@ -85,37 +86,37 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list StatefulSets")
-		return false
+		return sweep.retry
 	}
 	// StatefulSets first: deleteIfExists deletes them with foreground
 	// propagation, so reclaiming the StatefulSet is also what reclaims the
 	// abandoned generation's pods. Sweeping pods directly would need a delete
 	// verb on pods that nothing else in the operator asks for.
 	for i := range stsList.Items {
-		if !r.sweepOrphan(ctx, log, &stsList.Items[i], keepGens, &budget) {
-			return true
+		if !r.sweepOrphan(ctx, log, &stsList.Items[i], keepGens, sweep) {
+			return sweep.retry
 		}
 	}
 
 	svcList := &corev1.ServiceList{}
 	if err := r.List(ctx, svcList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list Services")
-		return false
+		return sweep.retry
 	}
 	for i := range svcList.Items {
-		if !r.sweepOrphan(ctx, log, &svcList.Items[i], keepGens, &budget) {
-			return true
+		if !r.sweepOrphan(ctx, log, &svcList.Items[i], keepGens, sweep) {
+			return sweep.retry
 		}
 	}
 
 	cmList := &corev1.ConfigMapList{}
 	if err := r.List(ctx, cmList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list ConfigMaps")
-		return false
+		return sweep.retry
 	}
 	for i := range cmList.Items {
-		if !r.sweepOrphan(ctx, log, &cmList.Items[i], keepGens, &budget) {
-			return true
+		if !r.sweepOrphan(ctx, log, &cmList.Items[i], keepGens, sweep) {
+			return sweep.retry
 		}
 	}
 
@@ -138,12 +139,12 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	if err := r.List(ctx, certList, ns, engineLabels); err != nil {
 		if !certKindUnavailable(err) {
 			log.Error(err, "GC: failed to list Certificates")
-			return false
+			return sweep.retry
 		}
 	} else {
 		for i := range certList.Items {
-			if !r.sweepOrphan(ctx, log, &certList.Items[i], keepGens, &budget) {
-				return true
+			if !r.sweepOrphan(ctx, log, &certList.Items[i], keepGens, sweep) {
+				return sweep.retry
 			}
 		}
 	}
@@ -151,15 +152,25 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	secretList := &corev1.SecretList{}
 	if err := r.List(ctx, secretList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list Secrets")
-		return false
+		return sweep.retry
 	}
 	for i := range secretList.Items {
-		if !r.sweepOrphan(ctx, log, &secretList.Items[i], keepGens, &budget) {
-			return true
+		if !r.sweepOrphan(ctx, log, &secretList.Items[i], keepGens, sweep) {
+			return sweep.retry
 		}
 	}
 
-	return false
+	return sweep.retry
+}
+
+// orphanSweep is one pass's delete allowance and what it could not finish.
+type orphanSweep struct {
+	// budget is how many more objects this pass may delete.
+	budget int
+	// retry records that orphans are still standing, so the caller should come
+	// back sooner than the phase's own interval: either the budget ran out or a
+	// delete failed.
+	retry bool
 }
 
 // sweepOrphan deletes obj when its generation label is present and outside
@@ -188,21 +199,23 @@ func (r *FireboltEngineReconciler) sweepOrphan(
 	log logr.Logger,
 	obj client.Object,
 	keepGens map[string]bool,
-	budget *int,
+	sweep *orphanSweep,
 ) bool {
 	gen := obj.GetLabels()[LabelGeneration]
 	if gen == "" || keepGens[gen] || obj.GetDeletionTimestamp() != nil {
 		return true
 	}
-	if *budget <= 0 {
+	if sweep.budget <= 0 {
+		sweep.retry = true
 		return false
 	}
-	*budget--
+	sweep.budget--
 
 	kind := fmt.Sprintf("%T", obj)
 	log.Info("GC: deleting orphaned resource", "kind", kind, "name", obj.GetName(), "generation", gen)
 	if err := r.deleteIfExists(ctx, obj); err != nil {
 		log.Error(err, "GC: failed to delete orphaned resource", "kind", kind, "name", obj.GetName())
+		sweep.retry = true
 	}
 	return true
 }

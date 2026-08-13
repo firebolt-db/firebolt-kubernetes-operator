@@ -286,7 +286,8 @@ ReconcileTerminal_Drift ==
 \* Unguarded on instanceReady and classReady, unlike every reconciler action
 \* below: reclaiming an abandoned generation needs neither a ready instance nor
 \* a resolvable class. Models gcOrphanedResources() in engine_gc.go, which the
-\* top-level Reconcile runs on every pass, ahead of those gates.
+\* top-level Reconcile defers so it runs on the way out of every pass, including
+\* the passes those gates end early.
 GCOrphans ==
     /\ \E g \in Gens :
            /\ StsExists(g)

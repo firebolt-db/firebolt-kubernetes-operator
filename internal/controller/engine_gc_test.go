@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -793,5 +794,73 @@ func TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted(t *testing.T) {
 	}
 	if stsPropagation == nil || *stsPropagation != metav1.DeletePropagationForeground {
 		t.Errorf("StatefulSet delete propagation = %v, want Foreground so the generation's pods go with it", stsPropagation)
+	}
+}
+
+// TestReconcileSweepsWhenAGateEndsThePass covers the placement, not the sweep:
+// every gate in Reconcile ends the pass before the phase machine runs, and an
+// engine parked on one of them would keep its abandoned generations forever if
+// the sweep sat behind that gate. The instance gate is the representative case
+// because it is a normal, error-free early return.
+func TestReconcileSweepsWhenAGateEndsThePass(t *testing.T) {
+	const (
+		ns         = "ns-gc-gated"
+		instName   = "parent"
+		engName    = "eng-gc-gated"
+		abandonedG = 0
+		currentG   = 1
+	)
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("clientgoscheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("computev1alpha1.AddToScheme: %v", err)
+	}
+
+	abandonedSvc := genSvc(engName, ns, abandonedG)
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engName, Namespace: ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: currentG,
+			ActiveGeneration:  -1,
+		},
+	}
+	// No MetadataEndpoint on the instance: resolveInstanceInfo fails, so the
+	// instance gate returns before the phase machine and before applyEngineState.
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+	}
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance, engine, abandonedSvc).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	ctx := context.Background()
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(ctx, types.NamespacedName{Name: engName, Namespace: ns}, got); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if !apimeta.IsStatusConditionFalse(got.Status.Conditions, computev1alpha1.ConditionInstanceReady) {
+		t.Fatalf("expected the instance gate to have blocked this pass; conditions = %+v", got.Status.Conditions)
+	}
+	if err := cli.Get(ctx, types.NamespacedName{Name: abandonedSvc.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
+		t.Errorf("abandoned Service survived a pass the instance gate ended (err=%v)", err)
 	}
 }
