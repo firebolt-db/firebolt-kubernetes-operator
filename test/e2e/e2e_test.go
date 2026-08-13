@@ -412,6 +412,70 @@ var _ = Describe("Firebolt Engine", func() {
 		})
 	})
 
+	Describe("Abandoned Generation Sweep", Ordered, Serial, func() {
+		var (
+			instanceName = "inst-sweep" + queryConfig.Suffix
+			engineName   = "test-sweep" + queryConfig.Suffix + "-engine"
+			lc           *TestInstanceLifecycle
+			gate         = &DeleteGate{}
+		)
+		RegisterFailedSpecPodLogDump(&instanceName, &engineName)
+
+		const abandonedGen = 9000
+
+		BeforeAll(func() {
+			By("Setting up FireboltInstance with GC enabled and deletes gated")
+			var err error
+			lc, err = SetupTestInstance(ctx, instanceName, WithGC(), WithDeleteGate(gate))
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterAll(func() {
+			gate.Allow()
+			By("Cleaning up abandoned-generation sweep test")
+			defer TeardownTestInstance(ctx, lc)
+			Expect(DeleteEngine(ctx, engineName)).To(Succeed())
+			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
+		})
+
+		// The ticket's acceptance path: an engine that never leaves Creating, an
+		// abandoned generation still standing, and deletes that fail before they
+		// are accepted. The unit tests prove the reconciler issues and retries the
+		// deletes; only a real cluster shows the abandoned generation's pod going
+		// down with its StatefulSet.
+		It("should reclaim an abandoned generation while the engine is stuck creating", func() {
+			By("Creating engine with 1 replica")
+			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
+			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+			Expect(WaitForEngineStable(ctx, engineName, clusterReadyTimeout)).To(Succeed())
+
+			By("Pinning the engine in creating with a nodeSelector nothing satisfies")
+			Expect(UpdateEngineScheduling(ctx, engineName, map[string]string{"firebolt.io/no-such-node": "true"}, nil, nil)).To(Succeed())
+			Expect(WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseCreating, clusterTransitionTimeout)).To(Succeed())
+
+			By("Planting the resources an abandoned generation leaves behind")
+			Expect(PlantAbandonedGeneration(ctx, engineName, abandonedGen)).To(Succeed())
+			Expect(WaitForGenerationPodRunning(ctx, engineName, abandonedGen, clusterTransitionTimeout)).To(Succeed())
+
+			By("Rejecting the operator's deletes for that generation")
+			gate.Reject(abandonedGen)
+			Consistently(func() (int, error) {
+				return GenerationResourcesStanding(ctx, engineName, abandonedGen)
+			}, generationSweepTimeout, pollInterval).Should(BeNumerically(">", 0),
+				"the abandoned generation must survive while its deletes are rejected")
+
+			By("Accepting deletes again")
+			gate.Allow()
+			Expect(WaitForGenerationReclaimed(ctx, engineName, abandonedGen, generationSweepTimeout)).To(Succeed())
+
+			By("Verifying the engine never left creating")
+			engine, err := GetEngine(ctx, engineName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(engine.Status.Phase).To(Equal(computev1alpha1.PhaseCreating),
+				"the sweep must not depend on the engine reaching a terminal phase")
+		})
+	})
+
 	// Test 5: Harmonic minor scale - 1->2->3->2->1
 	Describe("Harmonic Minor Scale", Ordered, func() {
 		var (

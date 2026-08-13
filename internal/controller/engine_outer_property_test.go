@@ -153,6 +153,46 @@ func (m *outerEngineSim) Reconcile(t *rapid.T) {
 	}
 }
 
+// ReconcileUntilSettled reconciles until the reconciler stops asking to be
+// re-queued immediately, which is what the manager's work queue does in
+// production: Requeue=true is a rate-limited re-add, not a pause. Without it the
+// walk almost never threads the four consecutive passes a rollout needs, because
+// every other action (a spec edit, the instance gate closing, a delete) lands
+// between them; the engine then never leaves creating at generation 0 and every
+// invariant past the first phase is checked vacuously.
+//
+// Bounded so a reconciler that requeues forever fails the run instead of hanging
+// it. The bound is generous next to the longest real chain
+// (creating -> switching -> draining -> cleaning -> terminal, plus the
+// re-materialization passes each phase can insert).
+func (m *outerEngineSim) ReconcileUntilSettled(t *rapid.T) {
+	const maxPasses = 16
+
+	for i := 0; i < maxPasses; i++ {
+		if m.engineGone {
+			return
+		}
+		res, err := m.reconciler.Reconcile(m.ctx, ctrl.Request{NamespacedName: m.engineKey()})
+		if err != nil {
+			t.Fatalf("Reconcile returned error: %v", err)
+		}
+		// Every intermediate pass is checked, not just the settled state. The
+		// interesting states of a rollout are the ones in between: a sweep that
+		// forgot the active generation would delete its StatefulSet during
+		// creating and have cleaning legitimately delete it again by the time the
+		// action returns, so checking only at the end would see nothing.
+		m.Check(t)
+		if m.engineGone {
+			return
+		}
+		//nolint:staticcheck // SA1019: the phase machine still sets Requeue, so settling has to read it
+		if !res.Requeue {
+			return
+		}
+	}
+	t.Fatalf("engine did not settle within %d consecutive reconciles", maxPasses)
+}
+
 // ApplySpecChange bumps the engine image, triggering spec drift on the
 // next Reconcile.
 func (m *outerEngineSim) ApplySpecChange(t *rapid.T) {
@@ -283,6 +323,34 @@ func (m *outerEngineSim) Check(t *rapid.T) {
 		s.Phase != computev1alpha1.PhaseCleaning {
 		t.Fatalf("Inv_DrainingPhase: DrainingGen=%d but phase=%s",
 			*s.DrainingGeneration, s.Phase)
+	}
+
+	// Inv_ActiveHasSTS, checked here and not only in the compute-layer harness
+	// because the orphan sweep is part of the outer Reconcile: this is what runs
+	// the real gcOrphanedResources, in every phase, against a real API server. A
+	// keep set that forgot ActiveGeneration would take the StatefulSet traffic is
+	// on mid-rollout, the hazard GCIgnoresActiveGen pins in
+	// formal/FireboltEngine.tla.
+	//
+	// Phase "" is the window before the status is initialized, where
+	// ActiveGeneration still holds its zero value rather than the -1 the
+	// reconciler writes, and Reconcile returns before the sweep in that pass.
+	if s.Phase != "" && s.ActiveGeneration >= 0 {
+		sts := &appsv1.StatefulSet{}
+		key := types.NamespacedName{
+			Name:      genResourceName(outerEngineName, s.ActiveGeneration, ""),
+			Namespace: m.namespace,
+		}
+		switch err := m.env.cli.Get(m.ctx, key, sts); {
+		case errors.IsNotFound(err):
+			t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d (phase=%s) has no StatefulSet",
+				s.ActiveGeneration, s.Phase)
+		case err != nil:
+			t.Fatalf("Check Get active StatefulSet: %v", err)
+		case !sts.DeletionTimestamp.IsZero():
+			t.Fatalf("Inv_ActiveHasSTS: ActiveGen=%d (phase=%s) StatefulSet %q is terminating",
+				s.ActiveGeneration, s.Phase, sts.Name)
+		}
 	}
 
 	// Owner refs: every surviving child resource must point back at the engine.
