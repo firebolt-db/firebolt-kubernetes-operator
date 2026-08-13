@@ -67,9 +67,21 @@ CONSTANTS
     \* SigningKeyRotation.tla.
     \*
     \* They exist because a passing invariant is only evidence if it could have
-    \* failed. Six of the twelve invariants in this spec are falsifiable by
-    \* removing a guard, and those six are the ones flagged here. The other six
-    \* are not, for reasons worth writing down rather than leaving as a gap:
+    \* failed. Five of the twelve invariants in this spec are falsifiable by
+    \* removing a guard, as is the no-delete-of-the-current-generation action
+    \* property, and those six are what the flags here cover.
+    \*
+    \* Inv_TerminalHasSTS was falsifiable by a GCCurrentGeneration flag that
+    \* dropped GCOrphans' `g # gcView` exclusion, until the generation floor
+    \* subsumed that exclusion: with the floor in place, dropping it changes no
+    \* reachable state, and TLC said so by no longer reporting the violation. The
+    \* exclusion stays in the action as defense in depth and the flag is gone,
+    \* which leaves Inv_TerminalHasSTS covered by the floor's own flag instead
+    \* -- NoDeleteOfCurrentGeneration is the stronger statement of the same
+    \* hazard, since it forbids the delete outright rather than only in a
+    \* terminal phase.
+    \*
+    \* The other six invariants are not falsifiable by a dropped guard, for reasons worth writing down rather than leaving as a gap:
     \* Inv_GenOrder and Inv_DrainingOlderThanCurrent hold structurally (activeGen
     \* and drainingGen are only ever assigned currentGen or a smaller gen, so no
     \* guard removal reaches them -- only a mutated WRITE would);
@@ -93,9 +105,16 @@ CONSTANTS
       \* still-serving generation is activeGen while currentGen is the one being
       \* built, so without that exclusion GC deletes the StatefulSet traffic is
       \* landing on. Violates Inv_ActiveHasSTS.
-    GCCurrentGeneration,
-      \* TRUE removes GCOrphans' `g # currentGen` exclusion, so GC deletes the
-      \* generation it is meant to be keeping. Violates Inv_TerminalHasSTS.
+    GCIgnoresGenerationFloor,
+      \* TRUE removes GCOrphans' generation floor, the `g < NewestKept(...)`
+      \* conjunct, which is the guard that makes a stale keep set harmless. With
+      \* it removed, a sweep whose view of currentGeneration lags deletes the
+      \* StatefulSet of the generation being created; the reconciler re-creates
+      \* it, the view falls further behind, and the engine never converges.
+      \* Violates EventuallyTerminal, and it is a liveness violation rather than
+      \* a safety one because destroying a generation mid-creation leaves every
+      \* state invariant intact -- which is exactly why the implementation shipped
+      \* the hazard.
     GCDrainingGeneration,
       \* TRUE removes GCOrphans' `g # drainingGen` exclusion, so the sweep takes
       \* the StatefulSet the drain is waiting on out from under it. Only
@@ -284,6 +303,17 @@ ReconcileTerminal_Drift ==
     /\ podsReady'  = FALSE
     /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
 
+\* The newest generation a sweep is keeping, given the currentGeneration it
+\* observed: the floor at or above which it may delete nothing. activeGen and
+\* drainingGen are -1 when unset, which never wins the maximum because gcView is
+\* never negative.
+\*
+\* Only gcView is modelled as possibly stale. The implementation reads all three
+\* from one status object, so a real keep set is stale in all three at once; this
+\* is the coarser statement, and the floor it feeds is what the guard rests on.
+Max2(a, b) == IF a > b THEN a ELSE b
+NewestKept(gcView) == Max2(Max2(gcView, activeGen), drainingGen)
+
 \* GC: delete STSes that belong to none of currentGen, activeGen, drainingGen.
 \* Runs opportunistically in every phase; safe to repeat. Keeping activeGen is
 \* what makes the phase gate unnecessary: mid-rollout it is the generation
@@ -295,9 +325,22 @@ ReconcileTerminal_Drift ==
 \* top-level Reconcile defers so it runs on the way out of every pass, including
 \* the passes those gates end early.
 GCOrphans ==
-    /\ \E g \in Gens :
+    \* gcView is the currentGeneration this pass observes, and it is allowed to
+    \* be any generation up to the real one: the keep set is built from a status
+    \* read, and a read can be behind the writes of earlier passes. That is not a
+    \* hypothetical -- it is what a cached read does under generation churn.
+    /\ \E gcView \in 0..currentGen :
+       \E g \in Gens :
            /\ StsExists(g)
-           /\ (g # currentGen \/ GCCurrentGeneration)
+           \* Generation floor. Abandoned generations are strictly older than the
+           \* keep set, because once currentGeneration moves on nothing recreates
+           \* an older one; a generation at or above the newest kept one can only
+           \* mean this view is stale. Refusing it costs a delayed reclaim, which
+           \* the next pass makes good.
+           /\ (g < NewestKept(gcView) \/ GCIgnoresGenerationFloor)
+           \* Subsumed by the floor above, kept as defense in depth. See the
+           \* constant block for why it carries no counterexample flag.
+           /\ g # gcView
            /\ (g # activeGen \/ GCIgnoresActiveGen)
            \* activeGen and drainingGen are -1 when unset, never a gen in Gens.
            /\ (g # drainingGen \/ GCDrainingGeneration)
@@ -613,6 +656,34 @@ Safety ==
 \* permanently unready instance or pods that never start -- correct behavior.
 
 EventuallyTerminal == <>(phase \in TerminalPhases)
+
+\* ---------------------------------------------------------------------------
+\* Action properties
+\* ---------------------------------------------------------------------------
+
+\* Nothing may delete the StatefulSet of the generation the engine is on without
+\* moving the engine off it in the same step. The abandon path qualifies: it
+\* deletes currentGen's StatefulSet and bumps currentGen together. A sweep does
+\* not, so this is the floor's contract, stated as an action property because the
+\* hazard leaves every state invariant intact -- deleting a generation
+\* mid-creation is indistinguishable, state by state, from not having created it
+\* yet, which is why the implementation shipped it and no invariant complained.
+\*
+\* EventuallyTerminal does not cover it either: the reconciler re-creates what the
+\* sweep removed, and strong fairness on the creating-phase actions is enough to
+\* reach a terminal phase anyway. The model converges where the implementation
+\* burned hundreds of generations an hour, so the property has to name the step
+\* rather than the outcome.
+\*
+\* The MaxGen carve-out is the model's boundary alias, not a real exemption:
+\* ReconcileCreating_SpecDrift_AtMax deletes in place and reuses MaxGen instead of
+\* growing the state space, so at that bound an abandon is shaped exactly like the
+\* hazard.
+NoDeleteOfCurrentGeneration ==
+    [][ (/\ stsSpecVer[currentGen] # -1
+         /\ stsSpecVer'[currentGen] = -1
+         /\ currentGen # MaxGen)
+        => currentGen' # currentGen ]_vars
 
 \* ---------------------------------------------------------------------------
 \* Temporal spec
