@@ -14835,6 +14835,11 @@
           ],
           "additionalProperties": false
         },
+        "metadataNG": {
+          "default": false,
+          "description": "MetadataNG is experimental and selects the next-generation metadata\nservice configuration.\nThe operator does not select or rewrite the metadata container image;\nusers must set a compatible image through spec.metadata.template.\nWhen false or omitted, the legacy metadata configuration is rendered.",
+          "type": "boolean"
+        },
         "metricScrapeMode": {
           "default": "PodIP",
           "description": "MetricScrapeMode selects the transport the operator uses to scrape\nengine pod /metrics for the drain probe and autoStop activity\npoll. Read fresh on every scrape so it can be flipped without a\ncontroller restart. Defaults to PodIP; flip to ApiserverProxy\nonly when in-cluster pod IPs aren't reachable from the controller\n(out-of-cluster `make run`, or networks that block node-to-node\non MetricsPort but allow apiserver-proxy).",

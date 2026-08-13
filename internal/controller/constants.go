@@ -167,13 +167,16 @@ const (
 	// constant must be revisited.
 	PostgresUID int64 = 70
 
-	// MetadataUID is the numeric UID/GID of the built-in `dedicated-pensieve`
-	// user in the metadata image. The Dockerfile creates the user with this
-	// fixed UID and sets `USER dedicated-pensieve`, so pinning
+	// MetadataUID is the numeric UID/GID of the built-in user in the legacy
+	// metadata image. The Dockerfile creates the user with this fixed UID, so pinning
 	// RunAsUser/RunAsGroup here just locks in the image's own default and
-	// lets the pod-level SecurityContext assert RunAsNonRoot=true. Revisit
-	// if the metadata image's user is ever renumbered.
+	// lets the pod-level SecurityContext assert RunAsNonRoot=true.
 	MetadataUID int64 = 1111
+	// MetadataNGUID is the numeric UID/GID of the built-in user in the
+	// metadata-ng image. spec.metadataNG selects this identity but deliberately
+	// does not select an image; users remain responsible for choosing a
+	// compatible metadata image through spec.metadata.template.
+	MetadataNGUID int64 = 1112
 
 	// DefaultDrainCheckInterval is how often the operator polls draining pods.
 	DefaultDrainCheckInterval = 5 * time.Second

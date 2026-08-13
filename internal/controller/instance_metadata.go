@@ -103,8 +103,29 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
 	// configuration. The CRD also applies a Pattern admission check on
 	// host/database/schema as defense-in-depth.
 	//
-	// dedicated-pensieve (metadata image) loads YAML config since FB-2743;
-	// the document root must be a YAML map (a scalar/sequence root is rejected).
+	// Both metadata service generations load a YAML map rooted at pensieve_lite.
+	// metadata-ng intentionally omits legacy-only keepalive, garbage-collection,
+	// thread-count, and logging settings. The metadata-ng service either does not
+	// implement them or already uses the equivalent behavior, and warns when the
+	// legacy settings are present.
+	if instance.Spec.MetadataNG {
+		return fmt.Sprintf(`pensieve_lite:
+  default_account_id: %s
+  host: 0.0.0.0
+  port: %d
+  metadata_storage:
+    postgresql:
+      host: %s
+      port: %d
+      database: %s
+      schema: %s
+`,
+			yamlString(instance.Spec.ID), MetadataServicePort,
+			yamlString(pgHost), pgPort, yamlString(pgDatabase), yamlString(pgSchema))
+	}
+
+	// The legacy metadata image loads YAML config since FB-2743; the document
+	// root must be a YAML map (a scalar/sequence root is rejected).
 	return fmt.Sprintf(`pensieve_lite:
   default_account_id: %s
   host: 0.0.0.0
@@ -218,9 +239,9 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
-// metadata (pensieve) service. The pod is hardened to the same standard as
+// metadata service. The pod is hardened to the same standard as
 // the internal PostgreSQL and Envoy gateway pods: it runs as the image's
-// built-in non-root `dedicated-pensieve` user (MetadataUID), drops all
+// generation-specific built-in non-root user, drops all
 // Linux capabilities, sets `RuntimeDefault` seccomp, denies privilege
 // escalation, and uses a read-only root filesystem backed by an emptyDir
 // at `/tmp` for the binary's transient files. `automountServiceAccountToken`
@@ -292,7 +313,7 @@ func effectiveMetadataPodTemplate(
 	image := metadataImageFromUser(userPrimary)
 	pullPolicy := metadataImagePullPolicy(userPrimary, image)
 
-	metadataUID := MetadataUID
+	metadataUID := metadataRunAsUID(instance)
 	configMapName := metadataConfigMapName(instance.Name)
 	secretName := metadataCredsSecretName(instance)
 
@@ -383,8 +404,8 @@ func effectiveMetadataPodTemplate(
 	// metadataPodSecurityContext starts from the user-supplied
 	// PodSecurityContext (deep-copied) and stamps the operator's
 	// non-root posture on top. RunAsUser/RunAsGroup are forced to
-	// MetadataUID because pensieve's data on disk is owned by that
-	// UID and the binary is hardcoded to that user inside the image;
+	// the generation-specific metadata UID because files in each image are
+	// owned by that built-in user;
 	// a different RunAsUser would mismatch the on-disk ownership.
 	podSC := metadataPodSecurityContext(userPodSpec.SecurityContext, metadataUID)
 
@@ -414,6 +435,15 @@ func effectiveMetadataPodTemplate(
 			Volumes:                       volumes,
 		},
 	}
+}
+
+// metadataRunAsUID returns the built-in user identity for the selected metadata
+// service generation. The mode does not infer or rewrite the image reference.
+func metadataRunAsUID(instance *computev1alpha1.FireboltInstance) int64 {
+	if instance.Spec.MetadataNG {
+		return MetadataNGUID
+	}
+	return MetadataUID
 }
 
 // metadataImageFromUser returns the user-supplied image on the

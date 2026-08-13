@@ -172,6 +172,86 @@ func TestBuildMetadataConfigYAML_GarbageCollectionKeys(t *testing.T) {
 	}
 }
 
+func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
+	inst := mkMetadataInstance()
+	inst.Spec.MetadataNG = true
+
+	got := buildMetadataConfigYAML(inst)
+
+	for _, want := range []string{
+		`default_account_id: "acc-1"`,
+		`host: "inst-metadata-pg.ns-1.svc.cluster.local"`,
+		`port: 5432`,
+		`database: "firebolt_metadata"`,
+		`schema: "public"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in metadata-ng config; got:\n%s", want, got)
+		}
+	}
+
+	for _, legacyOnly := range []string{
+		"server_threads",
+		"log_level",
+		"keepalive",
+		"connect_timeout_sec",
+		"garbage_collection",
+	} {
+		if strings.Contains(got, legacyOnly) {
+			t.Errorf("legacy-only key %q must not be rendered for metadata-ng; got:\n%s", legacyOnly, got)
+		}
+	}
+
+	var root map[string]any
+	if err := yaml.Unmarshal([]byte(got), &root); err != nil {
+		t.Fatalf("metadata-ng config must be valid YAML: %v\n%s", err, got)
+	}
+	if _, ok := root["pensieve_lite"]; !ok {
+		t.Fatalf("metadata-ng config missing pensieve_lite root: %v", root)
+	}
+}
+
+func TestMetadataNGPreservesUserImageAndRollsConfig(t *testing.T) {
+	legacy := mkMetadataInstance()
+	legacy.Spec.Metadata.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  computev1alpha1.MetadataContainerName,
+			Image: "registry.example/metadata:user-selected",
+		}},
+	}}
+	ng := legacy.DeepCopy()
+	ng.Spec.MetadataNG = true
+
+	legacyConfig := buildMetadataConfigYAML(legacy)
+	ngConfig := buildMetadataConfigYAML(ng)
+	legacyDep := buildMetadataDeployment(legacy, legacyConfig)
+	ngDep := buildMetadataDeployment(ng, ngConfig)
+
+	if got, want := legacyDep.Spec.Template.Spec.Containers[0].Image, "registry.example/metadata:user-selected"; got != want {
+		t.Errorf("legacy image = %q, want %q", got, want)
+	}
+	if got, want := ngDep.Spec.Template.Spec.Containers[0].Image, "registry.example/metadata:user-selected"; got != want {
+		t.Errorf("metadata-ng image = %q, want unchanged user image %q", got, want)
+	}
+	if legacyConfig == ngConfig {
+		t.Fatal("metadata-ng config must differ from legacy config")
+	}
+	legacyHash := legacyDep.Spec.Template.Annotations[AnnotationConfigHash]
+	ngHash := ngDep.Spec.Template.Annotations[AnnotationConfigHash]
+	if legacyHash == ngHash {
+		t.Fatalf("config hashes must differ so toggling metadataNG rolls the Deployment: %q", legacyHash)
+	}
+	if got := *legacyDep.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser; got != MetadataUID {
+		t.Errorf("legacy RunAsUser = %d, want %d", got, MetadataUID)
+	}
+	if got := *ngDep.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser; got != MetadataNGUID {
+		t.Errorf("metadata-ng RunAsUser = %d, want %d", got, MetadataNGUID)
+	}
+	if got := *ngDep.Spec.Template.Spec.SecurityContext.RunAsGroup; got != MetadataNGUID {
+		t.Errorf("metadata-ng pod RunAsGroup = %d, want %d", got, MetadataNGUID)
+	}
+}
+
 // The metadata (pensieve) pod has the same security posture as the
 // internal PostgreSQL and Envoy gateway pods: built-in non-root user,
 // read-only rootfs, all capabilities dropped, RuntimeDefault seccomp, and
