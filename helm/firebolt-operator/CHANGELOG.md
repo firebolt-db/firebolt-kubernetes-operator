@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.4.1...firebolt-operator-chart-0.5.0) (2026-08-13)
+
+
+### Features
+
+* add experimental metadata-ng mode (FB-3014) ([7556006](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/755600618ed6d52a850cd19bbc6493f5f1e95cb8))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.7.0 ([8414e9a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8414e9adbf4fc77bdb30ae9d10980d7aad4fe3e1))
+
 ## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.4.0...firebolt-operator-chart-0.4.1) (2026-08-12)
 
 
