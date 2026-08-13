@@ -147,7 +147,7 @@ A generation can be abandoned mid-flight: the spec changes while its pods are st
 
 The sweep is what reclaims them. A reconcile that gets as far as reading the engine's status lists this engine's labeled StatefulSets, Services, ConfigMaps, and per-generation TLS Certificates/Secrets, and deletes those whose `firebolt.io/generation` label is none of `currentGeneration`, `activeGeneration`, or `drainingGeneration`.
 
-Three passes deliberately do not sweep: the one that initializes an empty status and the one that installs the finalizer, which both requeue immediately and have nothing to reclaim yet; the deletion path, where `reconcileDelete` removes every generation instead; and any pass that panics, since a panic means the status backing the keep set describes a state the reconciler holds to be impossible.
+Four kinds of pass deliberately do not sweep: the one that initializes an empty status and the one that installs the finalizer, which both requeue immediately and have nothing to reclaim yet; the deletion path, where `reconcileDelete` removes every generation instead; and any pass that panics, since a panic means the status backing the keep set describes a state the reconciler holds to be impossible.
 
 Three properties make that safe, unconditional, and bounded:
 
