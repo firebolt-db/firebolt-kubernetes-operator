@@ -250,6 +250,12 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if p := recover(); p != nil {
 				panic(p)
 			}
+			// Error returns sweep too, and on purpose: a pass that cannot read
+			// engine state, or whose status write fails, is exactly the kind of
+			// wedge that used to accumulate abandoned generations. The keep set
+			// is safe either way — no phase writes per-generation resources for
+			// a generation it bumped to in the same pass, so whatever the
+			// ensures created is still in the keep set the sweep reads.
 			res = applyGCBacklogRequeue(res, r.gcOrphanedResources(ctx, engine))
 		}()
 	}
