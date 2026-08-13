@@ -1278,8 +1278,13 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 // the controller tests.
 //
 // Objects without a generation label (the cluster Service) are out of scope, and
-// an object already terminating counts as still present: the assertion is that
-// the abandoned generations are actually gone, not merely marked.
+// so is an object already carrying a deletionTimestamp: the operator has asked
+// for it, and what happens next belongs to the kubelet and the cluster garbage
+// collector. An engine pod drains on SIGTERM and its StatefulSet then waits on
+// foregroundDeletion, so a generation's teardown routinely outlives the suite's
+// 15s ceiling for condition waits. Same reading as checkNoOrphans in
+// engine_outer_property_test.go. What this catches is an abandoned generation
+// nothing ever asked to delete, which is the shape of the leak.
 func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	selector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
@@ -1294,8 +1299,11 @@ func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName strin
 		}
 		want := strconv.Itoa(currentGen)
 
-		stale := func(labels map[string]string) bool {
-			gen, ok := labels["firebolt.io/generation"]
+		stale := func(meta metav1.ObjectMeta) bool {
+			if !meta.DeletionTimestamp.IsZero() {
+				return false
+			}
+			gen, ok := meta.Labels["firebolt.io/generation"]
 			return ok && gen != want
 		}
 
@@ -1305,8 +1313,8 @@ func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName strin
 			lastErr = err
 		}
 		for i := range stsList.Items {
-			if stale(stsList.Items[i].Labels) {
-				lastErr = fmt.Errorf("StatefulSet %s belongs to an abandoned generation", stsList.Items[i].Name)
+			if stale(stsList.Items[i].ObjectMeta) {
+				lastErr = fmt.Errorf("StatefulSet %s belongs to an abandoned generation and nothing has deleted it", stsList.Items[i].Name)
 			}
 		}
 
@@ -1315,8 +1323,8 @@ func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName strin
 			lastErr = err
 		}
 		for i := range svcList.Items {
-			if stale(svcList.Items[i].Labels) {
-				lastErr = fmt.Errorf("Service %s belongs to an abandoned generation", svcList.Items[i].Name)
+			if stale(svcList.Items[i].ObjectMeta) {
+				lastErr = fmt.Errorf("Service %s belongs to an abandoned generation and nothing has deleted it", svcList.Items[i].Name)
 			}
 		}
 
@@ -1325,8 +1333,8 @@ func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName strin
 			lastErr = err
 		}
 		for i := range podList.Items {
-			if stale(podList.Items[i].Labels) {
-				lastErr = fmt.Errorf("pod %s belongs to an abandoned generation", podList.Items[i].Name)
+			if stale(podList.Items[i].ObjectMeta) {
+				lastErr = fmt.Errorf("pod %s belongs to an abandoned generation and nothing has deleted it", podList.Items[i].Name)
 			}
 		}
 
