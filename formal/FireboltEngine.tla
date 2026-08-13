@@ -283,8 +283,10 @@ ReconcileTerminal_Drift ==
 \* what makes the phase gate unnecessary: mid-rollout it is the generation
 \* serving traffic, and an engine that never reaches a terminal phase is
 \* precisely the one whose abandoned generations accumulate.
-\* Models gcOrphanedResources() in engine_gc.go, which the top-level Reconcile
-\* runs after applyEngineState on every pass.
+\* Unguarded on instanceReady and classReady, unlike every reconciler action
+\* below: reclaiming an abandoned generation needs neither a ready instance nor
+\* a resolvable class. Models gcOrphanedResources() in engine_gc.go, which the
+\* top-level Reconcile runs on every pass, ahead of those gates.
 GCOrphans ==
     /\ \E g \in Gens :
            /\ StsExists(g)
