@@ -241,14 +241,16 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// next pass.
 	if !r.DisableGC {
 		defer func() {
-			if r.gcOrphanedResources(ctx, engine) {
-				// The sweep left orphans standing, because it spent its
-				// per-pass delete budget or because a delete failed. Come back
-				// for the rest sooner than this phase would ask for. An error
-				// return ignores this and uses controller-runtime's backoff,
-				// which still converges.
-				res.RequeueAfter = soonestRequeue(res.RequeueAfter, GCBacklogRequeue)
+			// A panic means the pass hit a state the reconciler holds to be
+			// impossible — computeStable's negative ActiveGeneration guard, or
+			// applyEngineState's terminal-consistency guard. The status is not
+			// trustworthy then, and the sweep's keep set is read straight from
+			// it, so deleting on the way out could take the generation traffic
+			// is on. Re-panic instead: the crash is the correct outcome.
+			if p := recover(); p != nil {
+				panic(p)
 			}
+			res = applyGCBacklogRequeue(res, r.gcOrphanedResources(ctx, engine))
 		}()
 	}
 
@@ -446,6 +448,23 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		Requeue:      result.Requeue,
 		RequeueAfter: requeueAfter,
 	}, nil
+}
+
+// applyGCBacklogRequeue shortens res's delay when the orphan sweep left work
+// behind, either because it spent its per-pass delete budget or because a delete
+// failed, so the rest follows sooner than the phase's own interval would ask.
+//
+// A result that already asks for an immediate requeue is left alone:
+// controller-runtime reads RequeueAfter first, so writing a delay over
+// Requeue=true would turn the rate-limited retry a generation transition asked
+// for into a two-second wait, which is both slower for the backlog and not what
+// the phase machine requested.
+func applyGCBacklogRequeue(res ctrl.Result, backlogged bool) ctrl.Result {
+	if !backlogged || res.Requeue { //nolint:staticcheck // SA1019: the phase machine still sets Requeue, so the merge has to read it
+		return res
+	}
+	res.RequeueAfter = soonestRequeue(res.RequeueAfter, GCBacklogRequeue)
+	return res
 }
 
 // soonestRequeue picks the earlier of two requeue delays, treating zero as

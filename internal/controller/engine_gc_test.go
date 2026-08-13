@@ -21,6 +21,7 @@ import (
 	goerrors "errors"
 	"strconv"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -762,11 +763,17 @@ func TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted(t *testing.T) {
 	ctx := context.Background()
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}
 
-	if _, err := r.Reconcile(ctx, req); err != nil {
+	res, err := r.Reconcile(ctx, req)
+	if err != nil {
 		t.Fatalf("Reconcile with deletes rejected: %v", err)
 	}
 	if err := base.Get(ctx, types.NamespacedName{Name: abandonedSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Fatalf("abandoned StatefulSet should still stand while deletes are rejected: %v", err)
+	}
+	// The rejected deletes are a backlog, so the pass comes back for them
+	// sooner than the Creating phase's own interval.
+	if res.RequeueAfter != GCBacklogRequeue {
+		t.Errorf("RequeueAfter = %v after rejected deletes, want the backlog interval %v", res.RequeueAfter, GCBacklogRequeue)
 	}
 
 	rejecting = false
@@ -862,5 +869,57 @@ func TestReconcileSweepsWhenAGateEndsThePass(t *testing.T) {
 	}
 	if err := cli.Get(ctx, types.NamespacedName{Name: abandonedSvc.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
 		t.Errorf("abandoned Service survived a pass the instance gate ended (err=%v)", err)
+	}
+}
+
+// TestApplyGCBacklogRequeue pins how a sweep backlog folds into the reconcile
+// result. Two cases carry the weight: a result that already asked for an
+// immediate requeue must keep it, since controller-runtime reads RequeueAfter
+// first and a delay written over Requeue=true silently replaces a rate-limited
+// retry with a wait; and a phase interval longer than the backlog interval must
+// give way to it.
+func TestApplyGCBacklogRequeue(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         ctrl.Result
+		backlogged bool
+		want       ctrl.Result
+	}{
+		{
+			name: "no backlog leaves the result alone",
+			in:   ctrl.Result{RequeueAfter: 30 * time.Second},
+			want: ctrl.Result{RequeueAfter: 30 * time.Second},
+		},
+		{
+			name:       "immediate requeue survives a backlog",
+			in:         ctrl.Result{Requeue: true},
+			backlogged: true,
+			want:       ctrl.Result{Requeue: true},
+		},
+		{
+			name:       "a longer phase interval yields to the backlog",
+			in:         ctrl.Result{RequeueAfter: 30 * time.Second},
+			backlogged: true,
+			want:       ctrl.Result{RequeueAfter: GCBacklogRequeue},
+		},
+		{
+			name:       "a shorter phase interval is kept",
+			in:         ctrl.Result{RequeueAfter: time.Second},
+			backlogged: true,
+			want:       ctrl.Result{RequeueAfter: time.Second},
+		},
+		{
+			name:       "no interval at all takes the backlog interval",
+			in:         ctrl.Result{},
+			backlogged: true,
+			want:       ctrl.Result{RequeueAfter: GCBacklogRequeue},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := applyGCBacklogRequeue(tc.in, tc.backlogged); got != tc.want {
+				t.Errorf("applyGCBacklogRequeue(%+v, %t) = %+v, want %+v", tc.in, tc.backlogged, got, tc.want)
+			}
+		})
 	}
 }
