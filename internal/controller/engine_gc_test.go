@@ -1505,16 +1505,27 @@ func TestGCOrphanedResources_ReadsTheStatusUncached(t *testing.T) {
 	orphan := genSvc(engineName, ns, 3)
 	newest := genSvc(engineName, ns, 4)
 
-	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live, orphan, newest).Build()
+	// Two separate stores, so the test fails if the sweep reads the engine through
+	// the cached client: that one still calls generation 3 current, which puts the
+	// orphan at the floor and protects it.
+	cached := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: 3,
+			ActiveGeneration:  3,
+		},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cached, orphan, newest).Build()
+	apiReader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).Build()
 	r := &FireboltEngineReconciler{
 		Client:          fc,
-		APIReader:       fc,
+		APIReader:       apiReader,
 		Scheme:          scheme,
 		MetricsRecorder: metrics.NoOpEngineRecorder{},
 	}
 
-	stale := gcTestEngine(engineName, ns, 3, 3)
-	r.gcOrphanedResources(context.Background(), stale)
+	r.gcOrphanedResources(context.Background(), cached.DeepCopy())
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
 		t.Errorf("generation 3 is abandoned according to the live status and should have been reclaimed (err=%v)", err)
@@ -1549,5 +1560,64 @@ func TestGCOrphanedResources_StopsWhenTheEngineIsGone(t *testing.T) {
 	}
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
 		t.Errorf("the sweep must not delete on behalf of an engine it cannot read: %v", err)
+	}
+}
+
+// TestGCOrphanedResources_ServiceSelectorDoesNotRaiseTheFloor covers where the
+// floor may be anchored. The generation the cluster Service selects is protected,
+// but it is read from a different object than the status and can outlive the
+// engine that created it: a Service left by an earlier engine of the same name,
+// held by a finalizer, can select a generation far above anything the current
+// engine has reached. Letting it raise the floor would put the engine's own
+// generations below the floor and hand the sweep exactly the delete it exists to
+// prevent.
+func TestGCOrphanedResources_ServiceSelectorDoesNotRaiseTheFloor(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	const (
+		staleSelectorGen = 100 // left behind by an earlier engine of this name
+		currentGen       = 50  // where this engine actually is
+	)
+
+	sts := func(gen int) *appsv1.StatefulSet {
+		obj := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engineName, gen, ""), Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+		}}
+		ownedByEngine(engineName, obj)
+		return obj
+	}
+	current := sts(currentGen)
+	orphan := sts(currentGen - 2)
+
+	clusterSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + SuffixService, Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName},
+		},
+		Spec: corev1.ServiceSpec{Selector: map[string]string{
+			LabelEngine:     engineName,
+			LabelGeneration: strconv.Itoa(staleSelectorGen),
+		}},
+	}
+	ownedByEngine(engineName, clusterSvc)
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(current, orphan, clusterSvc).Build()
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+
+	// The status the sweep works from is behind, which is the case the floor is
+	// for; with the selector anchoring the floor at 100 the current generation
+	// would fall below it and be deleted.
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, currentGen-1, currentGen-1))
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: current.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("a stale Service selector must not raise the floor past a live generation: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &appsv1.StatefulSet{}); !errors.IsNotFound(err) {
+		t.Errorf("an older abandoned generation should still be reclaimed (err=%v)", err)
 	}
 }

@@ -675,14 +675,17 @@ EventuallyTerminal == <>(phase \in TerminalPhases)
 \* burned hundreds of generations an hour, so the property has to name the step
 \* rather than the outcome.
 \*
-\* The MaxGen carve-out is the model's boundary alias, not a real exemption:
-\* ReconcileCreating_SpecDrift_AtMax deletes in place and reuses MaxGen instead of
-\* growing the state space, so at that bound an abandon is shaped exactly like the
-\* hazard.
+\* Scoped to a StatefulSet that still matches the spec, which is what separates
+\* the two kinds of delete without needing an action marker. An abandon deletes a
+\* generation precisely because it has drifted, including the MaxGen alias where
+\* ReconcileCreating_SpecDrift_AtMax deletes in place and reuses the bound instead
+\* of growing the state space. A sweep deletes whatever its keep set failed to
+\* cover, drift or not, so a sweep that takes the generation being built is caught
+\* at every generation including that bound.
 NoDeleteOfCurrentGeneration ==
     [][ (/\ stsSpecVer[currentGen] # -1
          /\ stsSpecVer'[currentGen] = -1
-         /\ currentGen # MaxGen)
+         /\ StsMatchesSpec(currentGen))
         => currentGen' # currentGen ]_vars
 
 \* ---------------------------------------------------------------------------

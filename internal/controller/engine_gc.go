@@ -100,7 +100,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	switch err := r.Get(ctx, clusterSvcKey, clusterSvc); {
 	case err == nil:
 		if gen, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
-			keep.addLabel(gen)
+			keep.addExact(gen)
 		}
 	case !apierrors.IsNotFound(err):
 		log.Error(err, "GC: failed to read the cluster Service", "name", clusterSvcKey.Name)
@@ -234,15 +234,21 @@ func (k *generationKeepSet) add(gen int) {
 	}
 }
 
-// addLabel adds a generation read from a label. A value that is not a number is
-// ignored: it cannot place the resource against the floor, and nothing the
-// operator writes carries one.
-func (k *generationKeepSet) addLabel(gen string) {
-	n, err := strconv.Atoi(gen)
-	if err != nil {
+// addExact protects one generation without moving the floor. Used for the
+// generation the cluster Service selects, which is read from a different object
+// than the status and cannot anchor the floor: a Service left behind by an
+// earlier engine of the same name, held by a finalizer, can select a generation
+// far above anything the current engine has reached. Raising the floor to it
+// would put the engine's own live generation below the floor, which is the
+// deletion this guard exists to prevent.
+//
+// A value that is not a number is ignored; nothing the operator writes carries
+// one.
+func (k *generationKeepSet) addExact(gen string) {
+	if _, err := strconv.Atoi(gen); err != nil {
 		return
 	}
-	k.add(n)
+	k.gens[gen] = true
 }
 
 // protects reports whether the sweep must leave a resource carrying this
@@ -360,6 +366,13 @@ func (r *FireboltEngineReconciler) sweepOrphan(
 // it back here. It is admitted on the same provenance its deletion path uses,
 // the cert-manager certificate-name annotation naming a per-generation engine
 // certificate, and on nothing else.
+//
+// The bound that leaves: a Secret left behind by an earlier engine of the same
+// name carries no UID to distinguish it, so if its generation is above this
+// engine's floor the sweep will not reclaim it. Retention is the safe side of
+// that trade, and reconcileDelete reclaims those Secrets by name provenance
+// without a floor when the engine they belonged to is deleted, which is the path
+// that has to have failed for one to be there at all.
 func engineOwnsForGC(engine *computev1alpha1.FireboltEngine, obj client.Object) bool {
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Controller != nil && *ref.Controller && ref.UID == engine.UID {
