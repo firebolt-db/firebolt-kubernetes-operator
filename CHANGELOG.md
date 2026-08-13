@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.7.0...firebolt-operator-v0.7.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **controller:** anchor the generation floor to the engine's own status (FB-3011) ([c3a5e99](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c3a5e991d9d1db4b5b7e31071c9df03eb78321c7))
+* **controller:** build the whole keep set from one view of the cluster (FB-3011) ([0fd716c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0fd716cfbab64118c413577cfe25fb6310b4940d))
+* **controller:** end the pass when the engine status cannot be read (FB-3011) ([bcde48d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/bcde48d86bf2f8300900cbf8da4120e1ce10f7cc))
+* **controller:** never sweep a generation newer than the keep set (FB-3011) ([80b9a21](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/80b9a2155f23c06d24c82d3eb919b095def28ad4))
+
 ## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.6.1...firebolt-operator-v0.7.0) (2026-08-13)
 
 
