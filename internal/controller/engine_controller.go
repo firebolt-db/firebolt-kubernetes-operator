@@ -458,9 +458,13 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // controller-runtime reads RequeueAfter first, so writing a delay over
 // Requeue=true would turn the rate-limited retry a generation transition asked
 // for into a two-second wait, which is both slower for the backlog and not what
-// the phase machine requested.
+// the phase machine requested. Requeue only means "immediate" when no delay is
+// set beside it, since computeStable can set both — a stable engine
+// re-materializing a missing ConfigMap asks for a requeue and a 30s poll — and
+// controller-runtime then honors the delay.
 func applyGCBacklogRequeue(res ctrl.Result, backlogged bool) ctrl.Result {
-	if !backlogged || res.Requeue { //nolint:staticcheck // SA1019: the phase machine still sets Requeue, so the merge has to read it
+	//nolint:staticcheck // SA1019: the phase machine still sets Requeue, so the merge has to read it
+	if !backlogged || (res.Requeue && res.RequeueAfter == 0) {
 		return res
 	}
 	res.RequeueAfter = soonestRequeue(res.RequeueAfter, GCBacklogRequeue)

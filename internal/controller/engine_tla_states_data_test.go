@@ -59,6 +59,7 @@ var tlaRequiredInvariants = []string{
 	"Inv_ServiceValid",
 	"Inv_TerminalHasSTS",
 	"Inv_ActiveHasSTS",
+	"Inv_DrainingHasSTS",
 	"Inv_ServiceKnownGen",
 	"Inv_DrainingPhase",
 	"Inv_TerminalNoDraining",
