@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	goerrors "errors"
 	"strconv"
 	"testing"
 
@@ -31,6 +32,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -344,5 +346,224 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: currentSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("current StatefulSet should not have been deleted: %v", err)
+	}
+}
+
+// gcTestEngine returns an engine whose status places it mid-rollout: still
+// Creating a new generation while an older one serves traffic.
+func gcTestEngine(name, ns string, currentGen, activeGen int) *computev1alpha1.FireboltEngine {
+	return &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: currentGen,
+			ActiveGeneration:  activeGen,
+		},
+	}
+}
+
+// genSvc builds a per-generation headless Service the sweep can see.
+func genSvc(engineName, ns string, gen int) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engineName, gen, SuffixHL), Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+		},
+	}
+}
+
+// TestGCOrphanedResources_PreservesActiveGenerationMidRollout is the safety
+// property that lets the sweep run outside the terminal phases: while the engine
+// is Creating, the generation serving traffic is ActiveGeneration, not
+// CurrentGeneration. Deleting it would take the StatefulSet queries are landing
+// on. GCIgnoresActiveGen in formal/FireboltEngine.tla pins the same hazard in
+// the model.
+func TestGCOrphanedResources_PreservesActiveGenerationMidRollout(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	sts := func(gen int) *appsv1.StatefulSet {
+		return &appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: genResourceName(engineName, gen, ""), Namespace: ns,
+				Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+			},
+		}
+	}
+	abandonedSTS, activeSTS, currentSTS := sts(1), sts(2), sts(3)
+	abandonedSvc, activeSvc := genSvc(engineName, ns, 1), genSvc(engineName, ns, 2)
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(abandonedSTS, activeSTS, currentSTS, abandonedSvc, activeSvc).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, 2)); backlogged {
+		t.Error("expected the sweep to report no backlog for two orphans")
+	}
+
+	exists := func(name string, obj client.Object) bool {
+		return fc.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, obj) == nil
+	}
+	if exists(abandonedSTS.Name, &appsv1.StatefulSet{}) {
+		t.Error("abandoned StatefulSet (gen 1) should have been deleted in the Creating phase")
+	}
+	if exists(abandonedSvc.Name, &corev1.Service{}) {
+		t.Error("abandoned headless Service (gen 1) should have been deleted in the Creating phase")
+	}
+	if !exists(activeSTS.Name, &appsv1.StatefulSet{}) {
+		t.Error("active StatefulSet (gen 2) must survive: it is the generation serving traffic")
+	}
+	if !exists(activeSvc.Name, &corev1.Service{}) {
+		t.Error("active headless Service (gen 2) must survive: it resolves the serving pods")
+	}
+	if !exists(currentSTS.Name, &appsv1.StatefulSet{}) {
+		t.Error("current StatefulSet (gen 3) must survive: it is the generation being created")
+	}
+}
+
+// TestGCOrphanedResources_RetriesFailedDeleteOnNextPass covers the reason the
+// sweep exists at all: the abandon path issues its deletes once, so anything
+// the API server rejects then has to be reclaimed later. The sweep is
+// level-triggered, so a delete that fails is simply attempted again on the next
+// pass, and one failure does not stop the rest of the pass.
+func TestGCOrphanedResources_RetriesFailedDeleteOnNextPass(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	orphanA, orphanB := genSvc(engineName, ns, 1), genSvc(engineName, ns, 2)
+
+	base := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(orphanA, orphanB, genSvc(engineName, ns, 3)).
+		Build()
+
+	// Every delete in the first pass is throttled away, as the API server does
+	// under generation churn; the second pass is allowed through.
+	throttled := true
+	fc := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if throttled {
+				return goerrors.New("injected delete throttling")
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	engine := gcTestEngine(engineName, ns, 3, -1)
+
+	r.gcOrphanedResources(context.Background(), engine)
+
+	gone := func(name string) bool {
+		return errors.IsNotFound(base.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, &corev1.Service{}))
+	}
+	if gone(orphanA.Name) || gone(orphanB.Name) {
+		t.Fatal("expected both orphans to survive a pass whose deletes all failed")
+	}
+
+	throttled = false
+	r.gcOrphanedResources(context.Background(), engine)
+
+	if !gone(orphanA.Name) {
+		t.Errorf("orphan %q should have been deleted once deletes were accepted again", orphanA.Name)
+	}
+	if !gone(orphanB.Name) {
+		t.Errorf("orphan %q should have been deleted once deletes were accepted again", orphanB.Name)
+	}
+}
+
+// TestGCOrphanedResources_StopsAtDeleteBudget pins the per-pass bound. An engine
+// that churned generations for hours leaves far more orphans than one reconcile
+// should spend on them, and the controller reconciles one engine at a time, so
+// the sweep stops at GCMaxDeletesPerPass and reports the backlog instead of
+// holding the worker until the whole set is gone.
+func TestGCOrphanedResources_StopsAtDeleteBudget(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	orphanCount := GCMaxDeletesPerPass + 3
+
+	objs := make([]client.Object, 0, orphanCount+1)
+	objs = append(objs, genSvc(engineName, ns, 0))
+	for gen := 1; gen <= orphanCount; gen++ {
+		objs = append(objs, genSvc(engineName, ns, gen))
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	engine := gcTestEngine(engineName, ns, 0, 0)
+
+	survivors := func() int {
+		list := &corev1.ServiceList{}
+		if err := fc.List(context.Background(), list, client.InNamespace(ns)); err != nil {
+			t.Fatalf("List Services: %v", err)
+		}
+		return len(list.Items)
+	}
+
+	if backlogged := r.gcOrphanedResources(context.Background(), engine); !backlogged {
+		t.Error("expected the sweep to report a backlog after spending its budget")
+	}
+	// One survivor is the current generation, which is never in scope.
+	if want := orphanCount - GCMaxDeletesPerPass + 1; survivors() != want {
+		t.Errorf("expected %d Services left after one capped pass, got %d", want, survivors())
+	}
+
+	if backlogged := r.gcOrphanedResources(context.Background(), engine); backlogged {
+		t.Error("expected the remaining orphans to fit in one more pass")
+	}
+	if survivors() != 1 {
+		t.Errorf("expected only the current generation's Service to survive, got %d Services", survivors())
+	}
+}
+
+// TestGCOrphanedResources_SkipsTerminatingResources covers the objects whose
+// delete has already been accepted and is waiting on a finalizer — a
+// StatefulSet under foreground propagation waits for its pods. Re-issuing that
+// delete every pass spends budget and API calls without moving anything along.
+func TestGCOrphanedResources_SkipsTerminatingResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	terminating := genSvc(engineName, ns, 1)
+	terminating.Finalizers = []string{"example.com/holding"}
+	terminating.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
+	standing := genSvc(engineName, ns, 2)
+
+	base := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(terminating, standing).
+		Build()
+
+	var deleted []string
+	fc := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			deleted = append(deleted, obj.GetName())
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+
+	if len(deleted) != 1 || deleted[0] != standing.Name {
+		t.Errorf("expected exactly one delete, of %q; got %v", standing.Name, deleted)
 	}
 }

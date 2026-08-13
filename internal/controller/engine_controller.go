@@ -406,13 +406,17 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
-	if !r.DisableGC &&
-		(engine.Status.Phase == computev1alpha1.PhaseStable ||
-			engine.Status.Phase == computev1alpha1.PhaseStopped) {
-		r.gcOrphanedResources(ctx, engine)
-	}
+	// Every phase, not just the terminal ones: an engine whose pods never become
+	// ready, or whose spec keeps drifting, abandons generation after generation
+	// without ever reaching Stable, and those are exactly the abandoned
+	// generations that need reclaiming. gcOrphanedResources keeps the active
+	// generation, so it is safe mid-rollout.
+	gcBacklogged := !r.DisableGC && r.gcOrphanedResources(ctx, engine)
 
 	requeueAfter := result.RequeueAfter
+	if gcBacklogged {
+		requeueAfter = soonestRequeue(requeueAfter, GCBacklogRequeue)
+	}
 
 	// AutoStop runs only after a clean main reconcile and only in terminal
 	// phases. It may patch spec.replicas (level-driven: the patch flows
@@ -423,14 +427,27 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if asErr != nil {
 		log.Error(asErr, "AutoStop step failed; will retry on next reconcile")
 	}
-	if asResult.RequeueAfter > 0 && (requeueAfter == 0 || asResult.RequeueAfter < requeueAfter) {
-		requeueAfter = asResult.RequeueAfter
-	}
+	requeueAfter = soonestRequeue(requeueAfter, asResult.RequeueAfter)
 
 	return ctrl.Result{
 		Requeue:      result.Requeue,
 		RequeueAfter: requeueAfter,
 	}, nil
+}
+
+// soonestRequeue picks the earlier of two requeue delays, treating zero as
+// "nothing asked for one" rather than "immediately": the reconcile's own
+// interval, the orphan sweep's backlog interval, and AutoStop's next check all
+// want the soonest of whoever asked.
+func soonestRequeue(a, b time.Duration) time.Duration {
+	switch {
+	case a == 0:
+		return b
+	case b == 0:
+		return a
+	default:
+		return min(a, b)
+	}
 }
 
 // externalFinalizerEntry records one labeled child resource that

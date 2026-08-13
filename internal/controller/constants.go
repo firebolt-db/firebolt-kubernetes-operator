@@ -181,6 +181,19 @@ const (
 	// DefaultDrainCheckInterval is how often the operator polls draining pods.
 	DefaultDrainCheckInterval = 5 * time.Second
 
+	// GCMaxDeletesPerPass caps how many orphaned objects gcOrphanedResources
+	// deletes in one reconcile. An engine that churned generations for hours can
+	// leave tens of thousands of them, and the controller runs one reconcile at a
+	// time against a rate-limited client, so an unbounded sweep would hold the
+	// worker for many minutes and stall every other engine in the cluster.
+	GCMaxDeletesPerPass = 100
+
+	// GCBacklogRequeue is how long to wait before resuming a sweep that spent
+	// GCMaxDeletesPerPass with orphans still standing. Short, because the pass
+	// that hit the cap has already been slowed to the client's rate limit and
+	// the remaining work is the same cheap deletes.
+	GCBacklogRequeue = 2 * time.Second
+
 	// HealthReadyPath is the HTTP path for readiness probes on engine pods.
 	HealthReadyPath = "/health/ready"
 	// HealthLivePath is the HTTP path for liveness probes on engine pods.
