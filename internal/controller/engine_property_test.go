@@ -294,12 +294,17 @@ func isTerminalPhase(phase computev1alpha1.EnginePhase) bool {
 
 // ---------- State machine actions ----------
 
-// gcStaleResources mirrors gcOrphanedResources, which runs after applyEngineState
-// in the real controller when phase is any terminal phase (Stable or Stopped).
-// GC is an api-side delete; cache observation comes through the next
-// CacheCatchesUp.
+// gcStaleResources mirrors gcOrphanedResources, which runs after
+// applyEngineState in the real controller on every reconcile, whatever the
+// phase. The keep set carries ActiveGeneration for the same reason it does
+// there: mid-rollout that is the generation serving traffic, and it is neither
+// CurrentGeneration nor DrainingGeneration. GC is an api-side delete; cache
+// observation comes through the next CacheCatchesUp.
 func (m *engineSim) gcStaleResources() {
 	keepGens := map[int]bool{m.status.CurrentGeneration: true}
+	if m.status.ActiveGeneration >= 0 {
+		keepGens[m.status.ActiveGeneration] = true
+	}
 	if m.status.DrainingGeneration != nil {
 		keepGens[*m.status.DrainingGeneration] = true
 	}
@@ -330,8 +335,8 @@ func checkRequeue(t *rapid.T, result *EngineReconcileResult) {
 	}
 }
 
-// Reconcile runs a full reconcile cycle and applies all results including status.
-// When the resulting phase is terminal it also runs GC, mirroring the real controller.
+// Reconcile runs a full reconcile cycle and applies all results including
+// status, then runs GC, mirroring the real controller.
 func (m *engineSim) Reconcile(t *rapid.T) {
 	result := computeEngineReconcile(
 		&m.spec, &m.status, m.buildState(),
@@ -339,9 +344,7 @@ func (m *engineSim) Reconcile(t *rapid.T) {
 	)
 	checkRequeue(t, &result)
 	m.applyResult(&result, true)
-	if isTerminalPhase(m.status.Phase) {
-		m.gcStaleResources()
-	}
+	m.gcStaleResources()
 	m.specDirty = false
 }
 

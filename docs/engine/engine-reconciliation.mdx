@@ -141,6 +141,19 @@ At most two generations exist simultaneously: the active one serving traffic and
 | `firebolt.io/custom-engine-config-hash` | `spec.customEngineConfig` after the protected-paths strip | The engine ConfigMap content changed. Roll a new generation. |
 | `firebolt.io/engine-class-hash` | Resolved `FireboltEngineClass.spec.template` (or absent when `spec.engineClassRef` is nil) | Either the referenced class was edited in place, the engine flipped to a different class, or `engineClassRef` was cleared. Any of those rolls a new generation. |
 
+### Abandoned-generation sweep
+
+A generation can be abandoned mid-flight: the spec changes while its pods are still starting, so the reconciler deletes its resources and moves to a fresh generation rather than patching a live StatefulSet. Those deletes are issued once, from the reconcile that decided to abandon, and they only cover what that pass observed. A delete the API server rejects, a headless Service the cached read missed, or a Firebolt Operator restart between the delete and the status write all leave resources behind that nothing in the phase machine refers to again.
+
+The sweep is what reclaims them. After applying state, every reconcile lists this engine's labeled StatefulSets, Services, ConfigMaps, and per-generation TLS Certificates/Secrets, and deletes those whose `firebolt.io/generation` label is none of `currentGeneration`, `activeGeneration`, or `drainingGeneration`.
+
+Two properties make that safe and bounded:
+
+- **Keeping `activeGeneration` is what lets the sweep run in any phase.** Mid-rollout the generation serving traffic is `activeGeneration` while `currentGeneration` is the one being built. Gating the sweep on `stable`/`stopped` instead would exclude exactly the engines that accumulate abandoned generations, since an engine whose pods never become ready never reaches a terminal phase at all.
+- **Each pass deletes at most `GCMaxDeletesPerPass` objects**, then requeues. One reconcile runs at a time against a rate-limited client, so an engine with a large backlog is reclaimed over several passes rather than holding the worker.
+
+Resources carrying the engine label but no generation label (the cluster Service, anything labeled by hand) are out of scope, and an object already carrying a deletion timestamp is left to finish.
+
 ## Error handling
 
 The Firebolt Operator follows strict error propagation rules to ensure failures are always visible.

@@ -73,9 +73,9 @@ var tlaEngineActionMap = map[string][]string{
 	"EnvSetClassReady(TRUE)":  {"ApplyClassChange"},
 	"EnvSetClassReady(FALSE)": {"ApplyClassUnready"},
 
-	// GC of generations that are neither current nor draining.
-	// engineSim.Reconcile runs gcStaleResources whenever the resulting phase is
-	// terminal, mirroring the real controller gating it on phase.
+	// GC of generations that are neither current, active, nor draining.
+	// engineSim.Reconcile runs gcStaleResources on every pass, mirroring the
+	// real controller, which runs the sweep in every phase.
 	//
 	// Worth knowing: GCOrphans is enabled in NO reachable state at the
 	// configured bounds (grep the DOT dump -- it labels zero edges), because the

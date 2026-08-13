@@ -30,7 +30,7 @@
 # table omits: a naive config nothing runs looks like coverage and is not.
 SigningKeyRotationNaive.cfg	SigningKeyRotation.tla	Invariant NoValidationGap is violated
 FireboltEngineNaiveService.cfg	FireboltEngine.tla	Invariant Inv_ServiceKnownGen is violated
-FireboltEngineNaiveGCPhase.cfg	FireboltEngine.tla	Invariant Inv_ActiveHasSTS is violated
+FireboltEngineNaiveGCActive.cfg	FireboltEngine.tla	Invariant Inv_ActiveHasSTS is violated
 FireboltEngineNaiveGCCurrent.cfg	FireboltEngine.tla	Invariant Inv_TerminalHasSTS is violated
 FireboltEngineNaiveAdvance.cfg	FireboltEngine.tla	Invariant Inv_ServiceValid is violated
 FireboltEngineNaiveDrift.cfg	FireboltEngine.tla	Invariant Inv_DrainingPhase is violated

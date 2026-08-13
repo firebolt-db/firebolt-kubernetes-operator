@@ -86,12 +86,13 @@ CONSTANTS
       \* TRUE removes the cutover gate in ReconcileSwitching_Complete: the
       \* switch finalises even though the cluster Service still points at an
       \* older generation. Violates Inv_ServiceKnownGen.
-    GCOutsideTerminalPhase,
-      \* TRUE removes the phase gate on GCOrphans, which in the implementation
-      \* is the `phase \in {PhaseStable, PhaseStopped}` check in Reconcile that
-      \* decides whether gcOrphanedResources runs at all. Mid-rollout the
-      \* still-serving generation is neither currentGen nor drainingGen, so GC
-      \* deletes the StatefulSet traffic is landing on. Violates Inv_ActiveHasSTS.
+    GCIgnoresActiveGen,
+      \* TRUE removes GCOrphans' `g # activeGen` exclusion, which in the
+      \* implementation is the ActiveGeneration entry in gcOrphanedResources'
+      \* keepGens set. The sweep runs in every phase, and mid-rollout the
+      \* still-serving generation is activeGen while currentGen is the one being
+      \* built, so without that exclusion GC deletes the StatefulSet traffic is
+      \* landing on. Violates Inv_ActiveHasSTS.
     GCCurrentGeneration,
       \* TRUE removes GCOrphans' `g # currentGen` exclusion, so GC deletes the
       \* generation it is meant to be keeping. Violates Inv_TerminalHasSTS.
@@ -112,10 +113,9 @@ SpecVers == 0..MaxSpec
 Phases == {"uninitialized", "stable", "creating", "switching", "draining", "cleaning", "stopped"}
 TerminalPhases == {"stable", "stopped"}
 
-\* Phase gates, widened by the counterexample flags. Written as sets rather than
-\* inline disjunctions so the guard at the use site still reads as one membership
+\* Phase gate, widened by a counterexample flag. Written as a set rather than an
+\* inline disjunction so the guard at the use site still reads as one membership
 \* test and the shipped behaviour is what you get with every flag FALSE.
-GCPhases    == IF GCOutsideTerminalPhase THEN Phases ELSE TerminalPhases
 DriftPhases == IF DriftDuringDrain
                THEN TerminalPhases \cup {"draining", "cleaning"}
                ELSE TerminalPhases
@@ -278,16 +278,20 @@ ReconcileTerminal_Drift ==
     /\ podsReady'  = FALSE
     /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
 
-\* GC: delete STSes that belong neither to currentGen nor drainingGen.
-\* Runs opportunistically in either terminal phase; safe to repeat.
-\* Models gcOrphanedResources() in engine_gc.go, which is gated on
-\* phase \in {PhaseStable, PhaseStopped} in the top-level Reconcile.
+\* GC: delete STSes that belong to none of currentGen, activeGen, drainingGen.
+\* Runs opportunistically in every phase; safe to repeat. Keeping activeGen is
+\* what makes the phase gate unnecessary: mid-rollout it is the generation
+\* serving traffic, and an engine that never reaches a terminal phase is
+\* precisely the one whose abandoned generations accumulate.
+\* Models gcOrphanedResources() in engine_gc.go, which the top-level Reconcile
+\* runs after applyEngineState on every pass.
 GCOrphans ==
-    /\ phase \in GCPhases
     /\ \E g \in Gens :
            /\ StsExists(g)
            /\ (g # currentGen \/ GCCurrentGeneration)
-           /\ g # drainingGen   \* drainingGen=-1 never equals any gen in Gens
+           /\ (g # activeGen \/ GCIgnoresActiveGen)
+           \* activeGen and drainingGen are -1 when unset, never a gen in Gens.
+           /\ g # drainingGen
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
