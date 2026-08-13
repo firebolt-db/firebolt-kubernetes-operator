@@ -41,6 +41,24 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
+// gcTestEngineUID is the UID the sweep's ownership check compares against.
+const gcTestEngineUID = "11111111-2222-3333-4444-555555555555"
+
+// ownedByEngine stamps the controller reference every ensure* call puts on an
+// engine child. The sweep requires it before deleting anything, so a fixture
+// without it is a fixture of a resource the operator never created.
+func ownedByEngine(engineName string, objs ...client.Object) {
+	for _, obj := range objs {
+		obj.SetOwnerReferences([]metav1.OwnerReference{{
+			APIVersion: computev1alpha1.GroupVersion.String(),
+			Kind:       "FireboltEngine",
+			Name:       engineName,
+			UID:        gcTestEngineUID,
+			Controller: ptr(true),
+		}})
+	}
+}
+
 func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
@@ -92,6 +110,8 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 		},
 	}
 
+	ownedByEngine(engineName, orphanedSTS, currentSTS, orphanedSvc, currentSvc, clusterSvc, orphanedCM, currentCM)
+
 	fc := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(orphanedSTS, currentSTS, orphanedSvc, currentSvc, clusterSvc, orphanedCM, currentCM).
@@ -100,7 +120,7 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			CurrentGeneration: 3,
 			ActiveGeneration:  3,
@@ -154,7 +174,11 @@ func TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets(t *testing.T) {
 	mk := func(gen int) (*certmanagerv1.Certificate, *corev1.Secret) {
 		name := genResourceName(engineName, gen, SuffixEngineTLS)
 		labels := map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)}
-		return &certmanagerv1.Certificate{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}},
+		cert := &certmanagerv1.Certificate{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels}}
+		ownedByEngine(engineName, cert)
+		// No owner reference on the Secret: cert-manager points it at the
+		// Certificate, which is why the sweep admits it on provenance instead.
+		return cert,
 			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels, Annotations: map[string]string{certmanagerv1.CertificateNameKey: name}}}
 	}
 	c1, s1 := mk(1) // orphaned
@@ -166,7 +190,7 @@ func TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets(t *testing.T) {
 
 	drain := 2
 	engine := &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			CurrentGeneration: 3, ActiveGeneration: 3, DrainingGeneration: &drain,
 		},
@@ -216,6 +240,8 @@ func TestGCOrphanedResources_PreservesDrainingGeneration(t *testing.T) {
 		},
 	}
 
+	ownedByEngine(engineName, drainingSTS, currentSTS)
+
 	fc := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(drainingSTS, currentSTS).
@@ -224,7 +250,7 @@ func TestGCOrphanedResources_PreservesDrainingGeneration(t *testing.T) {
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			CurrentGeneration:  3,
 			ActiveGeneration:   3,
@@ -284,6 +310,8 @@ func TestGCOrphanedResources_PreservesUnlabeledResources(t *testing.T) {
 		},
 	}
 
+	ownedByEngine(engineName, unlabeledSTS, unlabeledCM, clusterSvc, currentSTS)
+
 	fc := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(unlabeledSTS, unlabeledCM, clusterSvc, currentSTS).
@@ -292,7 +320,7 @@ func TestGCOrphanedResources_PreservesUnlabeledResources(t *testing.T) {
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			CurrentGeneration: 1,
 			ActiveGeneration:  1,
@@ -330,6 +358,8 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 		},
 	}
 
+	ownedByEngine(engineName, currentSTS)
+
 	fc := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(currentSTS).
@@ -338,7 +368,7 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
 	engine := &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			CurrentGeneration: 1,
 			ActiveGeneration:  1,
@@ -356,7 +386,7 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 // Creating a new generation while an older one serves traffic.
 func gcTestEngine(name, ns string, currentGen, activeGen int) *computev1alpha1.FireboltEngine {
 	return &computev1alpha1.FireboltEngine{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, UID: gcTestEngineUID},
 		Status: computev1alpha1.FireboltEngineStatus{
 			Phase:             computev1alpha1.PhaseCreating,
 			CurrentGeneration: currentGen,
@@ -365,14 +395,17 @@ func gcTestEngine(name, ns string, currentGen, activeGen int) *computev1alpha1.F
 	}
 }
 
-// genSvc builds a per-generation headless Service the sweep can see.
+// genSvc builds a per-generation headless Service the sweep can see, owned by
+// the engine the way the operator owns the ones it creates.
 func genSvc(engineName, ns string, gen int) *corev1.Service {
-	return &corev1.Service{
+	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: genResourceName(engineName, gen, SuffixHL), Namespace: ns,
 			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
 		},
 	}
+	ownedByEngine(engineName, svc)
+	return svc
 }
 
 // TestGCOrphanedResources_PreservesActiveGenerationMidRollout is the safety
@@ -390,12 +423,14 @@ func TestGCOrphanedResources_PreservesActiveGenerationMidRollout(t *testing.T) {
 	engineName := "my-engine"
 
 	sts := func(gen int) *appsv1.StatefulSet {
-		return &appsv1.StatefulSet{
+		obj := &appsv1.StatefulSet{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: genResourceName(engineName, gen, ""), Namespace: ns,
 				Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
 			},
 		}
+		ownedByEngine(engineName, obj)
+		return obj
 	}
 	abandonedSTS, activeSTS, currentSTS := sts(1), sts(2), sts(3)
 	abandonedSvc, activeSvc := genSvc(engineName, ns, 1), genSvc(engineName, ns, 2)
@@ -599,19 +634,25 @@ func TestReconcileSweepsAbandonedGenerationsWhileCreating(t *testing.T) {
 		return map[string]string{LabelEngine: engName, LabelGeneration: strconv.Itoa(gen)}
 	}
 	sts := func(gen int) *appsv1.StatefulSet {
-		return &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		obj := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
 			Name: genResourceName(engName, gen, ""), Namespace: ns, Labels: labelsFor(gen),
 		}}
+		ownedByEngine(engName, obj)
+		return obj
 	}
 	hlSvc := func(gen int) *corev1.Service {
-		return &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		obj := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
 			Name: genResourceName(engName, gen, SuffixHL), Namespace: ns, Labels: labelsFor(gen),
 		}}
+		ownedByEngine(engName, obj)
+		return obj
 	}
 	cm := func(gen int) *corev1.ConfigMap {
-		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		obj := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 			Name: genResourceName(engName, gen, SuffixConfig), Namespace: ns, Labels: labelsFor(gen),
 		}}
+		ownedByEngine(engName, obj)
+		return obj
 	}
 
 	engine := &computev1alpha1.FireboltEngine{
@@ -619,6 +660,7 @@ func TestReconcileSweepsAbandonedGenerationsWhileCreating(t *testing.T) {
 			Name: engName, Namespace: ns,
 			Finalizers: []string{finalizerName},
 			Generation: 1,
+			UID:        gcTestEngineUID,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
 		Status: computev1alpha1.FireboltEngineStatus{
@@ -716,11 +758,13 @@ func TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted(t *testing.T) {
 	abandonedSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
 		Name: genResourceName(engName, abandonedG, SuffixHL), Namespace: ns, Labels: labels,
 	}}
+	ownedByEngine(engName, abandonedSTS, abandonedSvc)
 	engine := &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: engName, Namespace: ns,
 			Finalizers: []string{finalizerName},
 			Generation: 1,
+			UID:        gcTestEngineUID,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
 		Status: computev1alpha1.FireboltEngineStatus{
@@ -832,6 +876,7 @@ func TestReconcileSweepsWhenAGateEndsThePass(t *testing.T) {
 			Name: engName, Namespace: ns,
 			Finalizers: []string{finalizerName},
 			Generation: 1,
+			UID:        gcTestEngineUID,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
 		Status: computev1alpha1.FireboltEngineStatus{
@@ -998,6 +1043,9 @@ func TestReconcileReclaimsTheGenerationItAbandonsInTheSamePass(t *testing.T) {
 		Spec: appsv1.StatefulSetSpec{Replicas: ptr(int32(3))},
 	}
 	tlsSecretName := genResourceName(engName, abandonedG, SuffixEngineTLS)
+	ownedByEngine(engName, driftedSTS)
+	// The derived Secret carries no engine owner reference in production either;
+	// the sweep admits it on the cert-manager annotation.
 	tlsSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
 		Name: tlsSecretName, Namespace: ns, Labels: labels,
 		Annotations: map[string]string{certmanagerv1.CertificateNameKey: tlsSecretName},
@@ -1008,6 +1056,7 @@ func TestReconcileReclaimsTheGenerationItAbandonsInTheSamePass(t *testing.T) {
 			Name: engName, Namespace: ns,
 			Finalizers: []string{finalizerName},
 			Generation: 1,
+			UID:        gcTestEngineUID,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
 		Status: computev1alpha1.FireboltEngineStatus{
@@ -1076,6 +1125,7 @@ func TestReconcilePanicSkipsTheSweep(t *testing.T) {
 			Name: engName, Namespace: ns,
 			Finalizers: []string{finalizerName},
 			Generation: 1,
+			UID:        gcTestEngineUID,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
 		Status: computev1alpha1.FireboltEngineStatus{
@@ -1112,5 +1162,218 @@ func TestReconcilePanicSkipsTheSweep(t *testing.T) {
 
 	if err := cli.Get(ctx, types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
 		t.Errorf("an orphan was deleted while unwinding a panic: %v", err)
+	}
+}
+
+// TestGCOrphanedResources_LeavesUnownedResourcesAlone is the blast-radius
+// guard. Labels are copyable: a Service, ConfigMap, Secret or StatefulSet a user
+// or another controller tags with this engine's name and a stale generation
+// would be swept on label match alone, and for a Secret that is unrecoverable.
+// The operator's own children carry a controller reference to the engine, so the
+// reference is what admits them.
+func TestGCOrphanedResources_LeavesUnownedResourcesAlone(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	staleLabels := map[string]string{LabelEngine: engineName, LabelGeneration: "1"}
+
+	// Same labels as an abandoned generation, none of the provenance.
+	foreignSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "someone-elses-service", Namespace: ns, Labels: staleLabels,
+	}}
+	foreignSTS := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		Name: "someone-elses-sts", Namespace: ns, Labels: staleLabels,
+	}}
+	foreignSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: "someone-elses-secret", Namespace: ns, Labels: staleLabels,
+	}}
+	// Owned, but by a different engine of the same name in another incarnation:
+	// the UID is what distinguishes them.
+	recreatedEngineSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "older-incarnation", Namespace: ns, Labels: staleLabels,
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: computev1alpha1.GroupVersion.String(),
+			Kind:       "FireboltEngine",
+			Name:       engineName,
+			UID:        "99999999-9999-9999-9999-999999999999",
+			Controller: ptr(true),
+		}},
+	}}
+	// A Secret labeled like a generation's TLS Secret but whose cert-manager
+	// annotation points somewhere else entirely.
+	foreignCertSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engineName, 1, SuffixEngineTLS), Namespace: ns, Labels: staleLabels,
+		Annotations: map[string]string{certmanagerv1.CertificateNameKey: "unrelated-cert"},
+	}}
+	// The operator's own orphan, to prove the sweep still runs in this pass.
+	ownedOrphan := genSvc(engineName, ns, 1)
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(foreignSvc, foreignSTS, foreignSecret, recreatedEngineSvc, foreignCertSecret, ownedOrphan).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+
+	survivors := []struct {
+		name string
+		into client.Object
+	}{
+		{foreignSvc.Name, &corev1.Service{}},
+		{foreignSTS.Name, &appsv1.StatefulSet{}},
+		{foreignSecret.Name, &corev1.Secret{}},
+		{recreatedEngineSvc.Name, &corev1.Service{}},
+		{foreignCertSecret.Name, &corev1.Secret{}},
+	}
+	for _, s := range survivors {
+		if err := fc.Get(context.Background(), types.NamespacedName{Name: s.name, Namespace: ns}, s.into); err != nil {
+			t.Errorf("%q was deleted: the sweep may only delete what this engine owns (%v)", s.name, err)
+		}
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: ownedOrphan.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
+		t.Errorf("the engine's own orphan should still have been deleted in this pass (err=%v)", err)
+	}
+}
+
+// TestGCOrphanedResources_MovesOnWhenAKindKeepsFailing covers budget fairness.
+// Kinds are swept in a fixed order, so a kind whose deletes are rejected
+// persistently — an RBAC gap on one resource, say — would spend the whole
+// per-pass budget on the same prefix every pass, and the kinds after it would
+// never be reached at all.
+func TestGCOrphanedResources_MovesOnWhenAKindKeepsFailing(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	objs := make([]client.Object, 0, GCMaxDeletesPerPass+4)
+	for gen := 1; gen <= GCMaxDeletesPerPass+2; gen++ {
+		sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engineName, gen, ""), Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+		}}
+		ownedByEngine(engineName, sts)
+		objs = append(objs, sts)
+	}
+	orphanSvc := genSvc(engineName, ns, 1)
+	objs = append(objs, orphanSvc)
+
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+
+	stsDeletes := 0
+	fc := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if _, ok := obj.(*appsv1.StatefulSet); ok {
+				stsDeletes++
+				return goerrors.New("injected StatefulSet delete rejection")
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 0, -1)); !backlogged {
+		t.Error("expected a backlog while a whole kind's deletes are failing")
+	}
+
+	if stsDeletes > GCMaxKindFailuresPerPass {
+		t.Errorf("kept retrying a failing kind: %d StatefulSet deletes, want at most %d",
+			stsDeletes, GCMaxKindFailuresPerPass)
+	}
+	if err := base.Get(context.Background(), types.NamespacedName{Name: orphanSvc.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
+		t.Errorf("the Service after the failing kind was never reached (err=%v)", err)
+	}
+}
+
+// TestGCOrphanedResources_KeepsTheGenerationTheServiceSelects covers the
+// divergence case. Status and the cluster Service selector normally agree, but a
+// pass whose Service repair failed returns an error with the status ahead of the
+// selector, and the sweep runs on that path deliberately. Deleting the selected
+// generation there would cut the traffic that is still landing on it.
+func TestGCOrphanedResources_KeepsTheGenerationTheServiceSelects(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	const (
+		servingGen = 2 // what the Service still points at
+		statusGen  = 3 // what the status has moved on to
+	)
+
+	servingSTS := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engineName, servingGen, ""), Namespace: ns,
+		Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(servingGen)},
+	}}
+	staleSTS := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engineName, 1, ""), Namespace: ns,
+		Labels: map[string]string{LabelEngine: engineName, LabelGeneration: "1"},
+	}}
+	ownedByEngine(engineName, servingSTS, staleSTS)
+
+	clusterSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engineName + SuffixService, Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName},
+		},
+		Spec: corev1.ServiceSpec{Selector: map[string]string{
+			LabelEngine:     engineName,
+			LabelGeneration: strconv.Itoa(servingGen),
+		}},
+	}
+	ownedByEngine(engineName, clusterSvc)
+
+	fc := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(servingSTS, staleSTS, clusterSvc).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, statusGen, statusGen))
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: servingSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("the generation the cluster Service selects was deleted: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: staleSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); !errors.IsNotFound(err) {
+		t.Errorf("a generation nothing points at should still be swept (err=%v)", err)
+	}
+}
+
+// TestGCOrphanedResources_BailsWhenTheClusterServiceIsUnreadable covers the
+// fail-closed side of the same read: without the selector there is no way to
+// tell which generation is serving, so the pass reports a backlog and deletes
+// nothing.
+func TestGCOrphanedResources_BailsWhenTheClusterServiceIsUnreadable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	orphan := genSvc(engineName, ns, 1)
+
+	base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(orphan).Build()
+	fc := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if key.Name == engineName+SuffixService {
+				return goerrors.New("injected cluster Service read failure")
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1)); !backlogged {
+		t.Error("expected an unreadable cluster Service to report a backlog")
+	}
+	if err := base.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("nothing may be deleted while the serving generation is unknown: %v", err)
 	}
 }
