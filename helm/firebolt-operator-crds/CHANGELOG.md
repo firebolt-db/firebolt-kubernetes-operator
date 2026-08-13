@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.2.2...firebolt-operator-crds-chart-0.3.0) (2026-08-13)
+
+
+### Features
+
+* add experimental metadata-ng mode (FB-3014) ([7556006](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/755600618ed6d52a850cd19bbc6493f5f1e95cb8))
+
 ## [0.2.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.2.1...firebolt-operator-crds-chart-0.2.2) (2026-08-12)
 
 
