@@ -94,6 +94,13 @@ const engineClassRequeueAfter = 30 * time.Second
 //     holding the finalizer because at least one engine still binds.
 type FireboltEngineClassReconciler struct {
 	client.Client
+	// Reader reads FireboltEngines straight from the API server for the
+	// deletion guard. The manager cache can be narrowed with
+	// --watch-label-selector, and releasing a finalizer on a count taken
+	// from a narrowed cache would let a class vanish while an engine
+	// outside the selector still references it. Deletion is irreversible,
+	// so the guard counts against the live API state and fails closed.
+	Reader client.Reader
 	Scheme *runtime.Scheme
 }
 
@@ -131,7 +138,7 @@ func (r *FireboltEngineClassReconciler) Reconcile(ctx context.Context, req ctrl.
 		return r.reconcileDelete(ctx, class)
 	}
 
-	bound, err := r.countBoundEngines(ctx, class.Namespace, class.Name)
+	bound, err := r.countBoundEngines(ctx, r.Client, class.Namespace, class.Name)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("counting bound engines: %w", err)
 	}
@@ -170,9 +177,18 @@ func (r *FireboltEngineClassReconciler) Reconcile(ctx context.Context, req ctrl.
 //   - removes the finalizer, when no engine binds — the API server then
 //     completes the delete.
 //
+// The count is taken through r.Reader (live API state, not the manager
+// cache): with --watch-label-selector the cache omits engines outside
+// the selector, and a count that cannot see them would release the
+// finalizer while such an engine still binds the class. Held deletes
+// stay recoverable; a released finalizer is not.
+//
 // The watch on FireboltEngine already enqueues this class when bindings
 // change (see SetupWithManager), so the requeue interval is a safety
-// net rather than the primary trigger.
+// net rather than the primary trigger. Engines outside the selector
+// produce no watch events, so for them the requeue IS the trigger: a
+// blocked delete clears within one requeue interval of the last
+// out-of-selector binding going away.
 //
 // The deletion guard does not exempt itself from the operator-owned-field
 // re-check that runs on the live path. We deliberately stamp only the
@@ -187,7 +203,7 @@ func (r *FireboltEngineClassReconciler) reconcileDelete(ctx context.Context, cla
 		return ctrl.Result{}, nil
 	}
 
-	bound, err := r.countBoundEngines(ctx, class.Namespace, class.Name)
+	bound, err := r.countBoundEngines(ctx, r.Reader, class.Namespace, class.Name)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("counting bound engines during delete: %w", err)
 	}
@@ -229,15 +245,21 @@ func (r *FireboltEngineClassReconciler) reconcileDelete(ctx context.Context, cla
 	return ctrl.Result{}, nil
 }
 
-// countBoundEngines lists FireboltEngines in the class's namespace and
-// counts those whose spec.engineClassRef matches className.
+// countBoundEngines lists FireboltEngines in the class's namespace via
+// reader and counts those whose spec.engineClassRef matches className.
 // FireboltEngineClass is namespaced, so engines outside this namespace
 // cannot bind to it. The list path is O(N) in engines per namespace;
 // that's acceptable at our scale (tens of engines per instance) and
 // avoids a per-class index.
-func (r *FireboltEngineClassReconciler) countBoundEngines(ctx context.Context, namespace, className string) (int32, error) {
+//
+// The reader parameter picks the consistency the caller needs: the live
+// status path passes the cached client (status.BoundEngines reports the
+// engines this install has adopted, and the cache keeps the steady-state
+// requeue cheap), while the deletion guard passes r.Reader so the count
+// also sees engines a --watch-label-selector keeps out of the cache.
+func (r *FireboltEngineClassReconciler) countBoundEngines(ctx context.Context, reader client.Reader, namespace, className string) (int32, error) {
 	var engines computev1alpha1.FireboltEngineList
-	if err := r.List(ctx, &engines, client.InNamespace(namespace)); err != nil {
+	if err := reader.List(ctx, &engines, client.InNamespace(namespace)); err != nil {
 		return 0, err
 	}
 	var count int32

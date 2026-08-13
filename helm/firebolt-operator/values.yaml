@@ -184,6 +184,27 @@ healthProbeBindAddress: ":8081"
 # restart.
 watchNamespaces: []
 
+# -- Label selector restricting which FireboltEngine, FireboltInstance,
+# and FireboltEngineClass objects the operator caches and reconciles.
+# Empty (the default) applies no restriction. Non-empty is passed as
+# `--watch-label-selector=<selector>` and applies only to the three
+# Firebolt CRD types — child objects and third-party Secrets are cached
+# unfiltered, so they never need the label. Lets a cluster-wide install
+# ignore CRs owned by namespace-scoped installs, e.g.
+# `"!example.com/managed"`. CRs that reference each other (an engine
+# and the instance or engine class it points at) must land on the same
+# side of the selector: label whole stacks, never individual CRs. The
+# selector is not an isolation boundary: RBAC is governed by
+# `watchNamespaces` alone, and admission webhooks (when enabled) still
+# validate every Firebolt CR in the cluster, so enable webhooks only on
+# a cluster-wide install (empty `watchNamespaces`) — a namespace-scoped
+# install lacks the RBAC to validate CRs outside its namespaces and
+# would fail their admission under the default failurePolicy Fail. Give
+# each install its own release namespace: leader election uses a fixed
+# lease ID, so co-located releases contend for one lease and only one
+# of them ever runs.
+watchLabelSelector: ""
+
 # Upper bounds on FireboltEngine.spec.resources values. Each entry is a
 # Kubernetes resource.Quantity that caps both Requests and Limits for the
 # matching dimension. Empty disables that dimension's bound; the default

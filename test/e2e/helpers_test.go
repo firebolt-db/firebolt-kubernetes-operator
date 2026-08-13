@@ -2014,6 +2014,7 @@ func StartClassOperator() (*ClassOperator, error) {
 
 	reconciler := &controller.FireboltEngineClassReconciler{
 		Client: mgr.GetClient(),
+		Reader: mgr.GetAPIReader(),
 		Scheme: mgr.GetScheme(),
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
