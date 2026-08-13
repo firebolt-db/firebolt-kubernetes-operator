@@ -80,13 +80,17 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 
 	sweep := &orphanSweep{budget: GCMaxDeletesPerPass}
 
+	// A List that fails ends the pass reporting a backlog: it saw only part of
+	// the engine's resources, so whether orphans are standing is unknown, and
+	// coming back on the short interval is the safe reading.
+
 	engineLabels := client.MatchingLabels{LabelEngine: engine.Name}
 	ns := client.InNamespace(engine.Namespace)
 
 	stsList := &appsv1.StatefulSetList{}
 	if err := r.List(ctx, stsList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list StatefulSets")
-		return sweep.retry
+		return true
 	}
 	// StatefulSets first: deleteIfExists deletes them with foreground
 	// propagation, so reclaiming the StatefulSet is also what reclaims the
@@ -101,7 +105,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	svcList := &corev1.ServiceList{}
 	if err := r.List(ctx, svcList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list Services")
-		return sweep.retry
+		return true
 	}
 	for i := range svcList.Items {
 		if !r.sweepOrphan(ctx, log, &svcList.Items[i], keepGens, sweep) {
@@ -112,7 +116,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	cmList := &corev1.ConfigMapList{}
 	if err := r.List(ctx, cmList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list ConfigMaps")
-		return sweep.retry
+		return true
 	}
 	for i := range cmList.Items {
 		if !r.sweepOrphan(ctx, log, &cmList.Items[i], keepGens, sweep) {
@@ -139,7 +143,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	if err := r.List(ctx, certList, ns, engineLabels); err != nil {
 		if !certKindUnavailable(err) {
 			log.Error(err, "GC: failed to list Certificates")
-			return sweep.retry
+			return true
 		}
 	} else {
 		for i := range certList.Items {
@@ -152,7 +156,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	secretList := &corev1.SecretList{}
 	if err := r.List(ctx, secretList, ns, engineLabels); err != nil {
 		log.Error(err, "GC: failed to list Secrets")
-		return sweep.retry
+		return true
 	}
 	for i := range secretList.Items {
 		if !r.sweepOrphan(ctx, log, &secretList.Items[i], keepGens, sweep) {

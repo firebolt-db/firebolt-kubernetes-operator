@@ -903,6 +903,12 @@ func TestApplyGCBacklogRequeue(t *testing.T) {
 			want:       ctrl.Result{RequeueAfter: GCBacklogRequeue},
 		},
 		{
+			name:       "a requeue with a delay beside it is not immediate",
+			in:         ctrl.Result{Requeue: true, RequeueAfter: 30 * time.Second},
+			backlogged: true,
+			want:       ctrl.Result{Requeue: true, RequeueAfter: GCBacklogRequeue},
+		},
+		{
 			name:       "a shorter phase interval is kept",
 			in:         ctrl.Result{RequeueAfter: time.Second},
 			backlogged: true,
@@ -921,5 +927,41 @@ func TestApplyGCBacklogRequeue(t *testing.T) {
 				t.Errorf("applyGCBacklogRequeue(%+v, %t) = %+v, want %+v", tc.in, tc.backlogged, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestGCOrphanedResources_ReportsBacklogWhenAListFails covers the read side: a
+// pass whose List fails has seen only part of the engine's resources, so it must
+// report a backlog rather than "nothing left to do".
+func TestGCOrphanedResources_ReportsBacklogWhenAListFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	base := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(genSvc(engineName, ns, 0)).
+		Build()
+
+	// Services list after StatefulSets, so the sweep gets one clean List first
+	// and then fails partway: the orphan Service is never seen.
+	fc := interceptor.NewClient(base, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*corev1.ServiceList); ok {
+				return goerrors.New("injected list failure")
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1)); !backlogged {
+		t.Error("expected a failed List to report a backlog")
+	}
+	if err := base.Get(context.Background(), types.NamespacedName{Name: genSvc(engineName, ns, 0).Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("the orphan the failed List hid should still be there for the next pass: %v", err)
 	}
 }

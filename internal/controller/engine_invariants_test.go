@@ -110,6 +110,20 @@ var engineInvariants = map[string]func(t invariantT, m *engineSim){
 		}
 	},
 
+	// Scoped to the draining phase, matching the spec conjunct: cleaning's
+	// deletes and its DrainingGeneration reset are one atomic action in the
+	// model, but CrashReconcile applies the first without the second, so a
+	// drainingGen # -1 form would fail on a hazard the spec does not represent.
+	"Inv_DrainingHasSTS": func(t invariantT, m *engineSim) {
+		if m.status.Phase != computev1alpha1.PhaseDraining || m.status.DrainingGeneration == nil {
+			return
+		}
+		if m.api.stses[*m.status.DrainingGeneration] == nil {
+			t.Fatalf("Inv_DrainingHasSTS: draining gen=%d has no STS, so nothing is left to drain",
+				*m.status.DrainingGeneration)
+		}
+	},
+
 	"Inv_ServiceValid": func(t invariantT, m *engineSim) {
 		if m.status.ActiveGeneration < 0 {
 			return

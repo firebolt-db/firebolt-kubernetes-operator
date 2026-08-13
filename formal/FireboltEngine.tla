@@ -59,7 +59,7 @@ EXTENDS Integers, TLC
 CONSTANTS
     MaxGen,     \* upper bound on generation numbers (e.g. 2)
     MaxSpec,    \* upper bound on spec versions (e.g. 2)
-    \* The five flags below each remove ONE shipped guard. All are FALSE in
+    \* The six flags below each remove ONE shipped guard. All are FALSE in
     \* FireboltEngine.cfg -- that config checks the design as it ships. Each has a
     \* FireboltEngineNaive*.cfg that flips exactly one of them and names the
     \* invariant TLC must then report; `make formal-check-counterexample` runs
@@ -67,8 +67,8 @@ CONSTANTS
     \* SigningKeyRotation.tla.
     \*
     \* They exist because a passing invariant is only evidence if it could have
-    \* failed. Five of the eleven invariants in this spec are falsifiable by
-    \* removing a guard, and those five are the ones flagged here. The other six
+    \* failed. Six of the twelve invariants in this spec are falsifiable by
+    \* removing a guard, and those six are the ones flagged here. The other six
     \* are not, for reasons worth writing down rather than leaving as a gap:
     \* Inv_GenOrder and Inv_DrainingOlderThanCurrent hold structurally (activeGen
     \* and drainingGen are only ever assigned currentGen or a smaller gen, so no
@@ -96,6 +96,12 @@ CONSTANTS
     GCCurrentGeneration,
       \* TRUE removes GCOrphans' `g # currentGen` exclusion, so GC deletes the
       \* generation it is meant to be keeping. Violates Inv_TerminalHasSTS.
+    GCDrainingGeneration,
+      \* TRUE removes GCOrphans' `g # drainingGen` exclusion, so the sweep takes
+      \* the StatefulSet the drain is waiting on out from under it. Only
+      \* reachable because the sweep runs in every phase; with the old
+      \* terminal-phase gate the conjunct was vacuous, since a terminal phase has
+      \* nothing draining. Violates Inv_DrainingHasSTS.
     AdvanceWithoutMatchingSTS,
       \* TRUE removes `StsMatchesSpec(currentGen)` from ReconcileCreating_Advance,
       \* so creating advances to switching before the new generation's
@@ -294,7 +300,7 @@ GCOrphans ==
            /\ (g # currentGen \/ GCCurrentGeneration)
            /\ (g # activeGen \/ GCIgnoresActiveGen)
            \* activeGen and drainingGen are -1 when unset, never a gen in Gens.
-           /\ g # drainingGen
+           /\ (g # drainingGen \/ GCDrainingGeneration)
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
@@ -504,6 +510,20 @@ Inv_TerminalHasSTS ==
 Inv_ActiveHasSTS ==
     activeGen # -1 => StsExists(activeGen)
 
+\* While a generation is draining, its StatefulSet must exist: the drain is
+\* waiting on that generation's pods to finish serving. GCOrphans excluding
+\* drainingGen is what holds this, now that the sweep runs in every phase.
+\* Deleting it early cuts in-flight queries and skips the drain, because
+\* computeCleaning then finds nothing to delete and moves straight to a terminal
+\* phase.
+\*
+\* Scoped to the draining phase rather than to drainingGen # -1 for the Go
+\* mirror's sake: a partially-applied reconcile pass, which this spec does not
+\* model and the rapid harness does (CrashReconcile), can leave cleaning's
+\* deletes applied with drainingGen still set in status.
+Inv_DrainingHasSTS ==
+    phase = "draining" => (drainingGen = -1 \/ StsExists(drainingGen))
+
 \* The service selector only points to activeGen or currentGen, once traffic has
 \* been switched (activeGen != -1).
 \* Before the first switch (activeGen=-1) spec-drift bumps can leave svcTargetGen
@@ -552,6 +572,7 @@ Safety ==
     /\ Inv_ServiceValid
     /\ Inv_TerminalHasSTS
     /\ Inv_ActiveHasSTS
+    /\ Inv_DrainingHasSTS
     /\ Inv_ServiceKnownGen
     /\ Inv_DrainingPhase
     /\ Inv_TerminalNoDraining
