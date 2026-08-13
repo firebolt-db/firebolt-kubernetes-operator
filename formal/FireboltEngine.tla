@@ -517,10 +517,12 @@ Inv_ActiveHasSTS ==
 \* computeCleaning then finds nothing to delete and moves straight to a terminal
 \* phase.
 \*
-\* Scoped to the draining phase rather than to drainingGen # -1 for the Go
-\* mirror's sake: a partially-applied reconcile pass, which this spec does not
-\* model and the rapid harness does (CrashReconcile), can leave cleaning's
-\* deletes applied with drainingGen still set in status.
+\* Scoped to the draining phase, and not to drainingGen # -1, because the wider
+\* form is false in the implementation rather than merely unmodelled:
+\* applyEngineState issues its deletes before writing status, so a crash in
+\* cleaning leaves the draining generation's StatefulSet gone with drainingGen
+\* still set. Draining is the phase where the sweep is the only thing that could
+\* remove that StatefulSet, which is what this conjunct is for.
 Inv_DrainingHasSTS ==
     phase = "draining" => (drainingGen = -1 \/ StsExists(drainingGen))
 

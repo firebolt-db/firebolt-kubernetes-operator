@@ -110,10 +110,11 @@ var engineInvariants = map[string]func(t invariantT, m *engineSim){
 		}
 	},
 
-	// Scoped to the draining phase, matching the spec conjunct: cleaning's
-	// deletes and its DrainingGeneration reset are one atomic action in the
-	// model, but CrashReconcile applies the first without the second, so a
-	// drainingGen # -1 form would fail on a hazard the spec does not represent.
+	// Scoped to the draining phase, matching the spec conjunct. A
+	// DrainingGeneration != nil form would be wrong rather than merely stricter:
+	// applyEngineState issues its deletes before writing status, so a crash in
+	// cleaning legitimately leaves the draining generation's StatefulSet gone
+	// with DrainingGeneration still set, which CrashReconcile reproduces.
 	"Inv_DrainingHasSTS": func(t invariantT, m *engineSim) {
 		if m.status.Phase != computev1alpha1.PhaseDraining || m.status.DrainingGeneration == nil {
 			return

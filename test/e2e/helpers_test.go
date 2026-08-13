@@ -39,6 +39,7 @@ import (
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -139,6 +140,214 @@ func WithGC() EngineOperatorOption {
 		r.DisableGC = false
 	}
 }
+
+// DeleteGate lets a spec reject the operator's deletes for one generation, which
+// is the only way to reproduce a rejected delete on a live cluster: the operator
+// runs in-process here, so there is no API-server-side failure to inject and no
+// proxy in front of it.
+//
+// Scoped to a single generation on purpose. A gate that blocked every delete
+// would also block the engine's own teardown and any other spec sharing the
+// cluster.
+type DeleteGate struct {
+	mu       sync.Mutex
+	rejected string
+}
+
+// Reject makes the operator's deletes of gen's resources fail until Allow.
+func (g *DeleteGate) Reject(gen int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rejected = strconv.Itoa(gen)
+}
+
+// Allow lets deletes through again.
+func (g *DeleteGate) Allow() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rejected = ""
+}
+
+func (g *DeleteGate) rejects(obj client.Object) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.rejected == "" {
+		return false
+	}
+	return obj.GetLabels()["firebolt.io/generation"] == g.rejected
+}
+
+// gatedClient is the reconciler's client with Delete routed through a
+// DeleteGate. Everything else is the manager's cached client, so reads keep the
+// informer semantics the operator has in production.
+type gatedClient struct {
+	client.Client
+	gate *DeleteGate
+}
+
+func (c gatedClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if c.gate.rejects(obj) {
+		return fmt.Errorf("injected delete rejection for %s", obj.GetName())
+	}
+	return c.Client.Delete(ctx, obj, opts...)
+}
+
+// WithDeleteGate routes the engine reconciler's deletes through gate.
+func WithDeleteGate(gate *DeleteGate) EngineOperatorOption {
+	return func(r *controller.FireboltEngineReconciler) {
+		r.Client = gatedClient{Client: r.Client, gate: gate}
+	}
+}
+
+// PlantAbandonedGeneration creates the StatefulSet, headless Service and
+// ConfigMap an abandoned generation leaves behind, labeled the way the operator
+// labels them. This is what a generation looks like after the abandon path
+// issued its deletes and lost some of them: a cached read that missed an object,
+// or an operator restart between a delete and the status write.
+//
+// The StatefulSet runs one sleeping curl pod, so the sweep's foreground delete
+// has a real pod to take with it, which is the part no unit test can show.
+func PlantAbandonedGeneration(ctx context.Context, engineName string, gen int) error {
+	labels := map[string]string{
+		"firebolt.io/engine":     engineName,
+		"firebolt.io/generation": strconv.Itoa(gen),
+	}
+	name := fmt.Sprintf("%s-g%d", engineName, gen)
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: labels},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:    ptrTo(int32(1)),
+			ServiceName: name + "-hl",
+			Selector:    &metav1.LabelSelector{MatchLabels: labels},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: ptrTo(int64(1)),
+					Containers: []corev1.Container{{
+						Name:            "sleeper",
+						Image:           curlImage,
+						ImagePullPolicy: corev1.PullIfNotPresent,
+						Command:         []string{"sleep", "infinity"},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("10m"),
+								corev1.ResourceMemory: resource.MustParse("16Mi"),
+							},
+							Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("16Mi")},
+						},
+					}},
+				},
+			},
+		},
+	}
+	if _, err := k8sClient.AppsV1().StatefulSets(testNamespace).Create(ctx, sts, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("plant StatefulSet %s: %w", name, err)
+	}
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-hl", Namespace: testNamespace, Labels: labels},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: corev1.ClusterIPNone,
+			Selector:  labels,
+			Ports:     []corev1.ServicePort{{Name: "http", Port: 8123}},
+		},
+	}
+	if _, err := k8sClient.CoreV1().Services(testNamespace).Create(ctx, svc, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("plant Service %s: %w", svc.Name, err)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-config", Namespace: testNamespace, Labels: labels},
+		Data:       map[string]string{"config.yaml": "{}"},
+	}
+	if _, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("plant ConfigMap %s: %w", cm.Name, err)
+	}
+	return nil
+}
+
+// GenerationResourcesStanding reports how many of gen's StatefulSets, Services,
+// ConfigMaps and pods are present and not yet asked to go.
+func GenerationResourcesStanding(ctx context.Context, engineName string, gen int) (int, error) {
+	selector := fmt.Sprintf("firebolt.io/engine=%s,firebolt.io/generation=%d", engineName, gen)
+	standing := 0
+
+	stsList, err := k8sClient.AppsV1().StatefulSets(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return 0, err
+	}
+	for i := range stsList.Items {
+		if stsList.Items[i].DeletionTimestamp.IsZero() {
+			standing++
+		}
+	}
+
+	svcList, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return 0, err
+	}
+	for i := range svcList.Items {
+		if svcList.Items[i].DeletionTimestamp.IsZero() {
+			standing++
+		}
+	}
+
+	cmList, err := k8sClient.CoreV1().ConfigMaps(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return 0, err
+	}
+	for i := range cmList.Items {
+		if cmList.Items[i].DeletionTimestamp.IsZero() {
+			standing++
+		}
+	}
+
+	podList, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return 0, err
+	}
+	for i := range podList.Items {
+		if podList.Items[i].DeletionTimestamp.IsZero() {
+			standing++
+		}
+	}
+
+	return standing, nil
+}
+
+// WaitForGenerationReclaimed polls until nothing of gen is standing.
+func WaitForGenerationReclaimed(ctx context.Context, engineName string, gen int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	standing := -1
+	for time.Now().Before(deadline) {
+		var err error
+		standing, err = GenerationResourcesStanding(ctx, engineName, gen)
+		if err == nil && standing == 0 {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for generation %d of engine %s to be reclaimed (%d resources still standing)",
+		gen, engineName, standing)
+}
+
+// WaitForGenerationPodRunning polls until gen has a pod the API server has
+// admitted, so a later delete has something to cascade to.
+func WaitForGenerationPodRunning(ctx context.Context, engineName string, gen int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	selector := fmt.Sprintf("firebolt.io/engine=%s,firebolt.io/generation=%d", engineName, gen)
+	for time.Now().Before(deadline) {
+		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err == nil && len(pods.Items) > 0 {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for a pod of generation %d of engine %s", gen, engineName)
+}
+
+func ptrTo[T any](v T) *T { return &v }
 
 // StartOperator starts an engine operator scoped to the given instance name.
 // The reconciler drops reconcile requests for any engine whose
