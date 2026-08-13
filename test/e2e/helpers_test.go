@@ -214,8 +214,23 @@ func PlantAbandonedGeneration(ctx context.Context, engineName string, gen int) e
 	}
 	name := fmt.Sprintf("%s-g%d", engineName, gen)
 
+	// The controller reference matters as much as the labels: the sweep deletes
+	// only what the engine owns, so a planted resource without it is a resource
+	// the operator never created and must be left alone.
+	engine, err := GetEngine(ctx, engineName)
+	if err != nil {
+		return fmt.Errorf("plant generation %d: %w", gen, err)
+	}
+	owner := []metav1.OwnerReference{{
+		APIVersion: computev1alpha1.GroupVersion.String(),
+		Kind:       "FireboltEngine",
+		Name:       engine.Name,
+		UID:        engine.UID,
+		Controller: ptrTo(true),
+	}}
+
 	sts := &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: labels, OwnerReferences: owner},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:    ptrTo(int32(1)),
 			ServiceName: name + "-hl",
@@ -246,7 +261,7 @@ func PlantAbandonedGeneration(ctx context.Context, engineName string, gen int) e
 	}
 
 	svc := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: name + "-hl", Namespace: testNamespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-hl", Namespace: testNamespace, Labels: labels, OwnerReferences: owner},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: corev1.ClusterIPNone,
 			Selector:  labels,
@@ -258,7 +273,7 @@ func PlantAbandonedGeneration(ctx context.Context, engineName string, gen int) e
 	}
 
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: name + "-config", Namespace: testNamespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-config", Namespace: testNamespace, Labels: labels, OwnerReferences: owner},
 		Data:       map[string]string{"config.yaml": "{}"},
 	}
 	if _, err := k8sClient.CoreV1().ConfigMaps(testNamespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {

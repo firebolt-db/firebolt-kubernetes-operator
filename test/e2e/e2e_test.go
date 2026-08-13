@@ -444,6 +444,10 @@ var _ = Describe("Firebolt Engine", func() {
 		// deletes; only a real cluster shows the abandoned generation's pod going
 		// down with its StatefulSet.
 		It("should reclaim an abandoned generation while the engine is stuck creating", func() {
+			// Bringing an engine up is the one step here that cannot fit the
+			// suite's 15s ceiling for condition waits, so it keeps the shared
+			// readiness constant like every other spec. Everything the sweep
+			// itself does is bounded at 15s below.
 			By("Creating engine with 1 replica")
 			Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
 			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
@@ -451,18 +455,24 @@ var _ = Describe("Firebolt Engine", func() {
 
 			By("Pinning the engine in creating with a nodeSelector nothing satisfies")
 			Expect(UpdateEngineScheduling(ctx, engineName, map[string]string{"firebolt.io/no-such-node": "true"}, nil, nil)).To(Succeed())
-			Expect(WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseCreating, clusterTransitionTimeout)).To(Succeed())
+			Expect(WaitForEnginePhase(ctx, engineName, computev1alpha1.PhaseCreating, generationSweepTimeout)).To(Succeed())
+
+			// The gate is armed first: the sweep runs on every reconcile and the
+			// engine requeues every few seconds while creating, so a generation
+			// planted before the gate could be reclaimed between the two calls and
+			// the rejection would never be exercised.
+			By("Rejecting the operator's deletes for the generation about to be planted")
+			gate.Reject(abandonedGen)
 
 			By("Planting the resources an abandoned generation leaves behind")
 			Expect(PlantAbandonedGeneration(ctx, engineName, abandonedGen)).To(Succeed())
-			Expect(WaitForGenerationPodRunning(ctx, engineName, abandonedGen, clusterTransitionTimeout)).To(Succeed())
+			Expect(WaitForGenerationPodRunning(ctx, engineName, abandonedGen, generationSweepTimeout)).To(Succeed())
 
-			By("Rejecting the operator's deletes for that generation")
-			gate.Reject(abandonedGen)
+			By("Verifying the rejected deletes leave the generation standing")
 			Consistently(func() (int, error) {
 				return GenerationResourcesStanding(ctx, engineName, abandonedGen)
-			}, generationSweepTimeout, pollInterval).Should(BeNumerically(">", 0),
-				"the abandoned generation must survive while its deletes are rejected")
+			}, generationSweepTimeout, pollInterval).Should(Equal(4),
+				"every resource of the abandoned generation must survive while its deletes are rejected")
 
 			By("Accepting deletes again")
 			gate.Allow()

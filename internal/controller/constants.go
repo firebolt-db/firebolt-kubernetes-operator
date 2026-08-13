@@ -188,6 +188,13 @@ const (
 	// worker for many minutes and stall every other engine in the cluster.
 	GCMaxDeletesPerPass = 100
 
+	// GCMaxKindFailuresPerPass is how many delete failures the sweep tolerates
+	// within one kind before moving on to the next kind in the same pass. Without
+	// it a kind whose deletes fail persistently, an RBAC gap on one resource for
+	// instance, spends the whole per-pass budget on the same prefix every pass and
+	// the kinds swept after it are never reached.
+	GCMaxKindFailuresPerPass = 3
+
 	// GCBacklogRequeue is how long to wait before resuming a sweep that spent
 	// GCMaxDeletesPerPass with orphans still standing. Short, because the pass
 	// that hit the cap has already been slowed to the client's rate limit and

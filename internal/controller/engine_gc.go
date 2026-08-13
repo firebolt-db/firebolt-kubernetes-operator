@@ -25,6 +25,8 @@ import (
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -32,9 +34,9 @@ import (
 )
 
 // gcOrphanedResources deletes StatefulSets, Services, ConfigMaps, and
-// per-generation TLS Certificates/Secrets that belong to this engine (by
-// LabelEngine) but whose LabelGeneration matches none of CurrentGeneration,
-// ActiveGeneration, or DrainingGeneration. It returns true when the pass left
+// per-generation TLS Certificates/Secrets that this engine owns but whose
+// LabelGeneration matches none of CurrentGeneration, ActiveGeneration,
+// DrainingGeneration, or the generation the cluster Service selects. It returns true when the pass left
 // orphans standing, either because the per-pass delete budget ran out or because
 // a delete failed, so the caller can requeue promptly instead of waiting out the
 // phase's own interval.
@@ -78,6 +80,29 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		keepGens[strconv.Itoa(*engine.Status.DrainingGeneration)] = true
 	}
 
+	// Whatever the status says, the generation the cluster Service actually
+	// selects is the one queries are landing on, so it is kept too. Status and
+	// selector normally agree, and the phase machine is what reconciles them, but
+	// they can diverge: a pass whose Service repair failed returns an error with
+	// the status ahead of the selector, and this sweep runs on that path on
+	// purpose. Deleting the selected generation there would turn a recoverable
+	// divergence into an outage.
+	//
+	// A read failure other than NotFound ends the pass reporting a backlog rather
+	// than sweeping blind: without the selector there is no way to tell which
+	// generation is serving.
+	clusterSvc := &corev1.Service{}
+	clusterSvcKey := types.NamespacedName{Name: engine.Name + SuffixService, Namespace: engine.Namespace}
+	switch err := r.Get(ctx, clusterSvcKey, clusterSvc); {
+	case err == nil:
+		if gen, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
+			keepGens[gen] = true
+		}
+	case !apierrors.IsNotFound(err):
+		log.Error(err, "GC: failed to read the cluster Service", "name", clusterSvcKey.Name)
+		return true
+	}
+
 	sweep := &orphanSweep{budget: GCMaxDeletesPerPass}
 
 	// A List that fails ends the pass reporting a backlog: it saw only part of
@@ -96,10 +121,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	// propagation, so reclaiming the StatefulSet is also what reclaims the
 	// abandoned generation's pods. Sweeping pods directly would need a delete
 	// verb on pods that nothing else in the operator asks for.
-	for i := range stsList.Items {
-		if !r.sweepOrphan(ctx, log, &stsList.Items[i], keepGens, sweep) {
-			return sweep.retry
-		}
+	if !r.sweepKind(ctx, log, engine, len(stsList.Items),
+		func(i int) client.Object { return &stsList.Items[i] }, keepGens, sweep) {
+		return sweep.retry
 	}
 
 	svcList := &corev1.ServiceList{}
@@ -107,10 +131,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		log.Error(err, "GC: failed to list Services")
 		return true
 	}
-	for i := range svcList.Items {
-		if !r.sweepOrphan(ctx, log, &svcList.Items[i], keepGens, sweep) {
-			return sweep.retry
-		}
+	if !r.sweepKind(ctx, log, engine, len(svcList.Items),
+		func(i int) client.Object { return &svcList.Items[i] }, keepGens, sweep) {
+		return sweep.retry
 	}
 
 	cmList := &corev1.ConfigMapList{}
@@ -118,10 +141,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		log.Error(err, "GC: failed to list ConfigMaps")
 		return true
 	}
-	for i := range cmList.Items {
-		if !r.sweepOrphan(ctx, log, &cmList.Items[i], keepGens, sweep) {
-			return sweep.retry
-		}
+	if !r.sweepKind(ctx, log, engine, len(cmList.Items),
+		func(i int) client.Object { return &cmList.Items[i] }, keepGens, sweep) {
+		return sweep.retry
 	}
 
 	// Per-generation engine TLS Certificates and their cert-manager-derived
@@ -146,10 +168,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 			return true
 		}
 	} else {
-		for i := range certList.Items {
-			if !r.sweepOrphan(ctx, log, &certList.Items[i], keepGens, sweep) {
-				return sweep.retry
-			}
+		if !r.sweepKind(ctx, log, engine, len(certList.Items),
+			func(i int) client.Object { return &certList.Items[i] }, keepGens, sweep) {
+			return sweep.retry
 		}
 	}
 
@@ -158,10 +179,9 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		log.Error(err, "GC: failed to list Secrets")
 		return true
 	}
-	for i := range secretList.Items {
-		if !r.sweepOrphan(ctx, log, &secretList.Items[i], keepGens, sweep) {
-			return sweep.retry
-		}
+	if !r.sweepKind(ctx, log, engine, len(secretList.Items),
+		func(i int) client.Object { return &secretList.Items[i] }, keepGens, sweep) {
+		return sweep.retry
 	}
 
 	return sweep.retry
@@ -175,6 +195,9 @@ type orphanSweep struct {
 	// back sooner than the phase's own interval: either the budget ran out or a
 	// delete failed.
 	retry bool
+	// kindFailures counts failed deletes within the kind being swept, reset by
+	// sweepKind on entry.
+	kindFailures int
 }
 
 // sweepOrphan deletes obj when its generation label is present and outside
@@ -201,17 +224,17 @@ type orphanSweep struct {
 func (r *FireboltEngineReconciler) sweepOrphan(
 	ctx context.Context,
 	log logr.Logger,
+	engine *computev1alpha1.FireboltEngine,
 	obj client.Object,
 	keepGens map[string]bool,
 	sweep *orphanSweep,
-) bool {
+) {
 	gen := obj.GetLabels()[LabelGeneration]
 	if gen == "" || keepGens[gen] || obj.GetDeletionTimestamp() != nil {
-		return true
+		return
 	}
-	if sweep.budget <= 0 {
-		sweep.retry = true
-		return false
+	if !engineOwnsForGC(engine, obj) {
+		return
 	}
 	sweep.budget--
 
@@ -220,6 +243,61 @@ func (r *FireboltEngineReconciler) sweepOrphan(
 	if err := r.deleteIfExists(ctx, obj); err != nil {
 		log.Error(err, "GC: failed to delete orphaned resource", "kind", kind, "name", obj.GetName())
 		sweep.retry = true
+		sweep.kindFailures++
+	}
+}
+
+// engineOwnsForGC reports whether the sweep may delete obj, which takes more
+// than the two labels it was selected by. Labels are copyable: anything a user
+// or another controller tags with this engine's name and a stale generation
+// would otherwise be deleted, and for a Secret that is unrecoverable. The
+// operator's own children carry a controller reference to the engine
+// (SetControllerReference in every ensure*), so the reference is the proof.
+//
+// cert-manager's derived Secret is the documented exception: cert-manager
+// owner-references it to the Certificate, not to the engine, so nothing links
+// it back here. It is admitted on the same provenance its deletion path uses,
+// the cert-manager certificate-name annotation naming a per-generation engine
+// certificate, and on nothing else.
+func engineOwnsForGC(engine *computev1alpha1.FireboltEngine, obj client.Object) bool {
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller && ref.UID == engine.UID {
+			return true
+		}
+	}
+	if secret, ok := obj.(*corev1.Secret); ok {
+		return engineOwnedSecret(secret, engine.Name)
+	}
+	return false
+}
+
+// sweepKind sweeps one kind's list. It returns false when the pass is over,
+// either because the delete budget is spent or because this kind's deletes keep
+// failing: a kind whose deletes are rejected persistently, an RBAC gap on one
+// resource for instance, would otherwise spend the whole budget on the same
+// prefix every pass and the kinds after it would never be reached at all.
+// Giving up on the kind after GCMaxKindFailuresPerPass leaves the rest of the
+// budget for them.
+func (r *FireboltEngineReconciler) sweepKind(
+	ctx context.Context,
+	log logr.Logger,
+	engine *computev1alpha1.FireboltEngine,
+	count int,
+	at func(int) client.Object,
+	keepGens map[string]bool,
+	sweep *orphanSweep,
+) bool {
+	sweep.kindFailures = 0
+	for i := 0; i < count; i++ {
+		if sweep.budget <= 0 {
+			sweep.retry = true
+			return false
+		}
+		if sweep.kindFailures >= GCMaxKindFailuresPerPass {
+			log.Info("GC: giving up on this kind for now", "failures", sweep.kindFailures)
+			return true
+		}
+		r.sweepOrphan(ctx, log, engine, at(i), keepGens, sweep)
 	}
 	return true
 }
