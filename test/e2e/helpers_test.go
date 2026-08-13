@@ -1265,6 +1265,75 @@ func WaitForResourcesDeleted(ctx context.Context, engineName string, timeout tim
 	return fmt.Errorf("timeout waiting for resources of engine %s to be deleted", engineName)
 }
 
+// WaitForOnlyCurrentGenerationResources polls until every generation-labeled
+// StatefulSet, Service and pod of engineName belongs to the engine's current
+// generation. It is the live-cluster half of the abandoned-generation sweep:
+// unit tests can prove the operator issues the deletes, but only a real cluster
+// runs the garbage collector that takes an abandoned generation's pods down with
+// its StatefulSet.
+//
+// Objects without a generation label (the cluster Service) are out of scope, and
+// an object already terminating counts as still present: the assertion is that
+// the abandoned generations are actually gone, not merely marked.
+func WaitForOnlyCurrentGenerationResources(ctx context.Context, engineName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	selector := fmt.Sprintf("firebolt.io/engine=%s", engineName)
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		currentGen, _, err := GetEngineGeneration(ctx, engineName)
+		if err != nil {
+			lastErr = err
+			time.Sleep(pollInterval)
+			continue
+		}
+		want := strconv.Itoa(currentGen)
+
+		stale := func(labels map[string]string) bool {
+			gen, ok := labels["firebolt.io/generation"]
+			return ok && gen != want
+		}
+
+		lastErr = nil
+		stsList, err := k8sClient.AppsV1().StatefulSets(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			lastErr = err
+		}
+		for i := range stsList.Items {
+			if stale(stsList.Items[i].Labels) {
+				lastErr = fmt.Errorf("StatefulSet %s belongs to an abandoned generation", stsList.Items[i].Name)
+			}
+		}
+
+		svcList, err := k8sClient.CoreV1().Services(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			lastErr = err
+		}
+		for i := range svcList.Items {
+			if stale(svcList.Items[i].Labels) {
+				lastErr = fmt.Errorf("Service %s belongs to an abandoned generation", svcList.Items[i].Name)
+			}
+		}
+
+		podList, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+		if err != nil {
+			lastErr = err
+		}
+		for i := range podList.Items {
+			if stale(podList.Items[i].Labels) {
+				lastErr = fmt.Errorf("pod %s belongs to an abandoned generation", podList.Items[i].Name)
+			}
+		}
+
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return fmt.Errorf("timeout waiting for engine %s to be left with only its current generation: %w", engineName, lastErr)
+}
+
 // CreateClientPod creates a lightweight curl pod in the test namespace that can
 // be used to query services from inside the cluster. The pod blocks forever so
 // it stays running for the duration of the test.

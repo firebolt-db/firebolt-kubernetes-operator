@@ -34,6 +34,13 @@ computeCreating	internal/controller/engine_reconcile.go	formal/FireboltEngine.tl
 computeSwitching	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 computeDraining	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 computeCleaning	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+# The gcOrphanedResources row binds the sweep's KEEP SET, which is what
+# GCOrphans abstracts and what GCIgnoresActiveGen / GCDrainingGeneration /
+# GCCurrentGeneration falsify. It does not bind the rest of the function: the
+# state cover walks gcStaleResources, the harness mirror, and GCOrphans labels
+# no edge in the shipped configuration (see engine_actions_test.go), so the
+# budget, the delete-failure handling and the retry signal are covered by Go
+# tests alone. A keep-set change belongs in the spec; the others do not.
 gcOrphanedResources	internal/controller/engine_gc.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 setInstanceReadyRollup	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
 computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go

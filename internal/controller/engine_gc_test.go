@@ -965,3 +965,152 @@ func TestGCOrphanedResources_ReportsBacklogWhenAListFails(t *testing.T) {
 		t.Errorf("the orphan the failed List hid should still be there for the next pass: %v", err)
 	}
 }
+
+// TestReconcileReclaimsTheGenerationItAbandonsInTheSamePass pins why the sweep
+// is deferred rather than run at the top of the pass. The abandon path deletes
+// only what it observed, and a generation's TLS Secret is never in that set, so
+// the sweep is the only thing that reclaims it. Running last means the sweep
+// reads the status the pass wrote, so the generation abandoned by this pass is
+// already outside the keep set.
+func TestReconcileReclaimsTheGenerationItAbandonsInTheSamePass(t *testing.T) {
+	const (
+		ns         = "ns-gc-samepass"
+		instName   = "parent"
+		engName    = "eng-gc-samepass"
+		abandonedG = 1
+	)
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("clientgoscheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("computev1alpha1.AddToScheme: %v", err)
+	}
+
+	labels := map[string]string{LabelEngine: engName, LabelGeneration: strconv.Itoa(abandonedG)}
+	// Replicas disagree with the spec below, which is the first comparison
+	// stsMatchesSpec makes: this pass abandons generation 1.
+	driftedSTS := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engName, abandonedG, ""), Namespace: ns, Labels: labels,
+		},
+		Spec: appsv1.StatefulSetSpec{Replicas: ptr(int32(3))},
+	}
+	tlsSecretName := genResourceName(engName, abandonedG, SuffixEngineTLS)
+	tlsSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: tlsSecretName, Namespace: ns, Labels: labels,
+		Annotations: map[string]string{certmanagerv1.CertificateNameKey: tlsSecretName},
+	}}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engName, Namespace: ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: abandonedG,
+			ActiveGeneration:  -1,
+		},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata." + ns + ".svc.cluster.local:50051",
+		},
+	}
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance, engine, driftedSTS, tlsSecret).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	ctx := context.Background()
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(ctx, types.NamespacedName{Name: engName, Namespace: ns}, got); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if got.Status.CurrentGeneration != abandonedG+1 {
+		t.Fatalf("CurrentGeneration = %d, want %d: this pass was supposed to abandon the drifted generation",
+			got.Status.CurrentGeneration, abandonedG+1)
+	}
+	if err := cli.Get(ctx, types.NamespacedName{Name: tlsSecretName, Namespace: ns}, &corev1.Secret{}); !errors.IsNotFound(err) {
+		t.Errorf("the abandoned generation's TLS Secret survived the pass that abandoned it (err=%v)", err)
+	}
+}
+
+// TestReconcilePanicSkipsTheSweep covers the other half of the deferred call. A
+// panic means the pass reached a state the reconciler holds to be impossible, so
+// the status backing the keep set cannot be trusted: the panic must propagate
+// and nothing may be deleted on the way out.
+func TestReconcilePanicSkipsTheSweep(t *testing.T) {
+	const (
+		ns       = "ns-gc-panic"
+		instName = "parent"
+		engName  = "eng-gc-panic"
+	)
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("clientgoscheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("computev1alpha1.AddToScheme: %v", err)
+	}
+
+	orphan := genSvc(engName, ns, 5)
+	// Stable with no active generation is the state computeStable panics on.
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engName, Namespace: ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseStable,
+			CurrentGeneration: 0,
+			ActiveGeneration:  -1,
+		},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata." + ns + ".svc.cluster.local:50051",
+		},
+	}
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance, engine, orphan).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	ctx := context.Background()
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("expected the terminal-phase invariant to panic")
+			}
+		}()
+		_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}})
+	}()
+
+	if err := cli.Get(ctx, types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("an orphan was deleted while unwinding a panic: %v", err)
+	}
+}

@@ -379,6 +379,10 @@ var _ = Describe("Firebolt Engine", func() {
 			err = WaitForEngineStable(ctx, engineName, rapidTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Verifying the abandoned generations were reclaimed while the engine is alive")
+			err = WaitForOnlyCurrentGenerationResources(ctx, engineName, rapidTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
 			By("Verifying engine has exactly 1 node")
 			output, err := RunQuery(ctx, clientPod, engineName, queryConfig.Query)
 			Expect(err).NotTo(HaveOccurred())
