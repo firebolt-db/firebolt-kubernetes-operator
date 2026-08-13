@@ -199,6 +199,9 @@
         "minLength": 1
       }
     },
+    "watchLabelSelector": {
+      "type": "string"
+    },
     "logging": {
       "type": "object",
       "properties": {

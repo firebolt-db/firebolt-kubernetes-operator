@@ -206,6 +206,47 @@ This renders a dedicated `ClusterRole` (or per-namespace `Role` when
 `watchNamespaces` is set) that grants only `pods/proxy: get`. The
 default `metricScrapeMode=PodIP` does not need this permission.
 
+## Split CR ownership between installs with a label selector
+
+A cluster-wide install can coexist with namespace-scoped installs by
+ignoring the CRs those installs own. Give the cluster-wide install a
+selector that excludes the label the scoped installs stamp on their
+CRs:
+
+```bash
+helm upgrade --skip-crds --install firebolt-operator \
+  oci://oci.firebolt.io/firebolt-db/helm-charts/firebolt-operator \
+  --set-string 'watchLabelSelector=!example.com/managed'
+```
+
+Each install then reconciles only the Firebolt CRs matching its
+selector (see `--watch-label-selector` in the flag table below for the
+exact scope). Three rules keep a split-ownership cluster healthy:
+
+- **Label whole stacks.** CRs that reference each other (an engine and
+  the instance or engine class it points at) must land on the same
+  side of the selector. Never label individual CRs out of a stack.
+- **One install per namespace.** Leader election uses a fixed lease
+  ID, so two operator releases deployed into the same namespace
+  contend for one lease and only one of them ever runs. Give every
+  install its own release namespace.
+- **The selector is not an isolation boundary.** RBAC is governed by
+  `watchNamespaces` alone, and the chart registers admission webhooks
+  cluster-wide: every install with `webhook.enabled=true` validates
+  every Firebolt CR in the cluster, whatever its selector says. This
+  is deliberate. Kubernetes could scope the webhook itself (an
+  `objectSelector` on the webhook configuration, or a label check
+  inside the handler), but the chart does not wire the cache selector
+  into either: selector-scoped installs run webhook-less, so the
+  cluster-wide install's webhook is the only admission validation
+  their CRs receive, and filtering it by the same selector would
+  silently remove that. Enable webhooks on at most one install, and
+  make it the cluster-wide one (empty `watchNamespaces`): the
+  validators read live API state in whatever namespace a CR is
+  admitted in, which needs the chart's `ClusterRole`. A
+  namespace-scoped install serving webhooks would fail admission for
+  CRs outside its namespaces under the default `failurePolicy: Fail`.
+
 ## Firebolt Operator flags
 
 The Firebolt Operator supports these runtime flags. The binary default is what
@@ -216,6 +257,7 @@ the manager uses when you run it directly. The Helm chart default is what the
 |------|----------------|--------------------|-------------|
 | `--version` | `false` | Not set | Print the version and exit. |
 | `--namespaces` | `""` | Derived from `watchNamespaces` (omitted when empty) | Comma-separated list of namespaces to watch. Empty watches every namespace (cluster-wide install, requires the chart's `ClusterRole`). A non-empty list confines the manager cache to those namespaces and pairs with per-namespace `Role` and `RoleBinding` from the chart. |
+| `--watch-label-selector` | `""` | Derived from `watchLabelSelector` (omitted when empty) | Label selector restricting which `FireboltEngine`, `FireboltInstance`, and `FireboltEngineClass` objects the operator caches and reconciles. Empty applies no restriction. Applies only to the three Firebolt CRD types; child objects and third-party Secrets are cached unfiltered, so they never need the label. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, e.g. `!example.com/managed`. CRs that reference each other (an engine and the instance or engine class it points at) must land on the same side of the selector: label whole stacks, never individual CRs. |
 | `--metrics-bind-address` | `0` | `:8443` | Address for the metrics endpoint. Use `0` to disable metrics. |
 | `--metrics-secure` | `true` | `true` | Serve metrics over HTTPS with Kubernetes authentication and authorization. |
 | `--metrics-cert-path` | `""` | Not set | Directory that contains the metrics server certificate. |

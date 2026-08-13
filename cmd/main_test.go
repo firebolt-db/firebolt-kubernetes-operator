@@ -21,6 +21,10 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/labels"
+	ctrl "sigs.k8s.io/controller-runtime"
+
+	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
 func TestParseEngineResourceBounds_AllEmptyIsZeroValue(t *testing.T) {
@@ -102,5 +106,124 @@ func TestParseNamespaces(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseWatchLabelSelector_EmptyIsNil(t *testing.T) {
+	got, err := parseWatchLabelSelector("")
+	if err != nil {
+		t.Fatalf("parseWatchLabelSelector: empty flag should not error, got %v", err)
+	}
+	if got != nil {
+		t.Fatalf("parseWatchLabelSelector(\"\") = %v, want nil (no restriction)", got)
+	}
+}
+
+// TestParseWatchLabelSelector_NegatedExistence locks in the semantic the
+// cluster-wide install relies on: a negated-existence selector matches
+// every object that lacks the key — including the operator's own CRs,
+// which carry only firebolt.io/* labels — and excludes exactly the CRs
+// another install stamped with it.
+func TestParseWatchLabelSelector_NegatedExistence(t *testing.T) {
+	sel, err := parseWatchLabelSelector("!example.com/managed")
+	if err != nil {
+		t.Fatalf("parseWatchLabelSelector: %v", err)
+	}
+	cases := []struct {
+		name string
+		set  labels.Set
+		want bool
+	}{
+		{"unlabeled", labels.Set{}, true},
+		{"operator-owned labels only", labels.Set{"firebolt.io/engine": "analytics"}, true},
+		{"externally-managed", labels.Set{"example.com/managed": "proj-a"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sel.Matches(tc.set); got != tc.want {
+				t.Errorf("Matches(%v) = %v, want %v", tc.set, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestScopeManagerCache_ComposesNamespacesAndSelector locks in that
+// --namespaces and --watch-label-selector land in the same cache.Options:
+// DefaultNamespaces carries the namespace scope while ByObject carries
+// the selector for exactly the three Firebolt CRD types (controller-runtime
+// defaults ByObject entries with nil Namespaces from DefaultNamespaces,
+// so neither setting clobbers the other).
+func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
+	sel, err := parseWatchLabelSelector("!example.com/managed")
+	if err != nil {
+		t.Fatalf("parseWatchLabelSelector: %v", err)
+	}
+	var opts ctrl.Options
+	scopeManagerCache(&opts, []string{"tenant-a", "tenant-b"}, sel)
+
+	if len(opts.Cache.DefaultNamespaces) != 2 {
+		t.Fatalf("DefaultNamespaces = %v, want tenant-a and tenant-b", opts.Cache.DefaultNamespaces)
+	}
+	for _, ns := range []string{"tenant-a", "tenant-b"} {
+		if _, ok := opts.Cache.DefaultNamespaces[ns]; !ok {
+			t.Errorf("DefaultNamespaces missing %q", ns)
+		}
+	}
+	if len(opts.Cache.ByObject) != 3 {
+		t.Fatalf("ByObject has %d entries, want the 3 Firebolt CRD types", len(opts.Cache.ByObject))
+	}
+	seen := make(map[string]bool, 3)
+	stamped := labels.Set{"example.com/managed": "proj-a"}
+	for key, byObject := range opts.Cache.ByObject {
+		switch key.(type) {
+		case *computev1alpha1.FireboltEngine:
+			seen["FireboltEngine"] = true
+		case *computev1alpha1.FireboltInstance:
+			seen["FireboltInstance"] = true
+		case *computev1alpha1.FireboltEngineClass:
+			seen["FireboltEngineClass"] = true
+		default:
+			t.Errorf("unexpected ByObject key type %T", key)
+		}
+		if byObject.Label == nil {
+			t.Errorf("ByObject[%T].Label is nil, want the parsed selector", key)
+			continue
+		}
+		if byObject.Label.Matches(stamped) {
+			t.Errorf("ByObject[%T].Label matches a externally-managed set; selector not applied", key)
+		}
+		if byObject.Namespaces != nil {
+			t.Errorf("ByObject[%T].Namespaces = %v, want nil so it inherits DefaultNamespaces", key, byObject.Namespaces)
+		}
+	}
+	for _, want := range []string{"FireboltEngine", "FireboltInstance", "FireboltEngineClass"} {
+		if !seen[want] {
+			t.Errorf("ByObject missing entry for %s", want)
+		}
+	}
+}
+
+func TestScopeManagerCache_EmptyFlagsLeaveCacheUnscoped(t *testing.T) {
+	var opts ctrl.Options
+	scopeManagerCache(&opts, nil, nil)
+	if opts.Cache.DefaultNamespaces != nil {
+		t.Errorf("DefaultNamespaces = %v, want nil (cluster-wide)", opts.Cache.DefaultNamespaces)
+	}
+	if opts.Cache.ByObject != nil {
+		t.Errorf("ByObject = %v, want nil (no selector)", opts.Cache.ByObject)
+	}
+}
+
+// TestParseWatchLabelSelector_MalformedFails locks in the fail-fast
+// semantic: a typo in the flag must surface at process start rather than
+// silently caching every CR, and the error names the flag so the operator
+// can be debugged from the manager log alone.
+func TestParseWatchLabelSelector_MalformedFails(t *testing.T) {
+	_, err := parseWatchLabelSelector("example.com/managed===x")
+	if err == nil {
+		t.Fatal("parseWatchLabelSelector: expected error for malformed selector, got nil")
+	}
+	if !strings.Contains(err.Error(), "--watch-label-selector") {
+		t.Errorf("error %q does not name the offending flag", err.Error())
 	}
 }

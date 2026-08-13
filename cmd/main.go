@@ -33,11 +33,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -95,6 +97,7 @@ func main() {
 	var enableHTTP2 bool
 	var enableWebhooks bool
 	var watchNamespacesArg string
+	var watchLabelSelectorArg string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
 	var gatewayWakeClusterRole string
 	var wakeAgentImage string
@@ -126,6 +129,15 @@ func main() {
 		"Comma-separated list of namespaces to watch for Firebolt CRs. Empty watches all namespaces "+
 			"(cluster-wide install, requires the chart's ClusterRole). A non-empty list confines the "+
 			"manager cache to those namespaces and requires per-namespace Role+RoleBinding pairs in each.")
+	flag.StringVar(&watchLabelSelectorArg, "watch-label-selector", "",
+		"Label selector restricting which FireboltEngine, FireboltInstance, and FireboltEngineClass "+
+			"objects this operator caches and reconciles. Empty applies no restriction. The selector "+
+			"applies only to the three Firebolt CRD types; child objects and third-party Secrets "+
+			"(e.g. cert-manager's) are cached unfiltered, so they never need the label. Lets a "+
+			"cluster-wide install ignore CRs owned by namespace-scoped installs, "+
+			"e.g. '!example.com/managed'. CRs that reference each other (an engine and its "+
+			"instance or engine class) must land on the same side of the selector: label whole "+
+			"stacks, never individual CRs.")
 	flag.StringVar(&engineMaxCPUStr, "engine-max-cpu", "",
 		"Maximum value (Kubernetes resource.Quantity, e.g. \"32\") for FireboltEngine.spec.resources requests/limits CPU. "+
 			"Empty disables the bound.")
@@ -174,6 +186,12 @@ func main() {
 			"maxCPU", engineBounds.MaxCPU.String(),
 			"maxMemory", engineBounds.MaxMemory.String(),
 			"maxEphemeralStorage", engineBounds.MaxEphemeralStorage.String())
+	}
+
+	watchSelector, selectorErr := parseWatchLabelSelector(watchLabelSelectorArg)
+	if selectorErr != nil {
+		setupLog.Error(selectorErr, "invalid --watch-label-selector flag")
+		os.Exit(1)
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -258,14 +276,7 @@ func main() {
 	}
 
 	watchNamespaces := parseNamespaces(watchNamespacesArg)
-	if len(watchNamespaces) > 0 {
-		defaults := make(map[string]cache.Config, len(watchNamespaces))
-		for _, ns := range watchNamespaces {
-			defaults[ns] = cache.Config{}
-		}
-		mgrOpts.Cache = cache.Options{DefaultNamespaces: defaults}
-		setupLog.Info("manager cache scoped to enumerated namespaces", "namespaces", watchNamespaces)
-	}
+	scopeManagerCache(&mgrOpts, watchNamespaces, watchSelector)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOpts)
 	if err != nil {
@@ -319,6 +330,7 @@ func main() {
 
 	if err := (&controller.FireboltEngineClassReconciler{
 		Client: mgr.GetClient(),
+		Reader: mgr.GetAPIReader(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngineClass")
@@ -443,4 +455,66 @@ func parseNamespaces(s string) []string {
 		}
 	}
 	return out
+}
+
+// scopeManagerCache narrows the manager cache to the enumerated
+// namespaces (--namespaces) and to the Firebolt CRs matching the watch
+// label selector (--watch-label-selector). The two compose: ByObject
+// entries with nil Namespaces inherit DefaultNamespaces, so a scoped
+// install can additionally filter its CRs by label.
+//
+// The selector is applied as per-type ByObject entries rather than
+// cache.Options.DefaultLabelSelector: it decides which Firebolt CRs
+// this install adopts. Everything else the reconcilers read through
+// the cache — child StatefulSets/Services/ConfigMaps,
+// cert-manager-produced TLS and signing-key Secrets, external Postgres
+// credential Secrets — carries labels this operator does not control,
+// so a cache-wide selector would silently hide those objects and wedge
+// every reconcile behind not-found errors.
+//
+// The selector partitions adoption between installs, and the deployment
+// contract is that CRs referencing each other (an engine and the
+// instance or engine class it points at) are labeled as a unit, never
+// split across the selector. Fleet-level progress gates (auth-rotation
+// convergence, fleet TLS state, CA-bundle maintenance) deliberately
+// evaluate only adopted engines: under a split pair the mislabeled CR
+// harms only itself, and a correctly labeled instance is never wedged
+// behind an engine this install cannot reconcile. The one fleet read
+// that must not trust the narrowed cache is the engine-class deletion
+// guard — releasing a finalizer is irreversible — so it counts bound
+// engines against the live API state instead (see
+// FireboltEngineClassReconciler.Reader).
+func scopeManagerCache(mgrOpts *ctrl.Options, watchNamespaces []string, watchSelector labels.Selector) {
+	if len(watchNamespaces) > 0 {
+		defaults := make(map[string]cache.Config, len(watchNamespaces))
+		for _, ns := range watchNamespaces {
+			defaults[ns] = cache.Config{}
+		}
+		mgrOpts.Cache.DefaultNamespaces = defaults
+		setupLog.Info("manager cache scoped to enumerated namespaces", "namespaces", watchNamespaces)
+	}
+	if watchSelector != nil {
+		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
+			&computev1alpha1.FireboltEngine{}:      {Label: watchSelector},
+			&computev1alpha1.FireboltInstance{}:    {Label: watchSelector},
+			&computev1alpha1.FireboltEngineClass{}: {Label: watchSelector},
+		}
+		setupLog.Info("manager cache restricted to Firebolt CRs matching label selector", "selector", watchSelector.String())
+	}
+}
+
+// parseWatchLabelSelector turns the --watch-label-selector flag string
+// into a labels.Selector. An empty input returns a nil selector, which
+// the caller treats as "no restriction" (cache every Firebolt CR). A
+// non-empty but malformed value returns an error so the operator fails
+// fast at startup instead of silently watching everything.
+func parseWatchLabelSelector(s string) (labels.Selector, error) {
+	if s == "" {
+		return nil, nil
+	}
+	sel, err := labels.Parse(s)
+	if err != nil {
+		return nil, fmt.Errorf("--watch-label-selector=%q: %w", s, err)
+	}
+	return sel, nil
 }

@@ -119,7 +119,7 @@ func TestFireboltEngineClassReconcile_CountsBoundEngines(t *testing.T) {
 		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "compute-optimized", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -160,7 +160,7 @@ func TestFireboltEngineClassReconcile_DefenseInDepthRejectsOwnedFields(t *testin
 		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "bad-class", Namespace: "firebolt"}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestFireboltEngineClassReconcile_NotFoundIsNoOp(t *testing.T) {
 		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "missing", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -219,7 +219,7 @@ func TestFireboltEngineClassReconcile_IdempotentWhenNoChange(t *testing.T) {
 		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "steady", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -244,7 +244,7 @@ func TestFireboltEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T
 		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
 		Build()
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "fresh", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -257,7 +257,7 @@ func TestFireboltEngineClassReconcile_AddsFinalizerOnFirstReconcile(t *testing.T
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "fresh", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if !containsFinalizer(updated.Finalizers, engineClassFinalizerName) {
+	if !hasDeletionGuardFinalizer(updated.Finalizers) {
 		t.Errorf("Finalizers = %v, want %q included", updated.Finalizers, engineClassFinalizerName)
 	}
 	// Status untouched on the finalizer-add pass.
@@ -289,7 +289,7 @@ func TestFireboltEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "doomed", Namespace: "firebolt"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -302,7 +302,7 @@ func TestFireboltEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "doomed", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if !containsFinalizer(updated.Finalizers, engineClassFinalizerName) {
+	if !hasDeletionGuardFinalizer(updated.Finalizers) {
 		t.Errorf("Finalizers = %v, want %q still present (deletion must stay blocked)", updated.Finalizers, engineClassFinalizerName)
 	}
 	if updated.DeletionTimestamp.IsZero() {
@@ -323,6 +323,50 @@ func TestFireboltEngineClassReconcile_DeletionBlockedWhileBound(t *testing.T) {
 	}
 }
 
+// TestFireboltEngineClassReconcile_DeletionGuardSeesBeyondTheCache pins the
+// deletion guard to the live API state. With --watch-label-selector the
+// manager cache can omit an engine that still binds the class; the guard
+// must hold the finalizer anyway. The cached client here holds no engines
+// at all while the Reader sees one bound engine — if the guard ever counts
+// through the cache again, this releases the finalizer and fails.
+func TestFireboltEngineClassReconcile_DeletionGuardSeesBeyondTheCache(t *testing.T) {
+	sch := engineClassTestScheme(t)
+	class := newClassFixture("doomed")
+	cached := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(class).
+		WithStatusSubresource(&computev1alpha1.FireboltEngineClass{}).
+		Build()
+	live := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(newEngineFixture("outside-selector", "firebolt", "doomed")).
+		Build()
+
+	if err := cached.Delete(context.Background(), class); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	r := &FireboltEngineClassReconciler{Client: cached, Reader: live, Scheme: sch}
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "doomed", Namespace: "firebolt"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.RequeueAfter == 0 {
+		t.Errorf("RequeueAfter = 0, want %s (deletion held)", engineClassRequeueAfter)
+	}
+
+	updated := &computev1alpha1.FireboltEngineClass{}
+	if err := cached.Get(context.Background(), client.ObjectKey{Name: "doomed", Namespace: "firebolt"}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !hasDeletionGuardFinalizer(updated.Finalizers) {
+		t.Errorf("Finalizers = %v, want %q still present (guard must count engines the cache cannot see)", updated.Finalizers, engineClassFinalizerName)
+	}
+	if updated.Status.BoundEngines != 1 {
+		t.Errorf("BoundEngines = %d, want 1 (the engine visible only to the live reader)", updated.Status.BoundEngines)
+	}
+}
+
 // TestFireboltEngineClassReconcile_DeletionAllowedWhenUnbound pins the release
 // path: a class being deleted with no bound engines has its finalizer
 // removed, after which the API server would complete the delete.
@@ -339,7 +383,7 @@ func TestFireboltEngineClassReconcile_DeletionAllowedWhenUnbound(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: "orphan", Namespace: "firebolt"}}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -375,7 +419,7 @@ func TestFireboltEngineClassReconcile_DeletionLifecycle(t *testing.T) {
 		t.Fatalf("initial Delete: %v", err)
 	}
 
-	r := &FireboltEngineClassReconciler{Client: cli, Scheme: sch}
+	r := &FireboltEngineClassReconciler{Client: cli, Reader: cli, Scheme: sch}
 	key := client.ObjectKey{Name: "lifecycle", Namespace: "firebolt"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
@@ -386,7 +430,7 @@ func TestFireboltEngineClassReconcile_DeletionLifecycle(t *testing.T) {
 	if err := cli.Get(context.Background(), key, blocked); err != nil {
 		t.Fatalf("Get blocked: %v", err)
 	}
-	if !containsFinalizer(blocked.Finalizers, engineClassFinalizerName) {
+	if !hasDeletionGuardFinalizer(blocked.Finalizers) {
 		t.Fatalf("Finalizers = %v, want %q present while engine still binds", blocked.Finalizers, engineClassFinalizerName)
 	}
 
@@ -408,12 +452,12 @@ func TestFireboltEngineClassReconcile_DeletionLifecycle(t *testing.T) {
 	}
 }
 
-// containsFinalizer is a small slice search helper used by the
+// hasDeletionGuardFinalizer is a small slice search helper used by the
 // deletion-guard tests; kept local to avoid an extra import shared with
 // helper packages.
-func containsFinalizer(list []string, want string) bool {
+func hasDeletionGuardFinalizer(list []string) bool {
 	for _, f := range list {
-		if f == want {
+		if f == engineClassFinalizerName {
 			return true
 		}
 	}
