@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.6.1...firebolt-operator-v0.7.0) (2026-08-13)
+
+
+### Features
+
+* add experimental metadata-ng mode (FB-3014) ([7556006](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/755600618ed6d52a850cd19bbc6493f5f1e95cb8))
+
+
+### Bug Fixes
+
+* **controller:** defer the sweep so every pass reclaims (FB-3011) ([1499f57](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1499f5795067e47ea7c6a3ae2c6e7839540eeb32))
+* **controller:** delete only what the engine owns and what nothing serves (FB-3011) ([12e026f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/12e026f0715e50db5aad75b30eef3607a0b157ed))
+* **controller:** reclaim abandoned generations in every phase (FB-3011) ([60f4675](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/60f467550b4286b7f7c5deaf37fde660d845ee0f))
+* **controller:** report a sweep backlog on read failures and mixed requeues (FB-3011) ([8eb9f30](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8eb9f3042b594c0828baa876b0d7c9ca619ea26d))
+* **controller:** skip the sweep on a panic unwind, keep immediate requeues (FB-3011) ([215775b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/215775b03ff307ea652955c3eaf947cd41fcbdb1))
+* **controller:** sweep ahead of the reconcile gates (FB-3011) ([a4878f2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a4878f25ced7242863f0f75cfe6990c0762124c1))
+
 ## [0.6.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.6.0...firebolt-operator-v0.6.1) (2026-08-12)
 
 
