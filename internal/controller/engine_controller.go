@@ -163,7 +163,7 @@ type FireboltEngineReconciler struct {
 // Reconcile reads the current engine state from the cluster, computes the
 // reconcile actions needed, and applies them. Deletion is handled separately
 // via a finalizer.
-func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	log := logf.FromContext(ctx)
 
 	engine := &computev1alpha1.FireboltEngine{}
@@ -229,20 +229,28 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"activeGen", engine.Status.ActiveGeneration,
 	)
 
-	// Reclaim abandoned generations before anything that can wedge the pass.
-	// Every gate below returns early on failure — a missing or unready class, an
-	// instance that is not ready, a rejected pod template, resources over the
-	// configured maximum, an unreadable engine state — and an engine parked on
-	// one of them keeps whatever its last abandon left behind. The sweep needs
-	// none of that: it reads the generations recorded in status and lists by
-	// label. Running it here also covers the engines that never reach a terminal
-	// phase at all, whose pods crash-loop or whose spec keeps drifting, which is
-	// where abandoned generations pile up fastest.
-	//
-	// The keep set is therefore the status as persisted at the start of the
-	// pass. A pass that goes on to bump the generation leaves that bump's
-	// leftovers for the next sweep, one requeue later.
-	gcBacklogged := !r.DisableGC && r.gcOrphanedResources(ctx, engine)
+	// Reclaim abandoned generations on the way out of the pass, whichever path
+	// it takes. Deferred for two reasons. Every gate below ends the pass early
+	// on failure — a missing or unready class, an instance that is not ready, a
+	// rejected pod template, resources over the configured maximum, an
+	// unreadable engine state — and an engine parked on one of them keeps
+	// whatever its last abandon left behind; the sweep needs none of what those
+	// gates protect, since it reads the generations recorded in status and lists
+	// by label. Running last also means it sees the status this pass wrote, so
+	// the generation this pass just abandoned is reclaimed now instead of on the
+	// next pass.
+	if !r.DisableGC {
+		defer func() {
+			if r.gcOrphanedResources(ctx, engine) {
+				// The sweep left orphans standing, because it spent its
+				// per-pass delete budget or because a delete failed. Come back
+				// for the rest sooner than this phase would ask for. An error
+				// return ignores this and uses controller-runtime's backoff,
+				// which still converges.
+				res.RequeueAfter = soonestRequeue(res.RequeueAfter, GCBacklogRequeue)
+			}
+		}()
+	}
 
 	// Resolve the referenced FireboltEngineClass before reading engine state:
 	// getEngineState's drain decision and the autoStop both consume
@@ -271,7 +279,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.handleFireboltEngineClassError(ctx, engine, classErr)
 	}
 
-	current, err := r.getEngineState(ctx, engine, classInfo)
+	current, err = r.getEngineState(ctx, engine, classInfo)
 	if err != nil {
 		// Surface a drain-probe failure as a user-facing condition
 		// BEFORE returning the error. Without this the reconciler
@@ -422,13 +430,6 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	requeueAfter := result.RequeueAfter
-	if gcBacklogged {
-		// The sweep stopped at its per-pass budget with orphans still standing;
-		// come back for the rest sooner than this phase would ask for. A pass
-		// that returned at one of the gates above keeps its own retry interval
-		// instead, which is slower but still converges.
-		requeueAfter = soonestRequeue(requeueAfter, GCBacklogRequeue)
-	}
 
 	// AutoStop runs only after a clean main reconcile and only in terminal
 	// phases. It may patch spec.replicas (level-driven: the patch flows

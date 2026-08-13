@@ -34,6 +34,7 @@ computeCreating	internal/controller/engine_reconcile.go	formal/FireboltEngine.tl
 computeSwitching	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 computeDraining	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 computeCleaning	internal/controller/engine_reconcile.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
+gcOrphanedResources	internal/controller/engine_gc.go	formal/FireboltEngine.tla	internal/controller/engine_tla_states_data_test.go
 setInstanceReadyRollup	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
 computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.tla	internal/controller/instance_tla_states_data_test.go
 stepSigningKeyRotation	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
