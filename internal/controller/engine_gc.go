@@ -92,12 +92,19 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	// purpose. Deleting the selected generation there would turn a recoverable
 	// divergence into an outage.
 	//
+	// Read through the same reader as the status above, so the keep set is built
+	// from one view of the cluster. Mixing a live status with a cached selector is
+	// its own hazard: a pass working from a stale view can write an older
+	// generation into the selector, and a cached read that has not caught up
+	// returns the newer value it replaced, which would leave the generation
+	// traffic is actually on outside the keep set and below the floor.
+	//
 	// A read failure other than NotFound ends the pass reporting a backlog rather
 	// than sweeping blind: without the selector there is no way to tell which
 	// generation is serving.
 	clusterSvc := &corev1.Service{}
 	clusterSvcKey := types.NamespacedName{Name: engine.Name + SuffixService, Namespace: engine.Namespace}
-	switch err := r.Get(ctx, clusterSvcKey, clusterSvc); {
+	switch err := r.sweepReader().Get(ctx, clusterSvcKey, clusterSvc); {
 	case err == nil:
 		if gen, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
 			keep.addExact(gen)
@@ -282,6 +289,16 @@ func (k *generationKeepSet) newerThanNewest(gen string) bool {
 // This is defense in depth, not the correctness guarantee: a read can always be
 // overtaken by the next write, so the generation floor is what actually makes a
 // stale keep set safe.
+// sweepReader is the reader the keep set is built from: the API server directly
+// when one is wired, the cache otherwise. One reader for every read the keep set
+// depends on, so those reads cannot disagree with each other.
+func (r *FireboltEngineReconciler) sweepReader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
 func (r *FireboltEngineReconciler) sweepStatus(
 	ctx context.Context,
 	log logr.Logger,
@@ -291,7 +308,7 @@ func (r *FireboltEngineReconciler) sweepStatus(
 		return &engine.Status
 	}
 	live := &computev1alpha1.FireboltEngine{}
-	switch err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(engine), live); {
+	switch err := r.sweepReader().Get(ctx, client.ObjectKeyFromObject(engine), live); {
 	case err == nil:
 		return &live.Status
 	case apierrors.IsNotFound(err):

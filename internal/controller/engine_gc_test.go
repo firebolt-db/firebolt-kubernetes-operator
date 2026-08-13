@@ -1621,3 +1621,72 @@ func TestGCOrphanedResources_ServiceSelectorDoesNotRaiseTheFloor(t *testing.T) {
 		t.Errorf("an older abandoned generation should still be reclaimed (err=%v)", err)
 	}
 }
+
+// TestGCOrphanedResources_ReadsTheClusterServiceFromTheSameView pins that the
+// whole keep set comes from one view of the cluster. A pass working from a stale
+// view can write an older generation into the Service selector, and a cached read
+// that has not caught up still returns the newer value it replaced. Building the
+// keep set from a live status and that cached selector would leave the generation
+// traffic is actually on outside the keep set and below the floor.
+func TestGCOrphanedResources_ReadsTheClusterServiceFromTheSameView(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	const (
+		servingGen = 549 // what the selector was just regressed to, live
+		statusGen  = 551
+	)
+
+	svc := func(gen int) *corev1.Service {
+		obj := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: engineName + SuffixService, Namespace: ns,
+				Labels: map[string]string{LabelEngine: engineName},
+			},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{
+				LabelEngine:     engineName,
+				LabelGeneration: strconv.Itoa(gen),
+			}},
+		}
+		ownedByEngine(engineName, obj)
+		return obj
+	}
+	sts := func(gen int) *appsv1.StatefulSet {
+		obj := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engineName, gen, ""), Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+		}}
+		ownedByEngine(engineName, obj)
+		return obj
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: statusGen,
+			ActiveGeneration:  statusGen,
+		},
+	}
+	serving := sts(servingGen)
+
+	// The cache still has the selector the stale pass replaced; the API server has
+	// the regressed one, which is where traffic is going.
+	cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(engine, serving, svc(statusGen)).Build()
+	live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(engine.DeepCopy(), svc(servingGen)).Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          cached,
+		APIReader:       live,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+	}
+	r.gcOrphanedResources(context.Background(), engine.DeepCopy())
+
+	if err := cached.Get(context.Background(), types.NamespacedName{Name: serving.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("the generation the live selector points at was deleted: %v", err)
+	}
+}

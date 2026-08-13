@@ -67,21 +67,23 @@ CONSTANTS
     \* SigningKeyRotation.tla.
     \*
     \* They exist because a passing invariant is only evidence if it could have
-    \* failed. Five of the twelve invariants in this spec are falsifiable by
+    \* failed. Four of the twelve invariants in this spec are falsifiable by
     \* removing a guard, as is the no-delete-of-the-current-generation action
-    \* property, and those six are what the flags here cover.
+    \* property, and those five are what the flags here cover.
     \*
     \* Inv_TerminalHasSTS was falsifiable by a GCCurrentGeneration flag that
     \* dropped GCOrphans' `g # gcView` exclusion, until the generation floor
     \* subsumed that exclusion: with the floor in place, dropping it changes no
     \* reachable state, and TLC said so by no longer reporting the violation. The
-    \* exclusion stays in the action as defense in depth and the flag is gone,
-    \* which leaves Inv_TerminalHasSTS covered by the floor's own flag instead
-    \* -- NoDeleteOfCurrentGeneration is the stronger statement of the same
-    \* hazard, since it forbids the delete outright rather than only in a
-    \* terminal phase.
+    \* exclusion stays in the action as defense in depth and the flag is gone.
+    \* Inv_TerminalHasSTS therefore has no independent falsifier any more: in a
+    \* terminal phase activeGen = currentGen, so the active-generation exclusion
+    \* alone keeps the current generation's StatefulSet alive whichever GC flag is
+    \* flipped. NoDeleteOfCurrentGeneration covers the same hazard more strongly,
+    \* forbidding the delete in every phase rather than only in a terminal one,
+    \* but it is an action property and not that invariant's control.
     \*
-    \* The other six invariants are not falsifiable by a dropped guard, for reasons worth writing down rather than leaving as a gap:
+    \* The other invariants are not falsifiable by a dropped guard, for reasons worth writing down rather than leaving as a gap:
     \* Inv_GenOrder and Inv_DrainingOlderThanCurrent hold structurally (activeGen
     \* and drainingGen are only ever assigned currentGen or a smaller gen, so no
     \* guard removal reaches them -- only a mutated WRITE would);
