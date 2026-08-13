@@ -67,17 +67,21 @@ import (
 func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine) bool {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
-	keepGens := map[string]bool{
-		strconv.Itoa(engine.Status.CurrentGeneration): true,
+	status := r.sweepStatus(ctx, log, engine)
+	if status == nil {
+		return false
 	}
+
+	keep := &generationKeepSet{gens: map[string]bool{}}
+	keep.add(status.CurrentGeneration)
 	// Negative means "none yet" for ActiveGeneration (pre-first-switch) and is
 	// never a label value, but keeping the guard explicit documents that the
 	// sweep is protecting a generation that exists.
-	if engine.Status.ActiveGeneration >= 0 {
-		keepGens[strconv.Itoa(engine.Status.ActiveGeneration)] = true
+	if status.ActiveGeneration >= 0 {
+		keep.add(status.ActiveGeneration)
 	}
-	if engine.Status.DrainingGeneration != nil {
-		keepGens[strconv.Itoa(*engine.Status.DrainingGeneration)] = true
+	if status.DrainingGeneration != nil {
+		keep.add(*status.DrainingGeneration)
 	}
 
 	// Whatever the status says, the generation the cluster Service actually
@@ -96,7 +100,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	switch err := r.Get(ctx, clusterSvcKey, clusterSvc); {
 	case err == nil:
 		if gen, ok := clusterSvc.Spec.Selector[LabelGeneration]; ok {
-			keepGens[gen] = true
+			keep.addLabel(gen)
 		}
 	case !apierrors.IsNotFound(err):
 		log.Error(err, "GC: failed to read the cluster Service", "name", clusterSvcKey.Name)
@@ -122,7 +126,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 	// abandoned generation's pods. Sweeping pods directly would need a delete
 	// verb on pods that nothing else in the operator asks for.
 	if !r.sweepKind(ctx, log, engine, len(stsList.Items),
-		func(i int) client.Object { return &stsList.Items[i] }, keepGens, sweep) {
+		func(i int) client.Object { return &stsList.Items[i] }, keep, sweep) {
 		return sweep.retry
 	}
 
@@ -132,7 +136,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		return true
 	}
 	if !r.sweepKind(ctx, log, engine, len(svcList.Items),
-		func(i int) client.Object { return &svcList.Items[i] }, keepGens, sweep) {
+		func(i int) client.Object { return &svcList.Items[i] }, keep, sweep) {
 		return sweep.retry
 	}
 
@@ -142,7 +146,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		return true
 	}
 	if !r.sweepKind(ctx, log, engine, len(cmList.Items),
-		func(i int) client.Object { return &cmList.Items[i] }, keepGens, sweep) {
+		func(i int) client.Object { return &cmList.Items[i] }, keep, sweep) {
 		return sweep.retry
 	}
 
@@ -169,7 +173,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		}
 	} else {
 		if !r.sweepKind(ctx, log, engine, len(certList.Items),
-			func(i int) client.Object { return &certList.Items[i] }, keepGens, sweep) {
+			func(i int) client.Object { return &certList.Items[i] }, keep, sweep) {
 			return sweep.retry
 		}
 	}
@@ -180,7 +184,7 @@ func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engi
 		return true
 	}
 	if !r.sweepKind(ctx, log, engine, len(secretList.Items),
-		func(i int) client.Object { return &secretList.Items[i] }, keepGens, sweep) {
+		func(i int) client.Object { return &secretList.Items[i] }, keep, sweep) {
 		return sweep.retry
 	}
 
@@ -198,6 +202,98 @@ type orphanSweep struct {
 	// kindFailures counts failed deletes within the kind being swept, reset by
 	// sweepKind on entry.
 	kindFailures int
+	// loggedStaleView keeps the newer-than-the-keep-set note to one line per
+	// pass; under churn every resource of every newer generation would hit it.
+	loggedStaleView bool
+}
+
+// generationKeepSet is the set of generations a sweep must leave alone: the ones
+// the status names, the one the cluster Service selects, and everything newer
+// than all of those.
+//
+// The floor is the part that is not obvious. Abandoned generations are strictly
+// older than the keep set by construction, because once CurrentGeneration moves
+// on nothing recreates an older generation. A resource whose generation is newer
+// than every generation the sweep knows about therefore cannot be an orphan: it
+// can only mean this pass read a status that has since been superseded, which
+// happens under churn because the keep set comes from a cached read. Refusing to
+// delete it costs a delayed reclaim, which the next pass makes good; deleting it
+// destroys the generation the engine is currently building, and the resulting
+// re-ensure pushes the read further behind, which is a loop that sustains itself.
+type generationKeepSet struct {
+	gens map[string]bool
+	// newest is the highest generation in the set, and the floor at or above
+	// which nothing may be deleted.
+	newest int
+}
+
+func (k *generationKeepSet) add(gen int) {
+	k.gens[strconv.Itoa(gen)] = true
+	if gen > k.newest {
+		k.newest = gen
+	}
+}
+
+// addLabel adds a generation read from a label. A value that is not a number is
+// ignored: it cannot place the resource against the floor, and nothing the
+// operator writes carries one.
+func (k *generationKeepSet) addLabel(gen string) {
+	n, err := strconv.Atoi(gen)
+	if err != nil {
+		return
+	}
+	k.add(n)
+}
+
+// protects reports whether the sweep must leave a resource carrying this
+// generation label alone. Everything unrecognizable is protected: an absent
+// label puts the resource out of scope entirely, and a label that is not a
+// number cannot be placed against the floor.
+func (k *generationKeepSet) protects(gen string) bool {
+	if gen == "" || k.gens[gen] {
+		return true
+	}
+	n, err := strconv.Atoi(gen)
+	if err != nil {
+		return true
+	}
+	return n >= k.newest
+}
+
+// newerThanNewest reports whether this generation label is above the floor,
+// which is the signal that the status behind the keep set is stale.
+func (k *generationKeepSet) newerThanNewest(gen string) bool {
+	n, err := strconv.Atoi(gen)
+	return err == nil && n > k.newest
+}
+
+// sweepStatus returns the engine status the keep set is built from, read straight
+// from the API server when an APIReader is wired so the common case is a fresh
+// view rather than a cached one that lags an earlier pass's write. A nil return
+// means the engine is gone and there is nothing to sweep for; reconcileDelete
+// owns that path.
+//
+// This is defense in depth, not the correctness guarantee: a read can always be
+// overtaken by the next write, so the generation floor is what actually makes a
+// stale keep set safe.
+func (r *FireboltEngineReconciler) sweepStatus(
+	ctx context.Context,
+	log logr.Logger,
+	engine *computev1alpha1.FireboltEngine,
+) *computev1alpha1.FireboltEngineStatus {
+	if r.APIReader == nil {
+		return &engine.Status
+	}
+	live := &computev1alpha1.FireboltEngine{}
+	switch err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(engine), live); {
+	case err == nil:
+		return &live.Status
+	case apierrors.IsNotFound(err):
+		return nil
+	default:
+		log.Error(err, "GC: failed to read the engine status uncached; using the cached copy")
+		return &engine.Status
+	}
 }
 
 // sweepOrphan deletes obj when its generation label is present and outside
@@ -226,11 +322,16 @@ func (r *FireboltEngineReconciler) sweepOrphan(
 	log logr.Logger,
 	engine *computev1alpha1.FireboltEngine,
 	obj client.Object,
-	keepGens map[string]bool,
+	keep *generationKeepSet,
 	sweep *orphanSweep,
 ) {
 	gen := obj.GetLabels()[LabelGeneration]
-	if gen == "" || keepGens[gen] || obj.GetDeletionTimestamp() != nil {
+	if keep.protects(gen) || obj.GetDeletionTimestamp() != nil {
+		if keep.newerThanNewest(gen) && !sweep.loggedStaleView {
+			sweep.loggedStaleView = true
+			log.Info("GC: leaving generations newer than the status this pass read",
+				"newestKept", keep.newest, "generation", gen)
+		}
 		return
 	}
 	if !engineOwnsForGC(engine, obj) {
@@ -284,7 +385,7 @@ func (r *FireboltEngineReconciler) sweepKind(
 	engine *computev1alpha1.FireboltEngine,
 	count int,
 	at func(int) client.Object,
-	keepGens map[string]bool,
+	keep *generationKeepSet,
 	sweep *orphanSweep,
 ) bool {
 	sweep.kindFailures = 0
@@ -297,7 +398,7 @@ func (r *FireboltEngineReconciler) sweepKind(
 			log.Info("GC: giving up on this kind for now", "failures", sweep.kindFailures)
 			return true
 		}
-		r.sweepOrphan(ctx, log, engine, at(i), keepGens, sweep)
+		r.sweepOrphan(ctx, log, engine, at(i), keep, sweep)
 	}
 	return true
 }

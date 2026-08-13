@@ -116,6 +116,16 @@ type FireboltEngineReconciler struct {
 	// leave the field unset.
 	EventRecorder events.EventRecorder
 
+	// APIReader reads straight from the API server, bypassing the manager's
+	// cache. The orphan sweep uses it to re-read this engine's status: its keep
+	// set is a set of generation numbers, and a cached copy that lags an earlier
+	// pass's status write describes generations that have already been superseded.
+	// Wired from mgr.GetAPIReader() in SetupWithManager, the same way the
+	// admission validators get theirs. Nil is tolerated and means the sweep falls
+	// back to the status it was handed; the generation floor in
+	// gcOrphanedResources is what makes a stale keep set safe either way.
+	APIReader client.Reader
+
 	// DisableGC disables the orphaned-generation garbage collector. When
 	// true, the reconciler will not sweep resources from abandoned
 	// generations. E2E tests set this to verify that the happy path never
@@ -1613,6 +1623,9 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 	}
 	if r.EventRecorder == nil {
 		r.EventRecorder = mgr.GetEventRecorder(name)
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

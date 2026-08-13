@@ -533,16 +533,19 @@ func TestGCOrphanedResources_StopsAtDeleteBudget(t *testing.T) {
 	ns := "test-ns"
 	engineName := "my-engine"
 	orphanCount := GCMaxDeletesPerPass + 3
+	// Abandoned generations are older than the current one, which is what the
+	// sweep's generation floor requires of anything it deletes.
+	currentGen := orphanCount + 1
 
 	objs := make([]client.Object, 0, orphanCount+1)
-	objs = append(objs, genSvc(engineName, ns, 0))
+	objs = append(objs, genSvc(engineName, ns, currentGen))
 	for gen := 1; gen <= orphanCount; gen++ {
 		objs = append(objs, genSvc(engineName, ns, gen))
 	}
 
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	engine := gcTestEngine(engineName, ns, 0, 0)
+	engine := gcTestEngine(engineName, ns, currentGen, currentGen)
 
 	survivors := func() int {
 		list := &corev1.ServiceList{}
@@ -1252,6 +1255,10 @@ func TestGCOrphanedResources_MovesOnWhenAKindKeepsFailing(t *testing.T) {
 	ns := "test-ns"
 	engineName := "my-engine"
 
+	// Every planted generation is older than the engine's current one, which is
+	// what the sweep's generation floor requires of anything it deletes.
+	currentGen := GCMaxDeletesPerPass + 3
+
 	objs := make([]client.Object, 0, GCMaxDeletesPerPass+4)
 	for gen := 1; gen <= GCMaxDeletesPerPass+2; gen++ {
 		sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
@@ -1278,7 +1285,7 @@ func TestGCOrphanedResources_MovesOnWhenAKindKeepsFailing(t *testing.T) {
 	})
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 0, -1)); !backlogged {
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, currentGen, -1)); !backlogged {
 		t.Error("expected a backlog while a whole kind's deletes are failing")
 	}
 
@@ -1375,5 +1382,172 @@ func TestGCOrphanedResources_BailsWhenTheClusterServiceIsUnreadable(t *testing.T
 	}
 	if err := base.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
 		t.Errorf("nothing may be deleted while the serving generation is unknown: %v", err)
+	}
+}
+
+// TestGCOrphanedResources_NeverDeletesNewerThanItsKeepSet reproduces a
+// generation kill seen in the field. The sweep's keep set comes from the engine
+// status as read at the start of the pass, and under generation churn that read
+// lags: a pass started at generation N while N+1 and N+2 already existed, so its
+// sweep took them for orphans and deleted the live current generation about a
+// second after its pod started. The kill triggers a missing-resource re-ensure
+// and another bump, the read falls further behind, and the loop sustains itself.
+//
+// Abandoned generations are strictly older than the keep set by construction:
+// once the current generation moves on, nothing recreates an older one. So a
+// generation newer than everything in the keep set can only mean the sweep's
+// view is behind, and the safe reading is to leave it alone. Staleness then
+// costs a delayed reclaim rather than a destroyed engine.
+func TestGCOrphanedResources_NeverDeletesNewerThanItsKeepSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	const staleView = 549
+
+	sts := func(gen int) *appsv1.StatefulSet {
+		obj := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engineName, gen, ""), Namespace: ns,
+			Labels: map[string]string{LabelEngine: engineName, LabelGeneration: strconv.Itoa(gen)},
+		}}
+		ownedByEngine(engineName, obj)
+		return obj
+	}
+
+	// The generations the cache has not served yet, one of them live.
+	newer := []*appsv1.StatefulSet{sts(staleView + 1), sts(staleView + 2)}
+	// A genuine orphan, older than anything the sweep is keeping.
+	orphan := sts(staleView - 2)
+	current := sts(staleView)
+
+	objs := []client.Object{orphan, current}
+	for _, s := range newer {
+		objs = append(objs, s)
+	}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, staleView, staleView))
+
+	for _, s := range newer {
+		if err := fc.Get(context.Background(), types.NamespacedName{Name: s.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+			t.Errorf("%q is newer than the sweep's keep set and must survive a stale read: %v", s.Name, err)
+		}
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: current.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Errorf("the generation in the keep set was deleted: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &appsv1.StatefulSet{}); !errors.IsNotFound(err) {
+		t.Errorf("an older abandoned generation must still be reclaimed (err=%v)", err)
+	}
+}
+
+// TestGCOrphanedResources_SkipsUnparsableGenerationLabels covers the other way a
+// generation label can fail to place a resource against the floor: a value that
+// is not a number at all. Nothing the operator creates carries one, so the label
+// was written by something else, and the sweep leaves it alone rather than
+// failing the pass.
+func TestGCOrphanedResources_SkipsUnparsableGenerationLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	odd := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: "odd-generation-label", Namespace: ns,
+		Labels: map[string]string{LabelEngine: engineName, LabelGeneration: "not-a-number"},
+	}}
+	ownedByEngine(engineName, odd)
+	orphan := genSvc(engineName, ns, 1)
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(odd, orphan).Build()
+	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+
+	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: odd.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("a resource whose generation label is not a number must be left alone: %v", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
+		t.Errorf("the genuine orphan should still have been deleted (err=%v)", err)
+	}
+}
+
+// TestGCOrphanedResources_ReadsTheStatusUncached covers the defense-in-depth
+// half. The keep set is built from the engine status, and the copy the reconcile
+// was handed comes from a cache that can lag an earlier pass's write, so the
+// sweep re-reads it through the APIReader when one is wired. Here the handed-in
+// copy is behind by two generations: with the fresh read, the generation it does
+// not know about is reclaimed in this pass rather than the next.
+func TestGCOrphanedResources_ReadsTheStatusUncached(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+
+	// What the API server has: the engine has moved on to generation 4.
+	live := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: engineName, Namespace: ns, UID: gcTestEngineUID},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: 4,
+			ActiveGeneration:  4,
+		},
+	}
+	// Abandoned at generation 3, which the stale copy below still calls current.
+	orphan := genSvc(engineName, ns, 3)
+	newest := genSvc(engineName, ns, 4)
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live, orphan, newest).Build()
+	r := &FireboltEngineReconciler{
+		Client:          fc,
+		APIReader:       fc,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+	}
+
+	stale := gcTestEngine(engineName, ns, 3, 3)
+	r.gcOrphanedResources(context.Background(), stale)
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
+		t.Errorf("generation 3 is abandoned according to the live status and should have been reclaimed (err=%v)", err)
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: newest.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("the live current generation must survive: %v", err)
+	}
+}
+
+// TestGCOrphanedResources_StopsWhenTheEngineIsGone covers the other outcome of
+// that read: an engine deleted between the reconcile's cached read and the sweep
+// has no keep set to speak of, and reconcileDelete owns removing its resources.
+func TestGCOrphanedResources_StopsWhenTheEngineIsGone(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	ns := "test-ns"
+	engineName := "my-engine"
+	orphan := genSvc(engineName, ns, 1)
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(orphan).Build()
+	r := &FireboltEngineReconciler{
+		Client:          fc,
+		APIReader:       fc, // the engine itself is absent from the store
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NoOpEngineRecorder{},
+	}
+
+	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1)); backlogged {
+		t.Error("expected no backlog to be reported for an engine that is gone")
+	}
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
+		t.Errorf("the sweep must not delete on behalf of an engine it cannot read: %v", err)
 	}
 }

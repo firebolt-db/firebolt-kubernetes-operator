@@ -294,6 +294,7 @@ func main() {
 
 	if err := (&controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
+		APIReader:       mgr.GetAPIReader(),
 		Scheme:          mgr.GetScheme(),
 		MetricsRecorder: engineMetrics,
 		ResourceBounds:  engineBounds,

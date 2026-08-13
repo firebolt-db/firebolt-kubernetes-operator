@@ -415,6 +415,7 @@ func StartOperator(instanceName string, opts ...EngineOperatorOption) (*Operator
 	// mid-flight spec changes opt into GC via WithGC(); see EngineOperatorOption.
 	reconciler := &controller.FireboltEngineReconciler{
 		Client:          mgr.GetClient(),
+		APIReader:       mgr.GetAPIReader(),
 		Scheme:          mgr.GetScheme(),
 		Clientset:       clientset,
 		InstanceFilter:  instanceName,
