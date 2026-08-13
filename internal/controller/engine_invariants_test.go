@@ -28,6 +28,7 @@ package controller
 // therefore not optional on the Go side.
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"testing"
@@ -211,26 +212,35 @@ var engineInvariants = map[string]func(t invariantT, m *engineSim){
 	// so it has no separate conjunct for it; on the Go side the GC is a distinct
 	// step (gcOrphanedResources) worth asserting on its own.
 	"Inv_NoOrphanedResources": func(t invariantT, m *engineSim) {
-		if !isTerminalPhase(m.status.Phase) {
-			return
+		// The keep set is the sweep's own: the generation being built, the one
+		// serving traffic, and the one draining. Checked in every phase, because
+		// the sweep runs in every phase — a phase gate on either side lets an
+		// engine that never reaches a terminal phase keep its abandoned
+		// generations forever.
+		keep := map[int]bool{m.status.CurrentGeneration: true}
+		if m.status.ActiveGeneration >= 0 {
+			keep[m.status.ActiveGeneration] = true
 		}
-		cur := m.status.CurrentGeneration
+		if m.status.DrainingGeneration != nil {
+			keep[*m.status.DrainingGeneration] = true
+		}
+		describe := func() string {
+			return fmt.Sprintf("phase=%s currentGen=%d activeGen=%d drainingGen=%v",
+				m.status.Phase, m.status.CurrentGeneration, m.status.ActiveGeneration, m.status.DrainingGeneration)
+		}
 		for gen := range m.api.stses {
-			if gen != cur {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but STS gen=%d survives (currentGen=%d)",
-					m.status.Phase, gen, cur)
+			if !keep[gen] {
+				t.Fatalf("Inv_NoOrphanedResources: STS gen=%d survives (%s)", gen, describe())
 			}
 		}
 		for gen := range m.api.configMaps {
-			if gen != cur {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but ConfigMap gen=%d survives (currentGen=%d)",
-					m.status.Phase, gen, cur)
+			if !keep[gen] {
+				t.Fatalf("Inv_NoOrphanedResources: ConfigMap gen=%d survives (%s)", gen, describe())
 			}
 		}
 		for gen := range m.api.headlessSvcs {
-			if gen != cur {
-				t.Fatalf("Inv_NoOrphanedResources: phase=%s but HeadlessSvc gen=%d survives (currentGen=%d)",
-					m.status.Phase, gen, cur)
+			if !keep[gen] {
+				t.Fatalf("Inv_NoOrphanedResources: HeadlessSvc gen=%d survives (%s)", gen, describe())
 			}
 		}
 	},

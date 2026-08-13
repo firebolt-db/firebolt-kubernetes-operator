@@ -683,3 +683,115 @@ func TestReconcileSweepsAbandonedGenerationsWhileCreating(t *testing.T) {
 		t.Error("the generation being created has no StatefulSet after the reconcile that should have ensured it")
 	}
 }
+
+// TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted is the ticket's
+// acceptance path at the controller level: an engine held in Creating, deletes
+// rejected while the abandoned generation stands, then accepted. Nothing of the
+// abandoned generation may survive once the API takes deletes again, and its
+// StatefulSet must go with foreground propagation, which is what takes the
+// generation's pods with it.
+func TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted(t *testing.T) {
+	const (
+		ns         = "ns-gc-retry"
+		instName   = "parent"
+		engName    = "eng-gc-retry"
+		abandonedG = 0
+		creatingG  = 1
+	)
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("clientgoscheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("computev1alpha1.AddToScheme: %v", err)
+	}
+
+	labels := map[string]string{LabelEngine: engName, LabelGeneration: strconv.Itoa(abandonedG)}
+	abandonedSTS := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engName, abandonedG, ""), Namespace: ns, Labels: labels,
+	}}
+	abandonedSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Name: genResourceName(engName, abandonedG, SuffixHL), Namespace: ns, Labels: labels,
+	}}
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engName, Namespace: ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: creatingG,
+			ActiveGeneration:  -1,
+		},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata." + ns + ".svc.cluster.local:50051",
+		},
+	}
+
+	base := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(instance, engine, abandonedSTS, abandonedSvc).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	rejecting := true
+	var stsPropagation *metav1.DeletionPropagation
+	cli := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if rejecting {
+				return goerrors.New("injected delete rejection")
+			}
+			if _, ok := obj.(*appsv1.StatefulSet); ok {
+				var applied client.DeleteOptions
+				applied.ApplyOptions(opts)
+				stsPropagation = applied.PropagationPolicy
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+
+	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}
+
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("Reconcile with deletes rejected: %v", err)
+	}
+	if err := base.Get(ctx, types.NamespacedName{Name: abandonedSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
+		t.Fatalf("abandoned StatefulSet should still stand while deletes are rejected: %v", err)
+	}
+
+	rejecting = false
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("Reconcile with deletes accepted: %v", err)
+	}
+
+	got := &computev1alpha1.FireboltEngine{}
+	if err := base.Get(ctx, types.NamespacedName{Name: engName, Namespace: ns}, got); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if got.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Fatalf("phase = %q, want creating: the engine must never have to leave Creating for the retry", got.Status.Phase)
+	}
+	for _, obj := range []struct {
+		name string
+		into client.Object
+	}{
+		{abandonedSTS.Name, &appsv1.StatefulSet{}},
+		{abandonedSvc.Name, &corev1.Service{}},
+	} {
+		if err := base.Get(ctx, types.NamespacedName{Name: obj.name, Namespace: ns}, obj.into); !errors.IsNotFound(err) {
+			t.Errorf("%q survived the pass that could delete again (err=%v)", obj.name, err)
+		}
+	}
+	if stsPropagation == nil || *stsPropagation != metav1.DeletePropagationForeground {
+		t.Errorf("StatefulSet delete propagation = %v, want Foreground so the generation's pods go with it", stsPropagation)
+	}
+}
