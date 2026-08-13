@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -565,5 +566,120 @@ func TestGCOrphanedResources_SkipsTerminatingResources(t *testing.T) {
 
 	if len(deleted) != 1 || deleted[0] != standing.Name {
 		t.Errorf("expected exactly one delete, of %q; got %v", standing.Name, deleted)
+	}
+}
+
+// TestReconcileSweepsAbandonedGenerationsWhileCreating drives the FULL
+// Reconcile, not gcOrphanedResources in isolation, on the engine shape this
+// sweep exists for: pods that never become ready, so the phase never leaves
+// Creating and no terminal-phase-gated cleanup would ever run. One reconcile
+// must reclaim the abandoned generation and leave both the active generation
+// (still serving traffic) and the one being created alone.
+func TestReconcileSweepsAbandonedGenerationsWhileCreating(t *testing.T) {
+	const (
+		ns         = "ns-gc-creating"
+		instName   = "parent"
+		engName    = "eng-gc"
+		abandonedG = 0
+		activeG    = 1
+		creatingG  = 2
+	)
+
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("clientgoscheme.AddToScheme: %v", err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("computev1alpha1.AddToScheme: %v", err)
+	}
+
+	labelsFor := func(gen int) map[string]string {
+		return map[string]string{LabelEngine: engName, LabelGeneration: strconv.Itoa(gen)}
+	}
+	sts := func(gen int) *appsv1.StatefulSet {
+		return &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engName, gen, ""), Namespace: ns, Labels: labelsFor(gen),
+		}}
+	}
+	hlSvc := func(gen int) *corev1.Service {
+		return &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engName, gen, SuffixHL), Namespace: ns, Labels: labelsFor(gen),
+		}}
+	}
+	cm := func(gen int) *corev1.ConfigMap {
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: genResourceName(engName, gen, SuffixConfig), Namespace: ns, Labels: labelsFor(gen),
+		}}
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: engName, Namespace: ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{InstanceRef: instName, Replicas: 1},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:             computev1alpha1.PhaseCreating,
+			CurrentGeneration: creatingG,
+			ActiveGeneration:  activeG,
+		},
+	}
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata." + ns + ".svc.cluster.local:50051",
+		},
+	}
+
+	cli := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			instance, engine,
+			sts(abandonedG), hlSvc(abandonedG), cm(abandonedG),
+			sts(activeG), hlSvc(activeG), cm(activeG),
+		).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	ctx := context.Background()
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	got := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(ctx, types.NamespacedName{Name: engName, Namespace: ns}, got); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if got.Status.Phase != computev1alpha1.PhaseCreating {
+		t.Fatalf("phase = %q, want creating: the fixture has no ready pods, so the engine must not leave Creating", got.Status.Phase)
+	}
+
+	gone := func(name string, obj client.Object) bool {
+		return errors.IsNotFound(cli.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, obj))
+	}
+	if !gone(sts(abandonedG).Name, &appsv1.StatefulSet{}) {
+		t.Error("abandoned StatefulSet survived a Creating-phase reconcile")
+	}
+	if !gone(hlSvc(abandonedG).Name, &corev1.Service{}) {
+		t.Error("abandoned headless Service survived a Creating-phase reconcile")
+	}
+	if !gone(cm(abandonedG).Name, &corev1.ConfigMap{}) {
+		t.Error("abandoned ConfigMap survived a Creating-phase reconcile")
+	}
+	if gone(sts(activeG).Name, &appsv1.StatefulSet{}) {
+		t.Error("active StatefulSet was deleted: it is the generation serving traffic")
+	}
+	if gone(hlSvc(activeG).Name, &corev1.Service{}) {
+		t.Error("active headless Service was deleted: it resolves the serving pods")
+	}
+	if gone(cm(activeG).Name, &corev1.ConfigMap{}) {
+		t.Error("active ConfigMap was deleted: its pods mount it on restart")
+	}
+	if gone(genResourceName(engName, creatingG, ""), &appsv1.StatefulSet{}) {
+		t.Error("the generation being created has no StatefulSet after the reconcile that should have ensured it")
 	}
 }
