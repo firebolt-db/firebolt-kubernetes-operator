@@ -8151,6 +8151,15 @@ spec:
                 x-kubernetes-validations:
                 - message: metadata replicas must be 1
                   rule: '!has(self.replicas) || self.replicas == 1'
+              metadataNG:
+                default: false
+                description: |-
+                  MetadataNG is experimental and selects the next-generation metadata
+                  service configuration.
+                  The operator does not select or rewrite the metadata container image;
+                  users must set a compatible image through spec.metadata.template.
+                  When false or omitted, the legacy metadata configuration is rendered.
+                type: boolean
               metricScrapeMode:
                 default: PodIP
                 description: |-

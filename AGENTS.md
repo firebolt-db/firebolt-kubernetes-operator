@@ -208,6 +208,8 @@ The chart picks the RBAC envelope at install time from `.Values.watchNamespaces`
 
 ### Admission webhooks and controller-side fallbacks
 
+`FireboltInstance.spec.metadataNG` is experimental and defaults to false. It selects the rendered metadata config and built-in UID/GID but MUST NOT infer from or rewrite the metadata image; selecting a compatible image remains the user's responsibility.
+
 The operator supports two admission postures and every invariant has to behave the same in both. The operator CLI flag `--enable-webhooks` defaults to `true`, but the Helm chart sets `webhook.enabled: false` by default (cert bootstrap is the caller's responsibility), so the realistic shipped state is **webhooks off**. `make test`, `make test-e2e`, and `make helm-test` all run with webhooks off too — the in-process operators and envtest setup do not register the webhook server.
 
 Every webhook-enforced invariant has a controller-side counterpart so the same CR write produces the same outcome regardless of admission. When touching any of these, change both sides together and add envtest coverage for the controller branch:

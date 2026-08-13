@@ -857,6 +857,15 @@ type FireboltInstanceSpec struct {
 	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="spec.id is immutable once set"
 	ID string `json:"id,omitempty"`
 
+	// MetadataNG is experimental and selects the next-generation metadata
+	// service configuration.
+	// The operator does not select or rewrite the metadata container image;
+	// users must set a compatible image through spec.metadata.template.
+	// When false or omitted, the legacy metadata configuration is rendered.
+	// +kubebuilder:default=false
+	// +optional
+	MetadataNG bool `json:"metadataNG,omitempty"`
+
 	// Metadata configures the metadata service.
 	Metadata MetadataSpec `json:"metadata"`
 

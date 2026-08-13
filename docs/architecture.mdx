@@ -22,6 +22,8 @@ An engine cannot be created or updated without a ready instance in its namespace
 
 The metadata service stores and serves engine metadata. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
 
+Experimental `FireboltInstance.spec.metadataNG` support selects the next-generation configuration and UID/GID without selecting or rewriting the metadata image; the legacy mode remains the default.
+
 ### Gateway
 
 The gateway is the entry point for client query traffic. It receives a request, identifies the target engine, and forwards the request to healthy engine pods.

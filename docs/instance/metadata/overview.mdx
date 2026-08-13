@@ -8,6 +8,8 @@ sidebarTitle: Overview
 
 The metadata service stores and serves engine metadata. It uses PostgreSQL as the backing database. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
 
+**Experimental:** `spec.metadataNG: true` selects metadata-ng configuration and UID/GID, but does not select the metadata image. Legacy behavior remains the default.
+
 ## Rolling update parameters
 
 ### Metadata deployment
