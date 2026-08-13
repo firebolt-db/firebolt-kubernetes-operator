@@ -331,6 +331,24 @@ func GenerationResourcesStanding(ctx context.Context, engineName string, gen int
 	return standing, nil
 }
 
+// WaitForGenerationAtLeast polls until the engine's currentGeneration has reached
+// gen, which is how a spec waits for an abandon to have moved the engine past a
+// generation rather than guessing at timing.
+func WaitForGenerationAtLeast(ctx context.Context, engineName string, gen int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	current := -1
+	for time.Now().Before(deadline) {
+		var err error
+		current, _, err = GetEngineGeneration(ctx, engineName)
+		if err == nil && current >= gen {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for engine %s to reach generation %d (currentGeneration %d)",
+		engineName, gen, current)
+}
+
 // WaitForGenerationReclaimed polls until nothing of gen is standing.
 func WaitForGenerationReclaimed(ctx context.Context, engineName string, gen int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)

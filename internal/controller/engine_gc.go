@@ -67,9 +67,9 @@ import (
 func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine) bool {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
-	status := r.sweepStatus(ctx, log, engine)
+	status, unreadable := r.sweepStatus(ctx, log, engine)
 	if status == nil {
-		return false
+		return unreadable
 	}
 
 	keep := &generationKeepSet{gens: map[string]bool{}}
@@ -280,15 +280,24 @@ func (k *generationKeepSet) newerThanNewest(gen string) bool {
 	return err == nil && n > k.newest
 }
 
-// sweepStatus returns the engine status the keep set is built from, read straight
-// from the API server when an APIReader is wired so the common case is a fresh
-// view rather than a cached one that lags an earlier pass's write. A nil return
-// means the engine is gone and there is nothing to sweep for; reconcileDelete
-// owns that path.
+// sweepStatus returns the engine status the keep set is built from, read through
+// the same reader as everything else the keep set depends on. A nil status means
+// there is nothing to sweep for, and the second value says whether the caller
+// should report a backlog: an engine that is gone is not one, an engine that
+// cannot be read is.
 //
-// This is defense in depth, not the correctness guarantee: a read can always be
-// overtaken by the next write, so the generation floor is what actually makes a
-// stale keep set safe.
+// A failed read ends the pass rather than falling back to the status the
+// reconcile was handed, because that status can be AHEAD of the API server and
+// not only behind it: applyEngineState assigns the computed status before writing
+// it, and the write can fail there or on its conflict retry, leaving a generation
+// in memory the API server never accepted. A floor built from it would sit above
+// the real current generation, which is the deletion this guard exists to
+// prevent.
+//
+// The APIReader is defense in depth, not the correctness guarantee: a read can
+// always be overtaken by the next write, so the floor is what makes a keep set
+// that lags safe. With no APIReader wired the keep set comes from the handed-in
+// status and the cache throughout, which is at least one consistent view.
 // sweepReader is the reader the keep set is built from: the API server directly
 // when one is wired, the cache otherwise. One reader for every read the keep set
 // depends on, so those reads cannot disagree with each other.
@@ -303,19 +312,19 @@ func (r *FireboltEngineReconciler) sweepStatus(
 	ctx context.Context,
 	log logr.Logger,
 	engine *computev1alpha1.FireboltEngine,
-) *computev1alpha1.FireboltEngineStatus {
+) (*computev1alpha1.FireboltEngineStatus, bool) {
 	if r.APIReader == nil {
-		return &engine.Status
+		return &engine.Status, false
 	}
 	live := &computev1alpha1.FireboltEngine{}
 	switch err := r.sweepReader().Get(ctx, client.ObjectKeyFromObject(engine), live); {
 	case err == nil:
-		return &live.Status
+		return &live.Status, false
 	case apierrors.IsNotFound(err):
-		return nil
+		return nil, false
 	default:
-		log.Error(err, "GC: failed to read the engine status uncached; using the cached copy")
-		return &engine.Status
+		log.Error(err, "GC: failed to read the engine status; deleting nothing this pass")
+		return nil, true
 	}
 }
 
