@@ -229,6 +229,21 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"activeGen", engine.Status.ActiveGeneration,
 	)
 
+	// Reclaim abandoned generations before anything that can wedge the pass.
+	// Every gate below returns early on failure — a missing or unready class, an
+	// instance that is not ready, a rejected pod template, resources over the
+	// configured maximum, an unreadable engine state — and an engine parked on
+	// one of them keeps whatever its last abandon left behind. The sweep needs
+	// none of that: it reads the generations recorded in status and lists by
+	// label. Running it here also covers the engines that never reach a terminal
+	// phase at all, whose pods crash-loop or whose spec keeps drifting, which is
+	// where abandoned generations pile up fastest.
+	//
+	// The keep set is therefore the status as persisted at the start of the
+	// pass. A pass that goes on to bump the generation leaves that bump's
+	// leftovers for the next sweep, one requeue later.
+	gcBacklogged := !r.DisableGC && r.gcOrphanedResources(ctx, engine)
+
 	// Resolve the referenced FireboltEngineClass before reading engine state:
 	// getEngineState's drain decision and the autoStop both consume
 	// class-inherited settings (rollout, drainCheckEnabled, autoStop), and
@@ -406,15 +421,12 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("applyEngineState failed: %w", err)
 	}
 
-	// Every phase, not just the terminal ones: an engine whose pods never become
-	// ready, or whose spec keeps drifting, abandons generation after generation
-	// without ever reaching Stable, and those are exactly the abandoned
-	// generations that need reclaiming. gcOrphanedResources keeps the active
-	// generation, so it is safe mid-rollout.
-	gcBacklogged := !r.DisableGC && r.gcOrphanedResources(ctx, engine)
-
 	requeueAfter := result.RequeueAfter
 	if gcBacklogged {
+		// The sweep stopped at its per-pass budget with orphans still standing;
+		// come back for the rest sooner than this phase would ask for. A pass
+		// that returned at one of the gates above keeps its own retry interval
+		// instead, which is slower but still converges.
 		requeueAfter = soonestRequeue(requeueAfter, GCBacklogRequeue)
 	}
 

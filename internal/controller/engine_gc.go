@@ -56,9 +56,11 @@ import (
 // exactly the abandoned generations to delete. An engine that never reaches a
 // terminal phase — pods crash-looping, or a drift signal churning generations —
 // is the case that leaks, so gating the sweep on Stable/Stopped would exclude
-// precisely the engines that need it. GCOrphans in formal/FireboltEngine.tla
-// models this, and its GCIgnoresActiveGen counterexample pins what the
-// ActiveGeneration entry buys.
+// precisely the engines that need it. That is also why Reconcile runs this
+// before its gates rather than after applying state: an engine parked on an
+// unready instance or a rejected template needs its abandoned generations back
+// too. GCOrphans in formal/FireboltEngine.tla models the sweep, and its
+// GCIgnoresActiveGen counterexample pins what the ActiveGeneration entry buys.
 func (r *FireboltEngineReconciler) gcOrphanedResources(ctx context.Context, engine *computev1alpha1.FireboltEngine) bool {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
