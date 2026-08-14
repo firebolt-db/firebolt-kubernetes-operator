@@ -111,7 +111,6 @@ You MUST follow these collaboration rules on every task.
 
 You MUST keep documentation in sync with code. When making changes:
 
-- **AGENTS.md** -- update the relevant `AGENTS.md` (root or scoped) if you change structure, conventions, public interfaces, commands, config formats, or add or remove modules. If your change makes existing AGENTS.md content wrong, fix it before finishing.
 - **README.md** -- update if your change affects what a human reader needs to know to understand the project: setup, headline architecture, or what the project is for. Keep the README an overview; push detail into AGENTS.md.
 - **docs/architecture.mdx** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
 - **docs/** -- keep the published docs (`docs/`) up to date as code changes.
@@ -149,10 +148,6 @@ Linear specifics:
 ## Known issues
 
 Ongoing limitations, framework footguns, and environment traps that still affect day-to-day work and need a **workaround** until the root cause is fixed.
-
-- Do **not** add entries for bugs you fix in the current PR. The code change and PR description are the record.
-- When you add an entry, put it in the most-relevant `AGENTS.md` (root or scoped). State the symptom, cause, and workaround in two or three sentences.
-- Remove the entry when the underlying issue is fixed — do not leave solved history behind.
 
 - **GitHub Actions `pull_request.paths` filters also suppress `closed` events.** If a workflow creates external state on `opened` or `synchronize` and must clean it up on `closed`, do not rely on trigger-level `paths` filters. Put path relevance checks inside the job instead, and let `closed` events reach the workflow so cleanup can run even when the final PR diff no longer includes the original files.
 - **release-please root component (`.`) greedily owns sub-package commits.** A release-please component whose path is `.` is treated as a meta-package that owns **every** file in the repo, including files under nested component paths (matching is `file.indexOf("<path>/") === 0`, and `.` matches everything). Two consequences: (1) a commit touching only `helm/**` is attributed to the chart components **and** the root app component, opening a spurious app release PR — and because an app release commits a `chore(deps)` appVersion change, that creates a release cycle (app release → `chore(deps)` → new app PR); (2) a commit touching any **non-shipping** path (`docs/**`, `examples/**`, `formal/**`) with a **releasable** type (`fix:`, `feat:`) cuts a real operator release for a change that never touched the operator binary. Fix for both: list every non-operator directory in the `.` package's `"exclude-paths"` (`["helm", "docs", "examples", "formal"]`) so the root component only releases on genuine operator-shipping changes (`api/`, `cmd/`, `config/`, `internal/`). Caveats: (a) `exclude-paths` only filters by directory prefix; it cannot exclude individual root-level files ([googleapis/release-please#2266](https://github.com/googleapis/release-please/issues/2266)), so keep the `chore(deps)` appVersion commit scoped to files under `helm/` only (never a root file like `.release-please-manifest.json`); (b) release-please does **not** auto-close a release PR that is no longer warranted, so after excluding a path that already produced a spurious PR, close that PR by hand — once the path is excluded it will not be recreated.
