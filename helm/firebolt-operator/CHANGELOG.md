@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.5.1...firebolt-operator-chart-0.6.0) (2026-08-14)
+
+
+### Features
+
+* **controller:** add --watch-label-selector to scope cached Firebolt CRs (FB-3039) ([2921fb0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2921fb09cdd95b1c4c68e686f293b46111436c55))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.8.0 ([6abacb0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6abacb0729551721337fa7788a1a4d5cc75e46df))
+
 ## [0.5.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.5.0...firebolt-operator-chart-0.5.1) (2026-08-13)
 
 
