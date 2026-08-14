@@ -46,7 +46,11 @@ owns on `spec.template` (and the same rules apply to
 `terminationMessagePolicy`, `volumeDevices`, `resizePolicy`.
 
 Sidecar containers (any name other than `engine`) and additional
-`initContainers` pass through verbatim. See
+`initContainers` pass through verbatim, with one restriction: they may not
+mount the Secret-backed operator volumes (`auth-admin`, `tls-engine`,
+`auth-signing-<key-id>`). The `engine-config`, `data`, and `runtime` volumes
+are mountable — mounting `data` from an init container is the supported way to
+prepare the data directory before the engine starts. See
 [FireboltEngineClass CRD reference](./fireboltengineclass-crd-reference) for
 the full class-side allowlist.
 

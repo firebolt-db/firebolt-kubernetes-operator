@@ -209,12 +209,12 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 	errs = append(errs, ValidatePodTemplate(
 		inst.Spec.Metadata.Template,
 		field.NewPath("spec", "metadata", "template"),
-		MetadataPodTemplateRules,
+		&MetadataPodTemplateRules,
 	)...)
 	errs = append(errs, ValidatePodTemplate(
 		inst.Spec.Gateway.Template,
 		field.NewPath("spec", "gateway", "template"),
-		GatewayPodTemplateRules,
+		&GatewayPodTemplateRules,
 	)...)
 
 	if err := validateExternalPostgres(inst); err != nil {

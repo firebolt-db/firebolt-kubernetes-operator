@@ -260,7 +260,7 @@ func (v *FireboltEngineCustomValidator) validateTemplate(eng *FireboltEngine) fi
 	return ValidatePodTemplate(
 		eng.Spec.Template,
 		field.NewPath("spec", "template"),
-		FireboltEngineClassPodTemplateRules,
+		&FireboltEngineClassPodTemplateRules,
 	)
 }
 

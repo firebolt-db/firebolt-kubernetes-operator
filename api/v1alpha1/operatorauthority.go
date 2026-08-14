@@ -208,6 +208,20 @@ var operatorOwnedEngineVolumeNames = []string{
 	EngineTLSVolumeName,
 }
 
+// operatorOwnedEngineSecretVolumeNames is the subset of
+// operatorOwnedEngineVolumeNames the operator projects out of a Secret.
+// Additional containers may not mount these; see
+// validateReservedVolumeMounts for why the distinction exists.
+//
+// Signing-key volumes are absent for the same reason they are absent from
+// operatorOwnedEngineVolumeNames: rotation mounts a dynamic
+// "auth-signing-<kid>" set that no static list can enumerate.
+// isReservedVolumeMountName covers them by prefix instead.
+var operatorOwnedEngineSecretVolumeNames = []string{
+	EngineAuthAdminVolumeName,
+	EngineTLSVolumeName,
+}
+
 // GatewayWakeAgentContainerName is the wake-agent sidecar's container name.
 const GatewayWakeAgentContainerName = "wake-agent"
 
@@ -233,12 +247,35 @@ var operatorOwnedGatewayVolumeNames = []string{
 	GatewayWakeAgentTokenVolumeName,
 }
 
+// operatorOwnedGatewaySecretVolumeNames is the subset of
+// operatorOwnedGatewayVolumeNames the operator projects out of a Secret,
+// plus the wake-agent's projected ServiceAccount token — API-server-issued
+// rather than Secret-backed, but credential material under the same rule.
+// The CA and CRL volumes are included because they are projected from the
+// TLS Secrets, so the rule stays mechanical: an additional container may
+// not name a volume whose content the operator sourced from a Secret.
+var operatorOwnedGatewaySecretVolumeNames = []string{
+	GatewayEngineCAVolumeName,
+	GatewayTLSVolumeName,
+	GatewayClientCAVolumeName,
+	GatewayEngineCRLVolumeName,
+	GatewayClientCRLVolumeName,
+	GatewayWakeAgentTokenVolumeName,
+}
+
 // operatorOwnedMetadataVolumeNames are the volume names the operator
 // renders on the metadata Deployment's pod template.
 var operatorOwnedMetadataVolumeNames = []string{
 	MetadataConfigVolumeName,
 	MetadataPostgresCredsVolumeName,
 	MetadataTmpVolumeName,
+}
+
+// operatorOwnedMetadataSecretVolumeNames is the subset of
+// operatorOwnedMetadataVolumeNames the operator projects out of a Secret.
+// Additional containers may not mount these.
+var operatorOwnedMetadataSecretVolumeNames = []string{
+	MetadataPostgresCredsVolumeName,
 }
 
 // EngineConfigOwnedSection enumerates one operator-owned section of the
@@ -340,6 +377,14 @@ type PodTemplateRules struct {
 	// consulted when AllowedPrimaryFields.VolumeMounts is true.
 	ReservedPrimaryVolumeMountNames []string
 
+	// SecretBackedVolumeMountNames are the operator-rendered volumes
+	// whose content comes from a Secret. A user-supplied sidecar or init
+	// container may not mount them; every other operator-rendered volume
+	// (config, data, runtime, tmp) is mountable by one. This is a subset
+	// of ReservedPrimaryVolumeMountNames, which stays whole because the
+	// primary container's mounts are operator-rendered end to end.
+	SecretBackedVolumeMountNames []string
+
 	// AllowSidecars permits additional containers (any container whose
 	// name is not PrimaryContainerName). When false, any sidecar is
 	// rejected as a whole.
@@ -406,6 +451,7 @@ var FireboltEngineClassPodTemplateRules = PodTemplateRules{
 	},
 	ReservedPrimaryEnvKeys:          operatorOwnedEngineEnvKeys,
 	ReservedPrimaryVolumeMountNames: operatorOwnedEngineVolumeNames,
+	SecretBackedVolumeMountNames:    operatorOwnedEngineSecretVolumeNames,
 	AllowSidecars:                   true,
 	AllowInitContainers:             true,
 	ReservedContainerNames:          []string{EngineWebContainerName},
@@ -428,6 +474,7 @@ var GatewayPodTemplateRules = PodTemplateRules{
 		Resources: true,
 	},
 	ReservedPrimaryVolumeMountNames: operatorOwnedGatewayVolumeNames,
+	SecretBackedVolumeMountNames:    operatorOwnedGatewaySecretVolumeNames,
 	// The wake-agent sidecar is operator-rendered. Without reserving the
 	// name a user sidecar called "wake-agent" would produce a duplicate
 	// container name and the apiserver would reject the Deployment
@@ -453,6 +500,7 @@ var MetadataPodTemplateRules = PodTemplateRules{
 	},
 	ReservedPrimaryEnvKeys:          operatorOwnedMetadataEnvKeys,
 	ReservedPrimaryVolumeMountNames: operatorOwnedMetadataVolumeNames,
+	SecretBackedVolumeMountNames:    operatorOwnedMetadataSecretVolumeNames,
 	AllowSidecars:                   true,
 	AllowInitContainers:             true,
 }
@@ -463,7 +511,7 @@ var MetadataPodTemplateRules = PodTemplateRules{
 // delegates to the generic ValidatePodTemplate walker driven by
 // FireboltEngineClassPodTemplateRules.
 func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *field.Path) field.ErrorList {
-	return ValidatePodTemplate(template, base, FireboltEngineClassPodTemplateRules)
+	return ValidatePodTemplate(template, base, &FireboltEngineClassPodTemplateRules)
 }
 
 // ValidatePodTemplate walks a user-supplied PodTemplateSpec and rejects
@@ -486,8 +534,9 @@ func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *fi
 //   - init containers and additional containers (anything not
 //     PrimaryContainerName): rejected entirely when their respective
 //     AllowSidecars / AllowInitContainers flag is false. When permitted,
-//     they pass through with the single exception that no init
-//     container may take the primary container's name.
+//     they pass through except that they may not take the primary
+//     container's name or any name in rules.ReservedContainerNames, and
+//     may not mount a volume in rules.SecretBackedVolumeMountNames.
 //
 // base is the field.Path the caller used to reach this PodTemplateSpec
 // in its own object (e.g. field.NewPath("spec","template") for
@@ -495,7 +544,7 @@ func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *fi
 // FireboltInstance gateway). Returned errors carry the full nested
 // path so kubectl apply surfaces every violation at the offending
 // coordinate.
-func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	if template == nil {
 		return nil
 	}
@@ -646,7 +695,7 @@ func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path) field.Er
 // created). Containers with any other name are sidecars: rejected as a
 // group when rules.AllowSidecars is false, passed through unchanged
 // otherwise.
-func validateContainersAgainstRules(containers []corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validateContainersAgainstRules(containers []corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	primarySeen := false
 	for i := range containers {
@@ -670,10 +719,9 @@ func validateContainersAgainstRules(containers []corev1.Container, base *field.P
 					rules.Component, rules.PrimaryContainerName)))
 		default:
 			// Sidecar with an allowed-sidecars ruleset: pass through, but
-			// still reject any volumeMount that names an operator-owned
-			// volume so a sidecar cannot mount the auth/TLS Secret volumes
-			// the operator renders at pod level (see
-			// validateReservedVolumeMounts).
+			// still reject a volumeMount naming one of the Secret-backed
+			// volumes the operator renders at pod level, so a sidecar cannot
+			// read the auth/TLS material (see validateReservedVolumeMounts).
 			errs = append(errs, validateReservedVolumeMounts(c, path, rules)...)
 		}
 	}
@@ -686,8 +734,9 @@ func validateContainersAgainstRules(containers []corev1.Container, base *field.P
 // rejected: the operator-rendered primary container would then live
 // alongside a same-named init container, and Kubernetes would never
 // admit such a pod. A permitted init container's volumeMounts are also
-// screened for operator-owned volume names (see validateReservedVolumeMounts).
-func validateInitContainersAgainstRules(initContainers []corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+// screened for Secret-backed operator-owned volume names (see
+// validateReservedVolumeMounts).
+func validateInitContainersAgainstRules(initContainers []corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	for i := range initContainers {
 		c := &initContainers[i]
@@ -711,25 +760,34 @@ func validateInitContainersAgainstRules(initContainers []corev1.Container, base 
 	return errs
 }
 
-// validateReservedVolumeMounts rejects any volumeMount on a user-supplied
-// sidecar or init container that names an operator-owned volume. The
-// operator renders those volumes (config / data / runtime and, when auth or
-// TLS is enabled, the auth-admin / auth-signing-<kid> / tls-engine Secret
-// volumes) at the pod level, so a sidecar or init container that mounts one
-// by name would gain access the pod-template model never grants — most
-// critically reading the admin credentials or JWT signing keys straight off
-// disk, a privilege-escalation path for a template author who cannot
-// otherwise read those Secrets. Reserved names are matched via
-// isReservedVolumeMountName so the dynamically-numbered auth-signing-<kid>
-// set is covered by prefix, exactly as the primary container's check is.
-func validateReservedVolumeMounts(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+// validateReservedVolumeMounts rejects a volumeMount on a user-supplied
+// sidecar or init container that names an operator-rendered volume whose
+// content comes from a Secret (auth-admin / auth-signing-<kid> / tls-engine
+// on the engine; the TLS material and the wake-agent token on the gateway;
+// postgres-creds on the metadata pod). Mounting one by name would grant
+// access the pod-template model never does — reading the admin credentials
+// or JWT signing keys straight off disk, a privilege-escalation path for a
+// template author who cannot otherwise read those Secrets.
+//
+// The scope is deliberately narrower than ReservedPrimaryVolumeMountNames:
+// the remaining operator-rendered volumes (config, data, runtime, tmp) hold
+// no credential material, and mounting them from an init container is a
+// supported pattern — preparing ownership on the data volume before the
+// engine starts is the motivating case, since a hostPath-backed data volume
+// gets no fsGroup treatment from the kubelet and must be chowned in the pod.
+//
+// Names are matched via isReservedVolumeMountName so the dynamically-numbered
+// auth-signing-<kid> set is covered by prefix, exactly as the primary
+// container's check is.
+func validateReservedVolumeMounts(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	for mi := range c.VolumeMounts {
-		if !isReservedVolumeMountName(c.VolumeMounts[mi].Name, rules.ReservedPrimaryVolumeMountNames) {
+		if !isReservedVolumeMountName(c.VolumeMounts[mi].Name, rules.SecretBackedVolumeMountNames) {
 			continue
 		}
 		errs = append(errs, field.Forbidden(base.Child("volumeMounts").Index(mi).Child("name"),
-			fmt.Sprintf("volumeMount name %q is operator-owned and cannot be mounted by an additional container on the %s pod template",
+			fmt.Sprintf("volumeMount name %q is a Secret-backed operator-owned volume and cannot be mounted "+
+				"by an additional container on the %s pod template",
 				c.VolumeMounts[mi].Name, rules.Component)))
 	}
 	return errs
@@ -1060,7 +1118,7 @@ func IsGeneratedEngineTLSSecretName(name string) bool {
 // and allowlist-toggled fields. Env and VolumeMounts, even when
 // allowed, have their reserved-key / reserved-name filter applied per
 // entry.
-func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	errs = append(errs, validatePrimaryHardcodedRejects(c, base, rules)...)
 	errs = append(errs, validatePrimaryInteractiveRejects(c, base, rules)...)
@@ -1073,7 +1131,7 @@ func validatePrimaryContainerFields(c *corev1.Container, base *field.Path, rules
 // validatePrimaryHardcodedRejects covers fields the operator owns
 // unconditionally: name (via container-walk), command, args, ports,
 // all three probes. These have no allowlist toggle.
-func validatePrimaryHardcodedRejects(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryHardcodedRejects(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	if len(c.Command) > 0 {
 		errs = append(errs, field.Forbidden(base.Child("command"),
@@ -1108,7 +1166,7 @@ func validatePrimaryHardcodedRejects(c *corev1.Container, base *field.Path, rule
 // are kubectl-exec ergonomics with no meaning on a server process.
 // Closing these here gives users immediate feedback instead of
 // "set it, nothing happened".
-func validatePrimaryInteractiveRejects(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryInteractiveRejects(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	if c.RestartPolicy != nil {
 		errs = append(errs, field.Forbidden(base.Child("restartPolicy"),
@@ -1132,7 +1190,7 @@ func validatePrimaryInteractiveRejects(c *corev1.Container, base *field.Path, ru
 // validatePrimaryAllowlistedScalars covers the scalar / pointer
 // container fields whose allowlist toggle is per-ruleset:
 // image+imagePullPolicy, resources, securityContext, lifecycle.
-func validatePrimaryAllowlistedScalars(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryAllowlistedScalars(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	allowed := rules.AllowedPrimaryFields
 	if !allowed.Image && (c.Image != "" || c.ImagePullPolicy != "") {
@@ -1158,7 +1216,7 @@ func validatePrimaryAllowlistedScalars(c *corev1.Container, base *field.Path, ru
 // fields whose allowlist toggle is per-ruleset (Env, EnvFrom,
 // VolumeMounts) and applies the reserved-key / reserved-name per-entry
 // filter when allowed.
-func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	allowed := rules.AllowedPrimaryFields
 	if allowed.Env {
@@ -1196,7 +1254,7 @@ func validatePrimaryAllowlistedSlices(c *corev1.Container, base *field.Path, rul
 // allowlist toggles: WorkingDir, TerminationMessagePath/Policy,
 // VolumeDevices, ResizePolicy. Each is rejected when the ruleset
 // does not opt the component in.
-func validatePrimaryAllowlistedExtras(c *corev1.Container, base *field.Path, rules PodTemplateRules) field.ErrorList {
+func validatePrimaryAllowlistedExtras(c *corev1.Container, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
 	allowed := rules.AllowedPrimaryFields
 	if !allowed.WorkingDir && c.WorkingDir != "" {

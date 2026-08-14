@@ -1005,6 +1005,11 @@ func (in *PodTemplateRules) DeepCopyInto(out *PodTemplateRules) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SecretBackedVolumeMountNames != nil {
+		in, out := &in.SecretBackedVolumeMountNames, &out.SecretBackedVolumeMountNames
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.ReservedContainerNames != nil {
 		in, out := &in.ReservedContainerNames, &out.ReservedContainerNames
 		*out = make([]string, len(*in))
