@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.0...firebolt-operator-v0.8.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **api:** let sidecars and init containers mount non-Secret operator volumes (FB-3075) ([9038f4f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9038f4f3dd04cecccfc9bffde370971bc6357bdb))
+
 ## [0.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.7.1...firebolt-operator-v0.8.0) (2026-08-14)
 
 
