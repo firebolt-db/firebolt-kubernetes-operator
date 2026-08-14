@@ -1,133 +1,91 @@
 ---
 title: Auto-stop and wake-up
-description: Operator-driven FireboltEngine auto-stop and the gateway wake-up annotation protocol.
+description: Stop idle Engines and wake them when Gateway traffic arrives.
 sidebarTitle: Auto-stop and wake-up
 ---
 
-## Auto-stop
+Auto-stop is an activity-based on/off policy. It moves an Engine between `activeReplicas` and `idleReplicas`; it does not add replicas in proportion to query volume.
 
-Auto-stop is opt-in via `spec.autoStop.enabled=true`. When enabled, the Firebolt Operator owns `spec.replicas` and drives it between two fixed levels. It scales the engine up to `activeReplicas` when a UTC `schedule` window is open or a wake-up is requested, and scales it down to `idleReplicas` (default 0, which fully stops the engine) after the engine sits idle for `idleTimeout`. This is an activity-gated on/off toggle, not proportional autoscaling. The engine runs at either `idleReplicas` or `activeReplicas`, never a value in between, and query volume never changes the count. Observed query activity only keeps the engine warm by resetting the idle clock. It never adds replicas.
+## Configure auto-stop
 
-Auto-stop reuses the **same Prometheus signal** the drain check consumes: `firebolt_running_queries + firebolt_suspended_queries`, summed across all running pods of the active generation. Sharing the signal keeps "the engine is busy" in exactly one place. A pod that the drain check would refuse to evict is the same pod auto-stop counts as activity.
-
-### Decision precedence
-
-`computeAutoStopDecision` is a pure function over `(spec, status, observation, now)`. Precedence, top-down:
-
-1. **Disabled**: If `spec.autoStop` is unset or `enabled=false`, auto-stop emits no decision and `spec.replicas` is fully user-owned.
-2. **Wake requested**: a gateway received a query for this engine within `DefaultAutoStopWakeTTL` (5 minutes) while it had no ready endpoints. Replicas are scaled to `activeReplicas`. Reason `WakeRequested`. See [Gateway wake-up protocol](#gateway-wake-up-protocol).
-3. **Schedule active**: `now` falls inside any window in `spec.autoStop.schedule`. Replicas are pinned at `activeReplicas`. Schedule wins over both idle and stopped paths so an "always-on during business hours" policy can wake a parked engine.
-4. **Stopped**: `spec.replicas == 0`, no fresh wake annotation, no schedule window active. No-op.
-5. **Scrape failed or activity observed**: Refresh `status.lastActivityTime`, do not scale. Scrape failures are grouped with activity intentionally because a broken probe must never look quiet enough to scale down.
-6. **Quiet >= idleTimeout, replicas > idleReplicas**: Patch `spec.replicas = idleReplicas` and stamp `status.lastScaledAt`.
-7. **First quiet observation**: `status.lastActivityTime` is anchored to `now` so a fresh engine gets one full `idleTimeout` of grace.
-
-### Level-driven encoding
-
-Scale events are encoded by patching `spec.replicas` via the standard `r.Update`. The `FireboltEngine` watch fires. The next reconcile takes the normal blue-green path through `creating`, `switching`, `draining`, and `cleaning`. Auto-stop runs only in **terminal phases** (`stable`/`stopped`) so it cannot fight a rollout in progress.
-
-Because scale-down only fires when `firebolt_running_queries + firebolt_suspended_queries == 0` was just observed, the subsequent drain check on the old generation completes immediately. There is no wasted grace period. A separate "skip drain because auto-stop vouched for it" path is unnecessary.
-
-### Configuration
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: my-instance
+  replicas: 2
+  autoStop:
+    enabled: true
+    activeReplicas: 2
+    idleReplicas: 0
+    idleTimeout: 30m
+    pollInterval: 1m
+    schedule:
+      - start: "08:00"
+        end: "18:00"
+        days: [Mon, Tue, Wed, Thu, Fri]
+```
 
 | Field | Default | Description |
 |---|---|---|
-| `spec.autoStop.enabled` | `false` | Master toggle. |
-| `spec.autoStop.activeReplicas` | (required) | Replica count when active. |
-| `spec.autoStop.idleReplicas` | `0` | Floor. `0` fully stops the engine. |
-| `spec.autoStop.idleTimeout` | `30m` | Quiet window before scaling to `idleReplicas`. |
-| `spec.autoStop.pollInterval` | `1m` | Scrape cadence. |
-| `spec.autoStop.schedule[]` | `[]` | UTC `HH:MM`-`HH:MM` always-on windows. Optional `days` filter (`Mon`..`Sun`). End < start crosses midnight. |
+| `enabled` | `false` | Lets the Firebolt Operator manage `spec.replicas`. |
+| `activeReplicas` | Required when enabled | Replica count while active or scheduled. |
+| `idleReplicas` | `0` | Replica count after the idle timeout. Zero fully stops compute. |
+| `idleTimeout` | `30m` | Quiet period before scale-down. |
+| `pollInterval` | `1m` | Query-activity sampling interval. |
+| `schedule` | Empty | UTC windows that keep the Engine at `activeReplicas`. An end time before the start time crosses midnight. |
 
-### Status fields
+You can place the policy on an EngineClass. If an Engine sets `spec.autoStop`, the entire Engine policy replaces the class policy; individual auto-stop fields are not merged.
+
+When auto-stop is enabled, avoid managing `spec.replicas` with another controller. The Firebolt Operator writes that field to enforce the configured active and idle levels.
+
+## Scale-down behavior
+
+The Firebolt Operator treats running and suspended queries as activity. It does not scale down after a failed metrics scrape because unavailable metrics must not be interpreted as an idle Engine.
+
+An active schedule window keeps the Engine at `activeReplicas`. Outside schedule windows, an Engine scales to `idleReplicas` after the idle timeout.
+
+Inspect the decision and timestamps in Engine status:
 
 | Field | Meaning |
 |---|---|
-| `status.lastActivityTime` | Most recent observation that recorded activity (or, for a fresh engine, the first quiet observation). Drives the idle clock. |
-| `status.lastScaledAt` | Timestamp of the most recent auto-stop-driven `spec.replicas` mutation. Distinguishes auto-stop scale events from user edits. |
-| `status.autoStopReason` | Token: `Disabled` / `WakeRequested` / `ScheduleActive` / `Stopped` / `Initializing` / `ActivityObserved` / `ScrapeFailed` / `Idle`. |
+| `status.lastActivityTime` | Most recent observed activity, or the first quiet observation that started the idle timer. |
+| `status.lastScaledAt` | Most recent auto-stop replica change. |
+| `status.autoStopReason` | Current decision, such as `ScheduleActive`, `ActivityObserved`, `Idle`, `ScrapeFailed`, `WakeRequested`, or `Disabled`. |
 
-### Known limitations
+## Wake a stopped Engine with the Gateway
 
-Auto-stop samples query activity once per `pollInterval` (default 1 minute), which leads to a few current edge cases:
+With Helm value `wakeAgent.enabled=true` (the default) and the Firebolt Operator-managed Gateway ServiceAccount, a query sent through the Instance Gateway can wake an Engine at zero replicas:
 
-- **Brief queries can be missed.** A query that runs for less than `pollInterval` may not be counted as activity, so it does not reset the idle timer. A steady stream of very short queries can fail to keep an engine awake.
-- **An engine can stop earlier than expected.** An engine can scale down up to one `pollInterval` sooner than its configured `idleTimeout`.
+1. The Gateway holds the request while the Engine has no ready endpoints.
+2. The Firebolt Operator sets the Engine to `activeReplicas`.
+3. The held request proceeds after Engine endpoints become ready.
 
-## Gateway wake-up protocol
+The first query pays the full Engine cold-start time, which can take tens of seconds when images or volumes must be prepared. Set the client timeout accordingly. If the Gateway reaches its held-request capacity, additional requests receive `503` with `Retry-After` while wake-up continues.
 
-A FireboltEngine that auto-stop has scaled to zero replicas comes back to life when a query arrives for it. The query itself is the signal, and the query itself is what waits:
+Wake-up applies to any zero-replica Engine with auto-stop enabled, including one whose replica count was set to zero manually. To keep an Engine stopped, disable auto-stop as well:
 
-```text
-   ┌──────────┐  1. GET /hold?engine=X   ┌────────────┐
-   │ Gateway  ├─────────────────────────►│ Wake agent │
-   │ (Envoy)  │◄─────────────────────────┤ (sidecar)  │
-   └──────────┘  4. released, route it   └──┬──────┬──┘
-                                            │      │ watches
-                       2. last_demand_at    │      │ EndpointSlices
-                          scraped           │      ▼
-                                            │  ┌────────────┐
-                                            │  │  Engine    │
-                                            │  │  endpoints │
-                                            ▼  └─────▲──────┘
-                                     ┌────────────┐  │
-                                     │  Operator  │  │
-                                     │  auto-stop ├──┘
-                                     │  scales up │  3. spec.replicas
-                                     └────────────┘     = activeReplicas
+```yaml
+spec:
+  replicas: 0
+  autoStop:
+    enabled: false
 ```
 
-1. A query arrives for engine X. Before routing, Envoy's Lua filter calls the wake agent on loopback. For a running engine the agent answers immediately from memory; for a stopped one it records demand and parks the request.
-2. The Firebolt Operator polls each gateway's demand endpoint every couple of seconds and sees fresh demand for an engine it knows is at zero replicas.
-3. Auto-stop scales the engine to `activeReplicas`, reporting `status.autoStopReason: WakeRequested`.
-4. The agent's EndpointSlice watch sees the engine's endpoints appear and releases the parked request. Envoy routes it, and the client gets an answer to the query it sent — not an error telling it to try again.
+Direct connections to the Engine Service cannot wake a stopped Engine because the Service has no endpoints. Route through the Instance Gateway when you rely on wake-up.
 
-### Why the gateway holds no credential
+Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
 
-The gateway pod terminates untrusted traffic, so nothing in it may write to the Kubernetes API. The wake agent's entire grant is `get`, `list`, `watch` on EndpointSlices, and demand travels outward on a metrics endpoint rather than inward as an API write. The Firebolt Operator, which already holds write permission, is the only component that scales anything.
+Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
 
-The Envoy container holds no token at all. The pod sets `automountServiceAccountToken: false` and projects a short-lived, auto-rotating ServiceAccount token into the agent container alone — containers in a pod share the network namespace but not the mount namespace, so Envoy's filesystem never contains a credential.
+## Sampling limitations
 
-### Why an in-pod agent rather than Envoy alone
+Auto-stop samples activity once per `pollInterval`:
 
-The engine's cluster Service is headless. At zero replicas it has no endpoints, so its name has no A records and the request fails at DNS resolution, which Envoy emits as a *local reply*. Retry policies act on upstream responses, so the gateway's own retries never see it and cannot ride out a cold start. Something has to hold the request until the engine exists, and the component that holds it is also the cheapest place to report the demand.
+- A query shorter than the polling interval might not reset the idle timer.
+- Scale-down can occur up to one polling interval earlier than the configured `idleTimeout`.
 
-### Wake demand TTL
-
-`DefaultAutoStopWakeTTL` (5 minutes) bounds how long an unrefreshed demand timestamp continues to trigger scale-up. Long enough to cover engine cold-start (image pull, blue-green creating phase) and short enough that an abandoned wake does not pin an engine indefinitely.
-
-Demand is recorded as a timestamp, stamped when the request arrives, rather than as a count of requests currently waiting. A client that gives up before the Firebolt Operator's next poll still counts: it asked, and that is the reason to start the engine. This is also why a request shed under load still registers demand — the stamp happens before the capacity check.
-
-### What a query to a stopped engine costs
-
-The first query pays the engine's cold start, typically tens of seconds. Set your client's timeout above that or it will give up while the engine is still coming up. Subsequent queries are unaffected.
-
-Requests are held, not buffered in full: the agent reads nothing but the engine name, and Envoy's flow control stalls the client's upload rather than accumulating its body. The number of simultaneously held requests is capped from the gateway's memory budget; past the cap, requests get `503` with `Retry-After` while the wake still proceeds.
-
-### Formal model
-
-The demand path and the agent's hold path are both specified in TLA+ and model-checked in CI: `formal/EngineWake.tla` covers the agent's stamp, the Firebolt Operator's cached copy of it and the auto-stop decision that reads it, and `formal/WakeAgentHold.tla` covers the readiness waiter that releases a held query. Between them they establish that an engine only ever scales up on demand that is still within the TTL at the moment of the decision, that demand for a running engine never changes its replica count, and that a held query is always releasable when endpoints appear. See [Formal verification](../architecture#formal-verification) for what each specification proves and for the one lost-wakeup case the design accepts.
-
-### Wake and deliberately stopped engines
-
-Auto-stop cannot distinguish an engine it parked from one you set to `replicas: 0` by hand — both are engines at zero replicas — so a query through the gateway will start either. To keep an engine down, set `spec.autoStop.enabled: false` alongside `replicas: 0`; auto-stop then reports `Disabled` and leaves the engine alone.
-
-### Reaching a stopped engine
-
-Wake only fires for traffic through the gateway. Clients that resolve an engine's headless Service themselves and connect directly get no answer from a stopped engine and nothing wakes it, because a stopped engine has no endpoints for them to resolve in the first place. Route through the gateway if you rely on auto-stop.
-
-### Gateway RBAC
-
-Each FireboltInstance provisions per-gateway RBAC alongside the gateway Deployment:
-
-| Resource | Name | Purpose |
-|---|---|---|
-| `ServiceAccount` | `<instance>-gateway` | Identity attached to gateway pods. Used only by the wake-agent sidecar. |
-| `ClusterRole` | `<release>-gateway-wake` | Chart-managed. Grants `get`, `list`, `watch` on `endpointslices`. |
-| `RoleBinding` | `<instance>-gateway-wake` | Binds the ServiceAccount to that ClusterRole, scoped to the instance's namespace. |
-
-The ClusterRole is shipped by the Helm chart rather than created by the Firebolt Operator, which is what keeps `roles: create/update/patch` out of the Firebolt Operator's own RBAC.
-
-### Disabling wake
-
-Set `wakeAgent.enabled: false` in the chart. The sidecar is omitted and the RoleBinding is not created; a query for a stopped engine gets a `503` instead of waiting, and nothing wakes the engine. Query routing to running engines is unaffected.
+Choose a shorter polling interval when workloads consist primarily of brief queries, and account for the additional metrics traffic.

@@ -1,8 +1,6 @@
 package metrics
 
 import (
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -31,6 +29,10 @@ type EngineRecorder interface {
 	// Record updates all engine gauges to reflect the current CR state.
 	// podReady and podTotal come from the EngineState observed during reconcile.
 	Record(engine *computev1alpha1.FireboltEngine, podReady, podTotal int)
+
+	// RecordSuccessfulReconcile advances the timestamp for a reconcile that
+	// returned without an error.
+	RecordSuccessfulReconcile(namespace, name, instance string)
 
 	// RecordDrainCheckError increments the drain check error counter.
 	RecordDrainCheckError(namespace, name, instance string)
@@ -81,12 +83,10 @@ func (r *engineRecorder) Record(engine *computev1alpha1.FireboltEngine, podReady
 		drainingGen = float64(*engine.Status.DrainingGeneration)
 	}
 	EngineDrainingGeneration.WithLabelValues(ns, name, inst).Set(drainingGen)
+}
 
-	if engine.Status.LastReconciled != nil {
-		EngineLastReconciled.WithLabelValues(ns, name, inst).Set(float64(engine.Status.LastReconciled.Unix()))
-	} else {
-		EngineLastReconciled.WithLabelValues(ns, name, inst).Set(float64(time.Now().Unix()))
-	}
+func (r *engineRecorder) RecordSuccessfulReconcile(namespace, name, instance string) {
+	EngineLastReconciled.WithLabelValues(namespace, name, instance).SetToCurrentTime()
 }
 
 func (r *engineRecorder) RecordDrainCheckError(namespace, name, instance string) {
@@ -112,6 +112,9 @@ type NoOpEngineRecorder struct{}
 
 // Record is a no-op.
 func (NoOpEngineRecorder) Record(*computev1alpha1.FireboltEngine, int, int) {}
+
+// RecordSuccessfulReconcile is a no-op.
+func (NoOpEngineRecorder) RecordSuccessfulReconcile(string, string, string) {}
 
 // RecordDrainCheckError is a no-op.
 func (NoOpEngineRecorder) RecordDrainCheckError(string, string, string) {}

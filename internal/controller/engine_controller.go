@@ -214,6 +214,9 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	var current EngineState
 	defer func() {
 		r.MetricsRecorder.Record(engine, current.CurrentPodReady, current.CurrentPodTotal)
+		if err == nil {
+			r.MetricsRecorder.RecordSuccessfulReconcile(engine.Namespace, engine.Name, engine.Spec.InstanceRef)
+		}
 	}()
 
 	if engine.Status.Phase == "" {

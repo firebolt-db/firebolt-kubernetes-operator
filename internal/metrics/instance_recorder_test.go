@@ -77,6 +77,23 @@ func TestInstanceRecorderExternalPostgres(t *testing.T) {
 	}
 }
 
+func TestInstanceRecorderSuccessfulReconcileTimestamp(t *testing.T) {
+	rec := NewInstanceRecorder()
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst-success-time", Namespace: "ns"},
+	}
+
+	rec.Record(instance)
+	if v := gaugeValue(InstanceLastReconciled.WithLabelValues("ns", "inst-success-time")); v != 0 {
+		t.Fatalf("last reconciled after state-only Record = %v, want 0", v)
+	}
+
+	rec.RecordSuccessfulReconcile("ns", "inst-success-time")
+	if v := gaugeValue(InstanceLastReconciled.WithLabelValues("ns", "inst-success-time")); v == 0 {
+		t.Fatal("last reconciled after successful reconcile = 0, want a unix timestamp")
+	}
+}
+
 func TestInstanceRecorderDelete(t *testing.T) {
 	rec := NewInstanceRecorder()
 	instance := &computev1alpha1.FireboltInstance{

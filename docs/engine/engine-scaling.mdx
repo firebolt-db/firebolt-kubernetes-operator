@@ -1,36 +1,103 @@
 ---
-title: Engine Scaling
-description: Scale up, scale down, and stop a Firebolt Engine.
-sidebarTitle: Engine Scaling
+title: Engine scaling
+description: Scale, stop, resume, and update a Firebolt Engine.
+sidebarTitle: Engine scaling
 ---
 
-## Engine Scaling
-Firebolt Engine supports scaling up and down by patching the `spec.replicas` field. The Firebolt Operator
-handles the transition automatically, applying one of the rollout strategies defined in [Engine Rollouts](./engine-rollouts).
+Set `spec.replicas` to choose how many Engine pods serve queries. Replica and pod-shaping changes use the Engine's configured [rollout strategy](./engine-rollouts).
 
-## Scale or update
+## Scale an Engine
 
-Patch `spec.replicas` to scale the engine:
+Patch the replica count:
 
 ```bash
 kubectl patch fireng my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":2}}'
 ```
 
-The Firebolt Operator handles the zero-downtime transition automatically.
+The Firebolt Operator creates the desired generation, waits for it to become ready, switches the Engine Service, and retires the old generation. During a graceful rollout, both generations can exist at the same time. Ensure the cluster has enough CPU, memory, and storage capacity for that overlap.
 
-## Stop and resume
+If auto-stop is enabled, the Firebolt Operator owns `spec.replicas` and may replace manual replica changes with `activeReplicas` or `idleReplicas`. See [Auto-stop and wake-up](./auto-stop-and-wake-up).
 
-Set `spec.replicas` to `0` to stop the engine without deleting the custom resource:
+## Stop and resume an Engine
+
+Set the replica count to `0` to stop compute without deleting the Engine resource:
 
 ```bash
 kubectl patch fireng my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":0}}'
 ```
 
-Resume by setting a non-zero replica count:
+The Engine reports phase `stopped` and `Ready=False` with reason `Stopped`. Its query Service has no ready endpoints.
+
+Scale-to-zero retires the previous generation. Persistent volumes belonging to that retired generation are deleted according to the generated StatefulSet retention policy; Engine storage is treated as a regenerable local cache rather than durable object storage.
+
+Resume by setting a positive replica count:
 
 ```bash
 kubectl patch fireng my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":2}}'
 ```
+
+If you use auto-stop and want a query to resume a stopped Engine automatically, send traffic through the Instance Gateway. Direct Engine Service traffic cannot wake an Engine with no endpoints.
+
+## Update an Engine image
+
+Set the `engine` container image on the Engine template for a per-Engine override:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: my-instance
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: example.com/firebolt/engine:tag
+```
+
+The image resolves in this order:
+
+1. `FireboltEngine.spec.template.spec.containers[name="engine"].image`
+2. The referenced `FireboltEngineClass` Engine container image
+3. The Firebolt Operator default image
+
+Use a class image when several Engines should roll to the same version together. Use the Engine template when one Engine needs a different image.
+
+Image pull policy resolves independently with the same Engine-then-class precedence. Without an explicit policy, mutable `latest`, `dev`, and untagged images use `Always`; other tags use `IfNotPresent`.
+
+## Changes that roll an Engine
+
+Changes that alter the rendered Engine pod or configuration create a generation, including:
+
+- `spec.replicas`
+- `spec.template`, including image, resources, scheduling, volumes, sidecars, and init containers
+- `spec.storage`
+- `spec.customEngineConfig`
+- `spec.uiSidecar`
+- matching inherited settings changed on the referenced EngineClass
+- Instance-wide authentication or Engine TLS configuration used by the Engine
+
+The rollout policy fields `rollout`, `drainCheckEnabled`, and `drainCheckInterval` take effect without changing the pod by themselves. Auto-stop policy changes also take effect without forcing a rollout unless they change `spec.replicas`.
+
+## Monitor progress
+
+```bash
+kubectl get fireng my-engine -n firebolt -w
+```
+
+Normal rollout phases are `creating`, `switching`, `draining`, and `cleaning`. Completion is `stable` with `Ready=True`, or `stopped` when the desired replica count is zero.
+
+If progress stops, inspect the Engine and its pods:
+
+```bash
+kubectl describe fireng my-engine -n firebolt
+kubectl get pods -n firebolt -l firebolt.io/engine=my-engine
+```
+
+The Engine `Ready` condition can include warnings emitted for the StatefulSet, such as a failure to create pods with an unavailable ServiceAccount. Pod scheduling and volume-binding failures are normally reported on the affected Pods or PVCs, so inspect those resources as well. See [Troubleshooting](../troubleshooting) for recovery steps.

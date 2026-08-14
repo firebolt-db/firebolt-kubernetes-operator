@@ -50,6 +50,10 @@ type InstanceRecorder interface {
 	// Record updates all instance gauges to reflect the current CR state.
 	Record(instance *computev1alpha1.FireboltInstance)
 
+	// RecordSuccessfulReconcile advances the timestamp for a reconcile that
+	// returned without an error.
+	RecordSuccessfulReconcile(namespace, name string)
+
 	// Delete removes all metric label sets for the given instance,
 	// preventing stale metrics after CR deletion.
 	Delete(namespace, name string)
@@ -92,9 +96,11 @@ func (r *instanceRecorder) Record(instance *computev1alpha1.FireboltInstance) {
 	InstanceInfo.DeletePartialMatch(prometheus.Labels{"namespace": ns, "name": name})
 	InstanceInfo.WithLabelValues(ns, name, instance.Spec.ID, pgMode).Set(1)
 
-	InstanceLastReconciled.WithLabelValues(ns, name).Set(float64(time.Now().Unix()))
-
 	r.recordSigningKeys(instance)
+}
+
+func (r *instanceRecorder) RecordSuccessfulReconcile(namespace, name string) {
+	InstanceLastReconciled.WithLabelValues(namespace, name).SetToCurrentTime()
 }
 
 // recordSigningKeys reports the signing-key inventory and how long the current
@@ -154,6 +160,9 @@ type NoOpInstanceRecorder struct{}
 
 // Record is a no-op.
 func (NoOpInstanceRecorder) Record(*computev1alpha1.FireboltInstance) {}
+
+// RecordSuccessfulReconcile is a no-op.
+func (NoOpInstanceRecorder) RecordSuccessfulReconcile(string, string) {}
 
 // Delete is a no-op.
 func (NoOpInstanceRecorder) Delete(string, string) {}

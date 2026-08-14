@@ -1,0 +1,90 @@
+---
+title: kubectl firebolt plugin
+description: Manage Firebolt Instances and Engines with the kubectl firebolt plugin.
+sidebarTitle: kubectl plugin
+---
+
+The `kubectl firebolt` plugin lists, creates, deletes, and port-forwards Firebolt resources using your existing kubeconfig.
+
+## Install the plugin
+
+Build the plugin from the repository and place the executable on `PATH`:
+
+```bash
+make kubectl-firebolt
+install -m 0755 bin/kubectl-firebolt /usr/local/bin/kubectl-firebolt
+kubectl firebolt version
+```
+
+The plugin requires `kubectl` on `PATH`. Any executable named `kubectl-firebolt` is available through `kubectl firebolt`.
+
+## Select a cluster and namespace
+
+Commands use the current kubeconfig context and its default namespace. Override them with persistent flags:
+
+```bash
+kubectl firebolt --context my-cluster --namespace firebolt engine list
+```
+
+Use `--kubeconfig` to select a kubeconfig file. Use `--print-commands` to print the underlying `kubectl` commands without changing the cluster.
+
+## Work with Instances
+
+List Instances:
+
+```bash
+kubectl firebolt instance list -n firebolt
+kubectl firebolt instance list -n firebolt -o wide
+```
+
+Output formats are `table`, `wide`, `json`, `yaml`, and `name`.
+
+Forward a local port to an Instance Gateway:
+
+```bash
+kubectl firebolt instance port-forward my-instance \
+  -n firebolt --local-port 8123
+```
+
+Select an Engine behind the Gateway with the `X-Firebolt-Engine` request header.
+
+## Create an Engine
+
+Create an Engine and wait for it to become ready:
+
+```bash
+kubectl firebolt engine create my-engine \
+  -n firebolt \
+  --instance my-instance \
+  --type production \
+  --bucket my-bucket \
+  --replicas 2 \
+  --timeout 10m
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--instance` | Required | Referenced `FireboltInstance`. |
+| `--replicas` | `1` | Desired Engine replicas. Zero creates a stopped Engine and skips the readiness wait. |
+| `--type` | None | Referenced `FireboltEngineClass`. |
+| `--image` | Firebolt Operator default | Per-Engine container image override. |
+| `--bucket` | None | Managed-table object storage bucket. May be inherited from the EngineClass instead. |
+| `--storage-type` | `s3` | Backend for `--bucket`: `s3`, `gcs`, or `abs`. |
+| `--host-path` | None | Host path for the Engine data volume. Without it, the Firebolt Operator default is `emptyDir`. |
+| `--timeout` | `5m` | Maximum readiness wait as a Go duration. |
+
+The plugin does not configure scheduling. Put node affinity, pod affinity, topology spread constraints, and related defaults on the EngineClass or Engine pod template.
+
+## List, connect to, and delete Engines
+
+```bash
+kubectl firebolt engine list -n firebolt
+kubectl firebolt engine list -n firebolt --instance my-instance -o wide
+
+kubectl firebolt engine port-forward my-engine \
+  -n firebolt --local-port 8123
+
+kubectl firebolt engine delete my-engine -n firebolt
+```
+
+Use `kubectl firebolt --help` or `kubectl firebolt <command> --help` for the complete flag reference.

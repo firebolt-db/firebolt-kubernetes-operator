@@ -4,6 +4,18 @@
     {
       "source": "/engine/autoscaling-and-wake-up",
       "destination": "/engine/auto-stop-and-wake-up"
+    },
+    {
+      "source": "/engine/engine-reconciliation",
+      "destination": "/engine/engine-scaling"
+    },
+    {
+      "source": "/instance/instance-reconciliation",
+      "destination": "/instance/overview"
+    },
+    {
+      "source": "/engineclass/fireboltengineclass-design",
+      "destination": "/engineclass/configuration-inheritance"
     }
   ],
   "navigation": {
@@ -13,12 +25,12 @@
         "pages": [
           "installation",
           "quickstart",
+          "kubectl-plugin",
           "architecture",
           {
             "group": "Instance",
             "pages": [
               "instance/overview",
-              "instance/instance-reconciliation",
               {
                 "group": "Gateway",
                 "pages": [
@@ -39,7 +51,6 @@
             "group": "Engine",
             "pages": [
               "engine/overview",
-              "engine/engine-reconciliation",
               "engine/engine-rollouts",
               "engine/auto-stop-and-wake-up",
               "engine/engine-scaling",
@@ -58,7 +69,7 @@
             "group": "EngineClass",
             "pages": [
               "engineclass/overview",
-              "engineclass/fireboltengineclass-design"
+              "engineclass/configuration-inheritance"
             ]
           },
           "monitoring",

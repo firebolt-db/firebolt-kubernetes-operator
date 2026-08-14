@@ -1,226 +1,72 @@
 ---
 title: Architecture
-description: High-level architecture for FireboltInstance, FireboltEngine, and FireboltEngineClass.
+description: How FireboltInstance, FireboltEngine, and FireboltEngineClass work together.
 sidebarTitle: Architecture
 ---
 
-This document describes the reconciliation architecture used by the Firebolt Operator. The Firebolt Operator manages three custom resources:
-- **FireboltInstance** provisions the metadata infrastructure
-       - Metadata service
-       - Gateway
-       - PostgreSQL
-- **FireboltEngine** deploys compute nodes that run the query engine
-- **FireboltEngineClass** is an optional template that engines in the same namespace can reference to inherit shared pod-level properties.
+The Firebolt Operator manages three custom resources:
 
-An engine cannot be created or updated without a ready instance in its namespace. An engine may optionally reference an `FireboltEngineClass` in the same namespace.
+- **FireboltInstance** provisions shared PostgreSQL, Metadata Service, and Gateway infrastructure in a namespace.
+- **FireboltEngine** runs the compute nodes that serve queries.
+- **FireboltEngineClass** provides optional shared defaults for Engines in the same namespace.
 
-## FireboltInstance
-
-`FireboltInstance` represents the shared infrastructure that engines need before they can run. The Firebolt Operator creates and keeps this infrastructure healthy, then publishes the endpoints that engines use to connect to it.
-
-### Metadata service
-
-The metadata service stores and serves engine metadata. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
-
-Experimental `FireboltInstance.spec.metadataNG` support selects the next-generation configuration and UID/GID without selecting or rewriting the metadata image; the legacy mode remains the default.
-
-### Gateway
-
-The gateway is the entry point for client query traffic. It receives a request, identifies the target engine, and forwards the request to healthy engine pods.
-
-Each gateway pod runs two containers: Envoy, which does the proxying, and a small read-only wake agent. A query for an engine that auto-stop has scaled to zero is parked by the agent while the Firebolt Operator scales that engine back up, then released once the engine's endpoints appear.
-
-The split exists because of where credentials may live. Envoy terminates untrusted traffic, so nothing in the gateway pod may write to the Kubernetes API: the agent's entire grant is `get`/`list`/`watch` on EndpointSlices, and it reports demand outward on a metrics endpoint the Firebolt Operator polls rather than writing anything itself. The Firebolt Operator, which already holds write permission, is the only component that scales. The Envoy container holds no token at all — the pod sets `automountServiceAccountToken: false` and projects a rotating token into the agent container alone, which containers cannot share because they have separate mount namespaces.
-
-An in-pod component is required rather than an Envoy-only arrangement: the engine Service is headless, so a stopped engine's name has no A records and the request fails at DNS resolution as a local reply, which retry policies never see. Something must hold the request until the engine exists, and holding it is what makes the first query after an auto-stop succeed instead of returning an error.
-
-### PostgreSQL
-
-PostgreSQL is the backing database for the metadata service. The Firebolt Operator can provision a single node PostgreSQL instance for the metadata service. For production workloads you should provision your own PostgreSQL instance.
-
-## FireboltEngine
-
-`FireboltEngine` represents the compute nodes that run the query engine. The Firebolt Operator creates the Kubernetes resources for those nodes, rolls new generations when the spec changes, and reports whether the engine is ready to serve traffic.
-
-## FireboltEngineClass
-
-`FireboltEngineClass` is an optional namespaced class that engines can reference for shared pod-level configuration. It lets a namespace define common settings such as scheduling, service accounts, annotations, sidecars, and engine image details without repeating them on every engine.
-
-## Resource dependency model
-
-The Firebolt Operator enforces a hierarchical dependency from engines to their instance, plus an optional in-namespace dependency on FireboltEngineClass:
+## Resource relationships
 
 ```text
-┌───────────────────┐   1:N   ┌────────────────────────┐
-│ FireboltInstance  │◄────────│  FireboltEngine        │
-│                   │  reads  │                        │
-│ Provisions:       │ status  │ spec.instanceRef       │
-│ - PostgreSQL      │         │ points to the          │
-│ - Metadata Svc    │         │ instance by name       │
-│ - Gateway         │         │                        │
-│                   │         │ spec.template:         │
-│ status:           │         │   PodTemplateSpec      │
-│  metadataEndpoint │         │   (top of merge)       │
-│                   │         │                        │
-│                   │         │ Blocked until          │
-│                   │         │ instance has:          │
-│                   │         │ - metadataEndpoint     │
-│                   │         │ - spec.id              │
-└───────────────────┘         └────────────┬───────────┘
-                                           |
-                                      N:1  │ inherits properties
-                                           │ when spec.engineClassRef set
-                                           │
-                                           ▼
-                                ┌─────────────────────┐
-                                │  FireboltEngineClass│
-                                │   (namespaced,      │
-                                │    optional)        │
-                                │                     │
-                                │  spec.template:     │
-                                │    PodTemplateSpec  │
-                                │    (under engine    │
-                                │     in the merge)   │
-                                │                     │
-                                └─────────────────────┘
+                         optional shared defaults
+                  ┌──────────────────────────────┐
+                  │ FireboltEngineClass          │
+                  └──────────────┬───────────────┘
+                                 │
+                                 ▼
+┌──────────────────────┐   1:N   ┌──────────────────────┐
+│ FireboltInstance     │◄────────│ FireboltEngine       │
+│                      │         │                      │
+│ PostgreSQL           │         │ Stateful compute     │
+│ Metadata Service     │         │ Query processing     │
+│ Gateway              │         │ Per-Engine Service   │
+└──────────────────────┘         └──────────────────────┘
 ```
 
-The rendered engine pod spec is the merge of three layers, top wins:
-operator defaults < `FireboltEngineClass.spec.template` (when
-`spec.engineClassRef` is set) < `FireboltEngine.spec.template`.
-List-typed fields (`tolerations`, `initContainers`, sidecars, `env`,
-`envFrom`, `volumeMounts`, `imagePullSecrets`, `volumes`) concatenate
-class-then-engine so the engine template extends rather than replaces
-the class.
+Every Engine references one Instance in the same namespace through `spec.instanceRef`. The Instance must publish a ready Metadata Service before the Engine can start or materialize configuration in the `stable`, `stopped`, or `creating` phases. The Engine reports `InstanceReady=False` and waits when that gate fails. The `switching`, `draining`, and `cleaning` phases operate on already-rendered resources and finish without reading the Instance.
 
-**Rules:**
+An Engine may also reference one EngineClass in the same namespace through `spec.engineClassRef`. Engine settings take precedence over matching class settings, and class settings take precedence over Firebolt Operator defaults. See [EngineClass configuration inheritance](./engineclass/configuration-inheritance).
 
-- Each `FireboltEngine` declares its parent via `spec.instanceRef` (the name of a `FireboltInstance` in the same namespace).
-- The engine reconciler resolves the referenced instance on every reconcile. If the instance does not exist, is still provisioning, or lacks a populated `metadataEndpoint` or `spec.id`, reconciliation returns an error and requeues. No engine resources are created with missing metadata configuration. This gate only applies to the **stable**, **stopped**, and **creating** phases. These phases may build ConfigMaps referencing instance data. `stopped` is included because a missing ConfigMap can be re-materialized in place against the current instance info even at zero replicas. Phases that operate on already-created resources (**switching**, **draining**, **cleaning**) proceed without blocking on instance readiness.
-- The engine controller watches `FireboltInstance` resources and re-reconciles all referencing engines when an instance's status changes. This eliminates backoff delay when an instance transitions to ready.
-- The engine reports its dependency status via a `status.conditions[]` entry of type `InstanceReady`. This condition is written as part of the single `updateStatus` call at the end of each reconcile, avoiding double status writes. Users can inspect this condition to understand why an engine is not progressing.
-- The instance reconciler is independent and has no dependency on engines.
-- The optional `spec.engineClassRef` references a namespaced `FireboltEngineClass` **in the engine's own namespace**. The reference is checked at admission time by the FireboltEngine validating webhook. It hard-rejects if no class with that name exists in the engine's namespace, so a runtime "class missing" state is not part of the steady-state status surface. The engine controller watches `FireboltEngineClass` and re-reconciles every same-namespace referencing engine when a class is created, edited, or deleted. A class spec edit therefore rolls a fresh blue-green generation on every consumer engine immediately, rather than waiting for the 30s drift requeue.
-- FireboltEngineClass is **namespaced** rather than cluster-scoped, unlike `StorageClass` / `IngressClass` / `GatewayClass`, because its template carries namespace-resolved identifiers: `serviceAccountName`, `volumes[*].secret/configMap/persistentVolumeClaim` references, and typically per-tenant IAM annotations. Kubernetes resolves those names in the engine's own namespace at pod-admission time, so co-locating the class and its consumer engines avoids the silent-divergence trap a cluster-scoped class would have created. For example, an identical SA name in different namespaces could have different IAM bindings with no admission error.
-- `FireboltEngineClass` has its own status reconciler that maintains `status.boundEngines` (the count of FireboltEngines in the same namespace referencing the class) for user-facing visibility. The FireboltEngineClass validating webhook refuses deletion by listing referencing engines live from the API server, scoped to the class's namespace, at admission time rather than trusting the cached count. `status.boundEngines` starts at zero on a freshly admitted class, so a status-based gate would race the reconciler. `failurePolicy: Fail` on the webhook configuration ensures a webhook outage cannot open a deletion window.
+## Query traffic
 
-## Authentication, TLS, and signing-key rotation
+Clients normally connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
 
-Authentication and TLS are Instance-wide policies that the Firebolt Operator provisions in dedicated reconcile steps, each isolated from Postgres, the Metadata Service, and the Gateway so a failure in one never blocks the others. Each step surfaces its outcome through its own status condition (`AuthReady`, `EngineTLSReady`, `GatewayTLSReady`). Engines gate their own reconcile on the Instance's `Status` fields directly (`Status.Auth`, `Status.EngineTLS`), never on the top-level `Ready` roll-up, so a still-provisioning security feature delays only the Engines that depend on it.
+You can also connect directly to an Engine Service. Direct connections bypass Gateway features, including waking an auto-stopped Engine.
 
-The three steps run in a fixed order ahead of the components that read their output, and the reconciler logs their errors and continues rather than returning them:
+See [Gateway overview](./instance/gateway/overview) for connection examples and [Gateway query routing](./instance/gateway/gateway-query-routing) for routing behavior.
 
-| Order | Step | Runs before | Because |
-|---|---|---|---|
-| 1 | Auth | Engines | Engines mount the admin-password and signing-key Secrets recorded in `Status.Auth`. |
-| 2 | Engine TLS | Gateway | The Gateway reads `Status.EngineTLS` to decide whether to re-encrypt upstream. |
-| 3 | Gateway TLS | Gateway | The rendered Envoy config and pod template both read `Status.GatewayTLS`. |
+## Engine availability
 
-Isolation is what makes that safe: an Instance whose auth is misconfigured still brings up a usable Metadata Service and Gateway, and reports the problem on `AuthReady` rather than by failing the whole reconcile.
+The Firebolt Operator applies Engine changes with blue-green generations:
 
-### Authentication model
+1. It creates the desired generation.
+2. It waits for all pods and readiness-aware sidecars to become ready.
+3. It switches the Engine Service to the new generation.
+4. For a graceful rollout, it waits for queries on the old generation to drain.
+5. It removes the old generation.
 
-`spec.auth` configures authentication for every Engine in the Instance, not per Engine. Each Engine runs packdb's embedded `_local` authorization server, which both issues and validates JWTs, so every Engine must run byte-identical `instance.auth.*` config, including the same signing keys, or a token minted by one Engine fails validation on another. The Firebolt Operator resolves `spec.auth` once per Instance and renders the result into every Engine's `config.yaml` from that single source.
+The active generation remains available while the replacement starts. Plan cluster capacity for both generations to coexist during a rollout. See [Engine scaling](./engine/engine-scaling) and [Engine rollouts](./engine/engine-rollouts).
 
-The model combines two authorization servers:
+## Instance-wide security
 
-- Native local login through `spec.auth.local`: an admin username and password, plus the JWT signing parameters shared by all Engines.
-- Optional OIDC bearer-token validation through `spec.auth.oidc`: one or more trusted identity providers whose tokens Engines accept. packdb validates tokens against each provider's published keys; it never initiates a login flow itself.
+Authentication and listener TLS are configured on the Instance and apply consistently to its Engines:
 
-The Firebolt Operator provisions the crypto material auth needs. It runs an admin-password preflight that verifies the user-supplied password Secret exists and carries its key, and never generates an admin password, because a credential the user never sees is not usable. It provisions the shared JWT signing keypair through cert-manager. Both are mounted into every Engine pod and rendered as `instance.auth.admin.password_file` and `instance.auth.local.signing_keys[]`, so no plaintext password or private key appears in the rendered config.
+- `spec.auth` configures local authentication and optional OIDC validation.
+- `spec.tls.engine` configures TLS between the Gateway and Engines.
+- `spec.tls.gateway` configures client-facing Gateway TLS and optional mutual TLS.
 
-`AuthReady` is deliberately excluded from the top-level Instance `Ready` roll-up: auth provisioning has no bearing on whether the Metadata Service or Gateway are usable. `EngineTLSReady` and `GatewayTLSReady`, by contrast, are folded into `Ready`, so the Instance never advertises a secure posture it has not yet reached.
+The Instance reports authentication and TLS readiness independently through `AuthReady`, `EngineTLSReady`, and `GatewayTLSReady`. See [Security](./security) for configuration, certificate, Secret, and network-policy guidance.
 
-### Engine-listener TLS
+## Storage
 
-`spec.tls.engine` terminates TLS on each Engine's query listener. TLS replaces plaintext on the same port (3473): the Engine serves a single listener, not a dual plaintext-and-TLS pair. The Gateway then re-encrypts upstream to Engines, verifying each one against the Engine CA trust bundle.
+Engine pod storage and managed-table object storage are separate settings:
 
-The Gateway's upstream TLS context explicitly offers every elliptic curve an Engine certificate may use. Envoy offers only X25519 and P-256 by default, which its own TLS stack then rejects a P-384 Engine certificate against — and P-384 is the Firebolt Operator's default. The curve list therefore has to track the key sizes `spec.tls.engine.certManager.size` accepts.
+- `spec.storage` selects the pod data volume backend: `emptyDir`, `hostPath`, or a persistent volume claim template.
+- `spec.customEngineConfig.storage` configures the object store used for managed table data.
 
-The Gateway routes all Engine traffic through one `dynamic_forward_proxy` cluster whose `transport_socket` Envoy copies verbatim into every per-authority sub-cluster it synthesizes. Upstream TLS is therefore fleet-wide: the Gateway cannot speak TLS to one Engine and plaintext to another. Because of that, the upstream switch (`Status.EngineTLS.Reencrypting`) flips only once every Engine has converged onto a TLS-serving generation. Disable is symmetric: the Firebolt Operator retains the trust anchor and keeps re-encrypting until every Engine has drained back to plaintext.
-
-`EngineTLSReady` is convergence-gated, reporting `True` only once the whole fleet re-encrypts. Engines still roll onto TLS on the provisioned fact alone (`Status.EngineTLS` populated), not on the condition. Gating the Engine roll on the condition would deadlock the enable ramp, because the roll is what produces the convergence the condition waits for.
-
-### Gateway downstream TLS and fail-closed posture
-
-`spec.tls.gateway` terminates client-facing TLS on the Envoy listener; adding a client CA through `clientCASecretRef` upgrades the listener to mutual TLS.
-
-On a tightening transition (plaintext to TLS, one-way to mutual TLS, or a client-CA swap), the Firebolt Operator serves fail-closed rather than risk a fail-open window. It clears `Status.GatewayTLS`, omits the client-facing listener entirely, and drains the old looser pods before any new secure pod starts (`MaxUnavailable=100%`, `MaxSurge=0`). The client port rejects all connections for a brief window during the transition, but the Gateway is never fail-open. Liveness and readiness probes ride the always-plaintext metrics port, so pods stay alive through the fail-closed wait. Loosening and steady-state transitions carry no fail-open risk and skip staging.
-
-### Signing-key rotation
-
-When `spec.auth.local.signingKeys.rotationInterval` is set, the Firebolt Operator runs its own coordinated rotation instead of relying on cert-manager's renewal schedule. A new key is minted in a validate-only role first — used to validate tokens but not yet to sign them — and the state machine advances at most one step per reconcile.
-
-Every Engine signs with the first key in the config it has rolled onto, and rolling is not instantaneous, so at any moment different Engines may be signing and validating against different generations of that config. Each irreversible step is therefore gated on fleet convergence: every Engine's `Status.observedAuthHash` must equal the Instance-computed `authHash` before the step may run. What each gate prevents:
-
-| Step | Gate | Without the gate |
-|---|---|---|
-| `mint` | none — the key is validate-only | Nothing signs with it, so there is nothing to protect. |
-| `promote` | every Engine renders the new key | A rolled Engine signs tokens a not-yet-rolled Engine cannot validate. |
-| stamp `RetireEligibleAt` | every Engine renders the promotion | The retain window starts while Engines are still signing with the demoted key. |
-| `retain` → `Removing` | `RetireEligibleAt` + `retainDuration` elapsed | A token still inside its validity window loses the key that validates it. |
-| `delete` | every Engine renders the removal | An Engine still needs the key to validate a token signed before demotion. |
-
-The third gate is the subtle one. `RetireEligibleAt` anchors the retain window at confirmed post-promotion convergence, not at demotion: every Engine keeps signing with the demoted key until it rolls onto the promoted configuration, so `retainDuration` must measure from the instant no Engine *can* still be signing with the key, not from the instant the operator decided it should stop.
-
-That is a machine-checked claim rather than an argued one. [formal/SigningKeyRotation.tla](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/SigningKeyRotation.tla) models the state machine against a fleet whose Engines roll independently, and its `AnchorAtDemotion` constant switches the anchor to demotion. Under that anchor TLC produces a counterexample in which one Engine still signs with a key another has already dropped; under the shipped anchor it finds none. `make formal-check-counterexample` requires that counterexample to keep existing, so weakening a convergence gate fails the build.
-
-Because the gates wait indefinitely by design — an Engine that never converges parks the rotation rather than risking a validation gap — a parked rotation is reported rather than left to look idle. `Status.Auth.pendingRotationStep`, `pendingSince`, and `laggingEngines` name the step and the Engines it is waiting for, `AuthReady` carries reason `RotationWaitingForEngines` while staying `True` (the Active key still signs and validates, so the Instance is not unhealthy), and the `firebolt_instance_signing_key_rotation_*` metrics expose the same state for alerting. See [Monitoring](./monitoring) for the metrics and an example alert.
-
-The Firebolt Operator ships with the validating webhook off by default, so it does not lean on admission alone. Every `ValidateAuth` and `ValidateTLS` invariant has a controller-side re-check, and the transition-immutability invariants (such as a frozen signing algorithm or engine issuer while TLS stays enabled) have CRD CEL twins that hold at the API server regardless.
-
-### Trust-bundle cutover
-
-The Gateway's Engine trust bundle is the union of the CA certificate behind every live Engine generation's TLS Secret. Because the CA material behind an issuer can rotate even though the issuer name is immutable, an older live generation may carry a different CA than a newer one; trusting the union lets the Gateway verify both during the overlap. The bundle is reassembled from live generations every reconcile, so a CA drops out on its own once the last generation using it retires, with no separate convergence bookkeeping.
-
-A generation's Service selector may not flip to that generation until the Gateway confirms it trusts the generation's CA, that is, until the CA's fingerprint appears in `Status.RolledEngineTrustCAs`. The gate is vacuous until the Gateway actually re-encrypts upstream, because before that the Gateway talks plaintext and verifies nothing.
-
-### Known limitation: transient outage when toggling engine TLS
-
-Enabling or disabling engine TLS on an already-running, traffic-serving fleet has a transient Gateway-to-Engine outage window. Because Engines serve TLS only on the single query port, and the Gateway's upstream protocol is fleet-wide and rolled in a separate step, an Engine that has cut over ahead of the fleet is briefly unreachable from the not-yet-switched Gateway, and the reverse holds on disable.
-
-This window is bounded to the transition of a deliberate admin operation, and engine TLS is a new opt-in feature, so plaintext deployments see no regression. A fully hitless transition would require dual-listener (plaintext and TLS) support on the Engine side in packdb, which is outside the Firebolt Operator's scope.
-
-## Formal verification
-
-The Firebolt Operator's core state machines are specified in TLA+ and model-checked in CI, alongside the Go tests — five specifications today. The specifications are not documentation of the code — they are the argument for why the code's ordering constraints are the ones they are, and `make formal-verify` fails when the two disagree.
-
-| Specification | What it covers | What it proves |
-|---|---|---|
-| `FireboltEngine.tla` | the blue-green phase machine | no generation serves traffic without a StatefulSet, no drain is abandoned |
-| `FireboltInstance.tla` | the component readiness rollup | the phase matches what the components report |
-| `SigningKeyRotation.tla` | JWT signing-key rotation | no Engine ever signs with a key another cannot validate |
-| `EngineWake.tla` | wake-on-zero demand and auto-stop | an Engine only starts on demand that is current, and demand that keeps being observable is never lost |
-| `WakeAgentHold.tla` | the wake agent's readiness waiter | a held query is always releasable by a future readiness edge |
-
-Two properties hold the wake protocol together, and both are about the gap between two views of the same fact. The wake agent stamps demand and retains it for ten minutes; the Firebolt Operator polls that stamp into its own cache and honours it for five. So the cache legitimately holds stamps that are too old to act on, and re-observing one after a failed poll is normal rather than exceptional. `EngineWake.tla` therefore asserts on the transition, not on the state: an Engine's replica count only ever *grows* while the cache holds demand fresh within the TTL, and a running Engine's count only ever changes by being parked. The second is what the poller's filter to Engines at `replicas: 0` exists for — the agent stamps demand for any Engine with no ready endpoints, which includes a running Engine during a node drain, and wake sits above the idle check, so an unfiltered stamp would pin a hand-sized Engine at `activeReplicas` in the middle of its own outage.
-
-Progress is stated with the same care. Demand the Firebolt Operator keeps seeing always ends in a scale-up; a *single* observation can be lost, because a failed scrape replaces the demand cache wholesale and the stamp may age past the TTL before the next poll succeeds. That is a deliberate trade — the alternative is a cache that resurrects demand the agents no longer report — and it is bounded by the client's own retry. The one ordering the feature cannot survive losing is the wake check sitting *above* the `replicas == 0` early return in `computeAutoStopDecision`: an auto-stopped Engine is an Engine at zero replicas, so the other order makes wake impossible. Flipping it in the model breaks the liveness property, and flipping it in the reconciler breaks the state-cover suite; both are pinned.
-
-`WakeAgentHold.tla` settles a narrower question. The agent parks each held query on a channel it refcounts per Engine, and the readiness watch retires that channel when endpoints appear — so a later query registers a fresh channel under the same Engine name while an earlier query is still on its way out. Releasing by Engine name alone lets that late release delete the new registration, leaving a query parked on a channel nothing will ever close: it waits out its full timeout while the Engine it wanted is up and serving. Keying the release on the identity of the channel the query was handed is what makes this safe, and the model finds no stranded waiter under it.
-
-Every one of these claims is falsifiable by construction. Each specification carries boolean constants that remove exactly one shipped guard, [formal/counterexamples.tsv](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/counterexamples.tsv) records the violation each removal must still produce, and [formal/mutants/](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/mutants) does the same to the Go reconciler — a patch per deliberately-broken guard that the state-cover suite must still catch. A green model check is only evidence if the check could have gone red.
-
-What is *not* modelled is recorded too, in [formal/model-scope.tsv](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/formal/model-scope.tsv): the FireboltEngineClass merge layer, drain timeouts, and the Go side of the wake agent's hold path (its state is unexported in-memory bookkeeping in a package that deliberately does not depend on controller-runtime). "The TLA+ suite passes" is never the same claim as "this change is verified".
-
-## Design principles
-
-The Firebolt Operator uses a **level-triggered** (not edge-triggered) reconciliation model. Each invocation of `Reconcile` reads the full desired state (`.spec`) and the full observed state (cluster resources), computes the delta, and applies it. The reconciler does not depend on knowing _what changed_. It only depends on _what is_.
-
-This means:
-
-- **Idempotent**: calling `Reconcile` twice with the same inputs produces the same result.
-- **Crash-safe**: If the Firebolt Operator crashes at any point, the next reconciliation will observe the actual cluster state and resume from the correct phase.
-- **No queued operations**: there is no internal queue of "things to do". The status phase and observed resources determine the next action.
-
-## Detailed pages
-
-The rest of the design is split by audience and task:
-
-- [Engine reconciliation](./engine/engine-reconciliation) describes the FireboltEngine reconcile loop, phase machine, generation model, abandoned-generation sweep, status behavior, error handling, crash recovery, and resource ownership.
-- [Instance reconciliation](./instance/instance-reconciliation) describes how FireboltInstance provisions PostgreSQL, metadata, and gateway resources.
-- [FireboltEngineClass design](./engineclass/fireboltengineclass-design) describes FireboltEngineClass as a namespaced class abstraction and documents its pod-template merge behavior.
-- [Engine rollouts](./engine/engine-rollouts) describes drain checks and rolling update parameters.
-- [Auto-stop and wake-up](./engine/auto-stop-and-wake-up) describes Firebolt Operator-driven auto-stop and the gateway wake-on-zero protocol.
-- [Gateway query routing](./instance/gateway/gateway-query-routing) describes Envoy routing, zero-downtime shutdown behavior, and why the Firebolt Operator does not gate on EndpointSlice updates.
-- [Gateway sizing](./instance/gateway/gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.
+See the [FireboltEngine CRD reference](./crd-reference/engine-crd-reference) and the [object storage guides](./engine/object-storage/amazon-s3).

@@ -369,11 +369,10 @@ type FireboltEngineSpec struct {
 	// +optional
 	UISidecar *bool `json:"uiSidecar,omitempty"`
 
-	// DrainCheckEnabled controls whether the operator performs a SQL-based drain
-	// check on old-generation pods during graceful rollouts. When false, the
+	// DrainCheckEnabled controls whether the operator checks the query-count
+	// metrics on old-generation pods during graceful rollouts. When false, the
 	// operator skips directly to cleaning after switching traffic, without
-	// verifying that in-flight queries have completed. Requires a running
-	// node that can execute the drain-check query when enabled.
+	// verifying that in-flight queries have completed.
 	//
 	// Resolution is engine-if-set → FireboltEngineClass-if-set → operator
 	// default (true). The default is applied by the controller, not the CRD,

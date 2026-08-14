@@ -1,30 +1,37 @@
 ---
 title: Engine overview
-description: A FireboltEngine is the compute resource that runs query engine nodes.
+description: Create, operate, and inspect Firebolt Engines.
 sidebarTitle: Overview
 ---
 
-## Overview
+A `FireboltEngine` runs the compute nodes that serve queries. Every Engine references a ready `FireboltInstance` in the same namespace and may reference a `FireboltEngineClass` for shared defaults.
 
-The Firebolt Operator's engine reconciler owns `FireboltEngine` lifecycle: blue-green generations, phase transitions, status conditions, and the Kubernetes objects behind each engine node.
+Use the Engine guides to operate the workload:
 
-Use the pages in this section when you need implementation detail beyond the top-level [Architecture](../architecture) page.
+- [Engine scaling](./engine-scaling) covers replica changes, stopping and resuming, image updates, and rollout progress.
+- [Engine rollouts](./engine-rollouts) covers graceful and recreate strategies, readiness, drain checks, and capacity planning.
+- [Auto-stop and wake-up](./auto-stop-and-wake-up) covers activity-based scale-down and Gateway-triggered wake-up.
+- [Object storage](./object-storage/amazon-s3) covers managed-table storage configuration.
 
-- [Engine reconciliation](./engine-reconciliation) covers the reconcile loop, phase machine, generation model, and crash recovery.
-- [Engine rollouts](./engine-rollouts) covers drain checks and rolling update parameters during cutovers.
-- [Auto-stop and wake-up](./auto-stop-and-wake-up) covers operator-driven auto-stop and the gateway wake-up annotation protocol.
+For every field, phase, and condition, see the [FireboltEngine CRD reference](../crd-reference/engine-crd-reference).
 
-For the `FireboltEngine` API surface, see the [FireboltEngine CRD reference](../crd-reference/engine-crd-reference).
-
-## Inspecting status
+## Inspect Engine status
 
 ```bash
 kubectl get fireng -n firebolt
 ```
 
-```
+```text
 NAME        REPLICAS   PHASE    READY   GENERATION   AGE
 my-engine   5          stable   True    2            24h
 ```
 
-Worked examples live in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.
+Use `kubectl describe` to inspect conditions and Kubernetes events:
+
+```bash
+kubectl describe fireng my-engine -n firebolt
+```
+
+An Engine is available when its phase is `stable` and its `Ready` condition is `True`. The transition phases `creating`, `switching`, `draining`, and `cleaning` indicate rollout progress. A phase of `stopped` means `spec.replicas` is `0` and the Engine is intentionally unavailable.
+
+Worked manifests are available in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.

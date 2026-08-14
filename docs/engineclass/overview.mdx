@@ -10,14 +10,9 @@ sidebarTitle: Overview
 
 Each inherited field resolves the engine value first, then the class value, then the Firebolt Operator's default. An engine that sets a field owns it. The class fills it in otherwise.
 
-The pattern echoes known Kubernetes patterns like `StorageClass` or `GatewayClass` in the "shared template referenced by name"
-sense, but `FireboltEngineClass` is **namespaced** rather than cluster-scoped.
+Multiple classes can exist per namespace. The Engine picks one by name, and using a class is optional. See [EngineClass configuration inheritance](./configuration-inheritance) for template precedence, per-Engine overrides, deletion, and rollout behavior.
 
-Multiple classes can exist per namespace. The engine picks one by name. Usage is optional. The
-[FireboltEngineClass design](./fireboltengineclass-design) documents the merge precedence
-with `FireboltEngine.spec.template`, deletion, and rollout behavior when a class changes.
-
-For the allowlist of user-settable vs. operator-owned template fields, see the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference).
+For the allowlist of user-settable and Firebolt Operator-owned template fields, see the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference).
 
 ## Inspecting status
 

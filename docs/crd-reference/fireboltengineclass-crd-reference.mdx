@@ -1,19 +1,19 @@
 ---
 title: FireboltEngineClass CRD reference
-description: Spec, status, inherited engine settings, and operator-owned template fields for FireboltEngineClass.
+description: Spec, status, inherited Engine settings, and Firebolt Operator-owned template fields for FireboltEngineClass.
 sidebarTitle: FireboltEngineClass CRD reference
 ---
 
 ## Spec reference
 
-Every field except `spec.template` is an optional default that a referencing engine inherits when it does not set the matching field itself. Resolution is always the engine value first, then the class value, then the operator default. The engine owns the value when it sets it. The class supplies it otherwise. The operator default sits beneath both.
+Every field except `spec.template` is an optional default that a referencing Engine inherits when it does not set the matching field itself. Resolution is always the Engine value first, then the class value, then the Firebolt Operator default. The Engine owns the value when it sets it. The class supplies it otherwise. The Firebolt Operator default sits beneath both.
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each engine's `spec.template` (engine wins). See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-class-templates) and [FireboltEngineClass design](../engineclass/fireboltengineclass-design). |
+| `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each Engine's `spec.template` (Engine wins). See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-class-templates) and [EngineClass configuration inheritance](../engineclass/configuration-inheritance). |
 | `spec.uiSidecar` | No | `false` | Default UI sidecar toggle. When it resolves to `true`, the Firebolt Operator injects a built-in, operator-owned `nginx` container named `engine-web` (serving the Engine Web UI, listening on port `9100`) into each engine pod. The `engine-web` container name is reserved, so a user-supplied container or init container with that name is rejected. The container carries an HTTP readiness probe on the UI port, so the pod only reports Ready (and rollouts only promote) when the UI is actually serving. The sidecar follows the Kubernetes default pull policy for its image (`Always` while the UI image is tracked at `:latest`); an explicit `imagePullPolicy` on the `engine` container (in the engine or class template) applies to the sidecar too. The engine `spec.uiSidecar` wins when set. |
 | `spec.storage` | No | `{}` (emptyDir) | Default per-pod data volume. An engine that names any backend (`persistentVolumeClaim`, `emptyDir`, or `hostPath`) on its own `spec.storage` owns it. Otherwise the class backend applies. Backend selection is whole-struct, so the three backends stay mutually exclusive. See the [FireboltEngine CRD reference](./engine-crd-reference). |
-| `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment deep-merged beneath each engine's `spec.customEngineConfig`. The merge order is the operator base, then the class, then the engine, so an engine key wins over the same key on the class. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`) from the class layer too, so the class cannot override identity, routing, or topology. |
+| `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment deep-merged beneath each Engine's `spec.customEngineConfig`. The merge order is the Firebolt Operator base, then the class, then the Engine, so an Engine key wins over the same key on the class. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`) from the class layer too, so the class cannot override identity, routing, or topology. |
 | `spec.rollout` | No | `graceful` | Default rollout strategy, `graceful` or `recreate`. The engine `spec.rollout` wins when set. |
 | `spec.drainCheckEnabled` | No | `true` | Default drain-check toggle. The engine `spec.drainCheckEnabled` wins when set. |
 | `spec.drainCheckInterval` | No | – | Default drain-poll interval. The engine `spec.drainCheckInterval` wins when set. |
@@ -50,11 +50,11 @@ allowlist applies to `FireboltEngine.spec.template`.
 | `readinessGates`, `resourceClaims`, `hostAliases` | Yes | Class + engine, concatenated. |
 | `os`, `overhead` | Yes | Engine wins when set. |
 | `imagePullSecrets` | Yes | Class + engine, concatenated. |
-| `volumes` | Yes | Operator volumes first; class and engine volumes appended (collisions with operator names dropped). |
-| `securityContext` | Yes | Engine wins if non-nil; operator `fsGroup` defaults always stamped. |
+| `volumes` | Yes | Firebolt Operator volumes first; class and Engine volumes appended (collisions with reserved names dropped). |
+| `securityContext` | Yes | Engine wins if non-nil; Firebolt Operator `fsGroup` defaults always stamped. |
 | `initContainers[*]` | Yes | Class + engine, concatenated. Init container named `engine` is **rejected**. May mount `engine-config`, `data`, and `runtime`; the Secret-backed volumes are **rejected** (see below). |
 | `containers[name=="engine"]` | Limited | See engine container table below. |
-| `containers[name!="engine"]` | Yes | Sidecars: user-owned, except the reserved `engine-web` name (the operator's UI sidecar), which is rejected. Same volume rule as `initContainers`. |
+| `containers[name!="engine"]` | Yes | Sidecars: user-owned, except the reserved `engine-web` name (the Firebolt Operator's UI sidecar), which is rejected. Same volume rule as `initContainers`. |
 | `terminationGracePeriodSeconds` | **No** | Hardcoded to 60s (same on engine template). |
 | `subdomain`, `hostname` | **No** | Headless-DNS contract. |
 | `restartPolicy`, `activeDeadlineSeconds` | **No** | StatefulSet semantics. |
@@ -80,7 +80,7 @@ allowlist applies to `FireboltEngine.spec.template`.
 | `restartPolicy` | **No** | Dropped by the kubelet on non-init containers. |
 | `stdin`, `stdinOnce`, `tty` | **No** | Non-interactive workload. |
 
-A second container named `engine` is **rejected** (duplicate of the operator-rendered container).
+A second container named `engine` is **rejected** because the Firebolt Operator renders that container.
 
 ### Volumes a sidecar or init container may mount
 
@@ -91,7 +91,7 @@ an init container is the supported way to prepare the data directory before the
 the kubelet does not apply `fsGroup` to.
 
 The Secret-backed volumes are **rejected** on any container other than the
-operator-rendered `engine` container: `auth-admin`, `tls-engine`, and every
+Firebolt Operator-rendered `engine` container: `auth-admin`, `tls-engine`, and every
 `auth-signing-<key-id>` volume. Those carry the instance admin password, the
 engine's TLS private key, and the JWT signing keys, so mounting them would hand
 a template author credentials they cannot otherwise read.
@@ -101,7 +101,7 @@ a template author credentials they cannot otherwise read.
 | Field | Description |
 |---|---|
 | `status.observedGeneration` | `metadata.generation` last reconciled. |
-| `status.boundEngines` | Count of `FireboltEngine` resources in this namespace referencing the class. The deletion gate uses a live list, not this cache. |
-| `status.conditions[type=Ready]` | `True` when `spec.template` has no operator-owned fields. `False/Reason=OperatorOwnedFieldSet` is defense-in-depth for classes admitted under an older operator. |
+| `status.boundEngines` | Count of `FireboltEngine` resources in this namespace referencing the class. |
+| `status.conditions[type=Ready]` | `True` when the class can be used. `False/OperatorOwnedFieldSet` means the template contains a reserved field. `False/DeletionBlocked` means Engines still reference a class being deleted. |
 
 Short name: `firengc`.

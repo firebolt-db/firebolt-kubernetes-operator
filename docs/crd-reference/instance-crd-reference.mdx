@@ -12,7 +12,7 @@ under `spec.gateway.template` and `spec.metadata.template` respectively.
 They use the same shape as `FireboltEngineClass.spec.template`. The validating webhook
 restricts what users may set on those templates. See
 [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-component-templates)
-and [Instance reconciliation](../instance/instance-reconciliation#component-pod-templates).
+and [Customize component pods](../instance/overview#customize-component-pods).
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
@@ -39,9 +39,9 @@ and [Instance reconciliation](../instance/instance-reconciliation#component-pod-
 | `spec.auth.local.admin.password.key` | **Yes** | - | Key within that Secret. |
 | `spec.auth.local.passwordLogin` | No | `admin_only` | Who may log in by password once OIDC is configured: `admin_only` or `any_user`. Ignored when `spec.auth.oidc` is absent. |
 | `spec.auth.local.signingAlgorithm` | No | `ES384` | JWT signing algorithm. Immutable once set, and must pair with the signing key's algorithm and size. |
-| `spec.auth.local.tokenExpiry` | No | (packdb default) | Lifetime of issued access tokens, as a Go duration. |
-| `spec.auth.local.maxTokenAge` | No | (packdb default `1d`) | Upper bound on a token's `iat` age. Sets the floor for `retainDuration`. |
-| `spec.auth.local.clockSkewTolerance` | No | (packdb default `30s`) | Permitted clock drift when validating temporal claims. Added to the `retainDuration` floor. |
+| `spec.auth.local.tokenExpiry` | No | (Engine default) | Lifetime of issued access tokens, as a Go duration. |
+| `spec.auth.local.maxTokenAge` | No | (Engine default `1d`) | Upper bound on a token's `iat` age. Sets the floor for `retainDuration`. |
+| `spec.auth.local.clockSkewTolerance` | No | (Engine default `30s`) | Permitted clock drift when validating temporal claims. Added to the `retainDuration` floor. |
 | `spec.auth.local.signingKeys` | No | (single permanent key) | JWT signing-key policy. cert-manager only; there is no bring-your-own path for signing keys. |
 | `spec.auth.local.signingKeys.certManager.issuerRef.name` | **Yes** | - | `Issuer` or `ClusterIssuer` that issues signing keys. Immutable once set. |
 | `spec.auth.local.signingKeys.certManager.issuerRef.kind` | No | `ClusterIssuer` | `Issuer` or `ClusterIssuer`. |
@@ -59,14 +59,14 @@ and [Instance reconciliation](../instance/instance-reconciliation#component-pod-
 | `spec.tls` | No | disabled | Transport encryption. Engine and Gateway TLS are independent and separately opt-in. |
 | `spec.tls.engine` | No | disabled | Terminates TLS on each Engine's query listener. TLS **replaces** plaintext on the same port. |
 | `spec.tls.gateway` | No | disabled | Terminates client-facing TLS on the Gateway listener. |
-| `spec.tls.*.enabled` | No | `false` | Turn this listener's TLS on. Requires exactly one of `certManager` or `secretRef`. |
-| `spec.tls.*.certManager.issuerRef.name` | Yes* | - | `Issuer` or `ClusterIssuer` that issues this certificate. Immutable while TLS stays enabled. |
+| `spec.tls.*.enabled` | No | `false` | Turn this listener's TLS on. Engine TLS requires `certManager`; Gateway TLS requires exactly one of `certManager` or `secretRef`. |
+| `spec.tls.*.certManager.issuerRef.name` | Yes* | - | `Issuer` or `ClusterIssuer` that issues this certificate. |
 | `spec.tls.*.certManager.issuerRef.kind` | No | `ClusterIssuer` | `Issuer` or `ClusterIssuer`. |
 | `spec.tls.*.certManager.algorithm` | No | `ECDSA` | `ECDSA` or `RSA`. |
 | `spec.tls.*.certManager.size` | No | `384` | Key size. |
-| `spec.tls.*.secretRef.name` | Yes* | - | Bring-your-own certificate: a Secret carrying `tls.crt` and `tls.key`. Mutually exclusive with `certManager`. |
-| `spec.tls.*.clientCASecretRef.name` | No | - | Client CA to verify client certificates against. On the Gateway this upgrades the listener to mutual TLS. Replacing it is a tightening transition and is staged fail-closed. |
-| `spec.tls.*.dnsNames` | No | (in-cluster Service names) | Extra SANs the Firebolt Operator cannot derive itself, such as an externally-visible hostname. |
+| `spec.tls.gateway.secretRef.name` | Yes* | - | Bring-your-own Gateway certificate: a Secret carrying `tls.crt` and `tls.key`. Mutually exclusive with `certManager`. Engine TLS does not support `secretRef`. |
+| `spec.tls.gateway.clientCASecretRef.name` | No | - | Client CA to verify client certificates against, upgrading the Gateway listener to mutual TLS. Replacing it is a tightening transition and is staged fail-closed. Engine listeners do not support client-certificate verification. |
+| `spec.tls.gateway.dnsNames` | No | (in-cluster Service names) | Extra Gateway certificate SANs the Firebolt Operator cannot derive itself, such as an externally-visible hostname. Engine certificate names are derived automatically. |
 
 \* Required when the parent field is set.
 
@@ -112,11 +112,7 @@ Per-component pass-through (allowed without restriction):
 - Sidecars and init containers may mount the Firebolt Operator-rendered `config-volume` / `config` and `tmp` volumes, but **not** the Secret-backed ones: `tls-gateway`, `client-ca`, `engine-ca`, `engine-crl`, `client-crl`, and `wake-agent-token` on the gateway; `postgres-creds` on the metadata pod.
 - Pod-template `metadata.labels` and `metadata.annotations` outside the `firebolt.io/` reserved prefix.
 
-A second container or initContainer using the Firebolt Operator-rendered
-primary name (`envoy`, `metadata`) is rejected as a duplicate. The
-authoritative rule sets live in
-[`api/v1alpha1/operatorauthority.go`](https://github.com/firebolt-db/firebolt-kubernetes-operator/blob/main/api/v1alpha1/operatorauthority.go)
-as `GatewayPodTemplateRules` and `MetadataPodTemplateRules`.
+A second container or init container using the Firebolt Operator-rendered primary name (`envoy` or `metadata`) is rejected as a duplicate.
 
 ## Instance phases
 

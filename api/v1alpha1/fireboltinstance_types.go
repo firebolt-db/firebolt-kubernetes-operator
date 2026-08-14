@@ -660,12 +660,10 @@ type AuthSpec struct {
 
 // TLSListenerSpec configures TLS termination for one operator-managed
 // listener (the gateway's client-facing listener, or an engine's HTTP/
-// Postgres-wire listeners). When Enabled, provide exactly one certificate
-// source: CertManager (the operator provisions a cert-manager Certificate)
-// or SecretRef (bring your own Secret). Unlike SigningKeyPolicy — where
-// cert-manager is the only supported source — a TLS listener accepts a
-// pre-issued Secret so certificates from a CA the cluster has no
-// cert-manager integration with can still be used.
+// Postgres-wire listeners). When Enabled, the gateway listener accepts either
+// CertManager or SecretRef as its certificate source. The engine listener
+// requires CertManager because its per-generation hostnames need certificates
+// minted as generations are created.
 type TLSListenerSpec struct {
 	// Enabled turns on TLS for this listener.
 	// +kubebuilder:default=false

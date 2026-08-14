@@ -22,6 +22,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -110,6 +111,48 @@ func TestInstanceReconcile_RecordsMetrics(t *testing.T) {
 				t.Error("InstanceLastReconciled = 0, want a non-zero unix timestamp")
 			}
 		})
+	}
+}
+
+func TestInstanceReconcile_DoesNotAdvanceSuccessTimestampOnError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	const (
+		ns           = "instance-metrics-error-ns"
+		instanceName = "instance-metrics-error"
+	)
+	terminationGracePeriod := int64(30)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       instanceName,
+			Namespace:  ns,
+			Finalizers: []string{instanceFinalizerName},
+		},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			ID: "01METRICSERRORTEST",
+			Metadata: computev1alpha1.MetadataSpec{Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{TerminationGracePeriodSeconds: &terminationGracePeriod},
+			}},
+		},
+		Status: computev1alpha1.FireboltInstanceStatus{Phase: computev1alpha1.InstancePhaseProvisioning},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(instance).WithStatusSubresource(instance).Build()
+	r := &FireboltInstanceReconciler{
+		Client:          fc,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NewInstanceRecorder(),
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instanceName, Namespace: ns},
+	}); err == nil {
+		t.Fatal("Reconcile returned nil error for a rejected metadata template")
+	}
+
+	if v := readGauge(t, metrics.InstanceLastReconciled.WithLabelValues(ns, instanceName)); v != 0 {
+		t.Errorf("InstanceLastReconciled = %v after failed reconcile, want 0", v)
 	}
 }
 

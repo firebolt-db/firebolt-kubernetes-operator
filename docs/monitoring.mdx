@@ -10,7 +10,7 @@ This document describes how the Firebolt Operator exposes Prometheus metrics for
 
 | Component | Port | Name | Path | What it exposes |
 |---|---|---|---|---|
-| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other engine-internal gauges. The Firebolt Operator scrapes the first two via `Pods/proxy` to drive both the drain check and auto-stop. |
+| Engine pods | 9090 | `metrics` | `/metrics` | `firebolt_running_queries`, `firebolt_suspended_queries`, and other Engine gauges. The Firebolt Operator reads the first two for drain checks and auto-stop. |
 | Gateway pods (Envoy) | 9090 (default) | `metrics` | `/stats/prometheus` | Envoy connection, request, and cluster stats |
 | Firebolt Operator pod | Configurable via `metrics.bindAddress` | `https` or `http` | `/metrics` | controller-runtime reconciliation, workqueue, REST client, and Go runtime metrics |
 
@@ -57,36 +57,9 @@ The chart-level PodMonitors apply uniform scrape configuration to all instances 
 - Engine pods: `firebolt.io/engine: <engine-name>`
 - Gateway pods: `firebolt.io/instance: <instance-name>`, `firebolt.io/component: gateway`
 
-## Architecture decisions
+The chart creates PodMonitors only when you enable them and the Prometheus Operator CRDs are installed. Customize intervals, relabeling, and TLS settings on your own PodMonitors when the chart defaults do not fit your monitoring platform.
 
-### Helm chart templates, not Firebolt Operator reconciliation
-
-PodMonitor resources are shipped as Helm templates, not created by the Firebolt Operator's Go reconciliation loop. This follows the dominant industry pattern used by cert-manager, Strimzi, FoundationDB operator, and others. CloudNativePG tried a reconciler-managed approach and deprecated it in v1.26 because:
-
-- It creates a hard dependency on the Prometheus Operator CRDs. The Firebolt Operator fails to reconcile on clusters where the CRDs are not installed.
-- The Firebolt Operator overwrites user customizations (scrape intervals, relabelings, TLS config) on every reconcile.
-- It adds RBAC complexity for `monitoring.coreos.com` resources.
-- Platform teams want full ownership of their monitoring configuration.
-
-### Gateway stats listener
-
-The Envoy admin interface (port 9901) is bound to `127.0.0.1` and must stay that way. It exposes mutation endpoints (`POST /healthcheck/fail`, `POST /quitquitquit`) that the preStop hook depends on for graceful shutdown. Binding admin to `0.0.0.0` would allow any pod in the cluster to drain or kill gateway pods.
-
-Instead, a separate read-only stats listener is added on the metrics port (default 9090). This listener proxies only `/stats/prometheus` from the admin interface via an internal static cluster, exposing no mutation endpoints.
-
-### Consistent metrics port
-
-Engine pods and gateway pods both expose Prometheus metrics on a container port named `metrics` (default 9090). The gateway override lives on the FireboltInstance at `spec.gateway.metricsPort`. The Firebolt Operator stamps the corresponding `metrics`-named port on the rendered Envoy container. Engine pods carry the port via the per-FireboltEngine wiring. PodMonitors can therefore always reference `port: metrics` without knowing the actual port number. The metadata pod does not currently expose a Prometheus endpoint, so no `metrics` port is stamped there.
-
-### Cross-namespace support
-
-When the Firebolt Operator watches all namespaces (`watchNamespace` is empty), engine, gateway, and metadata pods may live in namespaces other than the Firebolt Operator's namespace. Setting `podMonitor.allNamespaces: true` adds `namespaceSelector.any: true` to the PodMonitors so Prometheus discovers pods across all namespaces.
-
-### Embedded CR status metrics
-
-The Firebolt Operator embeds custom Prometheus metrics that expose the status of every FireboltEngine and FireboltInstance it manages. These are level-triggered gauges updated on every reconcile. There are no timers or persisted timestamps, which is consistent with the Firebolt Operator's level-driven reconciliation model. Duration and trend analysis are left to PromQL.
-
-This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconcile_condition`), cert-manager (`certmanager_certificate_ready_status`), and Crossplane (`crossplane_managed_resource_ready`).
+The Gateway exposes a read-only stats listener on its metrics port. Its Envoy administration interface remains loopback-only and is not a Prometheus target.
 
 ## Operator metrics reference
 
@@ -101,7 +74,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | `firebolt_engine_pods_ready` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Number of ready pods in the active generation. |
 | `firebolt_engine_pods_total` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Total pods in the active generation (includes non-ready). |
 | `firebolt_engine_draining_generation` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Generation being drained, or -1 if no drain is in progress. |
-| `firebolt_engine_last_reconciled_timestamp` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Unix timestamp of the last successful reconcile. |
+| `firebolt_engine_last_reconciled_timestamp` | Gauge | `namespace`, `name`, `instance` | Successful reconciles | Unix timestamp of the last successful reconcile. |
 | `firebolt_engine_drain_check_errors_total` | Counter | `namespace`, `name`, `instance` | On drain probe failure | Cumulative count of drain probe failures (pod unreachable, metrics missing). |
 
 ### FireboltInstance metrics
@@ -111,7 +84,7 @@ This follows the pattern used by ArgoCD (`argocd_app_info`), Flux (`gotk_reconci
 | `firebolt_instance_status_phase` | Gauge | `namespace`, `name`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `Provisioning`, `Ready`, `Degraded`, `Failed`. |
 | `firebolt_instance_status_condition` | Gauge | `namespace`, `name`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `MetadataReady`, `GatewayReady`, `AuthReady`, `EngineTLSReady`, `GatewayTLSReady`. |
 | `firebolt_instance_info` | Gauge | `namespace`, `name`, `id`, `postgres_mode` | Every reconcile | Always 1. Carries static metadata: instance ID and postgres mode (`internal` or `external`). |
-| `firebolt_instance_last_reconciled_timestamp` | Gauge | `namespace`, `name` | Every reconcile | Unix timestamp of the last successful reconcile. |
+| `firebolt_instance_last_reconciled_timestamp` | Gauge | `namespace`, `name` | Successful reconciles | Unix timestamp of the last successful reconcile. |
 
 ### JWT signing-key rotation metrics
 
@@ -150,7 +123,7 @@ Engine stuck in draining phase for more than 10 minutes:
 
 ```promql
 firebolt_engine_status_phase{phase="draining"} == 1
-  unless firebolt_engine_status_phase{phase="draining"} offset 10m == 0
+  and firebolt_engine_status_phase{phase="draining"} offset 10m == 1
 ```
 
 Scaling in progress (ready pods less than desired):
@@ -222,11 +195,11 @@ Every irreversible rotation step waits for the whole engine fleet to converge, a
       FireboltInstance, then the named engines' own conditions.
 ```
 
-The operator also emits a `SigningKeyRotationStalled` Warning Event once a step has been parked past its own threshold. The Event message is deliberately stable across reconciles so the API server aggregates the repeats into one Event with a count, rather than one Event per requeue.
+The Firebolt Operator also emits a `SigningKeyRotationStalled` Warning Event when a rotation remains parked past its threshold.
 
 ### Cardinality
 
-Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 20 series (4 phases + 6 conditions + 1 info + 1 timestamp + 3 signing-key phases + 3 rotation steps + 3 scalar rotation gauges). For a cluster with 10 instances and 50 engines, expect roughly 950 series from the Firebolt Operator. This is negligible for any Prometheus deployment.
+Each FireboltEngine produces approximately 15 time series (6 phases + 2 conditions + 7 scalar gauges). Each FireboltInstance produces approximately 21 series (4 phases + 6 conditions + 1 info + 1 timestamp + 3 signing-key phases + 3 rotation steps + 3 scalar rotation gauges). For a cluster with 10 Instances and 50 Engines, expect roughly 960 time series from the Firebolt Operator.
 
 The `phase` and `step` labels on the signing-key metrics are bounded enumerations written on every pass, including zeros, so they add a fixed handful of series per Instance and never grow with rotation count.
 

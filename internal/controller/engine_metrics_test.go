@@ -107,3 +107,45 @@ func TestEngineReconcile_RecordsMetrics(t *testing.T) {
 		})
 	}
 }
+
+func TestEngineReconcile_DoesNotAdvanceSuccessTimestampOnError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = computev1alpha1.AddToScheme(scheme)
+
+	const (
+		ns           = "engine-metrics-error-ns"
+		engineName   = "engine-metrics-error"
+		instanceName = "instance-metrics-error"
+	)
+	missingClass := "missing-class"
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engineName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    instanceName,
+			EngineClassRef: &missingClass,
+			Replicas:       1,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{Phase: computev1alpha1.PhaseCreating},
+	}
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(engine).WithStatusSubresource(engine).Build()
+	r := &FireboltEngineReconciler{
+		Client:          fc,
+		Scheme:          scheme,
+		MetricsRecorder: metrics.NewEngineRecorder(),
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engineName, Namespace: ns},
+	}); err == nil {
+		t.Fatal("Reconcile returned nil error for a missing EngineClass")
+	}
+
+	if v := readGauge(t, metrics.EngineLastReconciled.WithLabelValues(ns, engineName, instanceName)); v != 0 {
+		t.Errorf("EngineLastReconciled = %v after failed reconcile, want 0", v)
+	}
+}

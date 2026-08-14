@@ -138,7 +138,7 @@ type FireboltInstanceReconciler struct {
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
-func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	if r.NameFilter != "" && req.Name != r.NameFilter {
 		return ctrl.Result{}, nil
 	}
@@ -184,11 +184,10 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// the firebolt_instance_* gauges empty in Prometheus, even though the CR
 	// still has its stable status conditions set. The deferred call reads
 	// `instance` at function-exit time so post-Update status changes are
-	// captured. Engine reconciler does the equivalent with a final-line
-	// MetricsRecorder.Record at the end of its main reconcile path; the
-	// instance reconciler has more error branches that bypass that call,
-	// hence defer here.
-	defer r.MetricsRecorder.Record(instance)
+	// captured. The Engine reconciler uses the same deferred pattern.
+	defer func() {
+		r.recordReconcileMetrics(instance, err)
+	}()
 
 	if instance.Status.Phase == "" {
 		instance.Status.Phase = computev1alpha1.InstancePhaseProvisioning
@@ -377,6 +376,16 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+func (r *FireboltInstanceReconciler) recordReconcileMetrics(
+	instance *computev1alpha1.FireboltInstance,
+	reconcileErr error,
+) {
+	r.MetricsRecorder.Record(instance)
+	if reconcileErr == nil {
+		r.MetricsRecorder.RecordSuccessfulReconcile(instance.Namespace, instance.Name)
+	}
 }
 
 // publishRolledEngineTrustCAs records, in Status.RolledEngineTrustCAs, the

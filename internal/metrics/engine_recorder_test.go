@@ -102,6 +102,24 @@ func TestEngineRecorderNoDraining(t *testing.T) {
 	}
 }
 
+func TestEngineRecorderSuccessfulReconcileTimestamp(t *testing.T) {
+	rec := NewEngineRecorder()
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng-success-time", Namespace: "ns"},
+		Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: "inst-1"},
+	}
+
+	rec.Record(engine, 0, 0)
+	if v := gaugeValue(EngineLastReconciled.WithLabelValues("ns", "eng-success-time", "inst-1")); v != 0 {
+		t.Fatalf("last reconciled after state-only Record = %v, want 0", v)
+	}
+
+	rec.RecordSuccessfulReconcile("ns", "eng-success-time", "inst-1")
+	if v := gaugeValue(EngineLastReconciled.WithLabelValues("ns", "eng-success-time", "inst-1")); v == 0 {
+		t.Fatal("last reconciled after successful reconcile = 0, want a unix timestamp")
+	}
+}
+
 func TestEngineRecorderDelete(t *testing.T) {
 	rec := NewEngineRecorder()
 	engine := &computev1alpha1.FireboltEngine{

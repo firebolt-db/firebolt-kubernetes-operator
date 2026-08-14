@@ -1,6 +1,6 @@
 ---
 title: Security model
-description: Operator vs. platform responsibilities for pod hardening, network isolation, resource bounds, and secrets.
+description: Firebolt Operator and platform responsibilities for pod hardening, network isolation, resource bounds, and Secrets.
 sidebarTitle: Security
 ---
 
@@ -14,12 +14,10 @@ The Firebolt Operator stamps a hardened security posture on the workloads
 it renders. How much you can change that posture depends on the CRD
 surface. Engine pods expose a wide pod-template merge layer through
 `FireboltEngineClass` and `FireboltEngine`. Gateway and metadata primary
-containers keep operator-owned hardening and only let you set image and
+containers keep Firebolt Operator-owned hardening and only let you set image and
 resources on the primary container.
 
-Per-field allowlists for each template surface live in
-`api/v1alpha1/operatorauthority.go` (`PodTemplateRules` per component)
-and in the CRD reference pages linked in each subsection below.
+The CRD reference pages linked in each subsection list the allowed and reserved fields for every template surface.
 
 ### Engine
 
@@ -40,22 +38,21 @@ You can replace that entire container `securityContext` wholesale through
 `FireboltEngineClass.spec.template` or
 `FireboltEngine.spec.template.spec.containers[name=="engine"].securityContext`.
 The engine template wins over the class. There is no merge or floor. A
-template value replaces the operator default completely, including the
+template value replaces the Firebolt Operator default completely, including the
 ability to weaken hardening.
 
 Pod-level `spec.template.spec.securityContext` is also user-settable. The
 Firebolt Operator only stamps `fsGroup` (3473) and
 `fsGroupChangePolicy: OnRootMismatch` when you leave those fields unset.
 Sidecar containers and init containers pass through from your template
-without operator hardening.
+without Firebolt Operator hardening.
 
 #### Writable directories and arbitrary UIDs
 
 The engine image owns two writable directories: the data dir
 (`/var/lib/firebolt`, the PVC mount) and the unix socket dir
 (`/run/firebolt`, an `emptyDir`). Both are group-owned by root (GID 0)
-with mode `2770` (`g=u` plus the setgid bit), not the broad `777` the
-image used previously. The read-only application payload at
+with mode `2770` (`g=u` plus the setgid bit). The read-only application payload at
 `/opt/firebolt` stays `firebolt:firebolt 0755`.
 
 This follows the OpenShift "arbitrary UID" convention: a platform that
@@ -73,8 +70,7 @@ either through the stamped `fsGroup` (which `chown`s the PVC to the
 group) or by mounting volumes already group-0-writable, and avoid
 pinning a `runAsUser` that is not a member of group 0.
 
-Validating webhooks on `FireboltEngine` and `FireboltEngineClass` (and
-the engine reconciler when webhooks are off) reject operator-owned paths
+The Firebolt Operator rejects reserved paths on `FireboltEngine` and `FireboltEngineClass` templates even when admission webhooks are disabled. These paths include
 on engine templates: command, args, ports, probes, reserved env keys, and
 `firebolt.io/*` labels. They do not reject a weakened `securityContext`.
 See the [FireboltEngineClass CRD reference](./crd-reference/fireboltengineclass-crd-reference)
@@ -82,7 +78,7 @@ and [FireboltEngine CRD reference](./crd-reference/engine-crd-reference).
 
 ### Gateway (Envoy)
 
-The Envoy primary container is operator-rendered end to end. The
+The Envoy primary container is rendered by the Firebolt Operator. The
 validating webhook rejects user input on its `securityContext`. You may
 only set `image` and `resources` on
 `spec.gateway.template.spec.containers[name=="envoy"]`. The Firebolt
@@ -102,7 +98,7 @@ Pod-level fields on `spec.gateway.template` (node selector, tolerations,
 by the template rules. See the
 [FireboltInstance CRD reference](./crd-reference/instance-crd-reference).
 
-### Metadata (Pensieve)
+### Metadata service
 
 The metadata primary container follows the same pattern as the gateway.
 Operator-stamped hardening applies to `containers[name=="metadata"]`.
@@ -110,7 +106,7 @@ You may set only `image` and `resources` there:
 
 | Field | Value |
 |---|---|
-| UID | 1111 (pinned to the image's `dedicated-pensieve` user) |
+| UID | 1111 |
 | `runAsNonRoot` | `true` |
 | Capabilities | drop `ALL` |
 | `allowPrivilegeEscalation` | `false` |
@@ -148,14 +144,14 @@ install time by `watchNamespaces`:
 - Non-empty list, e.g. `{tenant-a, tenant-b}`: a `Role` plus
   `RoleBinding` pair in each listed namespace, no `ClusterRole`. The
   manager cache spans only those namespaces. Use this posture when
-  multi-tenant compliance constraints bound the operator's blast
+  multi-tenant compliance constraints bound the Firebolt Operator's blast
   radius.
 
 The default `FireboltInstance.spec.metricScrapeMode=PodIP` reaches
 engine metrics through pod IPs and does not need `pods/proxy: get`,
 so the chart's manager RBAC does not include that verb. Setting
 `metricScrapeMode=ApiserverProxy` on any FireboltInstance requires
-`rbac.apiserverProxyGrant=true` on the operator chart, which
+`rbac.apiserverProxyGrant=true` on the Firebolt Operator chart, which
 renders a dedicated `ClusterRole` (or per-namespace `Role` when
 `watchNamespaces` is set) granting only that one verb. Without the
 toggle, the metric scrape surfaces as a 403 from the apiserver.
@@ -178,22 +174,22 @@ Both are opt-in and Instance-wide. Neither is configured per Engine: every Engin
 - **The local user store**, always present when auth is enabled. It holds the Instance admin plus any users created through SQL, and backs password login through the Engine's embedded authorization server.
 - **OIDC bearer validation** through `spec.auth.oidc`, optional. Engines accept JWTs issued by the trusted providers you configure. Engines validate those tokens; they never run a login flow themselves, so no client secret for your identity provider is ever held by the Instance.
 
-**The Firebolt Operator never generates the admin password.** It is supplied through a Secret you create, referenced by `spec.auth.local.admin.password`. A credential the operator invented and you never saw would not be usable, so the reconcile preflights the Secret's existence and reports `AuthReady=False/AdminSecretMissing` rather than inventing one. The password is mounted into each Engine as a file and referenced by path, so no plaintext credential appears in a rendered config.
+**The Firebolt Operator never generates the admin password.** Supply it through a Secret referenced by `spec.auth.local.admin.password`. If the Secret or key is missing, the Instance reports `AuthReady=False/AdminSecretMissing`. The password is mounted into each Engine as a file and referenced by path, so no plaintext credential appears in a rendered config.
 
 The shared JWT signing keypair is provisioned through cert-manager against an `Issuer` or `ClusterIssuer` you supply. Signing keys are cert-manager-only — unlike TLS, there is no bring-your-own `secretRef` path — and the private key is mounted by path, never inlined.
 
 ### Engine and Gateway TLS
 
-`spec.tls.engine` terminates TLS on each Engine's query listener; `spec.tls.gateway` terminates client-facing TLS on the Gateway. The Gateway listener accepts either a cert-manager issuer or a `secretRef` to a certificate you manage yourself. The Engine listener is cert-manager-only: the operator issues a certificate per Engine generation so the SANs cover that generation's pod hostnames, which a static Secret cannot do.
+`spec.tls.engine` terminates TLS on each Engine's query listener; `spec.tls.gateway` terminates client-facing TLS on the Gateway. The Gateway listener accepts either a cert-manager issuer or a `secretRef` to a certificate you manage yourself. The Engine listener is cert-manager-only: the Firebolt Operator issues a certificate per Engine generation so the SANs cover that generation's pod hostnames, which a static Secret cannot do.
 
 Two properties are worth knowing before you enable them:
 
-- **TLS replaces plaintext on the same port; it does not add a second listener.** An Engine serving TLS is not reachable in plaintext. Enabling or disabling Engine TLS on a fleet already serving traffic therefore has a brief Gateway-to-Engine outage window — see the transient-outage note in [architecture](./architecture).
+- **TLS replaces plaintext on the same port; it does not add a second listener.** An Engine serving TLS is not reachable in plaintext. Enabling or disabling Engine TLS on a fleet already serving traffic has a brief Gateway-to-Engine outage window.
 - **Tightening the Gateway's posture is fail-closed.** Going from plaintext to TLS, from one-way to mutual TLS, or swapping the client CA withholds the client-facing listener and drains the old, looser pods before any secure pod serves. The client port refuses connections for that window rather than briefly accepting clients the new posture is meant to reject. Liveness and readiness probes ride the always-plaintext metrics port, so pods stay alive through it.
 
 Adding `clientCASecretRef` upgrades the Gateway listener to mutual TLS, verifying client certificates against that CA. Loosening transitions carry no fail-open risk and are not staged.
 
-Two things about mutual TLS are worth stating plainly, because the operator cannot enforce them for you:
+The Firebolt Operator cannot enforce these mutual TLS deployment choices:
 
 - **Verification is CA-scoped, not identity-scoped.** Any certificate the configured CA signed is accepted. Point `clientCASecretRef` at a CA dedicated to this purpose, not at a broad organizational CA that already signs certificates for unrelated workloads.
 - **Prefer a separate issuer per purpose.** The signing keypair, the Engine listener, the Gateway listener, and the client CA should not all chain to one issuer. The Gateway verifies Engines against the Engine issuer's CA, so anything else able to obtain a certificate from that same issuer for a matching name is, to the Gateway, indistinguishable from an Engine.
@@ -206,9 +202,9 @@ Two things about mutual TLS are worth stating plainly, because the operator cann
 
 A `FireboltEngine`, `FireboltEngineClass`, or `FireboltInstance` pod template may declare volumes and sidecar containers, and a volume may reference any Secret in that namespace. **Treat edit rights on those templates as equivalent to read rights on the namespace's Secrets**, and scope RBAC accordingly: someone who can edit a template can mount a Secret and read it from a sidecar whose image and command they control, without any `get secrets` permission.
 
-The operator's own auth and TLS Secrets are excluded from this. The protected set is **Instance-wide** — every template is screened against every operator-managed Secret in the Instance, not only the ones its own pod mounts, so a Gateway template cannot reach a signing key and one Engine cannot reach another's serving key. The checks match the Secret being *referenced* rather than the name the author gave it, so renaming evades nothing:
+The Firebolt Operator's own auth and TLS Secrets are excluded from this. The protected set is **Instance-wide**: every template is screened against every Firebolt Operator-managed Secret in the Instance, not only the ones its own pod mounts, so a Gateway template cannot reach a signing key and one Engine cannot reach another's serving key. The checks match the Secret being referenced rather than the name the author gave it, so renaming evades nothing:
 
-- A **volume** whose source reaches one — including through a `projected` source — is dropped from the rendered pod and reported as a Warning Event on the resource. It is reported rather than refused on purpose: the kubelet re-syncs a Secret volume for the life of the pod, so a volume that named a not-yet-existing Secret starts yielding real key material once the operator creates it. The remedy is to replace the pod, and refusing to render would freeze the Engine on the very generation holding the exposed volume.
+- A **volume** whose source reaches one, including through a `projected` source, is dropped from the rendered pod and reported as a Warning Event on the resource. The kubelet re-syncs a Secret volume for the life of the pod, so replace a pod that referenced a protected Secret before the Secret existed.
 - A **container** that reads one into its environment, through `env[].valueFrom.secretKeyRef` or `envFrom[].secretRef`, is refused outright. An env reference resolves once when the pod starts and is never re-synced, so declining to render is a complete remedy.
 
 Both apply to the primary container, sidecars, and init containers, and to a referenced `FireboltEngineClass` template as well as the resource's own.
@@ -220,7 +216,7 @@ Some of these Secrets are matched by name shape rather than by a name the Firebo
 
 These patterns match across every Instance and Engine in the namespace, not only the resource being validated. A template on one Instance cannot reach a sibling Instance's signing key, and a template on one Engine cannot reach another Engine's serving certificate. Protection is a property of the Secret, not of which resource the template belongs to.
 
-Do not create your own Secrets under these names. A reference to one is treated as a reference to operator key material and is dropped or refused.
+Do not create your own Secrets under these names. A reference to one is treated as a reference to Firebolt Operator key material and is dropped or refused.
 
 Secrets you name yourself are the exception, because the Firebolt Operator cannot recognize them by shape. The admin password Secret is screened by name against the Instance being validated, so a template on one Instance can still reference a **sibling** Instance's admin password Secret if the two use different names for it. Treat template edit rights as read access to every Secret in the namespace, as above, and put unrelated Instances in separate namespaces when that matters.
 
@@ -383,8 +379,7 @@ image-policy enforcement is required.
 
 The FireboltEngine validating webhook rejects engine-container
 `resources` entries above Firebolt Operator-configured maxima. The
-gate resolves the effective container the same way the reconciler
-will: the engine's own
+gate resolves EngineClass inheritance before applying the limits: the Engine's own
 `spec.template.spec.containers[name=="engine"].resources` wins
 wholesale when set, otherwise the referenced FireboltEngineClass's
 container resources fill in. Both sources are checked, so a class
