@@ -70,6 +70,7 @@
         ".github",
         "helm",
         "docs",
+        "dev-docs",
         "examples",
         "formal",
         "scripts"

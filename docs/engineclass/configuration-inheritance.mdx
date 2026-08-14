@@ -1,0 +1,101 @@
+---
+title: EngineClass configuration inheritance
+description: Share Engine settings while allowing per-Engine overrides.
+sidebarTitle: Configuration inheritance
+---
+
+A `FireboltEngineClass` provides reusable defaults to Engines in the same namespace. Set `FireboltEngine.spec.engineClassRef` to the class name.
+
+Values resolve in this order:
+
+1. The Engine value
+2. The referenced EngineClass value
+3. The Firebolt Operator default
+
+An EngineClass is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims.
+
+## Pod template precedence
+
+The Engine template overrides the class template for conflicting scalar values. Collection behavior depends on the field:
+
+| Field | Resolution |
+|---|---|
+| `serviceAccountName` | Engine, then class |
+| `nodeSelector` | Maps merge; Engine keys win |
+| `tolerations`, `topologySpreadConstraints`, `imagePullSecrets` | Class entries followed by Engine entries |
+| `affinity`, pod `securityContext` | Engine value replaces class value when set |
+| labels and annotations | Maps merge; Engine keys win; `firebolt.io/` keys are reserved |
+| volumes | Class entries followed by Engine entries; Firebolt Operator volume names are reserved |
+| init containers and sidecars | Class entries followed by Engine entries |
+| Engine container image and pull policy | Engine, then class, then Firebolt Operator default |
+| Engine container resources | The Engine block replaces the class block when the Engine sets requests, limits, or claims |
+| Engine container environment and mounts | Firebolt Operator entries, then class entries, then Engine entries; reserved names are rejected or omitted |
+
+The Firebolt Operator owns fields required for Engine identity, networking, probes, and StatefulSet behavior. See the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference) for the complete allowed-field table.
+
+## Override a class image for one Engine
+
+Use the class image as the shared default:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngineClass
+metadata:
+  name: production
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: example.com/firebolt/engine:stable
+```
+
+Override it on one Engine:
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: canary
+  namespace: firebolt
+spec:
+  instanceRef: production
+  engineClassRef: production
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: engine
+          image: example.com/firebolt/engine:candidate
+```
+
+## Inherited Engine settings
+
+| Field | Resolution |
+|---|---|
+| `storage` | Whole setting. The Engine backend wins when set; otherwise the class backend applies; default is `emptyDir`. |
+| `customEngineConfig` | Deep merge: Firebolt Operator configuration, class configuration, then Engine configuration. Engine keys win. Protected identity, routing, and topology paths cannot be overridden. |
+| `rollout` | Engine, class, then `graceful` |
+| `drainCheckEnabled` | Engine, class, then `true` |
+| `drainCheckInterval` | Engine, class, then Firebolt Operator default |
+| `autoStop` | Whole setting. The Engine policy replaces the class policy when set. |
+| `uiSidecar` | Engine, class, then `false` |
+
+## Class changes
+
+Changes to class settings that alter Engine pods roll every bound Engine in the namespace. These include the pod template, storage, custom Engine configuration, and UI sidecar setting.
+
+Changes to rollout, drain-check, and auto-stop policy take effect without forcing a pod rollout by themselves.
+
+Inspect the number of referencing Engines with:
+
+```bash
+kubectl get firengc production -n firebolt
+```
+
+## Delete a class
+
+Class deletion remains blocked while Engines in the same namespace reference it. Remove or replace `spec.engineClassRef` on every bound Engine, wait for those updates to reconcile, then delete the class.
+
+If deletion is blocked, `status.conditions[type=Ready]` reports reason `DeletionBlocked` and `status.boundEngines` shows the current consumer count.

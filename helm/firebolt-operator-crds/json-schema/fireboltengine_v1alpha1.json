@@ -108,7 +108,7 @@
           "x-kubernetes-preserve-unknown-fields": true
         },
         "drainCheckEnabled": {
-          "description": "DrainCheckEnabled controls whether the operator performs a SQL-based drain\ncheck on old-generation pods during graceful rollouts. When false, the\noperator skips directly to cleaning after switching traffic, without\nverifying that in-flight queries have completed. Requires a running\nnode that can execute the drain-check query when enabled.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (true). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to true at admission.",
+          "description": "DrainCheckEnabled controls whether the operator checks the query-count\nmetrics on old-generation pods during graceful rollouts. When false, the\noperator skips directly to cleaning after switching traffic, without\nverifying that in-flight queries have completed.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (true). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to true at admission.",
           "type": "boolean"
         },
         "drainCheckInterval": {

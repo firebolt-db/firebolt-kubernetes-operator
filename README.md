@@ -1,4 +1,4 @@
-# Firebolt Kubernetes Operator
+# Firebolt Operator
 
 [![Downloads](https://scarf.sh/installs-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
 [![Companies](https://scarf.sh/company-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
@@ -119,6 +119,7 @@ make test-e2e           # E2E tests (requires Kind cluster)
 
 ## Where to go next
 - For **contributor** detail, conventions, and rules for making changes to this repo, see [`AGENTS.md`](AGENTS.md).
+- For maintained development, testing, release, and documentation workflows, see [`dev-docs/`](dev-docs/README.md).
 - The Helm chart for the operator lives in [helm/firebolt-operator](helm/firebolt-operator/README.md).
 - The pure CRD chart for the operator lives in [helm/firebolt-operator-crds](helm/firebolt-operator-crds/README.md).
 

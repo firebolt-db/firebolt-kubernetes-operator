@@ -9,15 +9,15 @@ sidebarTitle: FireboltEngine CRD reference
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace. |
-| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this engine's namespace. The class supplies defaults this engine inherits when it leaves the matching field unset: `spec.template` (merged under this engine's template, engine wins), `spec.uiSidecar`, `spec.storage`, `spec.customEngineConfig`, `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop`. Engine image comes from the class template. There is no per-engine image field on this CR. |
+| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this Engine's namespace. The class supplies defaults this Engine inherits when it leaves the matching field unset: `spec.template`, `spec.uiSidecar`, `spec.storage`, `spec.customEngineConfig`, `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop`. Engine values take precedence over class values. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. `0` stops the engine; the CR is preserved. |
-| `spec.template` | No | - | `PodTemplateSpec` for per-engine overrides. Engine container: `spec.template.spec.containers[name=="engine"]`. Define a readiness probe on any sidecar container you add: a probe-less container counts as ready as soon as its process starts, and pod readiness feeds both blue-green promotion and Service endpoints. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-engine-templates) and [Pod template merge](../engine/engine-reconciliation#pod-template-merge). |
+| `spec.template` | No | - | `PodTemplateSpec` for per-Engine overrides. Configure the Engine container at `spec.template.spec.containers[name=="engine"]`, including a per-Engine `image` or `imagePullPolicy`. Define a readiness probe on any sidecar container you add: a container without a probe counts as ready as soon as its process starts, and pod readiness controls blue-green promotion and Service endpoints. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-engine-templates) and [EngineClass configuration inheritance](../engineclass/configuration-inheritance). |
 | `spec.uiSidecar` | No | `false` | When `true`, the Firebolt Operator injects a built-in, operator-owned `nginx` container named `engine-web` (serving the Engine Web UI, listening on port `9100`) into each engine pod. The `engine-web` container name is reserved, so a user-supplied container or init container with that name is rejected. The container carries an HTTP readiness probe on the UI port, so the pod only reports Ready (and rollouts only promote) when the UI is actually serving. The sidecar follows the Kubernetes default pull policy for its image (`Always` while the UI image is tracked at `:latest`); an explicit `imagePullPolicy` on the `engine` container (in this template or the class template) applies to the sidecar too. Inherited from the class when unset. Changes force a new generation. |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. Inherited from the class when unset. |
 | `spec.drainCheckEnabled` | No | `true` | `false` skips the Firebolt Operator drain check (engine `shutdown_wait_unfinished` still runs on SIGTERM). Inherited from the class when unset. |
 | `spec.drainCheckInterval` | No | `5s` | Poll interval for old-pod drain status. Inherited from the class when unset. |
 | `spec.storage` | No | `emptyDir` | Per-pod data volume (distinct from `customEngineConfig.storage`). One of `persistentVolumeClaim`, `emptyDir`, or `hostPath`. Unset defaults to `emptyDir`. Inherited from the class when this engine names no backend. Changes force a new generation. |
-| `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath the class config (engine keys win). **Required** for start, from this field or the class. Operator-owned paths are stripped. Changes force a new generation. |
+| `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath the class config (engine keys win). Operator-owned paths are stripped. Changes force a new generation. |
 | `spec.autoStop` | No | disabled | When `enabled`, auto-stop owns `spec.replicas`. Inherited whole-struct from the class when unset. |
 | `spec.metadataEndpointOverride` | No | - | Override instance-derived metadata endpoint. |
 
@@ -78,15 +78,24 @@ the full class-side allowlist.
 | `Ready=False, Reason=Stopped` | `spec.replicas == 0`. Intentionally parked. |
 | `Ready=False, Reason=InstanceNotReady` | Referenced `FireboltInstance` is not ready. |
 | `Ready=False, Reason=DrainCheckFailing` | Drain probe cannot reach or parse metrics on a draining pod. |
+| `Ready=False, Reason=TemplateRejected` | `spec.template` contains a reserved or unsupported field. |
+| `Ready=False, Reason=FireboltEngineClassUnready` | The referenced EngineClass is not ready. Inspect the class condition. |
+| `Ready=False, Reason=ResourceBoundsExceeded` | Engine resources exceed the limits configured on the Firebolt Operator. |
 | `Ready=False, Reason=ExternalFinalizer` | Engine deleting; non-operator finalizers remain on owned children. |
 
 ## Status properties
 
 | Field | Description |
 |-------|-------------|
+| `status.observedGeneration` | Latest `metadata.generation` fully reconciled to a stable Engine. |
 | `status.phase` | Engine lifecycle phase. See [Engine phases](#engine-phases). |
-| `status.currentGeneration` | Active blue-green generation index. |
+| `status.currentGeneration` | Latest blue-green generation index allocated for the desired state. Resource creation can follow on the next reconciliation. |
+| `status.activeGeneration` | Generation currently serving traffic. |
 | `status.drainingGeneration` | Generation being drained, if any. |
+| `status.lastReconciled` | Time of the most recent reconciliation. |
+| `status.lastActivityTime` | Most recent Engine activity used by auto-stop. |
+| `status.lastScaledAt` | Most recent auto-stop replica change. |
+| `status.autoStopReason` | Most recent auto-stop decision. |
 | `status.conditions` | `InstanceReady`, `Ready`. See [Conditions](#conditions). |
 
 Short name: `fireng`.

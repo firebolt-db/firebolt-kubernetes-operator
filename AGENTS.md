@@ -2,7 +2,7 @@
 
 ## What this project does
 
-Firebolt Kubernetes Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, Pensieve metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **FireboltEngineClass** (optional namespaced fragment of shared engine settings -- a pod template plus storage, engine-config, rollout/autoStop, and optional Engine Web UI sidecar defaults -- referenced by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently). Built with Go and controller-runtime.
+Firebolt Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **FireboltEngineClass** (optional namespaced fragment of shared engine settings -- a pod template plus storage, engine-config, rollout/autoStop, and optional Engine Web UI sidecar defaults -- referenced by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently). Built with Go and controller-runtime.
 
 Engines require a ready instance. See [docs/architecture.mdx](docs/architecture.mdx) for the full design.
 
@@ -19,6 +19,7 @@ config/
   manager/             # manager deployment manifest
   samples/             # example CRs
 docs/                  # published Mintlify docs (MDX + docs.json)
+dev-docs/              # contributor documentation (Markdown; not published by Mintlify)
 examples/              # user-facing example manifests
 formal/                # TLA+ specifications and model-checker configs
 helm/
@@ -114,6 +115,7 @@ You MUST keep documentation in sync with code. When making changes:
 - **README.md** -- update if your change affects what a human reader needs to know to understand the project: setup, headline architecture, or what the project is for. Keep the README an overview; push detail into AGENTS.md.
 - **docs/architecture.mdx** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
 - **docs/** -- keep the published docs (`docs/`) up to date as code changes.
+- **dev-docs/** -- keep contributor-facing design, testing, release, and workflow documentation in sync with the implementation. This tree is Markdown-only and is not published by Mintlify.
 
 A pull request that changes structure or interfaces without a documentation update is incomplete.
 

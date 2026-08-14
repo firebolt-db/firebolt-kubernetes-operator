@@ -1,34 +1,61 @@
 ---
 title: Instance overview
-description: Shared infrastructure the Firebolt Operator provisions per FireboltInstance.
+description: Shared infrastructure and status for a FireboltInstance.
 sidebarTitle: Overview
 ---
 
-## Overview
+A `FireboltInstance` provides the shared infrastructure its Engines need:
 
-`FireboltInstance` is the parent resource for shared namespace infrastructure: PostgreSQL for metadata storage, the metadata service, and the Envoy gateway. Engines in the namespace stay blocked until the instance is ready and publishes the endpoints they need.
+- PostgreSQL stores Metadata Service data. Use the built-in single-node database for evaluation, or configure an external PostgreSQL database for production.
+- The Metadata Service provides account and Engine metadata.
+- The Envoy Gateway routes client queries to ready Engine pods.
 
-- [Instance reconciliation](./instance-reconciliation) walks through the reconciler steps, lifecycle phases, and component pod-template merge rules.
+Engines in the namespace wait until their referenced Instance publishes the required Metadata Service endpoint and Instance ID.
 
-Client query traffic enters through the per-instance Envoy gateway. See the [Gateway overview](./gateway/overview), plus [Gateway query routing](./gateway/gateway-query-routing) and [Gateway sizing](./gateway/gateway-sizing) for routing and capacity detail.
+For the complete API surface, see the [FireboltInstance CRD reference](../crd-reference/instance-crd-reference).
 
-For the `FireboltInstance` API surface, see the [FireboltInstance CRD reference](../crd-reference/instance-crd-reference).
+## Instance lifecycle
 
-## Inspecting status
+| Phase | Meaning |
+|---|---|
+| `Provisioning` | One or more components are being created or are not ready. |
+| `Ready` | The Metadata Service and Gateway are ready. |
+| `Degraded` | A component that was ready is currently unavailable. |
+| `Failed` | The Instance needs manual intervention. Inspect its conditions and events. |
+
+Authentication and TLS have dedicated conditions: `AuthReady`, `EngineTLSReady`, and `GatewayTLSReady`. Inspect these conditions even when the Metadata Service and Gateway are available.
+
+## Inspect Instance status
 
 ```bash
 kubectl get fire -n firebolt
 ```
 
-```
+```text
 NAME         PHASE   GATEWAY   METADATA   AGE
 production   Ready   true      true       24h
 ```
 
-For full detail:
+For conditions, endpoints, and events:
 
 ```bash
+kubectl describe fire production -n firebolt
 kubectl get fire production -n firebolt -o yaml
 ```
 
-Worked examples live in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.
+## Customize component pods
+
+Use `spec.gateway.template` and `spec.metadata.template` to configure user-owned pod settings such as scheduling, labels, annotations, image pull secrets, resources, and sidecars. The Firebolt Operator owns component identity, ports, probes, commands, required volumes, and other fields needed for correct operation.
+
+See [Firebolt Operator-owned component fields](../crd-reference/instance-crd-reference#firebolt-operator-owned-fields-on-component-templates) before adding template fields.
+
+## Select the Engine metrics transport
+
+The Firebolt Operator reads Engine query metrics for graceful drain checks and auto-stop:
+
+- `spec.metricScrapeMode: PodIP` is the default and connects directly to each Engine pod on its metrics port.
+- `spec.metricScrapeMode: ApiserverProxy` routes requests through the Kubernetes API server. Set Helm value `rbac.apiserverProxyGrant=true` when you use this mode.
+
+Use `ApiserverProxy` only when the Firebolt Operator cannot reach pod IPs directly and your cluster permits API-server proxy traffic to the Engine metrics port.
+
+Worked manifests are available in the [`examples/`](https://github.com/firebolt-db/firebolt-kubernetes-operator/tree/main/examples) directory.
