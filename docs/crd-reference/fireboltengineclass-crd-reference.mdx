@@ -52,9 +52,9 @@ allowlist applies to `FireboltEngine.spec.template`.
 | `imagePullSecrets` | Yes | Class + engine, concatenated. |
 | `volumes` | Yes | Operator volumes first; class and engine volumes appended (collisions with operator names dropped). |
 | `securityContext` | Yes | Engine wins if non-nil; operator `fsGroup` defaults always stamped. |
-| `initContainers[*]` | Yes | Class + engine, concatenated. Init container named `engine` is **rejected**. |
+| `initContainers[*]` | Yes | Class + engine, concatenated. Init container named `engine` is **rejected**. May mount `engine-config`, `data`, and `runtime`; the Secret-backed volumes are **rejected** (see below). |
 | `containers[name=="engine"]` | Limited | See engine container table below. |
-| `containers[name!="engine"]` | Yes | Sidecars: user-owned, except the reserved `engine-web` name (the operator's UI sidecar), which is rejected. |
+| `containers[name!="engine"]` | Yes | Sidecars: user-owned, except the reserved `engine-web` name (the operator's UI sidecar), which is rejected. Same volume rule as `initContainers`. |
 | `terminationGracePeriodSeconds` | **No** | Hardcoded to 60s (same on engine template). |
 | `subdomain`, `hostname` | **No** | Headless-DNS contract. |
 | `restartPolicy`, `activeDeadlineSeconds` | **No** | StatefulSet semantics. |
@@ -81,6 +81,20 @@ allowlist applies to `FireboltEngine.spec.template`.
 | `stdin`, `stdinOnce`, `tty` | **No** | Non-interactive workload. |
 
 A second container named `engine` is **rejected** (duplicate of the operator-rendered container).
+
+### Volumes a sidecar or init container may mount
+
+Sidecars and init containers may mount the Firebolt Operator-rendered
+`engine-config`, `data`, and `runtime` volumes. Mounting the `data` volume from
+an init container is the supported way to prepare the data directory before the
+(non-root) engine starts — necessary with the `hostPath` storage backend, which
+the kubelet does not apply `fsGroup` to.
+
+The Secret-backed volumes are **rejected** on any container other than the
+operator-rendered `engine` container: `auth-admin`, `tls-engine`, and every
+`auth-signing-<key-id>` volume. Those carry the instance admin password, the
+engine's TLS private key, and the JWT signing keys, so mounting them would hand
+a template author credentials they cannot otherwise read.
 
 ## Status properties
 

@@ -295,7 +295,7 @@ func TestValidatePodTemplate_GatewayClientCAVolumeReserved(t *testing.T) {
 			},
 		},
 	}
-	errs := ValidatePodTemplate(template, field.NewPath("spec", "gateway", "template"), GatewayPodTemplateRules)
+	errs := ValidatePodTemplate(template, field.NewPath("spec", "gateway", "template"), &GatewayPodTemplateRules)
 	if len(errs) == 0 {
 		t.Fatalf("expected rejection for a sidecar mounting the reserved %q volume", GatewayClientCAVolumeName)
 	}
@@ -307,6 +307,99 @@ func TestValidatePodTemplate_GatewayClientCAVolumeReserved(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("errors %v do not mention the reserved volume %q", errs, GatewayClientCAVolumeName)
+	}
+}
+
+// TestValidatePodTemplate_NonSecretVolumesMountableBySidecars is the
+// counterpart to the reserved-volume tests: what a sidecar may not mount is
+// the Secret-backed set, not every operator-rendered volume. The config and
+// tmp volumes on both instance components come from a ConfigMap and an
+// emptyDir, so a sidecar naming one gains nothing it could not already read.
+func TestValidatePodTemplate_NonSecretVolumesMountableBySidecars(t *testing.T) {
+	cases := []struct {
+		name          string
+		primary       string
+		rules         *PodTemplateRules
+		base          []string
+		mountableVols []string
+	}{
+		{
+			name:          "gateway",
+			primary:       GatewayContainerName,
+			rules:         &GatewayPodTemplateRules,
+			base:          []string{"spec", "gateway", "template"},
+			mountableVols: []string{GatewayConfigVolumeName, GatewayTmpVolumeName},
+		},
+		{
+			name:          "metadata",
+			primary:       MetadataContainerName,
+			rules:         &MetadataPodTemplateRules,
+			base:          []string{"spec", "metadata", "template"},
+			mountableVols: []string{MetadataConfigVolumeName, MetadataTmpVolumeName},
+		},
+	}
+
+	for _, tc := range cases {
+		for _, vol := range tc.mountableVols {
+			t.Run(tc.name+"/"+vol, func(t *testing.T) {
+				template := &corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{Name: tc.primary},
+							{
+								Name:         "extra",
+								VolumeMounts: []corev1.VolumeMount{{Name: vol, MountPath: "/x"}},
+							},
+						},
+						InitContainers: []corev1.Container{{
+							Name:         "prep",
+							VolumeMounts: []corev1.VolumeMount{{Name: vol, MountPath: "/x"}},
+						}},
+					},
+				}
+				errs := ValidatePodTemplate(template, field.NewPath(tc.base[0], tc.base[1], tc.base[2]), tc.rules)
+				if len(errs) != 0 {
+					t.Errorf("unexpected rejection for %q on the %s template: %v", vol, tc.name, errs)
+				}
+			})
+		}
+	}
+}
+
+// TestValidatePodTemplate_SecretVolumesStillReserved keeps the credential half
+// of the rule pinned for the instance components: the postgres credentials
+// Secret and the wake-agent's projected ServiceAccount token stay off limits
+// to any additional container.
+func TestValidatePodTemplate_SecretVolumesStillReserved(t *testing.T) {
+	cases := []struct {
+		name    string
+		primary string
+		rules   *PodTemplateRules
+		vol     string
+	}{
+		{"metadata postgres creds", MetadataContainerName, &MetadataPodTemplateRules, MetadataPostgresCredsVolumeName},
+		{"gateway wake-agent token", GatewayContainerName, &GatewayPodTemplateRules, GatewayWakeAgentTokenVolumeName},
+		{"gateway downstream TLS", GatewayContainerName, &GatewayPodTemplateRules, GatewayTLSVolumeName},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			template := &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: tc.primary},
+						{
+							Name:         "extra",
+							VolumeMounts: []corev1.VolumeMount{{Name: tc.vol, MountPath: "/exfil"}},
+						},
+					},
+				},
+			}
+			errs := ValidatePodTemplate(template, field.NewPath("spec", "template"), tc.rules)
+			if len(errs) == 0 {
+				t.Fatalf("expected rejection for a sidecar mounting %q", tc.vol)
+			}
+		})
 	}
 }
 

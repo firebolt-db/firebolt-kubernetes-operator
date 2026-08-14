@@ -109,6 +109,7 @@ Per-component pass-through (allowed without restriction):
 - Pod-level: `securityContext` (PodSecurityContext), `imagePullSecrets`, `serviceAccountName`, additional `volumes` (names that do not collide with Firebolt Operator-owned volume names).
 - Additional `containers` (sidecars): Appended after the Firebolt Operator-rendered primary container.
 - Additional `initContainers`: Passed through verbatim.
+- Sidecars and init containers may mount the Firebolt Operator-rendered `config-volume` / `config` and `tmp` volumes, but **not** the Secret-backed ones: `tls-gateway`, `client-ca`, `engine-ca`, `engine-crl`, `client-crl`, and `wake-agent-token` on the gateway; `postgres-creds` on the metadata pod.
 - Pod-template `metadata.labels` and `metadata.annotations` outside the `firebolt.io/` reserved prefix.
 
 A second container or initContainer using the Firebolt Operator-rendered

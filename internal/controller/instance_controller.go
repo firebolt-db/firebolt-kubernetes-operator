@@ -542,12 +542,12 @@ func validateInstanceTemplates(inst *computev1alpha1.FireboltInstance) (gateway,
 	gateway = computev1alpha1.ValidatePodTemplate(
 		inst.Spec.Gateway.Template,
 		field.NewPath("spec", "gateway", "template"),
-		computev1alpha1.GatewayPodTemplateRules,
+		&computev1alpha1.GatewayPodTemplateRules,
 	)
 	metadata = computev1alpha1.ValidatePodTemplate(
 		inst.Spec.Metadata.Template,
 		field.NewPath("spec", "metadata", "template"),
-		computev1alpha1.MetadataPodTemplateRules,
+		&computev1alpha1.MetadataPodTemplateRules,
 	)
 	// One Instance-wide predicate for BOTH templates, not a per-component list
 	// each: the gateway template has no business reaching the admin password or a

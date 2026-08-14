@@ -446,6 +446,80 @@ func TestFireboltEngineClassValidator_RejectsOwnedFields(t *testing.T) {
 	}
 }
 
+// TestFireboltEngineClassValidator_AdditionalContainersMayMountNonSecretVolumes
+// pins the other half of the reserved-volume rule: only the Secret-backed
+// operator volumes are off limits to a sidecar or init container. The
+// config / data / runtime volumes carry no credential material, and an init
+// container that mounts the data volume is a supported pattern — a
+// hostPath-backed data volume gets no fsGroup treatment from the kubelet, so
+// preparing its ownership before the (non-root) engine starts has to happen
+// in the pod. Rejecting that would leave the hostPath storage backend with no
+// way to work.
+func TestFireboltEngineClassValidator_AdditionalContainersMayMountNonSecretVolumes(t *testing.T) {
+	v := &FireboltEngineClassCustomValidator{}
+	for _, name := range []string{EngineConfigVolumeName, EngineDataVolumeName, EngineRuntimeVolumeName} {
+		t.Run("init container mounts "+name, func(t *testing.T) {
+			ec := validFireboltEngineClass()
+			ec.Spec.Template.Spec.InitContainers[0].VolumeMounts = []corev1.VolumeMount{
+				{Name: name, MountPath: "/mnt/x"},
+			}
+			if _, err := v.ValidateCreate(context.Background(), ec); err != nil {
+				t.Fatalf("ValidateCreate: unexpected error mounting %q from an init container: %v", name, err)
+			}
+		})
+		t.Run("sidecar mounts "+name, func(t *testing.T) {
+			ec := validFireboltEngineClass()
+			ec.Spec.Template.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{
+				{Name: name, MountPath: "/mnt/x"},
+			}
+			if _, err := v.ValidateCreate(context.Background(), ec); err != nil {
+				t.Fatalf("ValidateCreate: unexpected error mounting %q from a sidecar: %v", name, err)
+			}
+		})
+	}
+
+	// The engine container itself is operator-rendered end to end, so the
+	// whole operator-owned set stays reserved there.
+	t.Run("engine container still may not mount the data volume", func(t *testing.T) {
+		ec := validFireboltEngineClass()
+		ec.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
+			{Name: EngineDataVolumeName, MountPath: "/mnt/x"},
+		}
+		_, err := v.ValidateCreate(context.Background(), ec)
+		if err == nil {
+			t.Fatal("ValidateCreate: expected the engine container's data mount to be rejected")
+		}
+		if !strings.Contains(err.Error(), "spec.template.spec.containers[0].volumeMounts[0].name") {
+			t.Errorf("ValidateCreate: error %q does not mention the engine container's mount path", err.Error())
+		}
+	})
+}
+
+// TestFireboltEngineClassValidator_RealisticDiskPrepInitContainer walks the
+// whole shape of the pattern this rule has to allow: a root init container
+// that chowns the data volume to the engine's UID/GID before the engine
+// starts.
+func TestFireboltEngineClassValidator_RealisticDiskPrepInitContainer(t *testing.T) {
+	ec := validFireboltEngineClass()
+	runAsRoot := int64(0)
+	ec.Spec.Template.Spec.InitContainers = []corev1.Container{{
+		Name:            "prep-disk",
+		Image:           "busybox:1.36",
+		Command:         []string{"sh", "-c"},
+		Args:            []string{"chown -R 3473:3473 /var/lib/firebolt && chmod 2775 /var/lib/firebolt"},
+		SecurityContext: &corev1.SecurityContext{RunAsUser: &runAsRoot},
+		VolumeMounts: []corev1.VolumeMount{{
+			Name:      EngineDataVolumeName,
+			MountPath: "/var/lib/firebolt",
+		}},
+	}}
+
+	v := &FireboltEngineClassCustomValidator{}
+	if _, err := v.ValidateCreate(context.Background(), ec); err != nil {
+		t.Fatalf("ValidateCreate: unexpected error on a disk-prep init container: %v", err)
+	}
+}
+
 // TestFireboltEngineClassValidator_SidecarsUnconstrained pins down that sidecar
 // containers can carry whatever the user wants — image, command, ports,
 // env, probes, and volumeMounts to their OWN (non-reserved) volumes. Sidecar
