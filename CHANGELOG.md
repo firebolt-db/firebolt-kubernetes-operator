@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.7.1...firebolt-operator-v0.8.0) (2026-08-14)
+
+
+### Features
+
+* **controller:** add --watch-label-selector to scope cached Firebolt CRs (FB-3039) ([2921fb0](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2921fb09cdd95b1c4c68e686f293b46111436c55))
+
 ## [0.7.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.7.0...firebolt-operator-v0.7.1) (2026-08-13)
 
 
