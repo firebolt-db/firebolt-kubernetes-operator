@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.1...firebolt-operator-v0.8.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **metrics:** align reconciliation timestamps and documentation (FB-3054) ([c40f3d6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c40f3d6248ac537ec60d1266b95a835773064eff))
+
+
+### Dependencies
+
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260815074041.524de236b514 ([f06d70b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f06d70b3862e922be3afbf1c3b2208a447fb47b8))
+
 ## [0.8.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.0...firebolt-operator-v0.8.1) (2026-08-14)
 
 
