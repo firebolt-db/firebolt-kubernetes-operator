@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.3.0...firebolt-operator-crds-chart-0.3.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **metrics:** align reconciliation timestamps and documentation (FB-3054) ([c40f3d6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c40f3d6248ac537ec60d1266b95a835773064eff))
+
 ## [0.3.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.2.2...firebolt-operator-crds-chart-0.3.0) (2026-08-13)
 
 
