@@ -17,6 +17,14 @@ set -euo pipefail
 # released and answered. A 503 or a connection reset at any point is a
 # failure — the whole point of the feature is that the triggering query
 # survives.
+#
+# The negative half of the same contract is pinned here too, while the engine
+# is parked: a health probe on the gateway's /healthz is answered by the
+# health-check filter ahead of the wake filter, so it never registers demand
+# and never wakes the engine. Both halves are asserted from outside the pod,
+# against the gateway Service — no filter-config inspection — so a refactor
+# that reorders the filters or moves the health path fails these checks
+# instead of slipping past them.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -52,6 +60,18 @@ WAKE_QUERY_TIMEOUT="${WAKE_QUERY_TIMEOUT:-240}"
 # bring it back.
 STOP_WAIT_SECONDS="${STOP_WAIT_SECONDS:-180}"
 WAKE_WAIT_SECONDS="${WAKE_WAIT_SECONDS:-240}"
+
+# How many health probes to send at the parked engine, how long the probe
+# pod may take to schedule and finish them, and how long the engine must
+# still be observed at zero after the last probe. The settle window matters:
+# stamped demand turns into a scale-up only after the operator notices it —
+# its demand scrape runs every two seconds and triggers an immediate
+# reconcile, with the auto-stop pollInterval as the fallback cadence — so
+# the engine is watched well past both after the probes finish. An engine
+# still at zero then proves no probe registered demand.
+HEALTH_PROBE_COUNT="${HEALTH_PROBE_COUNT:-10}"
+HEALTH_PROBE_TIMEOUT="${HEALTH_PROBE_TIMEOUT:-120}"
+HEALTH_SETTLE_SECONDS="${HEALTH_SETTLE_SECONDS:-20}"
 
 echo "=== verify-wake-on-zero (namespace=${NAMESPACE}) ==="
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
@@ -189,7 +209,120 @@ fi
 echo "No endpoints, as expected"
 
 # ---------------------------------------------------------------------------
-# 3. The query that wakes it must itself succeed.
+# 3. Health probes are answered while the engine is parked, and never wake it.
+# ---------------------------------------------------------------------------
+
+# The gateway's client listener answers /healthz with its health-check filter,
+# placed ahead of the wake filter, so a probe is served by Envoy itself and
+# never reaches the wake path. Monitoring depends on that ordering: if a
+# refactor moved the health-check filter behind the wake filter, every probe
+# would stamp demand and no parked engine would ever stay parked. Two probe
+# shapes are sent because they fail differently under a reorder — a bare
+# probe would be rejected for its missing engine selector (non-200), and one
+# naming the engine would wake it (scale-up during the hold).
+health_url="http://${GATEWAY_SVC}.${NAMESPACE}.svc.cluster.local:80/healthz"
+health_probe_pod="healthz-probe-$$"
+
+echo "Probing ${health_url} while the engine is parked (${HEALTH_PROBE_COUNT} rounds)..."
+: > /tmp/healthz-probe-output
+(
+  kubectl run "$health_probe_pod" -n "$NAMESPACE" --rm -i --restart=Never \
+    --image="${CURL_IMAGE}" --command -- sh -c "
+      for i in \$(seq 1 ${HEALTH_PROBE_COUNT}); do
+        curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 '${health_url}'
+        curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 \
+          -H 'X-Firebolt-Engine: ${ENGINE_NAME}' '${health_url}'
+        sleep 1
+      done"
+) > /tmp/healthz-probe-output 2>&1 &
+health_probe_pid=$!
+
+# Fails the phase when the engine leaves its parked state. Watching is not
+# window-based but synchronized with the probe pod's lifetime: the watch runs
+# for as long as the probes do (however long the pod takes to schedule), and
+# then through a settle window after the last probe, since demand turns into
+# a scale-up only after the operator's demand scrape sees it. A fixed window
+# could stop watching while late probes were still being sent, and a demand
+# stamped then would wake the engine unobserved — and hand the wake phase
+# below an already-running engine.
+require_engine_parked() {
+  replicas=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
+    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "")
+  reason=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
+    -o jsonpath='{.status.autoStopReason}' 2>/dev/null || echo "")
+  if [[ "${replicas}" != "0" || "${reason}" == "WakeRequested" ]]; then
+    echo "A health probe woke the parked engine (replicas=${replicas:-?}, autoStopReason=${reason:-<none>})."
+    echo "A probe on /healthz must be answered ahead of the wake filter and must"
+    echo "never register demand."
+    kill "$health_probe_pid" 2>/dev/null || true
+    kubectl logs "$gateway_pod" -n "$NAMESPACE" -c wake-agent --tail=80 || true
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
+}
+
+echo "Watching the engine while the probes run (up to ${HEALTH_PROBE_TIMEOUT}s)..."
+probe_deadline=$(( SECONDS + HEALTH_PROBE_TIMEOUT ))
+while kill -0 "$health_probe_pid" 2>/dev/null; do
+  if (( SECONDS >= probe_deadline )); then
+    echo "Health probes did not complete within ${HEALTH_PROBE_TIMEOUT}s:"
+    cat /tmp/healthz-probe-output
+    kill "$health_probe_pid" 2>/dev/null || true
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
+  require_engine_parked
+  sleep 3
+done
+
+if ! wait "$health_probe_pid"; then
+  echo "The health-probe pod failed:"
+  cat /tmp/healthz-probe-output
+  dump_namespace_debug "$NAMESPACE"
+  exit 1
+fi
+
+echo "Probes done; the engine must stay at zero for another ${HEALTH_SETTLE_SECONDS}s..."
+settle_deadline=$(( SECONDS + HEALTH_SETTLE_SECONDS ))
+while (( SECONDS < settle_deadline )); do
+  require_engine_parked
+  sleep 3
+done
+# The loop's last check can land a few seconds short of the deadline, and a
+# demand processed in that final gap would wake the engine unnoticed — and
+# hand the wake phase below a pre-woken engine that satisfies its
+# replicas/WakeRequested assertion without its query doing the waking. Check
+# once more at the deadline, after the full settle has elapsed.
+require_engine_parked
+
+# Every probe must have been answered 200 by the gateway itself. A 400 means
+# the probe fell through to engine routing (the health-check filter no longer
+# answers ahead of it); a 404 means the health path moved off /healthz.
+# Either way, every external monitor pointed at the gateway breaks with it.
+health_statuses=$(grep -Eo '^[0-9]{3}$' /tmp/healthz-probe-output || true)
+health_expected=$(( HEALTH_PROBE_COUNT * 2 ))
+if [[ -z "${health_statuses}" ]]; then
+  health_got=0
+else
+  health_got=$(wc -l <<<"$health_statuses" | tr -d ' ')
+fi
+if [[ "${health_got}" -ne "${health_expected}" ]]; then
+  echo "Expected ${health_expected} health-probe responses, saw ${health_got}:"
+  cat /tmp/healthz-probe-output
+  dump_namespace_debug "$NAMESPACE"
+  exit 1
+fi
+health_bad=$(grep -cv '^200$' <<<"$health_statuses" || true)
+if [[ "${health_bad}" -ne 0 ]]; then
+  echo "${health_bad} of ${health_got} health probes were not answered 200:"
+  cat /tmp/healthz-probe-output
+  dump_namespace_debug "$NAMESPACE"
+  exit 1
+fi
+echo "${health_got} probes answered 200 and the engine stayed parked at zero"
+
+# ---------------------------------------------------------------------------
+# 4. The query that wakes it must itself succeed.
 # ---------------------------------------------------------------------------
 
 probe_pod="wake-probe-$$"
@@ -275,6 +408,7 @@ if ! grep -q "42" <<<"$query_output"; then
 fi
 
 echo "=== verify-wake-on-zero PASSED ==="
-echo "A query to a stopped engine was held by the gateway, the operator scaled the"
-echo "engine on the demand the agent reported, and the same query was released and"
-echo "answered — no client-visible error at any point."
+echo "Health probes on the parked engine's gateway were answered without waking"
+echo "it. A query to the stopped engine was held by the gateway, the operator"
+echo "scaled the engine on the demand the agent reported, and the same query was"
+echo "released and answered — no client-visible error at any point."
