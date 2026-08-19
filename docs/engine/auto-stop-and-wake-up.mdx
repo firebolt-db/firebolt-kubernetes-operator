@@ -77,6 +77,8 @@ spec:
 
 Direct connections to the Engine Service cannot wake a stopped Engine because the Service has no endpoints. Route through the Instance Gateway when you rely on wake-up.
 
+The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine.
+
 Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
 
 Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
