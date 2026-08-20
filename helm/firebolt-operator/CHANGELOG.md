@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.6.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.6.1...firebolt-operator-chart-0.6.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **metrics:** align reconciliation timestamps and documentation (FB-3054) ([c40f3d6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c40f3d6248ac537ec60d1266b95a835773064eff))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.8.2 ([a10f8b8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a10f8b864301e5a08e6730cbe01400ae127a02ab))
+
 ## [0.6.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.6.0...firebolt-operator-chart-0.6.1) (2026-08-14)
 
 
