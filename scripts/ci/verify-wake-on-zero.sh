@@ -237,6 +237,16 @@ echo "Probing ${health_url} while the engine is parked (${HEALTH_PROBE_COUNT} ro
 ) > /tmp/healthz-probe-output 2>&1 &
 health_probe_pid=$!
 
+# Stops the probe pod on a failure path. Killing $health_probe_pid only
+# stops the local kubectl client; --rm cleanup is client-side, so the pod
+# would keep probing until its loop ends, muddying dump_namespace_debug and
+# any rerun in the same namespace.
+stop_health_probe() {
+  kill "$health_probe_pid" 2>/dev/null || true
+  kubectl delete pod "$health_probe_pod" -n "$NAMESPACE" \
+    --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+
 # Fails the phase when the engine leaves its parked state. Watching is not
 # window-based but synchronized with the probe pod's lifetime: the watch runs
 # for as long as the probes do (however long the pod takes to schedule), and
@@ -245,16 +255,38 @@ health_probe_pid=$!
 # could stop watching while late probes were still being sent, and a demand
 # stamped then would wake the engine unobserved — and hand the wake phase
 # below an already-running engine.
+#
+# A kubectl error must not read as a wake: a failed read falls back to
+# empty, and empty != "0". Retry a few times before failing closed under an
+# unreadable-engine message, the same tolerance the park wait above gets by
+# looping over empty reads. Only the replicas read gates the retry — the
+# reason read is diagnostic, and an empty reason matches nothing.
 require_engine_parked() {
-  replicas=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
-    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "")
-  reason=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
-    -o jsonpath='{.status.autoStopReason}' 2>/dev/null || echo "")
+  local attempt replicas reason
+  for attempt in 1 2 3; do
+    replicas=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
+      -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "")
+    reason=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" \
+      -o jsonpath='{.status.autoStopReason}' 2>/dev/null || echo "")
+    if [[ -n "${replicas}" ]]; then
+      break
+    fi
+    sleep 2
+  done
+  if [[ -z "${replicas}" ]]; then
+    echo "Could not read the engine after ${attempt} attempts while watching for a"
+    echo "probe-driven wake. Failing closed: an unwatched window cannot prove the"
+    echo "probes did not wake the engine. This is an API read problem, not a"
+    echo "filter-order regression."
+    stop_health_probe
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
   if [[ "${replicas}" != "0" || "${reason}" == "WakeRequested" ]]; then
-    echo "A health probe woke the parked engine (replicas=${replicas:-?}, autoStopReason=${reason:-<none>})."
+    echo "A health probe woke the parked engine (replicas=${replicas}, autoStopReason=${reason:-<none>})."
     echo "A probe on /healthz must be answered ahead of the wake filter and must"
     echo "never register demand."
-    kill "$health_probe_pid" 2>/dev/null || true
+    stop_health_probe
     kubectl logs "$gateway_pod" -n "$NAMESPACE" -c wake-agent --tail=80 || true
     dump_namespace_debug "$NAMESPACE"
     exit 1
@@ -267,7 +299,7 @@ while kill -0 "$health_probe_pid" 2>/dev/null; do
   if (( SECONDS >= probe_deadline )); then
     echo "Health probes did not complete within ${HEALTH_PROBE_TIMEOUT}s:"
     cat /tmp/healthz-probe-output
-    kill "$health_probe_pid" 2>/dev/null || true
+    stop_health_probe
     dump_namespace_debug "$NAMESPACE"
     exit 1
   fi
@@ -278,9 +310,16 @@ done
 if ! wait "$health_probe_pid"; then
   echo "The health-probe pod failed:"
   cat /tmp/healthz-probe-output
+  stop_health_probe
   dump_namespace_debug "$NAMESPACE"
   exit 1
 fi
+
+# A completed client does not prove the pod is gone: kubectl run --rm deletes
+# the pod in a deferred call whose error is discarded. Delete it best-effort
+# now, before validating the responses, so no exit below can leak it.
+kubectl delete pod "$health_probe_pod" -n "$NAMESPACE" \
+  --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 echo "Probes done; the engine must stay at zero for another ${HEALTH_SETTLE_SECONDS}s..."
 settle_deadline=$(( SECONDS + HEALTH_SETTLE_SECONDS ))
