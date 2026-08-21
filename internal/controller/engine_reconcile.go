@@ -282,6 +282,13 @@ func computeEngineReconcile(
 		result.Requeue = true
 	}
 
+	// Observed, so it is written on every path rather than per phase: the
+	// count belongs to the state this pass read, not to the transition the
+	// pass decided on. assembleEngineState leaves it zero when there is no
+	// active-generation StatefulSet, which is what makes a stopped engine
+	// report 0 instead of its last running value.
+	result.Status.ReadyReplicas = current.CurrentPodReady
+
 	now := metav1.Now()
 	result.Status.LastReconciled = &now
 	return result

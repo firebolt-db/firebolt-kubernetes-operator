@@ -4390,6 +4390,14 @@ spec:
               phase:
                 description: Phase is the current lifecycle phase of the engine.
                 type: string
+              readyReplicas:
+                description: |-
+                  ReadyReplicas is how many pods of the active generation are running and
+                  passing their readiness probe. It is observed, not desired: it counts
+                  what serves traffic right now, so it trails spec.replicas while a
+                  generation comes up and reads 0 for a stopped engine. Pods of a
+                  draining generation are not counted.
+                type: integer
             required:
             - activeGeneration
             - currentGeneration

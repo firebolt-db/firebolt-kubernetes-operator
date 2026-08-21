@@ -559,6 +559,14 @@ type FireboltEngineStatus struct {
 	// +optional
 	ObservedEngineServingCertGen int `json:"observedEngineServingCertGen,omitempty"`
 
+	// ReadyReplicas is how many pods of the active generation are running and
+	// passing their readiness probe. It is observed, not desired: it counts
+	// what serves traffic right now, so it trails spec.replicas while a
+	// generation comes up and reads 0 for a stopped engine. Pods of a
+	// draining generation are not counted.
+	// +optional
+	ReadyReplicas int `json:"readyReplicas,omitempty"`
+
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

@@ -3294,3 +3294,96 @@ func TestTLSHash_ReflectsCertPolicy(t *testing.T) {
 		t.Error("tlsHash(nil) must be empty")
 	}
 }
+
+// TestComputeEngineReconcile_ReadyReplicasIsObserved verifies that
+// status.readyReplicas carries the observed active-generation ready count on
+// every path: the full count when all pods are ready, the partial count while
+// a generation is still coming up, and zero for an engine with no
+// active-generation StatefulSet.
+func TestComputeEngineReconcile_ReadyReplicasIsObserved(t *testing.T) {
+	tests := []struct {
+		name    string
+		current EngineState
+		want    int
+	}{
+		{
+			name: "all pods ready",
+			current: EngineState{
+				CurrentSTS:              makeSTS(testEngineName, 1, 3),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentPodsReady:        true,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         3,
+				ClusterService:          makeClusterSvc(testEngineName, 1),
+				ClusterServiceTargetGen: 1,
+			},
+			want: 3,
+		},
+		{
+			name: "partially ready reports the subset, not the desired count",
+			current: EngineState{
+				CurrentSTS:              makeSTS(testEngineName, 1, 3),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentPodsReady:        false,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         2,
+				ClusterService:          makeClusterSvc(testEngineName, 1),
+				ClusterServiceTargetGen: 1,
+			},
+			want: 2,
+		},
+		{
+			name:    "no active-generation StatefulSet reports zero",
+			current: EngineState{ClusterServiceTargetGen: -1},
+			want:    0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := testSpec()
+			spec.Template = nil
+			status := &computev1alpha1.FireboltEngineStatus{
+				Phase:             computev1alpha1.PhaseStable,
+				CurrentGeneration: 1,
+				ActiveGeneration:  1,
+			}
+			if tc.current.CurrentConfigMap == nil && tc.current.CurrentSTS != nil {
+				tc.current.CurrentConfigMap = buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+			}
+
+			result := computeEngineReconcile(spec, status, tc.current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+
+			if result.Status.ReadyReplicas != tc.want {
+				t.Errorf("expected readyReplicas %d, got %d", tc.want, result.Status.ReadyReplicas)
+			}
+		})
+	}
+}
+
+// TestComputeEngineReconcile_ReadyReplicasZeroWhenStopped verifies that a
+// parked engine reports zero rather than the count it last served with.
+func TestComputeEngineReconcile_ReadyReplicasZeroWhenStopped(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 0
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseStable,
+		CurrentGeneration: 1,
+		ActiveGeneration:  1,
+		ReadyReplicas:     3,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 1, 0),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil),
+		CurrentPodsReady:        true,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
+
+	if result.Status.ReadyReplicas != 0 {
+		t.Errorf("expected readyReplicas 0 for a stopped engine, got %d", result.Status.ReadyReplicas)
+	}
+}
