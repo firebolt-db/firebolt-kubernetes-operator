@@ -7586,7 +7586,7 @@
           "type": "string"
         },
         "readyReplicas": {
-          "description": "ReadyReplicas is how many pods of activeGeneration are running and\npassing their readiness probe. It is observed, not desired: it counts\nwhat serves traffic right now, so it trails spec.replicas while a\ngeneration comes up and reads 0 for a stopped engine or one whose first\ngeneration has not cut over yet.\n\nDuring a blue-green rollout it stays with the generation that is still\nserving and steps to the new one at cutover, so a roll does not show up\nhere as capacity briefly dropping away. Pods of a generation that is\ncoming up or draining are not counted.",
+          "description": "ReadyReplicas is how many pods of activeGeneration are running and\npassing their readiness probe. It is observed, not desired: it counts\nwhat serves traffic right now, so it trails spec.replicas while a\ngeneration comes up and reads 0 for a stopped engine or one whose first\ngeneration has not cut over yet.\n\nDuring a blue-green rollout it stays with the generation that is still\nserving and steps to the new one at cutover, so a roll does not show up\nhere as capacity briefly dropping away. Pods of a generation that is\ncoming up or draining are not counted.\nDeliberately serialized even at zero, unlike most optional status\nfields: zero is a real observation here (stopped, or nothing serving\nyet) and must stay distinguishable from the field being absent, which\nmeans an operator too old to report it at all. With omitempty a client\nreading the field cannot tell those apart. currentGeneration and\nactiveGeneration serialize zero for the same reason.",
           "type": "integer"
         }
       },

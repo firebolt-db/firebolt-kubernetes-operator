@@ -92,7 +92,7 @@ the full class-side allowlist.
 | `status.currentGeneration` | Latest blue-green generation index allocated for the desired state. Resource creation can follow on the next reconciliation. |
 | `status.activeGeneration` | Generation currently serving traffic. |
 | `status.drainingGeneration` | Generation being drained, if any. |
-| `status.readyReplicas` | Pods of the active generation that are running and passing their readiness probe. Observed, not desired: it trails `spec.replicas` while a generation comes up and reads `0` for a stopped Engine. Draining-generation pods are not counted. |
+| `status.readyReplicas` | Pods of the active generation that are running and passing their readiness probe. Observed, not desired: it trails `spec.replicas` while a generation comes up, and reads `0` for a stopped Engine or one whose first generation has not cut over yet. During a blue-green rollout it stays with the generation still serving and steps to the new one at cutover, so a roll does not appear here as capacity dropping away; pods of a generation coming up or draining are not counted. |
 | `status.lastReconciled` | Time of the most recent reconciliation. |
 | `status.lastActivityTime` | Most recent Engine activity used by auto-stop. |
 | `status.lastScaledAt` | Most recent auto-stop replica change. |
