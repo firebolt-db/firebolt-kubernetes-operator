@@ -150,9 +150,21 @@ An intermediary service account gives external access a stable identity instead.
 The engine selects the external credential path based on what you configure:
 
 - **Intermediary service account set.** The engine impersonates the intermediary service account for external access. The service account is the stable identity you grant access to external data.
-- **Intermediary service account not set.** The engine uses its own pod identity for external access.
+- **Intermediary service account not set.** The engine uses its own pod identity for external access, provided that `storage.gcp.allow_engine_identity` permits it. The Firebolt Operator sets it for every engine it deploys, because you run the engine and its pod identity is your own; the engine itself refuses that identity until a deployment permits it, because it cannot tell whose identity it runs as. Set `customEngineConfig.storage.gcp.allow_engine_identity: false` to keep external access off the pod identity: a credential-less `gs://` read is then sent unauthenticated and reaches publicly readable objects only, and a write fails with an error that asks for credentials. When an intermediary service account is set, that account is the principal, so the setting has no effect.
+- **The query supplies credentials.** A `gs://` location that carries `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (a Google Cloud Storage HMAC key) authenticates with that key through the S3-compatible XML API, bypassing both the pod identity and the intermediary service account.
+- **No Google identity at all.** Nothing provides Application Default Credentials to the engine pods: they run on a cluster outside Google Cloud, or on GKE without Workload Identity and without `GOOGLE_APPLICATION_CREDENTIALS`. A credential-less `gs://` read is then sent unauthenticated and reaches publicly readable objects only. Writing needs an identity and fails.
 
 Access to the managed `storage` bucket always uses the engine pod's own identity. The intermediary service account applies only to external locations.
+
+### Where Application Default Credentials come from
+
+The pod identity is whatever Application Default Credentials resolve to inside the engine container. Google's libraries look for them in a fixed order, and the first match wins:
+
+1. `GOOGLE_APPLICATION_CREDENTIALS`, if it is set. The file it names is used as given, whether that is a mounted service account key or a credential configuration file for Workload Identity Federation.
+2. `$HOME/.config/gcloud/application_default_credentials.json`, if that file exists. This is where `gcloud auth application-default login` writes, so it is normally present only on a workstation.
+3. The instance metadata server, which is what Workload Identity Federation for GKE provides.
+
+Step 2 takes precedence over step 3, so an engine whose `HOME` holds a `gcloud` login authenticates as that person instead of as the pod identity. To pin the source, set `GOOGLE_APPLICATION_CREDENTIALS` on the engine container, or set `HOME` to a directory that only the engine writes to. The engine logs the source it resolved once per process, as `Using Google Cloud identity from <source>`.
 
 ### Configure the intermediary service account
 
@@ -178,4 +190,4 @@ spec:
         intermediary_service_account_id: projects/my-project/serviceAccounts/firebolt-intermediary@my-project.iam.gserviceaccount.com
 ```
 
-The `storage.gcp` block is valid only when `type` is `gcs`.
+The `storage.gcp` connection settings apply to managed tables when `managed_table_storage` is `gcs`. `allow_engine_identity` is the exception: it governs external `gs://` locations, so it applies whatever backs managed tables, and the Firebolt Operator renders it for every engine.

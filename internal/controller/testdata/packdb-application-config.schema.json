@@ -413,7 +413,7 @@
           "properties": {
             "admin": {
               "additionalProperties": false,
-              "description": "The Instance admin — required when auth is enabled.",
+              "description": "The Instance admin \u2014 required when auth is enabled.",
               "properties": {
                 "name": {
                   "default": "firebolt",
@@ -814,6 +814,11 @@
         "gcp": {
           "additionalProperties": false,
           "properties": {
+            "allow_engine_identity": {
+              "default": false,
+              "description": "Permit an external `gs://` request that carries no `CREDENTIALS` to authenticate as the engine's own Google identity. When off, such a request is sent unauthenticated: a read reaches publicly readable objects only and a write is refused. Ignored where `intermediary_service_account_id` is set, and never applies to managed-table storage.",
+              "type": "boolean"
+            },
             "intermediary_service_account_id": {
               "type": "string"
             }
