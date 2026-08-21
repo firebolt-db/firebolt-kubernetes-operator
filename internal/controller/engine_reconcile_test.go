@@ -2978,6 +2978,43 @@ func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
 	}
 }
 
+// TestBuildConfigMap_AllowsGcpEngineIdentity pins the one storage key the
+// operator renders on its users' behalf. The engine refuses a credential-less
+// external gs:// request unless a deployment permits it, because it cannot tell
+// whose Google identity it runs as. An engine this operator deploys runs under a
+// ServiceAccount its own operator created, so the identity is theirs, and they
+// should not have to name it to use their own buckets. Rendered for every engine,
+// whatever backs managed tables, because the key governs external locations only.
+func TestBuildConfigMap_AllowsGcpEngineIdentity(t *testing.T) {
+	root := renderConfig(t, "")
+	gcp := nestedMap(t, nestedMap(t, root, "storage"), "gcp")
+	if gcp["allow_engine_identity"] != true {
+		t.Errorf("storage.gcp.allow_engine_identity = %v, want true", gcp["allow_engine_identity"])
+	}
+}
+
+// TestBuildConfigMap_UserRefusesGcpEngineIdentity is the other half: the value
+// above is a default the user can take back, which is what the self-managed docs
+// promise. It must survive the merge as `false`, not be restored to the
+// operator's `true`, and it must not take the sibling storage keys with it.
+func TestBuildConfigMap_UserRefusesGcpEngineIdentity(t *testing.T) {
+	custom := `{"storage": {"managed_table_storage": "gcs", "gcp": {"allow_engine_identity": false, ` +
+		`"intermediary_service_account_id": "projects/p/serviceAccounts/i@p.iam"}}}`
+	root := renderConfig(t, custom)
+	storage := nestedMap(t, root, "storage")
+	if storage["managed_table_storage"] != "gcs" {
+		t.Errorf("storage.managed_table_storage = %v, want gcs", storage["managed_table_storage"])
+	}
+	gcp := nestedMap(t, storage, "gcp")
+	if gcp["allow_engine_identity"] != false {
+		t.Errorf("storage.gcp.allow_engine_identity = %v, want false", gcp["allow_engine_identity"])
+	}
+	if gcp["intermediary_service_account_id"] != "projects/p/serviceAccounts/i@p.iam" {
+		t.Errorf("storage.gcp.intermediary_service_account_id = %v, want it preserved",
+			gcp["intermediary_service_account_id"])
+	}
+}
+
 func TestBuildConfigMap_NestedSectionOverridesUserDefaults(t *testing.T) {
 	custom := `{"logging": {"format": "text", "level": "debug"}}`
 	root := renderConfig(t, custom)
