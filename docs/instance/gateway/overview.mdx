@@ -16,9 +16,9 @@ removes the routing-only query parameter before forwarding the request to the En
 
 ## Connect to engines
 
-### Instance gateway (recommended)
+### Instance gateway
 
-The recommended entry point is the instance gateway. The Envoy proxy routes requests based on the target engine name and handles retries during blue-green transitions. Pass the engine with the `X-Firebolt-Engine` header (raw HTTP clients) or the `engine` query parameter (the bundled `firebolt` CLI).
+The Instance Gateway is the entry point for engine queries. The Envoy proxy routes requests based on the target engine name and handles retries during blue-green transitions. Pass the engine with the `X-Firebolt-Engine` header (raw HTTP clients) or the `engine` query parameter (the bundled `firebolt` CLI).
 
 ```text
 POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
@@ -38,15 +38,6 @@ firebolt client \
   -c "SELECT 42" \
   --no-interactive
 ```
-
-### Per-engine service
-
-Each engine also exposes a headless Service at `<engine>-service.<namespace>.svc.cluster.local:3473`. Use this when your client implements its own connection-level load balancing and DNS re-resolution.
-
-With this entry point the caller is responsible for:
-
-- Periodically re-resolving the Service hostname so that newly ready pods are picked up and draining pods are dropped.
-- Treating a request on a single endpoint that fails with a transport error as "pick another endpoint", not "retry this request".
 
 ### Configuration
 

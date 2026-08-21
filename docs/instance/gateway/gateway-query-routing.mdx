@@ -49,6 +49,6 @@ During an Engine cutover or scale-down:
 4. The Gateway retries that request on another ready pod.
 5. Queries accepted before shutdown continue until they finish or the Engine's termination window expires.
 
-The zero-downtime contract applies to traffic through the Gateway and to request bodies within the 2 MiB retry limit. Direct Engine Service connections bypass Gateway retry behavior.
+The zero-downtime contract applies to traffic through the Gateway and to request bodies within the 2 MiB retry limit. Traffic that bypasses the Gateway is unsupported and receives none of these guarantees.
 
 See [Engine rollouts](../../engine/engine-rollouts) for drain controls and [Gateway sizing](./gateway-sizing) for memory and concurrency planning.

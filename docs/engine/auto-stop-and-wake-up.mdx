@@ -75,7 +75,7 @@ spec:
     enabled: false
 ```
 
-Direct connections to the Engine Service cannot wake a stopped Engine because the Service has no endpoints. Route through the Instance Gateway when you rely on wake-up.
+Wake-up works only for queries sent through the Instance Gateway. Traffic that bypasses the Gateway is unsupported and cannot wake a stopped Engine because the Engine Service has no endpoints.
 
 The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine.
 
