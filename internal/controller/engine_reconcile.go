@@ -284,10 +284,14 @@ func computeEngineReconcile(
 
 	// Observed, so it is written on every path rather than per phase: the
 	// count belongs to the state this pass read, not to the transition the
-	// pass decided on. assembleEngineState leaves it zero when there is no
-	// active-generation StatefulSet, which is what makes a stopped engine
-	// report 0 instead of its last running value.
-	result.Status.ReadyReplicas = current.CurrentPodReady
+	// pass decided on. It tracks the ACTIVE generation, not the current one —
+	// during a rollout the new generation exists and is filling up while the
+	// old one still serves, and reporting the new one there would show a drop
+	// to zero and a climb back on every roll, for capacity that was never
+	// unavailable. assembleEngineState leaves it zero when nothing is serving,
+	// which is what makes a stopped engine report 0 rather than its last
+	// running value.
+	result.Status.ReadyReplicas = current.ActivePodReady
 
 	now := metav1.Now()
 	result.Status.LastReconciled = &now
