@@ -159,7 +159,8 @@ func main() {
 	flag.StringVar(&wakeAgentImagePullPolicy, "wake-agent-image-pull-policy", "",
 		"Pull policy for the wake-agent sidecar. Empty applies Kubernetes' own tag-derived default.")
 	flag.BoolVar(&telemetryEnabled, "telemetry", true,
-		"Send a once-daily anonymous aggregate usage event. Set false to disable.")
+		"Send a once-daily anonymous aggregate usage event. Set false to disable; "+
+			"deployed engine containers then get DO_NOT_TRACK=1 and default engine pulls switch to GHCR.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultEndpoint,
 		"Scarf Event Collection endpoint for anonymous aggregate usage events.")
 	zapOpts := zap.Options{Development: false}
@@ -172,6 +173,7 @@ func main() {
 	}
 	if !telemetryEnabled {
 		controller.UseDirectEngineRepository()
+		controller.DisableEngineTelemetry()
 	}
 
 	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
