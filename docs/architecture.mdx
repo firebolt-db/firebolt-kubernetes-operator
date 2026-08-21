@@ -34,9 +34,9 @@ An Engine may also reference one EngineClass in the same namespace through `spec
 
 ## Query traffic
 
-Clients normally connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
+Clients connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
 
-You can also connect directly to an Engine Service. Direct connections bypass Gateway features, including waking an auto-stopped Engine.
+Internally, each Engine exposes a Service that the Gateway resolves at request time. The Firebolt Operator switches that Service between generations during blue-green rollouts. It is an internal mechanism, not a client entry point: traffic that bypasses the Gateway is unsupported and loses Gateway features, including waking an auto-stopped Engine.
 
 See [Gateway overview](./instance/gateway/overview) for connection examples and [Gateway query routing](./instance/gateway/gateway-query-routing) for routing behavior.
 

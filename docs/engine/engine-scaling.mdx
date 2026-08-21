@@ -39,7 +39,7 @@ kubectl patch fireng my-engine -n firebolt \
   --type merge -p '{"spec":{"replicas":2}}'
 ```
 
-If you use auto-stop and want a query to resume a stopped Engine automatically, send traffic through the Instance Gateway. Direct Engine Service traffic cannot wake an Engine with no endpoints.
+If you use auto-stop and want a query to resume a stopped Engine automatically, send traffic through the Instance Gateway. Traffic that bypasses the Gateway cannot wake an Engine with no endpoints.
 
 ## Update an Engine image
 
