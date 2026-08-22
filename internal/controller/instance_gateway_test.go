@@ -766,6 +766,54 @@ func TestBuildEnvoyConfigYAMLDFPSubClusterMode(t *testing.T) {
 	}
 }
 
+// TestBuildEnvoyConfigYAMLDFPNoSearchDomains guards that the dynamic
+// forward proxy cluster resolves authorities exactly as written instead
+// of walking the pod's resolv.conf search domains. The Lua filter always
+// rewrites :authority to a fully qualified Service name whose dot count
+// is below the kubelet ndots default, so without this option c-ares
+// tries every search-domain expansion first. None of those expansions
+// can resolve, and on nodes that inject infrastructure search domains a
+// DNS-filtering CNI may answer an expansion with REFUSED — which c-ares
+// treats as a nameserver failure, aborting the lookup before the
+// canonical name is ever asked and turning every gateway query into a
+// 503. The resolver config is a plain Cluster field, so
+// sub_clusters_config copies it into every synthesized per-authority
+// sub-cluster the same way it copies transport_socket.
+func TestBuildEnvoyConfigYAMLDFPNoSearchDomains(t *testing.T) {
+	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+	}, false)
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+	}
+
+	cluster := parsed["static_resources"].(map[string]any)["clusters"].([]any)[0].(map[string]any)
+	if name, _ := cluster["name"].(string); name != "dynamic_forward_proxy" {
+		t.Fatalf("clusters[0] = %q; expected the dynamic_forward_proxy cluster", name)
+	}
+
+	resolver, ok := cluster["typed_dns_resolver_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("dynamic_forward_proxy cluster missing typed_dns_resolver_config; got cluster keys = %v", keysOf(cluster))
+	}
+	if name, _ := resolver["name"].(string); name != "envoy.network.dns_resolver.cares" {
+		t.Errorf("typed_dns_resolver_config.name = %q; expected the c-ares resolver", name)
+	}
+	typed, ok := resolver["typed_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("typed_dns_resolver_config missing typed_config; got keys = %v", keysOf(resolver))
+	}
+	opts, ok := typed["dns_resolver_options"].(map[string]any)
+	if !ok {
+		t.Fatalf("resolver typed_config missing dns_resolver_options; got keys = %v", keysOf(typed))
+	}
+	if v, _ := opts["no_default_search_domain"].(bool); !v {
+		t.Error("dns_resolver_options.no_default_search_domain is not true; the gateway would walk resolv.conf search domains and a REFUSED expansion aborts the whole c-ares lookup")
+	}
+}
+
 // TestBuildEnvoyConfigYAMLRetryPolicy guards the retry contract:
 //   - We retry on connect-failure / refused-stream / reset (transport-level
 //     failures where the engine could not have observed the request).

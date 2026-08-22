@@ -1158,6 +1158,32 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
           unhealthy_threshold: 1
           http_health_check:
             path: /health/ready
+      # Resolve the authority exactly as written, never through the pod's
+      # resolv.conf search domains. The Lua filter always rewrites
+      # :authority to a fully qualified in-cluster Service name, but that
+      # name's dot count sits below the kubelet ndots default (5), so
+      # without this option c-ares tries every search-domain expansion of
+      # the name before the name itself. Those expansions can never
+      # resolve, and they are not harmless: nodes commonly inject
+      # infrastructure search domains (a cloud VPC's internal zone, for
+      # example) into pod resolv.conf, and when a DNS-filtering CNI
+      # answers such an expansion with REFUSED, c-ares treats it as a
+      # nameserver failure and aborts the whole lookup without ever
+      # asking for the canonical name — glibc and Go resolvers continue
+      # past a refused candidate; c-ares does not. The engine lookup then
+      # fails on every attempt and the gateway answers 503 for queries
+      # even though the absolute name resolves fine. Skipping the search
+      # walk removes that failure class and the wasted queries with it;
+      # it can remove no working path, because the only candidate that
+      # ever resolves is the absolute name. Like transport_socket above,
+      # this is a plain Cluster field that sub_clusters_config copies
+      # verbatim into every synthesized per-authority sub-cluster.
+      typed_dns_resolver_config:
+        name: envoy.network.dns_resolver.cares
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.network.dns_resolver.cares.v3.CaresDnsResolverConfig
+          dns_resolver_options:
+            no_default_search_domain: true
       cluster_type:
         name: envoy.clusters.dynamic_forward_proxy
         typed_config:
