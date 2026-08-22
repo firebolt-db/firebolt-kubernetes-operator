@@ -36,7 +36,7 @@ An Engine may also reference one EngineClass in the same namespace through `spec
 
 Clients connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
 
-Internally, each Engine exposes a Service that the Gateway resolves at request time. The Firebolt Operator switches that Service between generations during blue-green rollouts. It is an internal mechanism, not a client entry point: traffic that bypasses the Gateway is unsupported and loses Gateway features, including waking an auto-stopped Engine.
+Internally, each Engine exposes a Service that the Gateway resolves at request time. The Gateway resolves that Service by its fully qualified name and never expands the pod's DNS search domains: the name is already complete, and some environments inject infrastructure search domains whose expansions a DNS-filtering CNI can reject in a way that Envoy's c-ares resolver treats as fatal for the whole lookup. Exact-name resolution applies to every per-Engine sub-cluster the dynamic forward proxy synthesizes. The Firebolt Operator switches the Service between generations during blue-green rollouts. It is an internal mechanism, not a client entry point: traffic that bypasses the Gateway is unsupported and loses Gateway features, including waking an auto-stopped Engine.
 
 See [Gateway overview](./instance/gateway/overview) for connection examples and [Gateway query routing](./instance/gateway/gateway-query-routing) for routing behavior.
 
