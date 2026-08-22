@@ -31,6 +31,8 @@ Client -> Gateway Service -> Envoy -> Engine Service -> ready Engine pod
 
 The Engine Service is headless and returns the ready pod IPs for the active generation. The Gateway performs active readiness checks and opens a new upstream connection for each request.
 
+The Gateway resolves the Engine Service by its fully qualified name, `<engine>-service.<namespace>.svc.cluster.local`, and does not expand the pod's DNS search domains. If you enforce DNS-level network policies, allow queries for that name; the Gateway sends no other lookups for Engine routing.
+
 Creating, scaling, or rolling an Engine does not restart the Gateway. Engine destinations are resolved dynamically.
 
 ## Retry behavior
