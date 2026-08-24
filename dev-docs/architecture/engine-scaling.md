@@ -195,6 +195,7 @@ The generation floor is the stale-cache safety boundary. A resource newer than t
 | Write ordering or new side effect | Crash points, property-test prefix model, and recovery tests |
 | New pod-affecting field | Effective resolver, StatefulSet builder, drift comparator, webhook/controller allowlist, CRD docs, and plugin |
 | EngineClass-inherited field | Engine-if-set precedence, class watch/hash behavior, and engine/class tests |
+| EngineDefaults overlay or fail-closed gate | `defaultsReady` in `FireboltEngine.tla` (not merge content), Defaults hash/watch tests, and inheritance docs |
 | Generation-owned resource | read state, apply/delete path, finalizer cleanup, GC ownership and keep-set logic |
 | Stable Service or readiness behavior | Gateway routing, shutdown chain, Service tests, and zero-downtime E2E coverage |
 | Drain semantics | both scrape transports, rollout documentation, timeouts, and drain-under-load E2E tests |

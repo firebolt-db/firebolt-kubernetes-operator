@@ -120,7 +120,9 @@ type engineSim struct {
 	// engine has spec.engineClassRef set. nil here models "no class
 	// referenced"; ApplyClassChange flips it between nil, classA, classB, …
 	// to exercise the stsMatchesSpec class-hash drift path. The Go-side
-	// equivalent of a class spec edit at runtime.
+	// equivalent of a class spec edit at runtime. Defaults overlay identity
+	// lives on the same struct (DefaultsName / DefaultsHash); ApplyDefaultsChange
+	// flips those fields so stsMatchesSpec sees Defaults-hash drift.
 	classInfo *FireboltEngineClassInfo
 
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
@@ -474,6 +476,45 @@ func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
 	m.classInfo = nil
 }
 
+// ApplyDefaultsChange mutates the resolved FireboltEngineDefaults overlay
+// folded into classInfo. Models a real FireboltEngineDefaults spec edit:
+// the production overlay stamps a fresh DefaultsHash and
+// stsMatchesSpec compares AnnotationEngineDefaultsHash. Drawing v=0
+// clears the overlay (namespace has no Defaults object). classInfo is
+// created when missing so a Defaults-only namespace (no engineClassRef)
+// is still reachable.
+func (m *engineSim) ApplyDefaultsChange(t *rapid.T) {
+	m.specDirty = true
+	v := rapid.IntRange(0, 99).Draw(t, "defaultsVersion")
+	if m.classInfo == nil {
+		m.classInfo = &FireboltEngineClassInfo{}
+	}
+	if v == 0 {
+		m.classInfo.DefaultsName = ""
+		m.classInfo.DefaultsHash = ""
+		return
+	}
+	m.classInfo.DefaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
+	m.classInfo.DefaultsHash = fmt.Sprintf("defaults-hash-v%d", v)
+}
+
+// ApplyDefaultsUnready models the Defaults fail-closed gate by
+// withholding the overlay. The production controller's
+// resolveFireboltEngineDefaultsInfo refuses to consume an unready,
+// required-missing, or ambiguous Defaults object and short-circuits
+// the reconcile, so the compute layer never sees the overlay — the
+// inner harness models that by clearing DefaultsName / DefaultsHash.
+// Distinct from drawing v=0 in ApplyDefaultsChange (which models
+// "the namespace Defaults object was deleted"): the engine may still
+// require Defaults, the object is just transiently inadmissible.
+func (m *engineSim) ApplyDefaultsUnready(_ *rapid.T) {
+	if m.classInfo == nil {
+		return
+	}
+	m.classInfo.DefaultsName = ""
+	m.classInfo.DefaultsHash = ""
+}
+
 // ApplyConflictingClassAndEngine sets the *same* pod-template field
 // on both the class and the engine template, with different values.
 // Forces the merge layer (effective*) to arbitrate. The harness's
@@ -595,10 +636,11 @@ func (m *engineSim) Check(t *rapid.T) {
 //
 // Gated states are excluded for exactly the reason the state cover skips them
 // (tlaShouldGateOut): the compute layer only runs when the outer Reconcile's
-// instance and class gates are open, and this harness calls the compute layer
-// directly. States on the model's MaxGen ceiling are kept -- unlike the state
-// cover, this harness has no closure oracle to disagree with, and a Go-side
-// generation bump past the model's bound is legitimate behavior worth walking.
+// instance, class, and Defaults gates are open, and this harness calls the
+// compute layer directly. States on the model's MaxGen ceiling are kept --
+// unlike the state cover, this harness has no closure oracle to disagree with,
+// and a Go-side generation bump past the model's bound is legitimate behavior
+// worth walking.
 var rapidStartStates = func() []int {
 	idxs := make([]int, 0, len(tlaStatePool))
 	for i := range tlaStatePool {
