@@ -185,7 +185,8 @@ healthProbeBindAddress: ":8081"
 watchNamespaces: []
 
 # -- Label selector restricting which FireboltEngine, FireboltInstance,
-# and FireboltEngineClass objects the operator caches and reconciles.
+# FireboltEngineClass, and FireboltEngineDefaults objects the operator
+# caches and reconciles.
 # Empty (the default) applies no restriction. Non-empty is passed as
 # `--watch-label-selector=<selector>` and applies only to the four
 # Firebolt CRD types — child objects and third-party Secrets are cached
