@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.2...firebolt-operator-v0.8.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* **gateway:** resolve engine authorities without DNS search-domain expansion (FB-3287) ([c7d39bb](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c7d39bb62ce77d5a6d07bc14095693f97eaeaa30))
+
 ## [0.8.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.1...firebolt-operator-v0.8.2) (2026-08-17)
 
 
