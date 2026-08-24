@@ -1327,6 +1327,38 @@ func indentBlock(s, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
+// WaitForReplacementPodReady waits for a pod matching labelSelector whose UID
+// differs from victimUID to report Ready. Identity is compared by UID because
+// StatefulSet replacements reuse the victim's name. This is the race-free way
+// to observe crash recovery: polling for the workload's ReadyReplicas to dip
+// to zero can miss the dip entirely when the replacement becomes ready faster
+// than the poll interval (Envoy restarts in well under a second).
+func WaitForReplacementPodReady(ctx context.Context, labelSelector string, victimUID types.UID, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err == nil {
+			for _, pod := range pods.Items {
+				if pod.UID == victimUID || pod.DeletionTimestamp != nil {
+					continue
+				}
+				if pod.Status.Phase != corev1.PodRunning {
+					continue
+				}
+				for _, cond := range pod.Status.Conditions {
+					if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+						return nil
+					}
+				}
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for a ready replacement pod (selector %q)", labelSelector)
+}
+
 // WaitForEngineReady waits for all pods in an engine to be ready AND for the
 // engine service to have ready endpoint addresses. Checking both ensures that
 // kube-proxy/iptables rules have been updated and the service is routable.
