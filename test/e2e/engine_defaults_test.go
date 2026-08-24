@@ -27,7 +27,13 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-var _ = Describe("FireboltEngineDefaults merge", Ordered, func() {
+// Serial because FireboltEngineDefaults is an ambient overlay merged under
+// every engine in the namespace: each create/edit/delete here changes the
+// effective pod template of all co-scheduled specs' engines and rolls them a
+// new blue-green generation, breaking any spec that asserts phase stability
+// or a stable pod IP. Serial also lets the AfterAll deletion complete instead
+// of hanging on the deletion-guard finalizer while other engines exist.
+var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 	var (
 		instanceName = "inst-defaults" + queryConfig.Suffix
 		engineName   = "test-defaults" + queryConfig.Suffix + "-engine"
