@@ -18,6 +18,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -42,13 +43,17 @@ func newFireboltEngineDefaultsInfo(d *computev1alpha1.FireboltEngineDefaults) *F
 		return nil
 	}
 	raw, err := json.Marshal(d.Spec)
-	hash := ""
-	if err == nil {
-		hash = contentHash(string(raw))
+	if err != nil {
+		// Unreachable for these API types (no cycles, channels, or funcs).
+		// Fall back to the fmt rendering — same pattern as
+		// customEngineConfigHash — so even an impossible marshal failure
+		// yields drift-detectable content instead of an empty hash that
+		// would hide Defaults edits from stsMatchesSpec.
+		raw = []byte(fmt.Sprintf("%v", d.Spec))
 	}
 	return &FireboltEngineDefaultsInfo{
 		Name:               d.Name,
-		Hash:               hash,
+		Hash:               contentHash(string(raw)),
 		Template:           d.Spec.Template.DeepCopy(),
 		Storage:            *d.Spec.Storage.DeepCopy(),
 		CustomEngineConfig: d.Spec.CustomEngineConfig.DeepCopy(),

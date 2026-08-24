@@ -174,11 +174,7 @@ func (r *FireboltEngineDefaultsReconciler) countNamespaceEngines(ctx context.Con
 	if err := reader.List(ctx, &engines, client.InNamespace(namespace)); err != nil {
 		return 0, err
 	}
-	var count int32
-	for range engines.Items {
-		count++
-	}
-	return count, nil
+	return int32(len(engines.Items)), nil //nolint:gosec // a namespace cannot hold 2^31 engines
 }
 
 func defaultsReadiness(defaults *computev1alpha1.FireboltEngineDefaults) (status metav1.ConditionStatus, reason, message string) {

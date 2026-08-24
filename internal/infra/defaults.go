@@ -11,6 +11,11 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
+// DefaultEngineDefaultsName is the conventional per-namespace
+// FireboltEngineDefaults object name, re-exported so CLI commands can
+// default a name argument without importing the API package.
+const DefaultEngineDefaultsName = v1alpha1.FireboltEngineDefaultsDefaultName
+
 // EngineDefaultsSummary is a one-line view of a FireboltEngineDefaults.
 type EngineDefaultsSummary struct {
 	Name         string
@@ -57,7 +62,7 @@ func (c *Client) ListEngineDefaults(ctx context.Context) ([]EngineDefaultsSummar
 // apply it with kubectl; the type is the compile-time contract.
 func BuildEngineDefaults(namespace, name, serviceAccount string) *v1alpha1.FireboltEngineDefaults {
 	if name == "" {
-		name = v1alpha1.FireboltEngineDefaultsDefaultName
+		name = DefaultEngineDefaultsName
 	}
 	return &v1alpha1.FireboltEngineDefaults{
 		TypeMeta: metav1.TypeMeta{

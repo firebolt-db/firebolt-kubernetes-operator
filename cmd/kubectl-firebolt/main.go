@@ -196,7 +196,7 @@ func newDefaultsGetCmd() *cobra.Command {
 		Short: "Get a FireboltEngineDefaults object",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := infra.BuildEngineDefaults("", "", "").Name
+			name := infra.DefaultEngineDefaultsName
 			if len(args) == 1 {
 				name = args[0]
 			}
