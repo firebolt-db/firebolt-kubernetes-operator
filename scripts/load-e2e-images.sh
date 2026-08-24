@@ -107,10 +107,25 @@ declare -a IMAGES=(
 #   ghcr.io/firebolt-db/engine:dev   -> firebolt-db/engine:dev   (strip explicit host)
 #   oci.firebolt.io/firebolt-db/engine:latest -> firebolt-db/engine:latest
 #   envoyproxy/envoy:v1.37.2         -> envoyproxy/envoy:v1.37.2 (org/name; keep)
-#   postgres:16-alpine               -> library/postgres:16-alpine (official Docker Hub)
+#   postgres:16.15-alpine            -> library/postgres:16.15-alpine (official Docker Hub)
 # The kind nodes' containerd hosts.toml maps each embedded image registry to the
 # local registry, so a single push under each upstream's path makes the image
 # resolvable without changing the operator-baked image references.
+#
+# Digest-pinned refs (name:tag@sha256:…) are pulled by digest, then published
+# under name:tag. `docker tag` cannot take a digest as the destination, and
+# the E2E registry HEAD check looks up the tag. Kind's docker.io mirror
+# falls back to Docker Hub for public images, so kubelet can still resolve
+# the compiled @sha256 from upstream if the local registry only has the tag.
+image_ref_without_digest() {
+    local image="$1"
+    if [[ "${image}" == *@sha256:* ]]; then
+        printf '%s\n' "${image%@sha256:*}"
+    else
+        printf '%s\n' "${image}"
+    fi
+}
+
 to_registry_path() {
     local image="$1"
     local first_seg="${image%%/*}"
@@ -147,7 +162,7 @@ publish_one() {
     esac
 
     local repo_path
-    repo_path=$(to_registry_path "${image}")
+    repo_path=$(to_registry_path "$(image_ref_without_digest "${image}")")
     local registry_ref="${REGISTRY_HOST_ENDPOINT}/${repo_path}"
 
     echo ">>> [${image}] tagging -> ${registry_ref}"
@@ -189,7 +204,7 @@ publish_one() {
 
     echo ">>> [${image}] done"
 }
-export -f publish_one to_registry_path
+export -f publish_one to_registry_path image_ref_without_digest
 export REGISTRY_HOST_ENDPOINT UPGRADE_TAG_SUFFIX
 export ENGINE_IMAGE ENGINE_TAG METADATA_IMAGE METADATA_TAG
 

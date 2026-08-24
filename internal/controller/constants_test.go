@@ -148,6 +148,7 @@ func TestResolveContainerImagePullPolicy(t *testing.T) {
 		{"registry port without tag defaults Always", "myregistry:5000/myimage", "", corev1.PullAlways},
 		{"registry port with tag defaults IfNotPresent", "myregistry:5000/myimage:v1", "", corev1.PullIfNotPresent},
 		{"digest defaults IfNotPresent", "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000", "", corev1.PullIfNotPresent},
+		{"tagged digest defaults IfNotPresent", "postgres:16.15-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000", "", corev1.PullIfNotPresent},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

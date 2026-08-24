@@ -159,7 +159,7 @@ const (
 	// PostgresPVCSize is the default PVC size for the internal PostgreSQL instance.
 	PostgresPVCSize = "10Gi"
 	// PostgresUID is the numeric UID/GID of the built-in `postgres` user in
-	// the `postgres:16-alpine` image. We pin RunAsUser/RunAsGroup/FSGroup to
+	// the alpine `postgres` image. We pin RunAsUser/RunAsGroup/FSGroup to
 	// this value so the pod-level SecurityContext can enforce RunAsNonRoot=true
 	// and the kubelet chowns the per-pod data PVC to a UID the postgres
 	// process actually runs as. The Debian-flavored `postgres` images use
