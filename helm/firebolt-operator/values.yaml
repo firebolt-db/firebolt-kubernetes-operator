@@ -187,7 +187,7 @@ watchNamespaces: []
 # -- Label selector restricting which FireboltEngine, FireboltInstance,
 # and FireboltEngineClass objects the operator caches and reconciles.
 # Empty (the default) applies no restriction. Non-empty is passed as
-# `--watch-label-selector=<selector>` and applies only to the three
+# `--watch-label-selector=<selector>` and applies only to the four
 # Firebolt CRD types — child objects and third-party Secrets are cached
 # unfiltered, so they never need the label. Lets a cluster-wide install
 # ignore CRs owned by namespace-scoped installs, e.g.

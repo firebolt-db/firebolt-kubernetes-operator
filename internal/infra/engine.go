@@ -26,9 +26,10 @@ import (
 
 const (
 	// kubectl resource names (CRD plurals/singulars the API server accepts).
-	resourceEngine      = "fireboltengine"
-	resourceInstance    = "fireboltinstance"
-	resourceEngineClass = "fireboltengineclass"
+	resourceEngine         = "fireboltengine"
+	resourceInstance       = "fireboltinstance"
+	resourceEngineClass    = "fireboltengineclass"
+	resourceEngineDefaults = "fireboltenginedefaults"
 
 	// engineContainerName is the operator-owned primary container whose image
 	// the engine's spec.template overrides.

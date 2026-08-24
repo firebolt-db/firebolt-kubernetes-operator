@@ -130,9 +130,9 @@ func main() {
 			"(cluster-wide install, requires the chart's ClusterRole). A non-empty list confines the "+
 			"manager cache to those namespaces and requires per-namespace Role+RoleBinding pairs in each.")
 	flag.StringVar(&watchLabelSelectorArg, "watch-label-selector", "",
-		"Label selector restricting which FireboltEngine, FireboltInstance, and FireboltEngineClass "+
+		"Label selector restricting which FireboltEngine, FireboltInstance, FireboltEngineClass, and FireboltEngineDefaults "+
 			"objects this operator caches and reconciles. Empty applies no restriction. The selector "+
-			"applies only to the three Firebolt CRD types; child objects and third-party Secrets "+
+			"applies only to the four Firebolt CRD types; child objects and third-party Secrets "+
 			"(e.g. cert-manager's) are cached unfiltered, so they never need the label. Lets a "+
 			"cluster-wide install ignore CRs owned by namespace-scoped installs, "+
 			"e.g. '!example.com/managed'. CRs that reference each other (an engine and its "+
@@ -336,6 +336,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngineClass")
 		os.Exit(1)
 	}
+	if err := (&controller.FireboltEngineDefaultsReconciler{
+		Client: mgr.GetClient(),
+		Reader: mgr.GetAPIReader(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "FireboltEngineDefaults")
+		os.Exit(1)
+	}
 	if enableWebhooks {
 		if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
@@ -343,6 +351,10 @@ func main() {
 		}
 		if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngineClass")
+			os.Exit(1)
+		}
+		if err := computev1alpha1.SetupFireboltEngineDefaultsWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngineDefaults")
 			os.Exit(1)
 		}
 		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, &engineBounds); err != nil {
@@ -495,9 +507,10 @@ func scopeManagerCache(mgrOpts *ctrl.Options, watchNamespaces []string, watchSel
 	}
 	if watchSelector != nil {
 		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&computev1alpha1.FireboltEngine{}:      {Label: watchSelector},
-			&computev1alpha1.FireboltInstance{}:    {Label: watchSelector},
-			&computev1alpha1.FireboltEngineClass{}: {Label: watchSelector},
+			&computev1alpha1.FireboltEngine{}:         {Label: watchSelector},
+			&computev1alpha1.FireboltInstance{}:       {Label: watchSelector},
+			&computev1alpha1.FireboltEngineClass{}:    {Label: watchSelector},
+			&computev1alpha1.FireboltEngineDefaults{}: {Label: watchSelector},
 		}
 		setupLog.Info("manager cache restricted to Firebolt CRs matching label selector", "selector", watchSelector.String())
 	}

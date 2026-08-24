@@ -2,7 +2,7 @@
 
 ## What this project does
 
-Firebolt Operator manages three CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), and **FireboltEngineClass** (optional namespaced fragment of shared engine settings -- a pod template plus storage, engine-config, rollout/autoStop, and optional Engine Web UI sidecar defaults -- referenced by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently). Built with Go and controller-runtime.
+Firebolt Operator manages four CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), **FireboltEngineClass** (optional namespaced fragment of shared engine settings -- a pod template plus storage, engine-config, rollout/autoStop, and optional Engine Web UI sidecar defaults -- referenced by multiple engines in the same namespace; namespaced rather than cluster-scoped so the SA / volume / IAM identifiers it carries resolve consistently), and **FireboltEngineDefaults** (optional namespaced ambient overlay -- service account, storage, credential env, customEngineConfig -- admitted and status-reconciled; v1 is one object per namespace, conventionally named `firebolt`). Built with Go and controller-runtime.
 
 Engines require a ready instance. See [docs/architecture.mdx](docs/architecture.mdx) for the full design.
 

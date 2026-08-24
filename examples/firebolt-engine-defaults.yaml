@@ -1,0 +1,28 @@
+# A FireboltEngineDefaults object. Ambient namespace overlay for service
+# account, credential env, storage, and customEngineConfig.
+#
+# v1 admits one object per namespace. The conventional name is "firebolt".
+# Engines do not reference this object by name.
+#
+# spec.template uses the same operator-owned-path allowlist as
+# FireboltEngineClass.spec.template.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngineDefaults
+metadata:
+  name: firebolt
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      serviceAccountName: firebolt-engine
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: engine-object-store
+  storage:
+    emptyDir: {}
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-bucket

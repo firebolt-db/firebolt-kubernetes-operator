@@ -1,0 +1,59 @@
+---
+title: FireboltEngineDefaults overview
+description: Optional namespaced ambient overlay for service account, storage, and engine config shared by every FireboltEngine in a namespace.
+sidebarTitle: Overview
+---
+
+## Overview
+
+`FireboltEngineDefaults` is an optional namespaced resource that holds ambient engine settings for a namespace: a pod-template fragment plus defaults for `storage` and `customEngineConfig`. Every Firebolt Engine in the same namespace can consume it. Engines do not reference the object by name.
+
+v1 admits one `FireboltEngineDefaults` per namespace. The conventional name is `firebolt`.
+
+The Firebolt Operator validates `spec.template` with the same operator-owned-path rules as `FireboltEngineClass`, and reports `Ready` on the object. Deleting the object is refused while any Firebolt Engine exists in the namespace.
+
+For the allowlist of user-settable and Firebolt Operator-owned template fields, see the [FireboltEngineDefaults CRD reference](../crd-reference/fireboltenginedefaults-crd-reference).
+
+## Inspecting status
+
+```bash
+kubectl get firengd -n firebolt
+```
+
+```
+NAME       BOUND   READY   AGE
+firebolt   3       True    24h
+```
+
+`BOUND` is the number of Firebolt Engines in the namespace. Defaults is ambient, so every engine in the namespace counts.
+
+## Example
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngineDefaults
+metadata:
+  name: firebolt
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      serviceAccountName: firebolt-engine
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: engine-object-store
+  storage:
+    emptyDir: {}
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-bucket
+```
+
+Apply the manifest:
+
+```bash
+kubectl apply --server-side -f firebolt-engine-defaults.yaml
+```

@@ -82,6 +82,15 @@ var _ = Describe("CRD pod-template containers-optional contract", func() {
 		})).To(Succeed(), hint)
 	})
 
+	It("admits a FireboltEngineDefaults whose spec.template has no containers", func() {
+		Expect(tryCreate(&computev1alpha1.FireboltEngineDefaults{
+			ObjectMeta: metav1.ObjectMeta{Name: "tmpl-nocont-" + utilrand.String(6), Namespace: ns},
+			Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+				Template: *bareTemplate(),
+			},
+		})).To(Succeed(), hint)
+	})
+
 	It("admits a FireboltInstance whose gateway and metadata templates have no containers", func() {
 		Expect(tryCreate(&computev1alpha1.FireboltInstance{
 			ObjectMeta: metav1.ObjectMeta{Name: "tmpl-nocont-" + utilrand.String(6), Namespace: ns},

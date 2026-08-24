@@ -3,8 +3,9 @@
 # `.spec` in our CRDs.
 #
 # Each CRD embeds a corev1.PodTemplateSpec (FireboltEngine.spec.template,
-# FireboltEngineClass.spec.template, and FireboltInstance.spec.{gateway,
-# metadata}.template). controller-gen faithfully renders PodSpec's `containers`
+# FireboltEngineClass.spec.template, FireboltEngineDefaults.spec.template,
+# and FireboltInstance.spec.{gateway, metadata}.template). controller-gen
+# faithfully renders PodSpec's `containers`
 # as a required field, emitting `required: [containers]` under each
 # `template.spec`. But these templates are *fragments*: the operator injects
 # the engine / gateway / metadata container at StatefulSet / Deployment build

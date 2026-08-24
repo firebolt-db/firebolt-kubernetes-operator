@@ -1,14 +1,15 @@
 ---
 title: Architecture
-description: How FireboltInstance, FireboltEngine, and FireboltEngineClass work together.
+description: How FireboltInstance, FireboltEngine, FireboltEngineClass, and FireboltEngineDefaults work together.
 sidebarTitle: Architecture
 ---
 
-The Firebolt Operator manages three custom resources:
+The Firebolt Operator manages four custom resources:
 
 - **FireboltInstance** provisions shared PostgreSQL, Metadata Service, and Gateway infrastructure in a namespace.
 - **FireboltEngine** runs the compute nodes that serve queries.
 - **FireboltEngineClass** provides optional shared defaults for Engines in the same namespace.
+- **FireboltEngineDefaults** is an optional ambient overlay for the namespace. The Firebolt Operator validates it and reports Ready. See [FireboltEngineDefaults overview](./enginedefaults/overview).
 
 ## Resource relationships
 

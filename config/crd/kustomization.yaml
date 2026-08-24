@@ -1,3 +1,4 @@
 resources:
 - bases/compute.firebolt.io_fireboltengines.yaml
 - bases/compute.firebolt.io_fireboltinstances.yaml
+- bases/compute.firebolt.io_fireboltenginedefaults.yaml

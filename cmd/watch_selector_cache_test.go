@@ -45,7 +45,7 @@ import (
 //  3. --namespaces composes: the selector keeps filtering inside the
 //     enumerated namespaces while other namespaces disappear entirely;
 //  4. Secrets stay cached unfiltered, even when they carry the excluded
-//     label — only the three Firebolt CRD types are selector-scoped.
+//     label — only the four Firebolt CRD types are selector-scoped.
 func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},

@@ -34,6 +34,7 @@ const (
 const (
 	resourceEngine   = "fireboltengine"
 	resourceInstance = "fireboltinstance"
+	resourceDefaults = "fireboltenginedefaults"
 )
 
 // version is the plugin version, overridden at build time via
@@ -80,7 +81,7 @@ func newRootCmd() *cobra.Command {
 	// passing either one prints the kubectl commands instead of running them.
 	pf.BoolVar(&flagPrintCommands, "debug", false, "Alias for --print-commands")
 
-	root.AddCommand(newInstanceCmd(), newEngineCmd(), newVersionCmd())
+	root.AddCommand(newInstanceCmd(), newEngineCmd(), newDefaultsCmd(), newVersionCmd())
 	return root
 }
 
@@ -174,6 +175,78 @@ name is not this argument.`,
 		},
 	}
 	cmd.Flags().IntVar(&localPort, "local-port", 0, "Bind kubectl to this local port instead of letting it pick a free one")
+	return cmd
+}
+
+// ── defaults ─────────────────────────────────────────────────────────────────
+
+func newDefaultsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "defaults",
+		Short: "Get and list FireboltEngineDefaults",
+	}
+	cmd.AddCommand(newDefaultsGetCmd(), newDefaultsListCmd())
+	return cmd
+}
+
+func newDefaultsGetCmd() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:   "get [name]",
+		Short: "Get a FireboltEngineDefaults object",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := infra.BuildEngineDefaults("", "", "").Name
+			if len(args) == 1 {
+				name = args[0]
+			}
+			c := newClient()
+			obj, err := c.GetEngineDefaults(cmd.Context(), name)
+			if err != nil {
+				return err
+			}
+			if output == outJSON || output == outYAML {
+				return printObjects(output, []infra.EngineDefaultsSummary{{
+					Name:         obj.Name,
+					BoundEngines: obj.Status.BoundEngines,
+					Ready:        nil,
+				}})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", resourceDefaults, obj.Name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", outName, "Output format: json, yaml, or name")
+	return cmd
+}
+
+func newDefaultsListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List FireboltEngineDefaults",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c := newClient()
+			items, err := c.ListEngineDefaults(cmd.Context())
+			if err != nil {
+				return err
+			}
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tBOUND\tREADY")
+			for _, it := range items {
+				ready := "<none>"
+				if it.Ready != nil {
+					if *it.Ready {
+						ready = "True"
+					} else {
+						ready = "False"
+					}
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\n", it.Name, it.BoundEngines, ready)
+			}
+			return w.Flush()
+		},
+	}
 	return cmd
 }
 

@@ -167,6 +167,9 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("setup FireboltEngineClass webhook: %w", err)
 	}
+	if err := computev1alpha1.SetupFireboltEngineDefaultsWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup FireboltEngineDefaults webhook: %w", err)
+	}
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
 	}
@@ -300,6 +303,34 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 						APIGroups:   []string{"compute.firebolt.io"},
 						APIVersions: []string{"v1alpha1"},
 						Resources:   []string{"fireboltengineclasses"},
+						Scope:       &scopeNamespaced,
+					},
+				}},
+				FailurePolicy:           &failPolicyFail,
+				SideEffects:             &sideEffectsNone,
+				MatchPolicy:             &matchPolicyEquivalent,
+				TimeoutSeconds:          &timeout,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+			{
+				Name: "vfireboltenginedefaults.compute.firebolt.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-fireboltenginedefaults"),
+					},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{
+					Operations: []admissionregistrationv1.OperationType{
+						admissionregistrationv1.Create,
+						admissionregistrationv1.Update,
+						admissionregistrationv1.Delete,
+					},
+					Rule: admissionregistrationv1.Rule{
+						APIGroups:   []string{"compute.firebolt.io"},
+						APIVersions: []string{"v1alpha1"},
+						Resources:   []string{"fireboltenginedefaults"},
 						Scope:       &scopeNamespaced,
 					},
 				}},
@@ -445,6 +476,35 @@ func TestWebhook_FireboltEngineClass_RejectsOwnedField(t *testing.T) {
 	err := suite.cli.Create(ctx, class)
 	if err == nil {
 		_ = suite.cli.Delete(ctx, class)
+		t.Fatal("Create: expected admission rejection for operator-owned command, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.template.spec.containers[0].command") {
+		t.Errorf("Create error %q does not surface the offending field path", err.Error())
+	}
+}
+
+func TestWebhook_FireboltEngineDefaults_RejectsOwnedField(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	defaults := &computev1alpha1.FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-defaults", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:    computev1alpha1.EngineContainerName,
+						Image:   "ghcr.io/firebolt-db/engine:dev",
+						Command: []string{"/bin/sh"},
+					}},
+				},
+			},
+		},
+	}
+	err := suite.cli.Create(ctx, defaults)
+	if err == nil {
+		_ = suite.cli.Delete(ctx, defaults)
 		t.Fatal("Create: expected admission rejection for operator-owned command, got nil")
 	}
 	if !strings.Contains(err.Error(), "spec.template.spec.containers[0].command") {

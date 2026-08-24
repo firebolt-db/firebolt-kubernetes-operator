@@ -1,0 +1,33 @@
+---
+title: FireboltEngineDefaults CRD reference
+description: Spec, status, and Firebolt Operator-owned template fields for FireboltEngineDefaults.
+sidebarTitle: FireboltEngineDefaults CRD reference
+---
+
+## Spec reference
+
+`FireboltEngineDefaults` is a namespaced ambient overlay. v1 admits one object per namespace. The conventional name is `firebolt`. Engines do not reference it by name.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) fragment. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields). |
+| `spec.storage` | No | `{}` (emptyDir) | Default per-pod data volume. Backend selection is whole-struct. See the [FireboltEngine CRD reference](./engine-crd-reference). |
+| `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`). |
+
+## Status
+
+| Field | Description |
+|---|---|
+| `status.observedGeneration` | `metadata.generation` last reconciled. |
+| `status.boundEngines` | Count of Firebolt Engines in the same namespace. |
+| `status.conditions[type=Ready]` | `True` when `spec.template` contains no operator-owned paths. `False`/`OperatorOwnedFieldSet` is defense in depth for objects admitted under an older operator. `False`/`DeletionBlocked` while delete is held because engines remain in the namespace. |
+
+Short name: `firengd`.
+
+```bash
+kubectl get firengd
+```
+
+## Firebolt Operator-owned fields
+
+The validating webhook rejects user input on paths the Firebolt Operator owns end-to-end. The allowlist is the same as [`FireboltEngineClass.spec.template`](./fireboltengineclass-crd-reference#firebolt-operator-owned-fields-on-class-templates).

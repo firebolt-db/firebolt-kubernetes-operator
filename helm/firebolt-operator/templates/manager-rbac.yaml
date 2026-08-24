@@ -94,6 +94,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses
+      - fireboltenginedefaults
     verbs:
       - get
       - list
@@ -104,6 +105,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses/finalizers
+      - fireboltenginedefaults/finalizers
       - fireboltengines/finalizers
       - fireboltinstances/finalizers
     verbs:
@@ -112,6 +114,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses/status
+      - fireboltenginedefaults/status
       - fireboltengines/status
       - fireboltinstances/status
     verbs:
@@ -275,6 +278,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses
+      - fireboltenginedefaults
     verbs:
       - get
       - list
@@ -285,6 +289,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses/finalizers
+      - fireboltenginedefaults/finalizers
       - fireboltengines/finalizers
       - fireboltinstances/finalizers
     verbs:
@@ -293,6 +298,7 @@ rules:
       - compute.firebolt.io
     resources:
       - fireboltengineclasses/status
+      - fireboltenginedefaults/status
       - fireboltengines/status
       - fireboltinstances/status
     verbs:

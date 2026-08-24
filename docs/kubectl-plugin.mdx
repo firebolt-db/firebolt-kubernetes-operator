@@ -87,4 +87,13 @@ kubectl firebolt engine port-forward my-engine \
 kubectl firebolt engine delete my-engine -n firebolt
 ```
 
+## Inspect EngineDefaults
+
+```bash
+kubectl firebolt defaults list -n firebolt
+kubectl firebolt defaults get firebolt -n firebolt
+```
+
+`get` defaults to the conventional name `firebolt` when you omit the argument.
+
 Use `kubectl firebolt --help` or `kubectl firebolt <command> --help` for the complete flag reference.
