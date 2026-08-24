@@ -310,6 +310,11 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		engine.Status.AppliedDefaultsName = ""
 		engine.Status.AppliedDefaultsHash = ""
 	}
+	// Keep the unmerged class for diagnostic attribution. overlayDefaultsOnClass
+	// folds Defaults into classInfo.Template, so validators that name the
+	// source object must see the pre-overlay class and the Defaults object
+	// separately. Render and reconcile consume the merged info.
+	resolvedClass := classInfo
 	classInfo = overlayDefaultsOnClass(defaultsInfo, classInfo)
 
 	current, err = r.getEngineState(ctx, engine, classInfo)
@@ -413,13 +418,13 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// resource-bound gate to mirror the webhook's validateTemplate→validateResources
 	// order. Refuse to render until the template is fixed; mirrors the
 	// FireboltInstance controller's validateInstanceTemplates gate.
-	if tplErrs := validateEngineTemplates(engine, classInfo, instanceInfo); len(tplErrs) > 0 {
+	if tplErrs := validateEngineTemplates(engine, resolvedClass, defaultsInfo, instanceInfo); len(tplErrs) > 0 {
 		return r.handleTemplateRejected(ctx, engine, tplErrs)
 	}
 
 	// Reported, never blocking: the render drops these, and the roll that carries
 	// the clean generation is the remedy — see engineAliasedSecretVolumes.
-	r.reportAliasedSecretVolumes(ctx, engine, classInfo, instanceInfo)
+	r.reportAliasedSecretVolumes(ctx, engine, resolvedClass, defaultsInfo, instanceInfo)
 
 	// Defense-in-depth for the FireboltEngine validating webhook's
 	// resource-bound check. Webhook ON: admission already rejected
@@ -435,7 +440,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// a class with oversized resources, referenced by an engine that
 	// inherits them, would bypass the controller-side gate even on the
 	// webhook-disabled path.
-	if boundsErrs := r.validateMergedEngineResources(engine, classInfo); len(boundsErrs) > 0 {
+	if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, defaultsInfo); len(boundsErrs) > 0 {
 		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
 	}
 
@@ -965,20 +970,39 @@ func (r *FireboltEngineReconciler) handleFireboltEngineClassError(ctx context.Co
 // validateMergedEngineResources is the controller-side counterpart of
 // the webhook's validateResources gate. It computes the effective
 // engine-container resources the way the reconciler will: engine
-// template wins wholesale when set, else class container, else empty
-// (which trivially passes any bound).
+// template wins wholesale when set, else Defaults container, else
+// class container, else empty (which trivially passes any bound).
+//
+// classInfo and defaultsInfo must be the unmerged sources. After
+// overlayDefaultsOnClass the merged template would make a Defaults
+// value look like it came from the class (or from an empty class name
+// when no engineClassRef is set).
 //
 // The merged field path stays on the engine
 // (spec.template.spec.containers[engine].resources.*) regardless of
 // source so error messages match the webhook's exactly. When the value
-// came from a class, the message detail names the class so the user
-// knows which side to edit.
-func (r *FireboltEngineReconciler) validateMergedEngineResources(engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo) field.ErrorList {
+// came from Defaults or a class, the message detail names that object
+// so the user knows which side to edit.
+func (r *FireboltEngineReconciler) validateMergedEngineResources(
+	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
+	defaultsInfo *FireboltEngineDefaultsInfo,
+) field.ErrorList {
 	mergedPath := field.NewPath("spec", "template", "spec", "containers").
 		Key(computev1alpha1.EngineContainerName).Child("resources")
 
 	if c := computev1alpha1.EngineContainerInTemplate(engine.Spec.Template); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		return r.ResourceBounds.Validate(c.Resources, mergedPath)
+	}
+	if c := computev1alpha1.EngineContainerInTemplate(defaultsTemplate(defaultsInfo)); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
+		errs := r.ResourceBounds.Validate(c.Resources, mergedPath)
+		for i := range errs {
+			errs[i].Detail = fmt.Sprintf(
+				"%s (inherited from FireboltEngineDefaults %q; set spec.template on this engine to override)",
+				errs[i].Detail, defaultsInfo.Name,
+			)
+		}
+		return errs
 	}
 	if c := classEngineContainer(classInfo); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		errs := r.ResourceBounds.Validate(c.Resources, mergedPath)
@@ -1032,18 +1056,23 @@ func validateEngineTemplate(engine *computev1alpha1.FireboltEngine) field.ErrorL
 // The Secret half depends on info, so it can only run after the instance gate has
 // resolved which Secrets this pod mounts.
 func validateEngineTemplates(
-	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
+	defaultsInfo *FireboltEngineDefaultsInfo,
+	info InstanceInfo,
 ) field.ErrorList {
 	errs := validateEngineTemplate(engine)
-	return append(errs, validateEngineSecretEnvRefs(engine, classInfo, info)...)
+	return append(errs, validateEngineSecretEnvRefs(engine, classInfo, defaultsInfo, info)...)
 }
 
 // engineTemplates returns the templates that merge into the engine pod, paired
-// with the field path each is reported under. The class template is included
-// because only the engine knows which Instance — and therefore which Secrets —
-// the class is being rendered against.
+// with the field path each is reported under. Class and Defaults templates
+// are the unmerged sources: only the engine knows which Instance — and
+// therefore which Secrets — those objects are being rendered against.
 func engineTemplates(
-	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo,
+	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
+	defaultsInfo *FireboltEngineDefaultsInfo,
 ) []struct {
 	tpl  *corev1.PodTemplateSpec
 	path *field.Path
@@ -1058,6 +1087,12 @@ func engineTemplates(
 			path *field.Path
 		}{engine.Spec.Template, field.NewPath("spec", "template", "spec")})
 	}
+	if tmpl := defaultsTemplate(defaultsInfo); tmpl != nil {
+		out = append(out, struct {
+			tpl  *corev1.PodTemplateSpec
+			path *field.Path
+		}{tmpl, field.NewPath("FireboltEngineDefaults").Key(defaultsInfo.Name).Child("spec", "template", "spec")})
+	}
 	if classInfo != nil && classInfo.Template != nil {
 		out = append(out, struct {
 			tpl  *corev1.PodTemplateSpec
@@ -1067,15 +1102,25 @@ func engineTemplates(
 	return out
 }
 
+func defaultsTemplate(defaultsInfo *FireboltEngineDefaultsInfo) *corev1.PodTemplateSpec {
+	if defaultsInfo == nil {
+		return nil
+	}
+	return defaultsInfo.Template
+}
+
 // validateEngineSecretEnvRefs rejects a template container that reads one of the
 // operator's own Secrets into its environment. An env reference is resolved once
 // at pod start and never re-synced, so declining to render is a complete remedy.
 func validateEngineSecretEnvRefs(
-	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
+	defaultsInfo *FireboltEngineDefaultsInfo,
+	info InstanceInfo,
 ) field.ErrorList {
 	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
-	for _, t := range engineTemplates(engine, classInfo) {
+	for _, t := range engineTemplates(engine, classInfo, defaultsInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
 			t.tpl.Spec.Containers, t.path.Child("containers"), isProtected, "engine")...)
 		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
@@ -1089,9 +1134,9 @@ func validateEngineSecretEnvRefs(
 // still happens.
 func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
 	ctx context.Context, engine *computev1alpha1.FireboltEngine,
-	classInfo *FireboltEngineClassInfo, info InstanceInfo,
+	classInfo *FireboltEngineClassInfo, defaultsInfo *FireboltEngineDefaultsInfo, info InstanceInfo,
 ) {
-	errs := engineAliasedSecretVolumes(engine, classInfo, info)
+	errs := engineAliasedSecretVolumes(engine, classInfo, defaultsInfo, info)
 	if len(errs) == 0 {
 		return
 	}
@@ -1117,11 +1162,14 @@ func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
 // from the rendered pod, so the new generation is clean, and this exists to say so
 // out loud.
 func engineAliasedSecretVolumes(
-	engine *computev1alpha1.FireboltEngine, classInfo *FireboltEngineClassInfo, info InstanceInfo,
+	engine *computev1alpha1.FireboltEngine,
+	classInfo *FireboltEngineClassInfo,
+	defaultsInfo *FireboltEngineDefaultsInfo,
+	info InstanceInfo,
 ) field.ErrorList {
 	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
-	for _, t := range engineTemplates(engine, classInfo) {
+	for _, t := range engineTemplates(engine, classInfo, defaultsInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretAliasVolumes(
 			t.tpl.Spec.Volumes, t.path.Child("volumes"), isProtected, "engine")...)
 	}

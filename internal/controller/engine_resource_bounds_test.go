@@ -370,3 +370,99 @@ func TestEngineReconcile_ClassResourceBoundsExceeded(t *testing.T) {
 		t.Errorf("StatefulSets = %d, want 0 (bounds gate must short-circuit before applyEngineState)", len(stsList.Items))
 	}
 }
+
+// TestEngineReconcile_DefaultsResourceBoundsExceeded pins that
+// oversized resources inherited from FireboltEngineDefaults trip the
+// same gate and name Defaults, not FireboltEngineClass — including
+// when no engineClassRef is set, so the message cannot fall back to
+// an empty class name.
+func TestEngineReconcile_DefaultsResourceBoundsExceeded(t *testing.T) {
+	sch := resourceBoundsTestScheme(t)
+	const (
+		ns           = "ns-a"
+		instName     = "parent-with-defaults"
+		engName      = "defaults-overbound"
+		defaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
+	)
+
+	instance := boundsTestInstance(instName, ns)
+	defaults := &computev1alpha1.FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: defaultsName, Namespace: ns},
+		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("64"),
+							},
+						},
+					}},
+				},
+			},
+		},
+	}
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef: instName,
+			Replicas:    1,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase: computev1alpha1.PhaseCreating,
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, defaults, engine).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
+		ResourceBounds: computev1alpha1.EngineResourceBounds{
+			MaxCPU: resource.MustParse("32"),
+		},
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+	}); err != nil {
+		t.Fatalf("Reconcile: unexpected error (gate should set status and requeue, not return err): %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
+	if cond == nil {
+		t.Fatal("Ready condition missing")
+	}
+	if cond.Reason != reasonResourceBoundsExceeded {
+		t.Errorf("Ready.Reason = %q, want %q (Defaults resources should trip the gate)",
+			cond.Reason, reasonResourceBoundsExceeded)
+	}
+	if !strings.Contains(cond.Message, "FireboltEngineDefaults") || !strings.Contains(cond.Message, defaultsName) {
+		t.Errorf("Ready.Message = %q, want it to name FireboltEngineDefaults %q so users know where to edit",
+			cond.Message, defaultsName)
+	}
+	if strings.Contains(cond.Message, "FireboltEngineClass") {
+		t.Errorf("Ready.Message = %q names FireboltEngineClass, which is the wrong source", cond.Message)
+	}
+
+	var stsList appsv1.StatefulSetList
+	if err := cli.List(context.Background(), &stsList, client.InNamespace(ns)); err != nil {
+		t.Fatalf("List StatefulSets: %v", err)
+	}
+	if len(stsList.Items) > 0 {
+		t.Errorf("StatefulSets = %d, want 0 (bounds gate must short-circuit before applyEngineState)", len(stsList.Items))
+	}
+}

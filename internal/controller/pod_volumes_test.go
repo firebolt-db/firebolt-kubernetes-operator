@@ -214,7 +214,7 @@ func TestEngineAliasedSecretVolumes(t *testing.T) {
 		Volumes: []corev1.Volume{secretVolume("innocuous", "admin-pw")},
 	}}
 
-	errs := engineAliasedSecretVolumes(engine, nil, info)
+	errs := engineAliasedSecretVolumes(engine, nil, nil, info)
 	if len(errs) != 1 {
 		t.Fatalf("want 1 error for the engine template, got %d: %v", len(errs), errs)
 	}
@@ -226,7 +226,7 @@ func TestEngineAliasedSecretVolumes(t *testing.T) {
 		classInfo := &FireboltEngineClassInfo{Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{secretVolume("cls", "inst-auth-signing")},
 		}}}
-		errs := engineAliasedSecretVolumes(&computev1alpha1.FireboltEngine{}, classInfo, info)
+		errs := engineAliasedSecretVolumes(&computev1alpha1.FireboltEngine{}, classInfo, nil, info)
 		if len(errs) != 1 {
 			t.Fatalf("want 1 error for the class template, got %d: %v", len(errs), errs)
 		}
@@ -236,7 +236,7 @@ func TestEngineAliasedSecretVolumes(t *testing.T) {
 	})
 
 	t.Run("no templates and no auth is clean", func(t *testing.T) {
-		if errs := engineAliasedSecretVolumes(&computev1alpha1.FireboltEngine{}, nil, InstanceInfo{}); len(errs) != 0 {
+		if errs := engineAliasedSecretVolumes(&computev1alpha1.FireboltEngine{}, nil, nil, InstanceInfo{}); len(errs) != 0 {
 			t.Errorf("want no errors, got %v", errs)
 		}
 	})
@@ -333,7 +333,7 @@ func TestValidateEngineSecretEnvRefs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			errs := validateEngineSecretEnvRefs(engine(tc.containers, tc.init), nil, info)
+			errs := validateEngineSecretEnvRefs(engine(tc.containers, tc.init), nil, nil, info)
 			if got := len(errs) > 0; got != tc.wantErr {
 				t.Fatalf("rejected=%v, want %v (errs: %v)", got, tc.wantErr, errs)
 			}
@@ -344,12 +344,32 @@ func TestValidateEngineSecretEnvRefs(t *testing.T) {
 		classInfo := &FireboltEngineClassInfo{Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 			Containers: []corev1.Container{secretEnvContainer("cls", "inst-auth-signing")},
 		}}}
-		errs := validateEngineSecretEnvRefs(&computev1alpha1.FireboltEngine{}, classInfo, info)
+		errs := validateEngineSecretEnvRefs(&computev1alpha1.FireboltEngine{}, classInfo, nil, info)
 		if len(errs) != 1 {
 			t.Fatalf("want 1 error for the class template, got %d: %v", len(errs), errs)
 		}
 		if msg := errs[0].Error(); !strings.Contains(msg, "engineClassRef") {
 			t.Errorf("error %q should point at the class", msg)
+		}
+	})
+
+	t.Run("the Defaults template is checked under its own path", func(t *testing.T) {
+		defaultsInfo := &FireboltEngineDefaultsInfo{
+			Name: computev1alpha1.FireboltEngineDefaultsDefaultName,
+			Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				Containers: []corev1.Container{secretEnvContainer("sid", "inst-auth-signing")},
+			}},
+		}
+		errs := validateEngineSecretEnvRefs(&computev1alpha1.FireboltEngine{}, nil, defaultsInfo, info)
+		if len(errs) != 1 {
+			t.Fatalf("want 1 error for the Defaults template, got %d: %v", len(errs), errs)
+		}
+		msg := errs[0].Error()
+		if !strings.Contains(msg, "FireboltEngineDefaults") || !strings.Contains(msg, defaultsInfo.Name) {
+			t.Errorf("error %q should point at FireboltEngineDefaults %q", msg, defaultsInfo.Name)
+		}
+		if strings.Contains(msg, "engineClassRef") {
+			t.Errorf("error %q should not point at a class", msg)
 		}
 	})
 }
@@ -369,16 +389,16 @@ func TestValidateEngineTemplatesBlocksEnvButNotVolumes(t *testing.T) {
 	e.Spec.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 		Volumes: []corev1.Volume{secretVolume("innocuous", "admin-pw")},
 	}}
-	if errs := validateEngineTemplates(e, nil, info); len(errs) != 0 {
+	if errs := validateEngineTemplates(e, nil, nil, info); len(errs) != 0 {
 		t.Errorf("a volume alias must not block the render, got %v", errs)
 	}
-	if errs := engineAliasedSecretVolumes(e, nil, info); len(errs) == 0 {
+	if errs := engineAliasedSecretVolumes(e, nil, nil, info); len(errs) == 0 {
 		t.Error("a volume alias must still be reported")
 	}
 
 	e.Spec.Template.Spec.Volumes = nil
 	e.Spec.Template.Spec.Containers = []corev1.Container{secretEnvContainer("sidecar", "admin-pw")}
-	if errs := validateEngineTemplates(e, nil, info); len(errs) == 0 {
+	if errs := validateEngineTemplates(e, nil, nil, info); len(errs) == 0 {
 		t.Error("an env Secret reference must block the render")
 	}
 }
