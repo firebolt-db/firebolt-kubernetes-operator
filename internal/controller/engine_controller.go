@@ -1501,9 +1501,11 @@ const (
 // resolveFireboltEngineDefaultsInfo lists FireboltEngineDefaults in the
 // engine's namespace. v1 admits one object: zero is optional unless
 // spec.requireDefaults is true; two or more is always fail-closed;
-// a single object with Ready=False/OperatorOwnedFieldSet is always
-// fail-closed. A missing Ready condition is allowed through so a
-// freshly created Defaults object does not deadlock engines.
+// a single object with Ready=False/OperatorOwnedFieldSet, or whose live
+// spec.template still carries operator-owned paths, is always
+// fail-closed. A missing Ready condition on an otherwise admissible
+// object is allowed through so a freshly created Defaults object does
+// not deadlock engines.
 func (r *FireboltEngineReconciler) resolveFireboltEngineDefaultsInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineDefaultsInfo, error) {
 	var list computev1alpha1.FireboltEngineDefaultsList
 	if err := r.List(ctx, &list, client.InNamespace(engine.Namespace)); err != nil {
@@ -1521,6 +1523,17 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineDefaultsInfo(ctx context
 			cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
 			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
 				errFireboltEngineDefaultsUnready, d.Name, d.Namespace, cond.Message)
+		}
+		// Re-run the allowlist on the live spec. The Ready condition is
+		// written by a different reconciler, so a webhook-off create (or a
+		// spec patch while DeletionBlocked) can reach this pass before
+		// OperatorOwnedFieldSet is stamped. Overlaying that spec would let
+		// reserved engine env win under kubelet last-wins.
+		if errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(
+			&d.Spec.Template, field.NewPath("spec", "template"),
+		); len(errs) > 0 {
+			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+				errFireboltEngineDefaultsUnready, d.Name, d.Namespace, errs.ToAggregate().Error())
 		}
 		return newFireboltEngineDefaultsInfo(d), nil
 	default:

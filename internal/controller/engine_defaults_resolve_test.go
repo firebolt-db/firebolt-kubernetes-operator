@@ -168,6 +168,53 @@ func TestResolveFireboltEngineDefaultsInfo_PassesOnDeletionBlocked(t *testing.T)
 	}
 }
 
+func defaultsWithReservedEngineEnv(name, namespace string) *computev1alpha1.FireboltEngineDefaults {
+	d := defaultsOnlyFixture(name, namespace)
+	d.Spec.Template.Spec.Containers = []corev1.Container{{
+		Name: computev1alpha1.EngineContainerName,
+		Env:  []corev1.EnvVar{{Name: "POD_INDEX", Value: "0"}},
+	}}
+	return d
+}
+
+func TestResolveFireboltEngineDefaultsInfo_BlocksOnLiveOwnedFieldsWithoutReady(t *testing.T) {
+	sch := classRefTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		defaultsWithReservedEngineEnv("firebolt", "ns-a"),
+	).Build()
+	r := engineRefTestReconciler(cli, sch)
+	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	if err == nil {
+		t.Fatal("expected errFireboltEngineDefaultsUnready when live spec has reserved env and Ready is unset")
+	}
+	if !stderrors.Is(err, errFireboltEngineDefaultsUnready) {
+		t.Errorf("error %q does not wrap errFireboltEngineDefaultsUnready", err)
+	}
+	if !strings.Contains(err.Error(), "POD_INDEX") {
+		t.Errorf("error %q should name the reserved env key", err)
+	}
+}
+
+func TestResolveFireboltEngineDefaultsInfo_BlocksOnLiveOwnedFieldsWhileDeletionBlocked(t *testing.T) {
+	d := defaultsWithReservedEngineEnv("firebolt", "ns-a")
+	apimeta.SetStatusCondition(&d.Status.Conditions, metav1.Condition{
+		Type:    computev1alpha1.FireboltEngineDefaultsConditionReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  reasonDeletionBlocked,
+		Message: "held",
+	})
+	sch := classRefTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(d).Build()
+	r := engineRefTestReconciler(cli, sch)
+	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	if err == nil {
+		t.Fatal("expected errFireboltEngineDefaultsUnready when DeletionBlocked Defaults spec carries reserved env")
+	}
+	if !stderrors.Is(err, errFireboltEngineDefaultsUnready) {
+		t.Errorf("error %q does not wrap errFireboltEngineDefaultsUnready", err)
+	}
+}
+
 func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
 	sch := classRefTestScheme(t)
 	const ns, instName, engName = "ns-a", "parent-instance", "engine-blocked"
