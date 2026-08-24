@@ -368,6 +368,147 @@ func TestFireboltEngineValidator_EngineWinsOverClassForBounds(t *testing.T) {
 	}
 }
 
+// engineDefaultsWithResources returns a FireboltEngineDefaults fixture
+// in the test namespace ("default") whose template carries the engine
+// container with the supplied resources block.
+func engineDefaultsWithResources(name string, resources corev1.ResourceRequirements) *FireboltEngineDefaults {
+	return &FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:      EngineContainerName,
+						Resources: resources,
+					}},
+				},
+			},
+		},
+	}
+}
+
+// fakeReaderWithObjects builds a fake client preloaded with arbitrary
+// objects. Used by the Defaults-tier bounds tests, which need a
+// FireboltEngineDefaults and optionally a FireboltEngineClass in the
+// same namespace.
+func fakeReaderWithObjects(t *testing.T, objs ...client.Object) client.Reader {
+	t.Helper()
+	sch := runtime.NewScheme()
+	if err := scheme.AddToScheme(sch); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := AddToScheme(sch); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	return fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
+}
+
+// TestFireboltEngineValidator_DefaultsResourcesExceedBound covers the
+// Defaults-aware tier of the bounds check: an engine without its own
+// template resources inherits the namespace FireboltEngineDefaults'
+// engine-container resources, so oversized values there must be
+// rejected at admission and attributed to the Defaults object — not to
+// a class, which the engine here does not even reference.
+func TestFireboltEngineValidator_DefaultsResourcesExceedBound(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithObjects(t, engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		})),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := fireboltEngineWithRef(nil)
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: Defaults cpu limit above bound should be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.limits") {
+		t.Errorf("ValidateCreate: error %q does not surface the merged template-container path", err.Error())
+	}
+	if !strings.Contains(err.Error(), "FireboltEngineDefaults") || !strings.Contains(err.Error(), "firebolt") {
+		t.Errorf("ValidateCreate: error %q should name the source FireboltEngineDefaults so the user knows where to edit", err.Error())
+	}
+	if strings.Contains(err.Error(), "FireboltEngineClass") {
+		t.Errorf("ValidateCreate: error %q names FireboltEngineClass, which is the wrong source", err.Error())
+	}
+}
+
+// TestFireboltEngineValidator_DefaultsWinOverClassForBounds covers the
+// merge precedence between the two inherited tiers: Defaults sits above
+// the class, so a class with oversized resources is masked by a
+// within-bounds Defaults override and the engine must be admitted.
+// Rejecting here would block a spec whose rendered resources are legal
+// and diverge from the webhook-off reconcile outcome.
+func TestFireboltEngineValidator_DefaultsWinOverClassForBounds(t *testing.T) {
+	class := &FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "compute-big", Namespace: "default"},
+		Spec: FireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+						},
+					}},
+				},
+			},
+		},
+	}
+	defaults := engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16")},
+	})
+	v := &FireboltEngineCustomValidator{
+		Reader:         fakeReaderWithObjects(t, class, defaults),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := fireboltEngineWithRef(ptr.To("compute-big"))
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: Defaults override masks the over-bound class, should pass; got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_EngineWinsOverDefaultsForBounds covers
+// the top of the precedence chain: an engine template with its own
+// within-bounds resources masks an over-bound Defaults object, exactly
+// as the renderer's whole-struct merge would.
+func TestFireboltEngineValidator_EngineWinsOverDefaultsForBounds(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithObjects(t, engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		})),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := engineWithResources(
+		nil,
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
+	)
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: engine wins, engine cpu within bound, should pass; got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_AmbiguousDefaultsSkipsTier pins the
+// resolution decision for a namespace holding two FireboltEngineDefaults
+// (possible with webhooks off): the tier is skipped rather than picking
+// one arbitrarily, so the bounds gate falls through to the class. The
+// reconciler independently fails the engine closed on ambiguity, so
+// admitting here cannot render an unchecked pod.
+func TestFireboltEngineValidator_AmbiguousDefaultsSkipsTier(t *testing.T) {
+	small := corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
+	}
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithObjects(t,
+			engineDefaultsWithResources("firebolt", small),
+			engineDefaultsWithResources("second", small),
+		),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	if _, err := v.ValidateCreate(context.Background(), fireboltEngineWithRef(nil)); err != nil {
+		t.Fatalf("ValidateCreate: ambiguous Defaults should skip the tier, not error; got %v", err)
+	}
+}
+
 // TestFireboltEngineValidator_ClassResourcesUnboundedWhenEngineEmpty
 // confirms the no-op path: a class without resources and an engine
 // without resources together pass the bounds gate, regardless of how

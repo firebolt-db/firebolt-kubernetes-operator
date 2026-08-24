@@ -126,11 +126,14 @@ func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev
 //     before any FireboltEngine that references it (GitOps tooling such as
 //     Argo CD sync-waves or Flux dependsOn handles this in practice).
 //
-//  2. Each value in spec.resources.requests / spec.resources.limits sits
-//     at or below the operator-configured ceiling in ResourceBounds. The
-//     bounds protect a namespace from accidentally admitting an engine
-//     whose requests would starve sibling workloads at scheduling time
-//     and an engine whose limits would OOM the node hosting it.
+//  2. The effective engine-container resources sit at or below the
+//     operator-configured ceiling in ResourceBounds, resolved with the
+//     same precedence the reconciler renders: the engine's own template
+//     wins wholesale, else the namespace FireboltEngineDefaults, else
+//     the referenced class. The bounds protect a namespace from
+//     accidentally admitting an engine whose requests would starve
+//     sibling workloads at scheduling time and an engine whose limits
+//     would OOM the node hosting it.
 //
 // The validator reads through mgr.GetAPIReader (live, non-cached) because
 // the informer cache may not yet have the FireboltEngineClass at the moment
@@ -194,16 +197,16 @@ func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ *Fir
 // resource that fails on both a class-ref typo and a resources bound
 // see both issues at once rather than fixing one and re-submitting.
 //
-// The class is loaded at most once per admission so the resources
-// gate can fall through to class-supplied values without a second
-// round-trip to the API server.
+// The class and the namespace FireboltEngineDefaults are each loaded at
+// most once per admission so the resources gate can fall through to
+// their values without further round-trips to the API server.
 func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *FireboltEngine) field.ErrorList {
 	var errs field.ErrorList
 	class, refErrs := v.resolveEngineClass(ctx, eng)
 	errs = append(errs, refErrs...)
 	errs = append(errs, v.validateTemplate(eng)...)
 	errs = append(errs, v.validateSecretAliases(ctx, eng)...)
-	errs = append(errs, v.validateResources(eng, class)...)
+	errs = append(errs, v.validateResources(eng, v.resolveEngineDefaults(ctx, eng), class)...)
 	return errs
 }
 
@@ -296,29 +299,69 @@ func (v *FireboltEngineCustomValidator) resolveEngineClass(
 	return class, nil
 }
 
+// resolveEngineDefaults returns the single FireboltEngineDefaults in the
+// engine's namespace, or nil when there is none to consume. Defaults is
+// ambient — engines never reference it by name — so resolution is a
+// namespace list, mirroring the reconciler's
+// resolveFireboltEngineDefaultsInfo.
+//
+// Unlike the class ref, an unresolvable Defaults never produces an
+// admission error here: a list failure degrades to the engine → class
+// fallthrough, and an ambiguous namespace (two or more objects) skips
+// the tier because the reconciler fails the engine closed on ambiguity
+// before rendering anything. Admission is the early warning for the
+// bounds gate; the reconciler's validateMergedEngineResources is the
+// guarantee.
+func (v *FireboltEngineCustomValidator) resolveEngineDefaults(ctx context.Context, eng *FireboltEngine) *FireboltEngineDefaults {
+	var list FireboltEngineDefaultsList
+	if err := v.Reader.List(ctx, &list, client.InNamespace(eng.Namespace)); err != nil {
+		return nil
+	}
+	if len(list.Items) != 1 {
+		return nil
+	}
+	return &list.Items[0]
+}
+
 // validateResources rejects engine-container resources entries whose
 // effective value (after the operator's merge layer) exceeds the
 // operator-configured maximum.
 //
 // Effective resources follow the same precedence the engine reconciler
 // uses: when the engine's own spec.template carries an engine container
-// with any requests/limits, that wins wholesale. Otherwise the class's
-// container resources fill in. Either way the value rendered onto the
-// StatefulSet pod must clear the ceiling, so both sources are checked
-// here — checking only the engine's own template would let a class
-// with oversized requests escape admission whenever the engine relies
-// on class-supplied resources.
+// with any requests/limits, that wins wholesale. Otherwise the
+// namespace FireboltEngineDefaults fills in, then the class. Whichever
+// source supplies the value rendered onto the StatefulSet pod must
+// clear the ceiling, so all three are checked here in render order —
+// checking a source the merge would mask (the class under a Defaults
+// override) would reject specs whose rendered resources are legal, and
+// skipping a source the merge honors would let oversized values
+// escape admission.
 //
 // The error's field path points at the merged location
 // (spec.template.spec.containers[engine].resources.*) regardless of
 // source: it is where the user should edit to override. When the value
-// came from class, the error detail names the class so the user knows
-// they can fix it on either side.
-func (v *FireboltEngineCustomValidator) validateResources(eng *FireboltEngine, class *FireboltEngineClass) field.ErrorList {
+// came from Defaults or a class, the error detail names that object so
+// the user knows which side to edit.
+func (v *FireboltEngineCustomValidator) validateResources(
+	eng *FireboltEngine, defaults *FireboltEngineDefaults, class *FireboltEngineClass,
+) field.ErrorList {
 	mergedPath := field.NewPath("spec", "template", "spec", "containers").Key(EngineContainerName).Child("resources")
 
 	if c := EngineContainerInTemplate(eng.Spec.Template); c != nil && HasContainerResources(c.Resources) {
 		return v.ResourceBounds.Validate(c.Resources, mergedPath)
+	}
+	if defaults != nil {
+		if c := EngineContainerInTemplate(&defaults.Spec.Template); c != nil && HasContainerResources(c.Resources) {
+			errs := v.ResourceBounds.Validate(c.Resources, mergedPath)
+			for i := range errs {
+				errs[i].Detail = fmt.Sprintf(
+					"%s (inherited from FireboltEngineDefaults %q; set spec.template on this engine to override)",
+					errs[i].Detail, defaults.Name,
+				)
+			}
+			return errs
+		}
 	}
 	if class != nil {
 		if c := EngineContainerInTemplate(&class.Spec.Template); c != nil && HasContainerResources(c.Resources) {
