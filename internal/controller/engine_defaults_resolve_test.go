@@ -188,7 +188,11 @@ func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
 			Replicas:        1,
 			RequireDefaults: ptr(true),
 		},
-		Status: computev1alpha1.FireboltEngineStatus{Phase: computev1alpha1.PhaseCreating},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:               computev1alpha1.PhaseCreating,
+			AppliedDefaultsName: "stale-defaults",
+			AppliedDefaultsHash: "stale-hash",
+		},
 	}
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
@@ -214,5 +218,9 @@ func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
 	}
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("Ready.Status = %s, want False", cond.Status)
+	}
+	if updated.Status.AppliedDefaultsName != "" || updated.Status.AppliedDefaultsHash != "" {
+		t.Errorf("AppliedDefaults = %q/%q, want cleared when Defaults resolve fails closed",
+			updated.Status.AppliedDefaultsName, updated.Status.AppliedDefaultsHash)
 	}
 }

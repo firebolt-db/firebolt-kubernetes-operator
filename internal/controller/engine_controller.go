@@ -1531,12 +1531,16 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineDefaultsInfo(ctx context
 
 // handleFireboltEngineDefaultsError surfaces fail-closed Defaults
 // states as ConditionReady=False and requeues. API-list failures
-// bubble up for backoff.
+// bubble up for backoff. AppliedDefaultsName/Hash are cleared so
+// status cannot keep naming an overlay that this pass refused to
+// resolve (removed, ambiguous, or OperatorOwnedFieldSet).
 func (r *FireboltEngineReconciler) handleFireboltEngineDefaultsError(ctx context.Context, engine *computev1alpha1.FireboltEngine, defaultsErr error) (ctrl.Result, error) {
 	reason, ok := fireboltEngineDefaultsConditionReason(defaultsErr)
 	if !ok {
 		return ctrl.Result{}, defaultsErr
 	}
+	engine.Status.AppliedDefaultsName = ""
+	engine.Status.AppliedDefaultsHash = ""
 	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 		Type:               computev1alpha1.ConditionReady,
 		Status:             metav1.ConditionFalse,
