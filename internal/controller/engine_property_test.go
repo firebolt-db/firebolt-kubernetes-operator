@@ -118,11 +118,14 @@ type engineSim struct {
 
 	// classInfo carries the resolved FireboltEngineClass template when the
 	// engine has spec.engineClassRef set. nil here models "no class
-	// referenced"; ApplyClassChange flips it between nil, classA, classB, …
-	// to exercise the stsMatchesSpec class-hash drift path. The Go-side
-	// equivalent of a class spec edit at runtime. Defaults overlay identity
+	// referenced and no Defaults overlay"; ApplyClassChange flips the
+	// class fields between empty, classA, classB, … to exercise the
+	// stsMatchesSpec class-hash drift path. Defaults overlay identity
 	// lives on the same struct (DefaultsName / DefaultsHash); ApplyDefaultsChange
 	// flips those fields so stsMatchesSpec sees Defaults-hash drift.
+	// Class actions preserve the Defaults overlay: the two gates are
+	// independent in production (overlayDefaultsOnClass folds Defaults
+	// over a nil class), so a class edit must not drop DefaultsHash.
 	classInfo *FireboltEngineClassInfo
 
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
@@ -445,11 +448,12 @@ func (m *engineSim) ApplySpecChange(t *rapid.T) {
 func (m *engineSim) ApplyClassChange(t *rapid.T) {
 	m.specDirty = true
 	v := rapid.IntRange(0, 99).Draw(t, "classVersion")
+	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
 	if v == 0 {
-		m.classInfo = nil
+		m.classInfo = classInfoWithDefaultsOverlay(nil, defaultsName, defaultsHash)
 		return
 	}
-	m.classInfo = &FireboltEngineClassInfo{
+	m.classInfo = classInfoWithDefaultsOverlay(&FireboltEngineClassInfo{
 		Name: fmt.Sprintf("class-v%d", v),
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -457,23 +461,21 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 			},
 		},
 		Hash: fmt.Sprintf("class-hash-v%d", v),
-	}
+	}, defaultsName, defaultsHash)
 }
 
 // ApplyClassUnready models the class-Ready gate by
-// nulling out the resolved classInfo. The production controller's
+// withholding the resolved class. The production controller's
 // resolveFireboltEngineClassInfo refuses to consume an unready class
 // and short-circuits the reconcile, so the compute layer never sees
-// the classInfo — the inner harness models that by setting m.classInfo
-// to nil. Distinct from drawing v=0 in ApplyClassChange (which models
-// "engineClassRef cleared by the user"): the engine still references
-// a class, the class is just transiently unready. The compute layer
-// cannot distinguish the two, which is exactly what the production
-// gate enforces — useful as an explicit named action so the state
-// space deliberately visits the transition rather than relying on
-// the implicit v=0 draw probability.
+// the class — the inner harness models that by clearing class Name /
+// Template / Hash. Distinct from drawing v=0 in ApplyClassChange (which
+// models "engineClassRef cleared by the user"). Defaults overlay is
+// independent of the class gate and is preserved, matching
+// overlayDefaultsOnClass(defaults, nil).
 func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
-	m.classInfo = nil
+	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
+	m.classInfo = classInfoWithDefaultsOverlay(nil, defaultsName, defaultsHash)
 }
 
 // ApplyDefaultsChange mutates the resolved FireboltEngineDefaults overlay
@@ -538,7 +540,8 @@ func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
 		m.spec.Template = &corev1.PodTemplateSpec{}
 	}
 	m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("engine-sa-v%d", v)
-	m.classInfo = &FireboltEngineClassInfo{
+	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
+	m.classInfo = classInfoWithDefaultsOverlay(&FireboltEngineClassInfo{
 		Name: fmt.Sprintf("class-conflict-v%d", v),
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -546,6 +549,45 @@ func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
 			},
 		},
 		Hash: fmt.Sprintf("class-conflict-hash-v%d", v),
+	}, defaultsName, defaultsHash)
+}
+
+// defaultsOverlayOf copies Defaults identity off classInfo so class
+// actions can replace the class without dropping the overlay.
+func defaultsOverlayOf(classInfo *FireboltEngineClassInfo) (name, hash string) {
+	if classInfo == nil {
+		return "", ""
+	}
+	return classInfo.DefaultsName, classInfo.DefaultsHash
+}
+
+// classInfoWithDefaultsOverlay returns class (or a Defaults-only
+// info when class is nil) with DefaultsName/Hash restored. Nil when
+// there is neither a class nor a Defaults overlay.
+func classInfoWithDefaultsOverlay(class *FireboltEngineClassInfo, defaultsName, defaultsHash string) *FireboltEngineClassInfo {
+	if class == nil {
+		if defaultsName == "" && defaultsHash == "" {
+			return nil
+		}
+		return &FireboltEngineClassInfo{DefaultsName: defaultsName, DefaultsHash: defaultsHash}
+	}
+	class.DefaultsName = defaultsName
+	class.DefaultsHash = defaultsHash
+	return class
+}
+
+func TestClassInfoWithDefaultsOverlay_PreservesDefaultsWithoutClass(t *testing.T) {
+	if got := classInfoWithDefaultsOverlay(nil, "", ""); got != nil {
+		t.Errorf("empty overlay = %+v, want nil", got)
+	}
+	got := classInfoWithDefaultsOverlay(nil, "firebolt", "hash-1")
+	if got == nil || got.DefaultsName != "firebolt" || got.DefaultsHash != "hash-1" || got.Name != "" {
+		t.Errorf("defaults-only = %+v, want Name empty and Defaults set", got)
+	}
+	cls := &FireboltEngineClassInfo{Name: "c", Hash: "ch"}
+	got = classInfoWithDefaultsOverlay(cls, "firebolt", "hash-1")
+	if got.Name != "c" || got.Hash != "ch" || got.DefaultsName != "firebolt" || got.DefaultsHash != "hash-1" {
+		t.Errorf("class+defaults = %+v, want class fields and Defaults set", got)
 	}
 }
 
