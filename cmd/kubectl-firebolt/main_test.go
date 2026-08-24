@@ -58,6 +58,46 @@ func TestMarshalObjectListIsKubectlStyle(t *testing.T) {
 	}
 }
 
+func TestMarshalObjectIsSingleCR(t *testing.T) {
+	obj := v1alpha1.FireboltEngineDefaults{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "compute.firebolt.io/v1alpha1", Kind: "FireboltEngineDefaults"},
+		ObjectMeta: metav1.ObjectMeta{Name: "firebolt"},
+		Status: v1alpha1.FireboltEngineDefaultsStatus{
+			BoundEngines: 3,
+			Conditions: []metav1.Condition{{
+				Type:   v1alpha1.FireboltEngineDefaultsConditionReady,
+				Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+	out, err := marshalObject(outJSON, obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if got["kind"] != "FireboltEngineDefaults" {
+		t.Errorf("kind = %v, want FireboltEngineDefaults (not a List wrapper)", got["kind"])
+	}
+	status, ok := got["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("status missing or not an object: %v", got["status"])
+	}
+	if status["boundEngines"] != float64(3) {
+		t.Errorf("boundEngines = %v, want 3", status["boundEngines"])
+	}
+	conds, ok := status["conditions"].([]any)
+	if !ok || len(conds) != 1 {
+		t.Fatalf("conditions = %v, want a 1-element Ready array", status["conditions"])
+	}
+	cond, ok := conds[0].(map[string]any)
+	if !ok || cond["type"] != "Ready" || cond["status"] != "True" {
+		t.Errorf("Ready condition = %v, want type=Ready status=True", conds[0])
+	}
+}
+
 func TestValidateOutput(t *testing.T) {
 	for _, ok := range []string{outTable, outWide, outJSON, outYAML, outName, ""} {
 		if err := validateOutput(ok); err != nil {

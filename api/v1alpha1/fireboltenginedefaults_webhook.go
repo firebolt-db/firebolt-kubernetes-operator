@@ -30,9 +30,11 @@ import (
 // FireboltEngineDefaultsCustomValidator implements the validating
 // admission webhook for FireboltEngineDefaults. Create and Update
 // reject operator-owned pod-template paths via
-// ValidateOperatorOwnedPodTemplate. Delete is refused while at least
-// one FireboltEngine exists in the same namespace: Defaults is ambient
-// and every engine in the namespace merges it.
+// ValidateOperatorOwnedPodTemplate. Create also refuses a second
+// object in the same namespace (v1 admits at most one). Delete is
+// refused while at least one FireboltEngine exists in the same
+// namespace: Defaults is ambient and every engine in the namespace
+// merges it.
 //
 // +kubebuilder:object:generate=false
 type FireboltEngineDefaultsCustomValidator struct {
@@ -50,9 +52,13 @@ func SetupFireboltEngineDefaultsWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// ValidateCreate rejects operator-owned paths on spec.template.
-func (v *FireboltEngineDefaultsCustomValidator) ValidateCreate(_ context.Context, d *FireboltEngineDefaults) (admission.Warnings, error) {
-	return nil, validateFireboltEngineDefaultsSpec(d).ToAggregate()
+// ValidateCreate rejects operator-owned paths on spec.template and
+// refuses a second FireboltEngineDefaults in the same namespace.
+func (v *FireboltEngineDefaultsCustomValidator) ValidateCreate(ctx context.Context, d *FireboltEngineDefaults) (admission.Warnings, error) {
+	if errs := validateFireboltEngineDefaultsSpec(d); len(errs) > 0 {
+		return nil, errs.ToAggregate()
+	}
+	return nil, v.validateUniqueInNamespace(ctx, d)
 }
 
 // ValidateUpdate enforces the same operator-owned-path rejection set
@@ -89,4 +95,32 @@ func (v *FireboltEngineDefaultsCustomValidator) ValidateDelete(ctx context.Conte
 
 func validateFireboltEngineDefaultsSpec(d *FireboltEngineDefaults) field.ErrorList {
 	return ValidateOperatorOwnedPodTemplate(&d.Spec.Template, field.NewPath("spec", "template"))
+}
+
+// validateUniqueInNamespace refuses create when another
+// FireboltEngineDefaults already exists in the same namespace. The
+// incoming object is not stored yet, so any listed peer is a
+// conflict. An object of the same name is skipped so a replayed
+// create of the admitted object is not rejected as a sibling.
+func (v *FireboltEngineDefaultsCustomValidator) validateUniqueInNamespace(ctx context.Context, d *FireboltEngineDefaults) error {
+	if v.Reader == nil {
+		return errors.New("FireboltEngineDefaults create webhook has no API reader configured")
+	}
+	var list FireboltEngineDefaultsList
+	if err := v.Reader.List(ctx, &list, client.InNamespace(d.Namespace)); err != nil {
+		return fmt.Errorf("listing FireboltEngineDefaults in namespace %q to enforce at most one: %w", d.Namespace, err)
+	}
+	for i := range list.Items {
+		existing := &list.Items[i]
+		if existing.Name == d.Name {
+			continue
+		}
+		return field.Forbidden(
+			field.NewPath("metadata", "name"),
+			fmt.Sprintf(
+				"FireboltEngineDefaults %q already exists in namespace %q; v1 admits at most one object per namespace",
+				existing.Name, d.Namespace),
+		)
+	}
+	return nil
 }

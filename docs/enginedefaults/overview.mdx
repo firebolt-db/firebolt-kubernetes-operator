@@ -8,7 +8,7 @@ sidebarTitle: Overview
 
 `FireboltEngineDefaults` is an optional namespaced resource that holds ambient engine settings for a namespace: a pod-template fragment plus defaults for `storage` and `customEngineConfig`. Every Firebolt Engine in the same namespace can consume it. Engines do not reference the object by name.
 
-v1 admits one `FireboltEngineDefaults` per namespace. The conventional name is `firebolt`.
+v1 admits one `FireboltEngineDefaults` per namespace. The conventional name is `firebolt`. Creating a second object in the same namespace is rejected.
 
 The Firebolt Operator validates `spec.template` with the same operator-owned-path rules as `FireboltEngineClass`, and reports `Ready` on the object. Deleting the object is refused while any Firebolt Engine exists in the namespace.
 

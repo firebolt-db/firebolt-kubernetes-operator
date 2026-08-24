@@ -206,11 +206,7 @@ func newDefaultsGetCmd() *cobra.Command {
 				return err
 			}
 			if output == outJSON || output == outYAML {
-				return printObjects(output, []infra.EngineDefaultsSummary{{
-					Name:         obj.Name,
-					BoundEngines: obj.Status.BoundEngines,
-					Ready:        nil,
-				}})
+				return printObject(output, obj)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", resourceDefaults, obj.Name)
 			return nil
@@ -555,6 +551,29 @@ func marshalObjectList(format string, items any) ([]byte, error) {
 		return yaml.Marshal(list)
 	}
 	return json.MarshalIndent(list, "", "  ")
+}
+
+// marshalObject renders a single typed CR as JSON or YAML, matching
+// `kubectl get <name> -o json|yaml` rather than a List wrapper.
+func marshalObject(format string, obj any) ([]byte, error) {
+	if format == outYAML {
+		return yaml.Marshal(obj)
+	}
+	return json.MarshalIndent(obj, "", "  ")
+}
+
+// printObject writes a single typed CR in the given machine-readable format.
+func printObject(format string, obj any) error {
+	out, err := marshalObject(format, obj)
+	if err != nil {
+		return err
+	}
+	if format == outYAML {
+		fmt.Print(string(out)) // yaml.Marshal already ends with a newline
+	} else {
+		fmt.Println(string(out))
+	}
+	return nil
 }
 
 // printObjects writes the listed objects as a kubectl-style List in the given

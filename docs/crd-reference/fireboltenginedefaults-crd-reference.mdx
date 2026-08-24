@@ -6,7 +6,7 @@ sidebarTitle: FireboltEngineDefaults CRD reference
 
 ## Spec reference
 
-`FireboltEngineDefaults` is a namespaced ambient overlay. v1 admits one object per namespace. The conventional name is `firebolt`. Engines do not reference it by name.
+`FireboltEngineDefaults` is a namespaced ambient overlay. v1 admits one object per namespace; creating a second object in the same namespace is rejected. The conventional name is `firebolt`. Engines do not reference it by name.
 
 | Field | Required | Default | Description |
 |---|---|---|---|

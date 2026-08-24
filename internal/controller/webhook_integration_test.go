@@ -512,6 +512,39 @@ func TestWebhook_FireboltEngineDefaults_RejectsOwnedField(t *testing.T) {
 	}
 }
 
+func TestWebhook_FireboltEngineDefaults_RejectsSecondInNamespace(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	first := &computev1alpha1.FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "first-defaults", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: "engine-sa",
+				},
+			},
+		},
+	}
+	if err := suite.cli.Create(ctx, first); err != nil {
+		t.Fatalf("Create first Defaults: %v", err)
+	}
+	t.Cleanup(func() { _ = suite.cli.Delete(context.Background(), first) })
+
+	second := first.DeepCopy()
+	second.Name = "second-defaults"
+	second.ResourceVersion = ""
+	err := suite.cli.Create(ctx, second)
+	if err == nil {
+		_ = suite.cli.Delete(ctx, second)
+		t.Fatal("Create: expected admission rejection for a second Defaults in the namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), first.Name) {
+		t.Errorf("Create error %q does not name the existing object %q", err.Error(), first.Name)
+	}
+}
+
 // TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound verifies the
 // delete-time gate over the wire: a DELETE on a FireboltEngineClass that
 // has at least one FireboltEngine referencing it via

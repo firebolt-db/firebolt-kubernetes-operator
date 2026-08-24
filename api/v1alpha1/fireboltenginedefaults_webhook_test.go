@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -59,8 +60,15 @@ func validFireboltEngineDefaults() *FireboltEngineDefaults {
 	}
 }
 
+func defaultsValidatorWithObjects(t *testing.T, objs ...client.Object) *FireboltEngineDefaultsCustomValidator {
+	t.Helper()
+	scheme := fireboltEngineClassWebhookScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	return &FireboltEngineDefaultsCustomValidator{Reader: cli}
+}
+
 func TestFireboltEngineDefaultsValidator_CreateAcceptsValid(t *testing.T) {
-	v := &FireboltEngineDefaultsCustomValidator{}
+	v := defaultsValidatorWithObjects(t)
 	if _, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults()); err != nil {
 		t.Fatalf("ValidateCreate: unexpected error on valid spec: %v", err)
 	}
@@ -70,6 +78,37 @@ func TestFireboltEngineDefaultsValidator_UpdateAcceptsValid(t *testing.T) {
 	v := &FireboltEngineDefaultsCustomValidator{}
 	if _, err := v.ValidateUpdate(context.Background(), validFireboltEngineDefaults(), validFireboltEngineDefaults()); err != nil {
 		t.Fatalf("ValidateUpdate: unexpected error on valid spec: %v", err)
+	}
+}
+
+func TestFireboltEngineDefaultsValidator_CreateRejectsSecondInNamespace(t *testing.T) {
+	existing := validFireboltEngineDefaults()
+	v := defaultsValidatorWithObjects(t, existing)
+	second := validFireboltEngineDefaults()
+	second.Name = "other"
+	_, err := v.ValidateCreate(context.Background(), second)
+	if err == nil {
+		t.Fatal("ValidateCreate: expected error when a Defaults object already exists in the namespace")
+	}
+	if !strings.Contains(err.Error(), existing.Name) {
+		t.Errorf("error %q does not name the existing object %q", err, existing.Name)
+	}
+}
+
+func TestFireboltEngineDefaultsValidator_CreateAllowsWhenOtherNamespaceHasDefaults(t *testing.T) {
+	other := validFireboltEngineDefaults()
+	other.Namespace = "other-ns"
+	v := defaultsValidatorWithObjects(t, other)
+	if _, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults()); err != nil {
+		t.Fatalf("ValidateCreate: Defaults in another namespace must not block: %v", err)
+	}
+}
+
+func TestFireboltEngineDefaultsValidator_CreateRequiresReader(t *testing.T) {
+	v := &FireboltEngineDefaultsCustomValidator{}
+	_, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults())
+	if err == nil {
+		t.Fatal("ValidateCreate: expected error when Reader is nil")
 	}
 }
 
