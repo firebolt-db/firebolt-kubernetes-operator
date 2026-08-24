@@ -344,7 +344,7 @@ func newEngineCreateCmd() *cobra.Command {
 			// resolve the effective config rather than only checking the flags.
 			// Warn (don't block): the operator doesn't require storage, and it may
 			// be supplied another way.
-			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) {
+			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) && !defaultsProvideStorage(cmd.Context(), c) {
 				warnNoStorage(engineType)
 			}
 			if err := c.CreateEngine(cmd.Context(), spec); err != nil {
@@ -449,16 +449,26 @@ func classProvidesStorage(ctx context.Context, c *infra.Client, engineType strin
 	return ok
 }
 
+func defaultsProvideStorage(ctx context.Context, c *infra.Client) bool {
+	ok, err := c.EngineDefaultsProvidesStorage(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not verify whether FireboltEngineDefaults supplies object storage: %v\n", err)
+		return false
+	}
+	return ok
+}
+
 // warnNoStorage warns that the engine has no object storage source — neither a
-// --bucket nor a storage-providing class — so it may never reach Ready.
+// --bucket, a storage-providing class, nor FireboltEngineDefaults — so it may
+// never reach Ready.
 func warnNoStorage(engineType string) {
 	if engineType != "" {
-		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket nor engine class %q "+
-			"(customEngineConfig.storage) provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
+		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket, engine class %q, "+
+			"nor FireboltEngineDefaults provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket nor --type given; "+
-		"the engine may not become Ready unless storage is provided another way")
+	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket, --type, nor FireboltEngineDefaults "+
+		"provides a bucket; the engine may not become Ready unless storage is provided another way")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -321,6 +321,24 @@ func (c *Client) EngineClassProvidesStorage(ctx context.Context, name string) (b
 	return customConfigHasBucket(class.Spec.CustomEngineConfig), nil
 }
 
+// EngineDefaultsProvidesStorage reports whether the single
+// FireboltEngineDefaults object in the namespace carries object-storage
+// config. Zero or many objects are treated as no storage from Defaults.
+func (c *Client) EngineDefaultsProvidesStorage(ctx context.Context) (bool, error) {
+	out, err := c.kubectl.get(c.namespace, resourceEngineDefaults).Capture(ctx)
+	if err != nil {
+		return false, err
+	}
+	var list v1alpha1.FireboltEngineDefaultsList
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		return false, fmt.Errorf("parsing FireboltEngineDefaults list: %w", err)
+	}
+	if len(list.Items) != 1 {
+		return false, nil
+	}
+	return customConfigHasBucket(list.Items[0].Spec.CustomEngineConfig), nil
+}
+
 // customConfigHasBucket reports whether a customEngineConfig payload sets a
 // non-empty storage.managed_table_bucket_name — the field the engine needs for
 // managed object storage, written the same way by --bucket and by a class.

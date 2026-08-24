@@ -9,7 +9,7 @@ The Firebolt Operator manages four custom resources:
 - **FireboltInstance** provisions shared PostgreSQL, Metadata Service, and Gateway infrastructure in a namespace.
 - **FireboltEngine** runs the compute nodes that serve queries.
 - **FireboltEngineClass** provides optional shared defaults for Engines in the same namespace.
-- **FireboltEngineDefaults** is an optional ambient overlay for the namespace. The Firebolt Operator validates it and reports Ready. See [FireboltEngineDefaults overview](./enginedefaults/overview).
+- **FireboltEngineDefaults** is an optional ambient overlay merged under every Engine in the namespace (service account, storage, credential env, `customEngineConfig`). See [FireboltEngineDefaults overview](./enginedefaults/overview).
 
 ## Resource relationships
 
@@ -31,7 +31,7 @@ The Firebolt Operator manages four custom resources:
 
 Every Engine references one Instance in the same namespace through `spec.instanceRef`. The Instance must publish a ready Metadata Service before the Engine can start or materialize configuration in the `stable`, `stopped`, or `creating` phases. The Engine reports `InstanceReady=False` and waits when that gate fails. The `switching`, `draining`, and `cleaning` phases operate on already-rendered resources and finish without reading the Instance.
 
-An Engine may also reference one EngineClass in the same namespace through `spec.engineClassRef`. Engine settings take precedence over matching class settings, and class settings take precedence over Firebolt Operator defaults. See [EngineClass configuration inheritance](./engineclass/configuration-inheritance).
+An Engine may also reference one EngineClass in the same namespace through `spec.engineClassRef`. Settings resolve Engine, then FireboltEngineDefaults, then EngineClass, then Firebolt Operator defaults. See [EngineClass configuration inheritance](./engineclass/configuration-inheritance).
 
 ## Query traffic
 

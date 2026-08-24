@@ -552,6 +552,17 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef, nil)
 }
 
+// CreateEngineWithRequireDefaults creates a FireboltEngine that must
+// observe a Ready FireboltEngineDefaults object in the namespace before
+// becoming Ready.
+func CreateEngineWithRequireDefaults(ctx context.Context, instanceName, name string, replicas int) error {
+	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
+		func(engine *computev1alpha1.FireboltEngine) {
+			require := true
+			engine.Spec.RequireDefaults = &require
+		})
+}
+
 // CreateEngineWithDrainCheck creates a FireboltEngine like CreateEngine but
 // with the query-liveness drain check ON (the suite default is off because
 // most specs don't provision the ApiserverProxy scrape path the in-process
@@ -728,6 +739,53 @@ func CreateFireboltEngineClass(ctx context.Context, name, image string) error {
 		},
 	}
 	return cl.Create(ctx, class)
+}
+
+// CreateFireboltEngineDefaults creates a FireboltEngineDefaults object
+// in testNamespace with the given service account.
+func CreateFireboltEngineDefaults(ctx context.Context, name, serviceAccount string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	defaults := &computev1alpha1.FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{ServiceAccountName: serviceAccount},
+			},
+		},
+	}
+	return cl.Create(ctx, defaults)
+}
+
+// UpdateFireboltEngineDefaultsServiceAccount patches spec.template.spec.serviceAccountName.
+func UpdateFireboltEngineDefaultsServiceAccount(ctx context.Context, name, serviceAccount string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	for i := 0; i < 10; i++ {
+		defaults := &computev1alpha1.FireboltEngineDefaults{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, defaults); err != nil {
+			return err
+		}
+		defaults.Spec.Template.Spec.ServiceAccountName = serviceAccount
+		if err := cl.Update(ctx, defaults); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("updating FireboltEngineDefaults %q service account to %q: conflict after 10 retries", name, serviceAccount)
+}
+
+// DeleteFireboltEngineDefaults deletes a FireboltEngineDefaults object.
+func DeleteFireboltEngineDefaults(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	defaults := &computev1alpha1.FireboltEngineDefaults{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	return cl.Delete(ctx, defaults)
 }
 
 // UpdateFireboltEngineClassImage mutates the engine container image on an

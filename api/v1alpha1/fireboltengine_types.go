@@ -313,6 +313,18 @@ type FireboltEngineSpec struct {
 	// +optional
 	EngineClassRef *string `json:"engineClassRef,omitempty"`
 
+	// RequireDefaults, when true, keeps the engine from becoming Ready
+	// until the namespace has exactly one Ready FireboltEngineDefaults
+	// object. The default (false / unset) keeps existing engines working
+	// in namespaces that have no Defaults object. A present but unready
+	// or ambiguous Defaults object always fails closed, even when this
+	// field is unset.
+	//
+	// The default is applied by the controller, not the CRD, so an unset
+	// value stays empty at admission.
+	// +optional
+	RequireDefaults *bool `json:"requireDefaults,omitempty"`
+
 	// Replicas is the number of engine nodes. Set to 0 to stop the
 	// engine: the operator tears down the active generation (honoring
 	// spec.rollout for drain behavior) and leaves the CR in the
@@ -331,14 +343,12 @@ type FireboltEngineSpec struct {
 	// podSecurityContext) and any sidecars / init containers / extra
 	// volumes they need.
 	//
-	// When spec.engineClassRef is also set, the operator first merges
-	// the class's spec.template underneath the operator defaults, then
-	// this template on top — engine wins on conflict (whole-struct
-	// ownership for pointer fields; list-type fields like tolerations
-	// / initContainers / sidecars / volumes concatenate class-first
-	// then engine). The same field-by-field precedence the
-	// FireboltEngineClass merge layer has always used now applies to
-	// the engine's own template as the topmost layer.
+	// When a FireboltEngineDefaults object and/or spec.engineClassRef
+	// are present, the operator merges
+	// engine > Defaults > class > operator default — engine wins on
+	// conflict (whole-struct ownership for pointer fields; list-type
+	// fields like tolerations / initContainers / sidecars / volumes
+	// concatenate lower-layer first).
 	//
 	// The validating webhook rejects user input on paths the operator
 	// owns end-to-end — see FireboltEngineClassPodTemplateRules in
@@ -577,6 +587,18 @@ type FireboltEngineStatus struct {
 	// activeGeneration serialize zero for the same reason.
 	// +optional
 	ReadyReplicas int `json:"readyReplicas"`
+
+	// AppliedDefaultsName is the FireboltEngineDefaults object merged
+	// into this engine when one exists in the namespace. Empty when
+	// the namespace has no Defaults object.
+	// +optional
+	AppliedDefaultsName string `json:"appliedDefaultsName,omitempty"`
+
+	// AppliedDefaultsHash is the content hash of the Defaults spec
+	// last applied to this engine. Empty when no Defaults object
+	// was merged.
+	// +optional
+	AppliedDefaultsHash string `json:"appliedDefaultsHash,omitempty"`
 
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional

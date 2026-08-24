@@ -62,6 +62,13 @@ const (
 	// engineClassRef changes and in-place edits to the referenced class.
 	AnnotationEngineClassHash = "firebolt.io/engine-class-hash"
 
+	// AnnotationEngineDefaultsHash records a content-hash of the
+	// FireboltEngineDefaults spec merged under this engine. Absent when
+	// the namespace has no Defaults object. stsMatchesSpec compares it
+	// to the freshly resolved Defaults hash and rolls a new generation
+	// on any mismatch.
+	AnnotationEngineDefaultsHash = "firebolt.io/engine-defaults-hash"
+
 	// AnnotationCustomEngineConfigHash records a content-hash of the
 	// spec.customEngineConfig payload baked into the engine ConfigMap.
 	// stsMatchesSpec compares against this to detect changes that require

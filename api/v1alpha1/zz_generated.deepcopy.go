@@ -620,6 +620,11 @@ func (in *FireboltEngineSpec) DeepCopyInto(out *FireboltEngineSpec) {
 		*out = new(string)
 		**out = **in
 	}
+	if in.RequireDefaults != nil {
+		in, out := &in.RequireDefaults, &out.RequireDefaults
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Template != nil {
 		in, out := &in.Template, &out.Template
 		*out = new(v1.PodTemplateSpec)

@@ -299,6 +299,18 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if classErr != nil {
 		return r.handleFireboltEngineClassError(ctx, engine, classErr)
 	}
+	defaultsInfo, defaultsErr := r.resolveFireboltEngineDefaultsInfo(ctx, engine)
+	if defaultsErr != nil {
+		return r.handleFireboltEngineDefaultsError(ctx, engine, defaultsErr)
+	}
+	if defaultsInfo != nil {
+		engine.Status.AppliedDefaultsName = defaultsInfo.Name
+		engine.Status.AppliedDefaultsHash = defaultsInfo.Hash
+	} else {
+		engine.Status.AppliedDefaultsName = ""
+		engine.Status.AppliedDefaultsHash = ""
+	}
+	classInfo = overlayDefaultsOnClass(defaultsInfo, classInfo)
 
 	current, err = r.getEngineState(ctx, engine, classInfo)
 	if err != nil {
@@ -1426,6 +1438,83 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 	return newFireboltEngineClassInfo(class), nil
 }
 
+var (
+	errFireboltEngineDefaultsRequired  = stderrors.New("FireboltEngineDefaults is required in this namespace")
+	errFireboltEngineDefaultsAmbiguous = stderrors.New("namespace has more than one FireboltEngineDefaults")
+	errFireboltEngineDefaultsUnready   = stderrors.New("FireboltEngineDefaults is not Ready")
+)
+
+const (
+	reasonFireboltEngineDefaultsRequired  = "FireboltEngineDefaultsRequired"
+	reasonFireboltEngineDefaultsAmbiguous = "FireboltEngineDefaultsAmbiguous"
+	reasonFireboltEngineDefaultsUnready   = "FireboltEngineDefaultsUnready"
+)
+
+// resolveFireboltEngineDefaultsInfo lists FireboltEngineDefaults in the
+// engine's namespace. v1 admits one object: zero is optional unless
+// spec.requireDefaults is true; two or more is always fail-closed;
+// a single object with Ready=False/OperatorOwnedFieldSet is always
+// fail-closed. A missing Ready condition is allowed through so a
+// freshly created Defaults object does not deadlock engines.
+func (r *FireboltEngineReconciler) resolveFireboltEngineDefaultsInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineDefaultsInfo, error) {
+	var list computev1alpha1.FireboltEngineDefaultsList
+	if err := r.List(ctx, &list, client.InNamespace(engine.Namespace)); err != nil {
+		return nil, fmt.Errorf("listing FireboltEngineDefaults in namespace %q: %w", engine.Namespace, err)
+	}
+	switch len(list.Items) {
+	case 0:
+		if engine.Spec.RequireDefaults != nil && *engine.Spec.RequireDefaults {
+			return nil, fmt.Errorf("%w: namespace %q has no FireboltEngineDefaults", errFireboltEngineDefaultsRequired, engine.Namespace)
+		}
+		return nil, nil
+	case 1:
+		d := &list.Items[0]
+		if cond := apimeta.FindStatusCondition(d.Status.Conditions, computev1alpha1.FireboltEngineDefaultsConditionReady); cond != nil &&
+			cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
+			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+				errFireboltEngineDefaultsUnready, d.Name, d.Namespace, cond.Message)
+		}
+		return newFireboltEngineDefaultsInfo(d), nil
+	default:
+		return nil, fmt.Errorf("%w: namespace %q has %d FireboltEngineDefaults objects",
+			errFireboltEngineDefaultsAmbiguous, engine.Namespace, len(list.Items))
+	}
+}
+
+// handleFireboltEngineDefaultsError surfaces fail-closed Defaults
+// states as ConditionReady=False and requeues. API-list failures
+// bubble up for backoff.
+func (r *FireboltEngineReconciler) handleFireboltEngineDefaultsError(ctx context.Context, engine *computev1alpha1.FireboltEngine, defaultsErr error) (ctrl.Result, error) {
+	reason, ok := fireboltEngineDefaultsConditionReason(defaultsErr)
+	if !ok {
+		return ctrl.Result{}, defaultsErr
+	}
+	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: engine.Generation,
+		Reason:             reason,
+		Message:            defaultsErr.Error(),
+	})
+	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func fireboltEngineDefaultsConditionReason(err error) (string, bool) {
+	switch {
+	case stderrors.Is(err, errFireboltEngineDefaultsRequired):
+		return reasonFireboltEngineDefaultsRequired, true
+	case stderrors.Is(err, errFireboltEngineDefaultsAmbiguous):
+		return reasonFireboltEngineDefaultsAmbiguous, true
+	case stderrors.Is(err, errFireboltEngineDefaultsUnready):
+		return reasonFireboltEngineDefaultsUnready, true
+	default:
+		return "", false
+	}
+}
+
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's
 // spec.instanceRef and returns its metadata endpoint, instance ID, and (when
 // auth is enabled) the resolved auth config. Reconciliation is blocked until
@@ -1637,6 +1726,8 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 			handler.EnqueueRequestsFromMapFunc(r.instanceToEngines)).
 		Watches(&computev1alpha1.FireboltEngineClass{},
 			handler.EnqueueRequestsFromMapFunc(r.engineClassToEngines)).
+		Watches(&computev1alpha1.FireboltEngineDefaults{},
+			handler.EnqueueRequestsFromMapFunc(r.engineDefaultsToEngines)).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
@@ -1680,6 +1771,27 @@ func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj
 		if ref == nil || *ref != className {
 			continue
 		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      engineList.Items[i].Name,
+				Namespace: engineList.Items[i].Namespace,
+			},
+		})
+	}
+	return requests
+}
+
+// engineDefaultsToEngines maps a FireboltEngineDefaults event to
+// reconcile requests for every FireboltEngine in the same namespace.
+// Defaults is ambient, so every engine consumes it.
+func (r *FireboltEngineReconciler) engineDefaultsToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+	engineList := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engineList, client.InNamespace(obj.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for FireboltEngineDefaults watch", "namespace", obj.GetNamespace())
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(engineList.Items))
+	for i := range engineList.Items {
 		requests = append(requests, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      engineList.Items[i].Name,

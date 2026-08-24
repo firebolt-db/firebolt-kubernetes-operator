@@ -268,6 +268,18 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              requireDefaults:
+                description: |-
+                  RequireDefaults, when true, keeps the engine from becoming Ready
+                  until the namespace has exactly one Ready FireboltEngineDefaults
+                  object. The default (false / unset) keeps existing engines working
+                  in namespaces that have no Defaults object. A present but unready
+                  or ambiguous Defaults object always fails closed, even when this
+                  field is unset.
+
+                  The default is applied by the controller, not the CRD, so an unset
+                  value stays empty at admission.
+                type: boolean
               rollout:
                 description: |-
                   Rollout strategy for transitions: "graceful" waits for drain, "recreate"
@@ -401,14 +413,12 @@ spec:
                   podSecurityContext) and any sidecars / init containers / extra
                   volumes they need.
 
-                  When spec.engineClassRef is also set, the operator first merges
-                  the class's spec.template underneath the operator defaults, then
-                  this template on top — engine wins on conflict (whole-struct
-                  ownership for pointer fields; list-type fields like tolerations
-                  / initContainers / sidecars / volumes concatenate class-first
-                  then engine). The same field-by-field precedence the
-                  FireboltEngineClass merge layer has always used now applies to
-                  the engine's own template as the topmost layer.
+                  When a FireboltEngineDefaults object and/or spec.engineClassRef
+                  are present, the operator merges
+                  engine > Defaults > class > operator default — engine wins on
+                  conflict (whole-struct ownership for pointer fields; list-type
+                  fields like tolerations / initContainers / sidecars / volumes
+                  concatenate lower-layer first).
 
                   The validating webhook rejects user input on paths the operator
                   owns end-to-end — see FireboltEngineClassPodTemplateRules in
@@ -4234,6 +4244,18 @@ spec:
                 description: ActiveGeneration is the generation currently serving
                   traffic.
                 type: integer
+              appliedDefaultsHash:
+                description: |-
+                  AppliedDefaultsHash is the content hash of the Defaults spec
+                  last applied to this engine. Empty when no Defaults object
+                  was merged.
+                type: string
+              appliedDefaultsName:
+                description: |-
+                  AppliedDefaultsName is the FireboltEngineDefaults object merged
+                  into this engine when one exists in the namespace. Empty when
+                  the namespace has no Defaults object.
+                type: string
               autoStopReason:
                 description: |-
                   AutoStopReason is a short token describing the most recent auto-stop

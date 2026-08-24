@@ -220,6 +220,13 @@ type FireboltEngineClassInfo struct {
 	// AutoStop do not reshape the StatefulSet and are read live, so they
 	// are not hashed.
 	Hash string
+
+	// DefaultsName and DefaultsHash identify the FireboltEngineDefaults
+	// object folded into this info by overlayDefaultsOnClass. Empty when
+	// the namespace has no Defaults object. Hash is compared against
+	// AnnotationEngineDefaultsHash; Name is recorded on engine status.
+	DefaultsName string
+	DefaultsHash string
 }
 
 // newFireboltEngineClassInfo wraps a FireboltEngineClass into a
@@ -1140,6 +1147,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	if classInfo != nil {
 		annotations[AnnotationEngineClassHash] = classInfo.Hash
+		if classInfo.DefaultsHash != "" {
+			annotations[AnnotationEngineDefaultsHash] = classInfo.DefaultsHash
+		}
 	}
 
 	// Engine container image flows from the engine's own spec.template's
@@ -3406,10 +3416,15 @@ func annotationsMatchSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.Firebol
 	}
 
 	expectedClassHash := ""
+	expectedDefaultsHash := ""
 	if classInfo != nil {
 		expectedClassHash = classInfo.Hash
+		expectedDefaultsHash = classInfo.DefaultsHash
 	}
-	return sts.Annotations[AnnotationEngineClassHash] == expectedClassHash
+	if sts.Annotations[AnnotationEngineClassHash] != expectedClassHash {
+		return false
+	}
+	return sts.Annotations[AnnotationEngineDefaultsHash] == expectedDefaultsHash
 }
 
 // sidecarsMatch compares the user-owned sidecar containers (those whose

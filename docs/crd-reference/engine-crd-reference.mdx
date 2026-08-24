@@ -9,15 +9,16 @@ sidebarTitle: FireboltEngine CRD reference
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `spec.instanceRef` | **Yes** | - | Name of the `FireboltInstance` in the same namespace. |
-| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this Engine's namespace. The class supplies defaults this Engine inherits when it leaves the matching field unset: `spec.template`, `spec.uiSidecar`, `spec.storage`, `spec.customEngineConfig`, `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop`. Engine values take precedence over class values. |
+| `spec.engineClassRef` | No | - | Name of a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in this Engine's namespace. Resolution is Engine, then [`FireboltEngineDefaults`](./fireboltenginedefaults-crd-reference), then class, then Firebolt Operator default. See [configuration inheritance](../engineclass/configuration-inheritance). |
+| `spec.requireDefaults` | No | `false` | When `true`, the Engine stays not Ready until the namespace has exactly one Ready `FireboltEngineDefaults` object. Unset keeps existing Engines working in namespaces with no Defaults object. |
 | `spec.replicas` | **Yes** | - | Number of engine nodes. `0` stops the engine; the CR is preserved. |
 | `spec.template` | No | - | `PodTemplateSpec` for per-Engine overrides. Configure the Engine container at `spec.template.spec.containers[name=="engine"]`, including a per-Engine `image` or `imagePullPolicy`. Define a readiness probe on any sidecar container you add: a container without a probe counts as ready as soon as its process starts, and pod readiness controls blue-green promotion and Service endpoints. See [Firebolt Operator-owned fields](#firebolt-operator-owned-fields-on-engine-templates) and [EngineClass configuration inheritance](../engineclass/configuration-inheritance). |
 | `spec.uiSidecar` | No | `false` | When `true`, the Firebolt Operator injects a built-in, operator-owned `nginx` container named `engine-web` (serving the Engine Web UI, listening on port `9100`) into each engine pod. The `engine-web` container name is reserved, so a user-supplied container or init container with that name is rejected. The container carries an HTTP readiness probe on the UI port, so the pod only reports Ready (and rollouts only promote) when the UI is actually serving. The sidecar follows the Kubernetes default pull policy for its image (`Always` while the UI image is tracked at `:latest`); an explicit `imagePullPolicy` on the `engine` container (in this template or the class template) applies to the sidecar too. Inherited from the class when unset. Changes force a new generation. |
 | `spec.rollout` | No | `graceful` | `graceful` waits for drain. `recreate` deletes immediately. Inherited from the class when unset. |
 | `spec.drainCheckEnabled` | No | `true` | `false` skips the Firebolt Operator drain check (engine `shutdown_wait_unfinished` still runs on SIGTERM). Inherited from the class when unset. |
 | `spec.drainCheckInterval` | No | `5s` | Poll interval for old-pod drain status. Inherited from the class when unset. |
-| `spec.storage` | No | `emptyDir` | Per-pod data volume (distinct from `customEngineConfig.storage`). One of `persistentVolumeClaim`, `emptyDir`, or `hostPath`. Unset defaults to `emptyDir`. Inherited from the class when this engine names no backend. Changes force a new generation. |
-| `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath the class config (engine keys win). Operator-owned paths are stripped. Changes force a new generation. |
+| `spec.storage` | No | `emptyDir` | Per-pod data volume (distinct from `customEngineConfig.storage`). One of `persistentVolumeClaim`, `emptyDir`, or `hostPath`. Unset defaults to `emptyDir`. Inherited from Defaults, then the class, when this engine names no backend. Changes force a new generation. |
+| `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath Defaults and class config (engine keys win). Operator-owned paths are stripped. Changes force a new generation. |
 | `spec.autoStop` | No | disabled | When `enabled`, auto-stop owns `spec.replicas`. Inherited whole-struct from the class when unset. |
 | `spec.metadataEndpointOverride` | No | - | Override instance-derived metadata endpoint. |
 
@@ -80,6 +81,9 @@ the full class-side allowlist.
 | `Ready=False, Reason=DrainCheckFailing` | Drain probe cannot reach or parse metrics on a draining pod. |
 | `Ready=False, Reason=TemplateRejected` | `spec.template` contains a reserved or unsupported field. |
 | `Ready=False, Reason=FireboltEngineClassUnready` | The referenced EngineClass is not ready. Inspect the class condition. |
+| `Ready=False, Reason=FireboltEngineDefaultsRequired` | `spec.requireDefaults` is true and the namespace has no `FireboltEngineDefaults` object. |
+| `Ready=False, Reason=FireboltEngineDefaultsAmbiguous` | The namespace has more than one `FireboltEngineDefaults` object. |
+| `Ready=False, Reason=FireboltEngineDefaultsUnready` | The namespace Defaults object is not Ready. Inspect the Defaults condition. |
 | `Ready=False, Reason=ResourceBoundsExceeded` | Engine resources exceed the limits configured on the Firebolt Operator. |
 | `Ready=False, Reason=ExternalFinalizer` | Engine deleting; non-operator finalizers remain on owned children. |
 
@@ -97,6 +101,8 @@ the full class-side allowlist.
 | `status.lastActivityTime` | Most recent Engine activity used by auto-stop. |
 | `status.lastScaledAt` | Most recent auto-stop replica change. |
 | `status.autoStopReason` | Most recent auto-stop decision. |
+| `status.appliedDefaultsName` | Name of the `FireboltEngineDefaults` object merged into this Engine, when one exists. |
+| `status.appliedDefaultsHash` | Content hash of that Defaults spec last applied. |
 | `status.conditions` | `InstanceReady`, `Ready`. See [Conditions](#conditions). |
 
 Short name: `fireng`.
