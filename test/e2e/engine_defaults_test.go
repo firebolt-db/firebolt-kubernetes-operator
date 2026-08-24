@@ -38,7 +38,10 @@ var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 		instanceName = "inst-defaults" + queryConfig.Suffix
 		engineName   = "test-defaults" + queryConfig.Suffix + "-engine"
 		defaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
-		lc           *TestInstanceLifecycle
+		// editedServiceAccount is created by the spec before the Defaults
+		// edit references it; pods of the rolled generation run under it.
+		editedServiceAccount = "defaults-sa" + queryConfig.Suffix
+		lc                   *TestInstanceLifecycle
 	)
 	RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
@@ -55,6 +58,7 @@ var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 		Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 		_ = DeleteFireboltEngineDefaults(ctx, defaultsName)
+		_ = DeleteServiceAccount(ctx, editedServiceAccount)
 	})
 
 	It("fails closed until Defaults exists, then rolls on a Defaults edit", func() {
@@ -70,11 +74,32 @@ var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 		By("Waiting for the engine to become Ready")
 		Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
 		Expect(WaitForEngineStable(ctx, engineName, clusterReadyTimeout)).To(Succeed())
+		genBefore, _, err := GetEngineGeneration(ctx, engineName)
+		Expect(err).NotTo(HaveOccurred())
+
+		// The ServiceAccount must exist before the Defaults edit points
+		// pods at it, or the new generation could never be admitted and
+		// the blue-green roll would wedge.
+		By("Creating the edited ServiceAccount")
+		Expect(CreateServiceAccount(ctx, editedServiceAccount)).To(Succeed())
 
 		By("Editing FireboltEngineDefaults service account")
-		Expect(UpdateFireboltEngineDefaultsServiceAccount(ctx, defaultsName, "defaults-sa")).To(Succeed())
+		Expect(UpdateFireboltEngineDefaultsServiceAccount(ctx, defaultsName, editedServiceAccount)).To(Succeed())
 
 		By("Waiting for the engine to leave PhaseStable")
 		Expect(WaitForEnginePhaseChange(ctx, engineName, computev1alpha1.PhaseStable, clusterTransitionTimeout)).To(Succeed())
+
+		By("Waiting for the roll to complete on a new generation")
+		Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
+		Expect(WaitForEngineStable(ctx, engineName, clusterReadyTimeout)).To(Succeed())
+		genAfter, _, err := GetEngineGeneration(ctx, engineName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(genAfter).To(BeNumerically(">", genBefore),
+			"a Defaults spec edit must roll a new blue-green generation")
+
+		By("Verifying the new generation carries the merged service account")
+		sts, err := GetEngineGenerationStatefulSet(ctx, engineName, genAfter)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sts.Spec.Template.Spec.ServiceAccountName).To(Equal(editedServiceAccount))
 	})
 })

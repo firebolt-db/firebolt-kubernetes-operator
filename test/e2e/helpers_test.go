@@ -773,9 +773,55 @@ func UpdateFireboltEngineDefaultsServiceAccount(ctx context.Context, name, servi
 		defaults.Spec.Template.Spec.ServiceAccountName = serviceAccount
 		if err := cl.Update(ctx, defaults); err == nil {
 			return nil
+		} else if !errors.IsConflict(err) {
+			return err
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("updating FireboltEngineDefaults %q service account to %q: conflict after 10 retries", name, serviceAccount)
+}
+
+// CreateServiceAccount creates a plain ServiceAccount in testNamespace.
+// Tolerates AlreadyExists so retried specs stay idempotent.
+func CreateServiceAccount(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	if err := cl.Create(ctx, sa); err != nil && !errors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
+}
+
+// DeleteServiceAccount deletes a ServiceAccount from testNamespace,
+// tolerating NotFound.
+func DeleteServiceAccount(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	if err := cl.Delete(ctx, sa); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// GetEngineGenerationStatefulSet fetches the StatefulSet the operator
+// rendered for one blue-green generation of the named engine.
+func GetEngineGenerationStatefulSet(ctx context.Context, engineName string, gen int) (*appsv1.StatefulSet, error) {
+	cl, err := getCRDClient()
+	if err != nil {
+		return nil, err
+	}
+	sts := &appsv1.StatefulSet{}
+	name := fmt.Sprintf("%s-g%d", engineName, gen)
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, sts); err != nil {
+		return nil, err
+	}
+	return sts, nil
 }
 
 // DeleteFireboltEngineDefaults deletes a FireboltEngineDefaults object.
