@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.7.0...firebolt-operator-chart-0.8.0) (2026-08-25)
+
+
+### Features
+
+* **api:** add namespaced FireboltEnginePreset CRD (FB-3340) ([#167](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/167)) ([8755d70](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8755d70bfc2790a548c27b9212df67d983d82bcb))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.10.0 ([6fbb44f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6fbb44f108724bd99eae126a51e3ad1da02dde14))
+
 ## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.6.3...firebolt-operator-chart-0.7.0) (2026-08-25)
 
 
