@@ -77,6 +77,14 @@ type rawEngineResources struct {
 	CurrentPodTotal    int
 	CurrentPodReady    int
 
+	// ActiveSTS and ActivePodReady describe status.ActiveGeneration, and are
+	// fetched only when it differs from the current generation — mid-rollout,
+	// where the outgoing generation is still the one serving. Otherwise they
+	// are left zero and assembleEngineState reuses the current-generation
+	// count, so the steady state costs no extra reads.
+	ActiveSTS      *appsv1.StatefulSet
+	ActivePodReady int
+
 	DrainingSTS         *appsv1.StatefulSet
 	DrainingConfigMap   *corev1.ConfigMap
 	DrainingHeadlessSvc *corev1.Service
@@ -114,6 +122,19 @@ func assembleEngineState(
 			state.CurrentPodTotal = raw.CurrentPodTotal
 			state.CurrentPodReady = raw.CurrentPodReady
 		}
+	}
+
+	// The serving generation's ready count. Same generation as current outside a
+	// rollout, so the current count is reused rather than read twice; mid-rollout
+	// it is the outgoing generation, fetched separately by the caller. A negative
+	// ActiveGeneration means nothing serves yet (first creation), which leaves the
+	// count at zero.
+	switch activeGen := status.ActiveGeneration; {
+	case activeGen < 0:
+	case activeGen == currentGen:
+		state.ActivePodReady = state.CurrentPodReady
+	case raw.ActiveSTS != nil:
+		state.ActivePodReady = raw.ActivePodReady
 	}
 
 	if drainingGen >= 0 && drainingGen != currentGen {
@@ -176,6 +197,28 @@ func (r *FireboltEngineReconciler) getEngineState(ctx context.Context, engine *c
 				r.checkPodsReady(ctx, engine, currentGen, int(engine.Spec.Replicas))
 			if err != nil {
 				return EngineState{}, fmt.Errorf("checkPodsReady (gen %d): %w", currentGen, err)
+			}
+		}
+	}
+
+	// Mid-rollout the generation serving traffic is not the current one, and its
+	// ready count is what status.readyReplicas reports. Only read it when the two
+	// actually differ: in the steady state assembleEngineState reuses the count
+	// above, so this costs nothing outside a transition. expectedReplicas comes
+	// from this generation's own StatefulSet rather than the spec, which the new
+	// generation may already have changed; only the ready count is consumed here.
+	if activeGen := status.ActiveGeneration; activeGen >= 0 && activeGen != currentGen {
+		if raw.ActiveSTS, err = r.getStatefulSet(ctx, engineName, ns, activeGen); err != nil {
+			return EngineState{}, err
+		}
+		if raw.ActiveSTS != nil {
+			expected := 0
+			if raw.ActiveSTS.Spec.Replicas != nil {
+				expected = int(*raw.ActiveSTS.Spec.Replicas)
+			}
+			if _, _, raw.ActivePodReady, err =
+				r.checkPodsReady(ctx, engine, activeGen, expected); err != nil {
+				return EngineState{}, fmt.Errorf("checkPodsReady (active gen %d): %w", activeGen, err)
 			}
 		}
 	}

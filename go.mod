@@ -7,7 +7,7 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/go-logr/logr v1.4.4
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/onsi/ginkgo/v2 v2.32.0
+	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2

@@ -559,6 +559,25 @@ type FireboltEngineStatus struct {
 	// +optional
 	ObservedEngineServingCertGen int `json:"observedEngineServingCertGen,omitempty"`
 
+	// ReadyReplicas is how many pods of activeGeneration are running and
+	// passing their readiness probe. It is observed, not desired: it counts
+	// what serves traffic right now, so it trails spec.replicas while a
+	// generation comes up and reads 0 for a stopped engine or one whose first
+	// generation has not cut over yet.
+	//
+	// During a blue-green rollout it stays with the generation that is still
+	// serving and steps to the new one at cutover, so a roll does not show up
+	// here as capacity briefly dropping away. Pods of a generation that is
+	// coming up or draining are not counted.
+	// Deliberately serialized even at zero, unlike most optional status
+	// fields: zero is a real observation here (stopped, or nothing serving
+	// yet) and must stay distinguishable from the field being absent, which
+	// means an operator too old to report it at all. With omitempty a client
+	// reading the field cannot tell those apart. currentGeneration and
+	// activeGeneration serialize zero for the same reason.
+	// +optional
+	ReadyReplicas int `json:"readyReplicas"`
+
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
