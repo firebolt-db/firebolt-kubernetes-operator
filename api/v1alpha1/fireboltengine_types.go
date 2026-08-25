@@ -314,11 +314,12 @@ type FireboltEngineSpec struct {
 	EngineClassRef *string `json:"engineClassRef,omitempty"`
 
 	// RequirePreset, when true, keeps the engine from becoming Ready
-	// until the namespace has exactly one Ready FireboltEnginePreset
-	// object. The default (false / unset) keeps existing engines working
-	// in namespaces that have no Preset object. A present but unready
-	// or ambiguous Preset object always fails closed, even when this
-	// field is unset.
+	// until the namespace has a Ready FireboltEnginePreset object
+	// (named "firebolt"; the CRD pins the name so a namespace holds at
+	// most one). The default (false / unset) keeps existing engines
+	// working in namespaces that have no Preset object. A present but
+	// unready Preset object always fails closed, even when this field
+	// is unset.
 	//
 	// The default is applied by the controller, not the CRD, so an unset
 	// value stays empty at admission.

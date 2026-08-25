@@ -55,10 +55,12 @@
 \*     introduced: from the model's perspective both overlays are inputs
 \*     to the spec-content hash specVer abstracts over.
 \*   - The Preset fail-closed gate is NOT the same as a spec edit. When
-\*     Preset is required-and-missing, ambiguous, or Ready=False for an
+\*     Preset is required-and-missing or Ready=False for an
 \*     operator-owned template path, the outer Reconcile refuses to call
 \*     computeEngineReconcile — the same scheduling window as instanceReady
 \*     and classReady. That is presetReady. Merge content stays UNMODELLED.
+\*     (A second Preset per namespace is impossible: the CRD CEL rule pins
+\*     metadata.name, so there is no ambiguity state to model.)
 
 EXTENDS Integers, TLC
 
@@ -266,10 +268,10 @@ EnvSetClassReady(v) ==
 
 \* FireboltEnginePreset becomes admissible or not. Symmetric to
 \* EnvSetClassReady: models the Preset fail-closed gate
-\* (resolveFireboltEnginePresetInfo refuses required-and-missing,
-\* two-or-more, or Ready=False/OperatorOwnedFieldSet; Reconcile then
+\* (resolveFireboltEnginePresetInfo refuses required-and-missing
+\* or Ready=False/OperatorOwnedFieldSet; Reconcile then
 \* surfaces ConditionReady=False/FireboltEnginePreset{Required,
-\* Ambiguous,Unready} without rendering a StatefulSet). Missing Ready,
+\* Unready} without rendering a StatefulSet). Missing Ready,
 \* or Ready=False/DeletionBlocked, is admissible — same as class.
 \* Switching/Draining/Cleaning bypass the gate.
 EnvSetPresetReady(v) ==

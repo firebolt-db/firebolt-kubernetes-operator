@@ -1487,66 +1487,61 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 }
 
 var (
-	errFireboltEnginePresetRequired  = stderrors.New("FireboltEnginePreset is required in this namespace")
-	errFireboltEnginePresetAmbiguous = stderrors.New("namespace has more than one FireboltEnginePreset")
-	errFireboltEnginePresetUnready   = stderrors.New("FireboltEnginePreset is not Ready")
+	errFireboltEnginePresetRequired = stderrors.New("FireboltEnginePreset is required in this namespace")
+	errFireboltEnginePresetUnready  = stderrors.New("FireboltEnginePreset is not Ready")
 )
 
 const (
-	reasonFireboltEnginePresetRequired  = "FireboltEnginePresetRequired"
-	reasonFireboltEnginePresetAmbiguous = "FireboltEnginePresetAmbiguous"
-	reasonFireboltEnginePresetUnready   = "FireboltEnginePresetUnready"
+	reasonFireboltEnginePresetRequired = "FireboltEnginePresetRequired"
+	reasonFireboltEnginePresetUnready  = "FireboltEnginePresetUnready"
 )
 
-// resolveFireboltEnginePresetInfo lists FireboltEnginePreset in the
-// engine's namespace. v1 admits one object: zero is optional unless
-// spec.requirePreset is true; two or more is always fail-closed;
-// a single object with Ready=False/OperatorOwnedFieldSet, or whose live
-// spec.template still carries operator-owned paths, is always
-// fail-closed. A missing Ready condition on an otherwise admissible
-// object is allowed through so a freshly created Preset object does
-// not deadlock engines.
+// resolveFireboltEnginePresetInfo fetches the namespace's single
+// FireboltEnginePreset by its CEL-enforced fixed name ("firebolt");
+// apiserver name uniqueness makes a second object impossible, so
+// there is no ambiguity case. Absence is optional unless
+// spec.requirePreset is true; an object with
+// Ready=False/OperatorOwnedFieldSet, or whose live spec.template
+// still carries operator-owned paths, is always fail-closed. A
+// missing Ready condition on an otherwise admissible object is
+// allowed through so a freshly created Preset object does not
+// deadlock engines.
 func (r *FireboltEngineReconciler) resolveFireboltEnginePresetInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEnginePresetInfo, error) {
-	var list computev1alpha1.FireboltEnginePresetList
-	if err := r.List(ctx, &list, client.InNamespace(engine.Namespace)); err != nil {
-		return nil, fmt.Errorf("listing FireboltEnginePreset in namespace %q: %w", engine.Namespace, err)
+	d := &computev1alpha1.FireboltEnginePreset{}
+	key := client.ObjectKey{Namespace: engine.Namespace, Name: computev1alpha1.FireboltEnginePresetDefaultName}
+	if err := r.Get(ctx, key, d); err != nil {
+		if errors.IsNotFound(err) {
+			if engine.Spec.RequirePreset != nil && *engine.Spec.RequirePreset {
+				return nil, fmt.Errorf("%w: namespace %q has no FireboltEnginePreset", errFireboltEnginePresetRequired, engine.Namespace)
+			}
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting FireboltEnginePreset %q in namespace %q: %w", key.Name, engine.Namespace, err)
 	}
-	switch len(list.Items) {
-	case 0:
-		if engine.Spec.RequirePreset != nil && *engine.Spec.RequirePreset {
-			return nil, fmt.Errorf("%w: namespace %q has no FireboltEnginePreset", errFireboltEnginePresetRequired, engine.Namespace)
-		}
-		return nil, nil
-	case 1:
-		d := &list.Items[0]
-		if cond := apimeta.FindStatusCondition(d.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady); cond != nil &&
-			cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
-			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
-				errFireboltEnginePresetUnready, d.Name, d.Namespace, cond.Message)
-		}
-		// Re-run the allowlist on the live spec. The Ready condition is
-		// written by a different reconciler, so a webhook-off create (or a
-		// spec patch while DeletionBlocked) can reach this pass before
-		// OperatorOwnedFieldSet is stamped. Overlaying that spec would let
-		// reserved engine env win under kubelet last-wins.
-		if errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(
-			&d.Spec.Template, field.NewPath("spec", "template"),
-		); len(errs) > 0 {
-			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
-				errFireboltEnginePresetUnready, d.Name, d.Namespace, errs.ToAggregate().Error())
-		}
-		return newFireboltEnginePresetInfo(d), nil
-	default:
-		return nil, fmt.Errorf("%w: namespace %q has %d FireboltEnginePreset objects",
-			errFireboltEnginePresetAmbiguous, engine.Namespace, len(list.Items))
+	if cond := apimeta.FindStatusCondition(d.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady); cond != nil &&
+		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
+		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+			errFireboltEnginePresetUnready, d.Name, d.Namespace, cond.Message)
 	}
+	// Re-run the allowlist on the live spec. The Ready condition is
+	// written by a different reconciler, so a webhook-off create (or a
+	// spec patch while DeletionBlocked) can reach this pass before
+	// OperatorOwnedFieldSet is stamped. Overlaying that spec would let
+	// reserved engine env win under kubelet last-wins.
+	if errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(
+		&d.Spec.Template, field.NewPath("spec", "template"),
+	); len(errs) > 0 {
+		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+			errFireboltEnginePresetUnready, d.Name, d.Namespace, errs.ToAggregate().Error())
+	}
+	return newFireboltEnginePresetInfo(d), nil
 }
 
 // handleFireboltEnginePresetError surfaces fail-closed Preset
-// states as ConditionReady=False and requeues. API-list failures
+// states as ConditionReady=False and requeues. API-read failures
 // bubble up for backoff. AppliedPresetName/Hash are cleared so
 // status cannot keep naming an overlay that this pass refused to
-// resolve (removed, ambiguous, or OperatorOwnedFieldSet).
+// resolve (removed or OperatorOwnedFieldSet).
 func (r *FireboltEngineReconciler) handleFireboltEnginePresetError(ctx context.Context, engine *computev1alpha1.FireboltEngine, presetErr error) (ctrl.Result, error) {
 	reason, ok := fireboltEnginePresetConditionReason(presetErr)
 	if !ok {
@@ -1571,8 +1566,6 @@ func fireboltEnginePresetConditionReason(err error) (string, bool) {
 	switch {
 	case stderrors.Is(err, errFireboltEnginePresetRequired):
 		return reasonFireboltEnginePresetRequired, true
-	case stderrors.Is(err, errFireboltEnginePresetAmbiguous):
-		return reasonFireboltEnginePresetAmbiguous, true
 	case stderrors.Is(err, errFireboltEnginePresetUnready):
 		return reasonFireboltEnginePresetUnready, true
 	default:

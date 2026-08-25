@@ -142,7 +142,7 @@
           "type": "integer"
         },
         "requirePreset": {
-          "description": "RequirePreset, when true, keeps the engine from becoming Ready\nuntil the namespace has exactly one Ready FireboltEnginePreset\nobject. The default (false / unset) keeps existing engines working\nin namespaces that have no Preset object. A present but unready\nor ambiguous Preset object always fails closed, even when this\nfield is unset.\n\nThe default is applied by the controller, not the CRD, so an unset\nvalue stays empty at admission.",
+          "description": "RequirePreset, when true, keeps the engine from becoming Ready\nuntil the namespace has a Ready FireboltEnginePreset object\n(named \"firebolt\"; the CRD pins the name so a namespace holds at\nmost one). The default (false / unset) keeps existing engines\nworking in namespaces that have no Preset object. A present but\nunready Preset object always fails closed, even when this field\nis unset.\n\nThe default is applied by the controller, not the CRD, so an unset\nvalue stays empty at admission.",
           "type": "boolean"
         },
         "rollout": {
