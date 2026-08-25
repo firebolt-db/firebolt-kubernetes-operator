@@ -16,18 +16,6 @@
     {
       "source": "/engineclass/fireboltengineclass-design",
       "destination": "/engineclass/configuration-inheritance"
-    },
-    {
-      "source": "/enginedefaults",
-      "destination": "/enginepreset/overview"
-    },
-    {
-      "source": "/enginedefaults/overview",
-      "destination": "/enginepreset/overview"
-    },
-    {
-      "source": "/crd-reference/fireboltenginedefaults-crd-reference",
-      "destination": "/crd-reference/fireboltenginepreset-crd-reference"
     }
   ],
   "navigation": {
