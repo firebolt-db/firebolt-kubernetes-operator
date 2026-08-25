@@ -3294,3 +3294,211 @@ func TestTLSHash_ReflectsCertPolicy(t *testing.T) {
 		t.Error("tlsHash(nil) must be empty")
 	}
 }
+
+// TestAssembleEngineState_ActivePodReadyTracksServingGeneration verifies which
+// generation's ready count reaches status.readyReplicas. Outside a rollout the
+// current-generation count is reused; mid-rollout the count belongs to the
+// generation still serving, never to the one filling up; and nothing serving
+// yet reads zero.
+func TestAssembleEngineState_ActivePodReadyTracksServingGeneration(t *testing.T) {
+	tests := []struct {
+		name       string
+		currentGen int
+		activeGen  int
+		raw        rawEngineResources
+		want       int
+	}{
+		{
+			name:       "steady state reuses the current generation's count",
+			currentGen: 1,
+			activeGen:  1,
+			raw: rawEngineResources{
+				CurrentSTS:      makeSTS(testEngineName, 1, 3),
+				CurrentPodReady: 3,
+			},
+			want: 3,
+		},
+		{
+			name:       "steady state with no StatefulSet reads zero",
+			currentGen: 1,
+			activeGen:  1,
+			raw:        rawEngineResources{CurrentPodReady: 3},
+			want:       0,
+		},
+		{
+			name:       "mid-rollout reports the serving generation, not the one coming up",
+			currentGen: 2,
+			activeGen:  1,
+			raw: rawEngineResources{
+				CurrentSTS:      makeSTS(testEngineName, 2, 3),
+				CurrentPodReady: 1,
+				ActiveSTS:       makeSTS(testEngineName, 1, 3),
+				ActivePodReady:  3,
+			},
+			want: 3,
+		},
+		{
+			name:       "mid-rollout with the serving StatefulSet already gone reads zero",
+			currentGen: 2,
+			activeGen:  1,
+			raw: rawEngineResources{
+				CurrentSTS:      makeSTS(testEngineName, 2, 3),
+				CurrentPodReady: 1,
+			},
+			want: 0,
+		},
+		{
+			name:       "first creation has no serving generation and reads zero",
+			currentGen: 0,
+			activeGen:  -1,
+			raw: rawEngineResources{
+				CurrentSTS:      makeSTS(testEngineName, 0, 3),
+				CurrentPodReady: 2,
+			},
+			want: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &computev1alpha1.FireboltEngineStatus{
+				CurrentGeneration: tc.currentGen,
+				ActiveGeneration:  tc.activeGen,
+			}
+
+			state, err := assembleEngineState(status, tc.raw)
+			if err != nil {
+				t.Fatalf("assembleEngineState: %v", err)
+			}
+
+			if state.ActivePodReady != tc.want {
+				t.Errorf("expected ActivePodReady %d, got %d", tc.want, state.ActivePodReady)
+			}
+		})
+	}
+}
+
+// TestComputeEngineReconcile_ReadyReplicasIsObserved verifies that
+// status.readyReplicas carries the observed serving-generation ready count on
+// every path: the full count when all pods are ready, the partial count while
+// a generation is still coming up, and zero when nothing is serving.
+func TestComputeEngineReconcile_ReadyReplicasIsObserved(t *testing.T) {
+	tests := []struct {
+		name    string
+		current EngineState
+		want    int
+	}{
+		{
+			name: "all pods ready",
+			current: EngineState{
+				CurrentSTS:              makeSTS(testEngineName, 1, 3),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentPodsReady:        true,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         3,
+				ActivePodReady:          3,
+				ClusterService:          makeClusterSvc(testEngineName, 1),
+				ClusterServiceTargetGen: 1,
+			},
+			want: 3,
+		},
+		{
+			name: "partially ready reports the subset, not the desired count",
+			current: EngineState{
+				CurrentSTS:              makeSTS(testEngineName, 1, 3),
+				CurrentHeadlessSvc:      &corev1.Service{},
+				CurrentPodsReady:        false,
+				CurrentPodTotal:         3,
+				CurrentPodReady:         2,
+				ActivePodReady:          2,
+				ClusterService:          makeClusterSvc(testEngineName, 1),
+				ClusterServiceTargetGen: 1,
+			},
+			want: 2,
+		},
+		{
+			name:    "nothing serving reports zero",
+			current: EngineState{ClusterServiceTargetGen: -1},
+			want:    0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := testSpec()
+			spec.Template = nil
+			status := &computev1alpha1.FireboltEngineStatus{
+				Phase:             computev1alpha1.PhaseStable,
+				CurrentGeneration: 1,
+				ActiveGeneration:  1,
+			}
+			if tc.current.CurrentConfigMap == nil && tc.current.CurrentSTS != nil {
+				tc.current.CurrentConfigMap = buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+			}
+
+			result := computeEngineReconcile(spec, status, tc.current, testEngineName, testNamespace, 1, testInstanceInfo(), nil)
+
+			if result.Status.ReadyReplicas != tc.want {
+				t.Errorf("expected readyReplicas %d, got %d", tc.want, result.Status.ReadyReplicas)
+			}
+		})
+	}
+}
+
+// TestComputeEngineReconcile_ReadyReplicasZeroWhenStopped verifies that a
+// parked engine reports zero rather than the count it last served with.
+func TestComputeEngineReconcile_ReadyReplicasZeroWhenStopped(t *testing.T) {
+	spec := testSpec()
+	spec.Replicas = 0
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseStable,
+		CurrentGeneration: 1,
+		ActiveGeneration:  1,
+		ReadyReplicas:     3,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 1, 0),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 1, testInstanceInfo(), nil),
+		CurrentPodsReady:        true,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 3, testInstanceInfo(), nil)
+
+	if result.Status.ReadyReplicas != 0 {
+		t.Errorf("expected readyReplicas 0 for a stopped engine, got %d", result.Status.ReadyReplicas)
+	}
+}
+
+// TestComputeEngineReconcile_ReadyReplicasHoldsThroughRollout verifies that a
+// roll does not read as capacity dropping away: while the new generation is
+// creating, the count stays with the generation still serving rather than
+// following the one filling up.
+func TestComputeEngineReconcile_ReadyReplicasHoldsThroughRollout(t *testing.T) {
+	spec := testSpec()
+	spec.Template = nil
+	status := &computev1alpha1.FireboltEngineStatus{
+		Phase:             computev1alpha1.PhaseCreating,
+		CurrentGeneration: 2,
+		ActiveGeneration:  1,
+		ReadyReplicas:     3,
+	}
+	current := EngineState{
+		CurrentSTS:              makeSTS(testEngineName, 2, 3),
+		CurrentHeadlessSvc:      &corev1.Service{},
+		CurrentConfigMap:        buildConfigMap(spec, testEngineName, testNamespace, 2, testInstanceInfo(), nil),
+		CurrentPodTotal:         1,
+		CurrentPodReady:         1,
+		ActivePodReady:          3,
+		ClusterService:          makeClusterSvc(testEngineName, 1),
+		ClusterServiceTargetGen: 1,
+	}
+
+	result := computeEngineReconcile(spec, status, current, testEngineName, testNamespace, 2, testInstanceInfo(), nil)
+
+	if result.Status.ReadyReplicas != 3 {
+		t.Errorf("expected readyReplicas 3 from the serving generation, got %d", result.Status.ReadyReplicas)
+	}
+}

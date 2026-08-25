@@ -35,13 +35,23 @@ type EngineState struct {
 	CurrentHeadlessSvc *corev1.Service
 	CurrentPodsReady   bool
 	// CurrentPodTotal is the number of pods that currently exist for the
-	// active generation (including non-running and non-ready ones). It can
+	// current generation (including non-running and non-ready ones). It can
 	// be less than spec.replicas if the StatefulSet has not finished
 	// creating pods yet.
 	CurrentPodTotal int
 	// CurrentPodReady is the subset of CurrentPodTotal that is in
 	// PodRunning phase with PodReady=True. Always <= CurrentPodTotal.
 	CurrentPodReady int
+
+	// ActivePodReady is the ready-pod count of status.ActiveGeneration — the
+	// generation the cluster Service selects, hence the one serving traffic.
+	// It equals CurrentPodReady outside a rollout, when the current and active
+	// generations are the same. While a new generation comes up the two differ,
+	// and this field stays with the outgoing generation until the cutover, so it
+	// never reports capacity that is not reachable yet. Zero when no generation
+	// is active (first creation) or when the active generation's StatefulSet is
+	// absent.
+	ActivePodReady int
 
 	DrainingSTS         *appsv1.StatefulSet
 	DrainingConfigMap   *corev1.ConfigMap

@@ -167,6 +167,13 @@ func (m *engineSim) buildState() EngineState {
 		ClusterService:     m.cache.clusterSvc,
 	}
 
+	if ag := m.status.ActiveGeneration; ag >= 0 && ag != gen {
+		// Mid-rollout getEngineState reads the serving generation separately;
+		// when it coincides with the current one assembleEngineState reuses
+		// that count instead of reading twice.
+		raw.ActiveSTS = m.cache.stses[ag]
+	}
+
 	if m.status.DrainingGeneration != nil {
 		dg := *m.status.DrainingGeneration
 		raw.DrainingSTS = m.cache.stses[dg]
