@@ -10,9 +10,9 @@ sidebarTitle: Overview
 
 Values resolve **Engine > Preset > EngineClass > Firebolt Operator default**. SKU-shaped settings (`rollout`, `autoStop`, `uiSidecar`, drain checks) stay on `FireboltEngineClass`.
 
-v1 admits one `FireboltEnginePreset` per namespace. The conventional name is `firebolt`. Creating a second object in the same namespace is rejected.
+The object must be named `firebolt`: a validation rule baked into the CRD pins `metadata.name`, so the Kubernetes API server rejects any other name and name uniqueness guarantees at most one `FireboltEnginePreset` per namespace. The guarantee holds whether or not the Firebolt Operator's admission webhooks are enabled.
 
-Set `FireboltEngine.spec.requirePreset: true` when an Engine must not become Ready until Preset exists and is Ready. A present but unready object, or more than one object in the namespace, fails closed for every Engine even when `requirePreset` is unset.
+Set `FireboltEngine.spec.requirePreset: true` when an Engine must not become Ready until Preset exists and is Ready. A present but unready object fails closed for every Engine even when `requirePreset` is unset.
 
 The Firebolt Operator validates `spec.template` with the same operator-owned-path rules as `FireboltEngineClass`, and reports `Ready` on the object. Deleting the object is refused while any Firebolt Engine exists in the namespace. A Preset edit that changes the pod template, storage, or engine config rolls a new blue-green generation.
 

@@ -22,10 +22,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// FireboltEnginePresetDefaultName is the conventional metadata.name for
-// the single FireboltEnginePreset object in a namespace. The operator
-// selects by "the one Preset in the namespace" rather than this name;
-// the constant exists so samples, docs, and clients agree on a name.
+// FireboltEnginePresetDefaultName is the enforced metadata.name of the
+// FireboltEnginePreset object in a namespace. A CRD CEL rule constrains
+// every object to this name, so Kubernetes name uniqueness guarantees
+// at most one Preset per namespace in every admission posture (the rule
+// is baked into the CRD and runs inside the apiserver, independent of
+// the operator's webhooks). The operator resolves the overlay by this
+// name.
 const FireboltEnginePresetDefaultName = "firebolt"
 
 // FireboltEnginePresetSpec is the ambient, namespace-level engine
@@ -35,10 +38,12 @@ const FireboltEnginePresetDefaultName = "firebolt"
 //
 //	engine spec > FireboltEnginePreset > FireboltEngineClass > operator default
 //
-// v1 admits at most one FireboltEnginePreset per namespace. The
-// object is not selected by engines: customers keep referencing a
-// class name (or no class). The conventional object name is
-// FireboltEnginePresetDefaultName ("firebolt").
+// A namespace holds at most one FireboltEnginePreset: the CRD CEL
+// rule on the root object pins metadata.name to
+// FireboltEnginePresetDefaultName ("firebolt"), so apiserver name
+// uniqueness makes a second object impossible. The object is not
+// selected by engines: customers keep referencing a class name (or no
+// class).
 //
 // The carried fields are the namespace-resolved identifiers and
 // config fragments that are shared by every engine in the namespace
@@ -110,11 +115,13 @@ const FireboltEnginePresetConditionReady = "Ready"
 // +kubebuilder:printcolumn:name="Bound",type=integer,JSONPath=`.status.boundEngines`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'firebolt'",message="FireboltEnginePreset must be named 'firebolt'; the namespace singleton is enforced by name"
 
 // FireboltEnginePreset is a namespaced ambient overlay merged under
 // every FireboltEngine in the same namespace. Engines do not reference
-// it by name. v1 selects the single object in the namespace; the
-// conventional name is "firebolt".
+// it by name. The object must be named "firebolt" (CEL-enforced), so
+// name uniqueness caps a namespace at one Preset; the operator
+// resolves the overlay by that name.
 //
 // It is namespaced because the template carries namespace-resolved
 // identifiers (ServiceAccount names, Secret / ConfigMap references)

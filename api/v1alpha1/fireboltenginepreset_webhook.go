@@ -30,11 +30,12 @@ import (
 // FireboltEnginePresetCustomValidator implements the validating
 // admission webhook for FireboltEnginePreset. Create and Update
 // reject operator-owned pod-template paths via
-// ValidateOperatorOwnedPodTemplate. Create also refuses a second
-// object in the same namespace (v1 admits at most one). Delete is
-// refused while at least one FireboltEngine exists in the same
-// namespace: Preset is ambient and every engine in the namespace
-// merges it.
+// ValidateOperatorOwnedPodTemplate. The one-object-per-namespace
+// invariant needs no webhook: the CRD CEL rule pins metadata.name to
+// "firebolt", so apiserver name uniqueness enforces it in every
+// admission posture. Delete is refused while at least one
+// FireboltEngine exists in the same namespace: Preset is ambient and
+// every engine in the namespace merges it.
 //
 // +kubebuilder:object:generate=false
 type FireboltEnginePresetCustomValidator struct {
@@ -52,13 +53,9 @@ func SetupFireboltEnginePresetWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// ValidateCreate rejects operator-owned paths on spec.template and
-// refuses a second FireboltEnginePreset in the same namespace.
-func (v *FireboltEnginePresetCustomValidator) ValidateCreate(ctx context.Context, d *FireboltEnginePreset) (admission.Warnings, error) {
-	if errs := validateFireboltEnginePresetSpec(d); len(errs) > 0 {
-		return nil, errs.ToAggregate()
-	}
-	return nil, v.validateUniqueInNamespace(ctx, d)
+// ValidateCreate rejects operator-owned paths on spec.template.
+func (v *FireboltEnginePresetCustomValidator) ValidateCreate(_ context.Context, d *FireboltEnginePreset) (admission.Warnings, error) {
+	return nil, validateFireboltEnginePresetSpec(d).ToAggregate()
 }
 
 // ValidateUpdate enforces the same operator-owned-path rejection set
@@ -95,32 +92,4 @@ func (v *FireboltEnginePresetCustomValidator) ValidateDelete(ctx context.Context
 
 func validateFireboltEnginePresetSpec(d *FireboltEnginePreset) field.ErrorList {
 	return ValidateOperatorOwnedPodTemplate(&d.Spec.Template, field.NewPath("spec", "template"))
-}
-
-// validateUniqueInNamespace refuses create when another
-// FireboltEnginePreset already exists in the same namespace. The
-// incoming object is not stored yet, so any listed peer is a
-// conflict. An object of the same name is skipped so a replayed
-// create of the admitted object is not rejected as a sibling.
-func (v *FireboltEnginePresetCustomValidator) validateUniqueInNamespace(ctx context.Context, d *FireboltEnginePreset) error {
-	if v.Reader == nil {
-		return errors.New("FireboltEnginePreset create webhook has no API reader configured")
-	}
-	var list FireboltEnginePresetList
-	if err := v.Reader.List(ctx, &list, client.InNamespace(d.Namespace)); err != nil {
-		return fmt.Errorf("listing FireboltEnginePreset in namespace %q to enforce at most one: %w", d.Namespace, err)
-	}
-	for i := range list.Items {
-		existing := &list.Items[i]
-		if existing.Name == d.Name {
-			continue
-		}
-		return field.Forbidden(
-			field.NewPath("metadata", "name"),
-			fmt.Sprintf(
-				"FireboltEnginePreset %q already exists in namespace %q; v1 admits at most one object per namespace",
-				existing.Name, d.Namespace),
-		)
-	}
-	return nil
 }

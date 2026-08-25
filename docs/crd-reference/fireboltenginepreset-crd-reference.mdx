@@ -6,7 +6,7 @@ sidebarTitle: FireboltEnginePreset CRD reference
 
 ## Spec reference
 
-`FireboltEnginePreset` is a namespaced ambient overlay. v1 admits one object per namespace; creating a second object in the same namespace is rejected. The conventional name is `firebolt`. Engines do not reference it by name.
+`FireboltEnginePreset` is a namespaced ambient overlay. The object must be named `firebolt`: a CEL validation rule baked into the CRD pins `metadata.name`, so the API server rejects any other name and name uniqueness caps a namespace at one object — with or without the Firebolt Operator's admission webhooks. Engines do not reference it by name.
 
 | Field | Required | Default | Description |
 |---|---|---|---|

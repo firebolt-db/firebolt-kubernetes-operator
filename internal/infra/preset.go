@@ -11,7 +11,7 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// DefaultEnginePresetName is the conventional per-namespace
+// DefaultEnginePresetName is the CEL-enforced per-namespace
 // FireboltEnginePreset object name, re-exported so CLI commands can
 // default a name argument without importing the API package.
 const DefaultEnginePresetName = v1alpha1.FireboltEnginePresetDefaultName
