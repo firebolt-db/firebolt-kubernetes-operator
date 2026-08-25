@@ -105,7 +105,7 @@ func tlaMakeClusterSvc(gen int) *corev1.Service {
 
 // materializeTLAState constructs an engineSim whose simulated cluster state
 // corresponds to the given TLA+ state. instanceReady, classReady, and
-// defaultsReady are intentionally not plumbed — the real gates live in the
+// presetReady are intentionally not plumbed — the real gates live in the
 // outer Reconcile method, not in the compute layer this test exercises;
 // states gated by any of those flags being FALSE are skipped at test time
 // (see tlaShouldGateOut). Both api and cache views are initialized
@@ -173,7 +173,7 @@ func materializeTLAState(s tlaState) *engineSim {
 }
 
 // projectEngineSim extracts the TLA+ observable variables from the simulated
-// cluster state. instanceReady, classReady, and defaultsReady are preserved
+// cluster state. instanceReady, classReady, and presetReady are preserved
 // from the input state because the compute layer cannot change any of them —
 // the three gates are enforced by the outer Reconcile.
 //
@@ -181,7 +181,7 @@ func materializeTLAState(s tlaState) *engineSim {
 // TestTLAEngineStateCover (materialize → project == start) is what enforces
 // that: a field left at its zero value silently narrows what
 // tlaClosureContains compares, which weakens every assertion in the suite.
-func projectEngineSim(m *engineSim, instanceReady, classReady, defaultsReady bool) tlaState {
+func projectEngineSim(m *engineSim, instanceReady, classReady, presetReady bool) tlaState {
 	st := tlaState{
 		Phase:         string(m.status.Phase),
 		CurrentGen:    m.status.CurrentGeneration,
@@ -194,7 +194,7 @@ func projectEngineSim(m *engineSim, instanceReady, classReady, defaultsReady boo
 		PodsDrained:   m.podsDrained,
 		InstanceReady: instanceReady,
 		ClassReady:    classReady,
-		DefaultsReady: defaultsReady,
+		PresetReady:   presetReady,
 	}
 	for g := range st.StsSpecVer {
 		st.StsSpecVer[g] = -1
@@ -265,7 +265,7 @@ func parseSAToken(s string) int {
 // skips these states because the compute layer runs only when all three
 // gates are open.
 func tlaShouldGateOut(s tlaState) bool {
-	if s.InstanceReady && s.ClassReady && s.DefaultsReady {
+	if s.InstanceReady && s.ClassReady && s.PresetReady {
 		return false
 	}
 	switch s.Phase {
@@ -370,7 +370,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			// dropped field fails the round-trip for any state whose value
 			// differs from that field's zero value. Every state-cover harness
 			// carries this guard, through the same shared comparison.
-			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.DefaultsReady); !tlaProjectionEqual(got, start) {
+			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.PresetReady); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
 
@@ -386,7 +386,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			m.gcStaleResources()
 			tlaInvariants(t, m)
 
-			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.DefaultsReady)
+			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.PresetReady)
 			if !tlaClosureContains(tlaStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
 					start, actual, len(tc.Closure), tlaFormatClosure(tlaStatePool, tc.Closure))
@@ -394,7 +394,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 		})
 	}
 	ran := len(tlaEngineStateCases) - skippedGate - skippedBoundary
-	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false OR defaultsReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
+	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false OR presetReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
 		ran, len(tlaEngineStateCases), skippedGate, skippedBoundary)
 
 	// The skip predicates are the other way coverage can quietly vanish: widen

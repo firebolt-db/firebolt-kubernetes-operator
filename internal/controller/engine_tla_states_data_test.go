@@ -23,7 +23,7 @@ type tlaState struct {
 	PodsDrained    bool
 	InstanceReady  bool
 	ClassReady     bool
-	DefaultsReady  bool
+	PresetReady  bool
 }
 
 // tlaTestCase references tlaStatePool by index. Start is the index of the
@@ -86,8 +86,8 @@ var tlaEngineSpecActions = []string{
 	"EnvSetInstanceReady(FALSE)",
 	"EnvSetClassReady(TRUE)",
 	"EnvSetClassReady(FALSE)",
-	"EnvSetDefaultsReady(TRUE)",
-	"EnvSetDefaultsReady(FALSE)",
+	"EnvSetPresetReady(TRUE)",
+	"EnvSetPresetReady(FALSE)",
 	"EnvSetGatesOpen",
 	"ReconcileInit",
 	"ReconcileTerminal_Drift",
