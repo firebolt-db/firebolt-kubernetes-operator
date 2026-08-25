@@ -299,28 +299,23 @@ func (v *FireboltEngineCustomValidator) resolveEngineClass(
 	return class, nil
 }
 
-// resolveEnginePreset returns the single FireboltEnginePreset in the
-// engine's namespace, or nil when there is none to consume. Preset is
-// ambient — engines never reference it by name — so resolution is a
-// namespace list, mirroring the reconciler's
+// resolveEnginePreset returns the namespace's FireboltEnginePreset, or
+// nil when there is none to consume. Preset is ambient — engines never
+// reference it — so resolution is a Get by the CEL-enforced fixed name
+// ("firebolt"), mirroring the reconciler's
 // resolveFireboltEnginePresetInfo.
 //
 // Unlike the class ref, an unresolvable Preset never produces an
-// admission error here: a list failure degrades to the engine → class
-// fallthrough, and an ambiguous namespace (two or more objects) skips
-// the tier because the reconciler fails the engine closed on ambiguity
-// before rendering anything. Admission is the early warning for the
-// bounds gate; the reconciler's validateMergedEngineResources is the
-// guarantee.
+// admission error here: a read failure degrades to the engine → class
+// fallthrough. Admission is the early warning for the bounds gate; the
+// reconciler's validateMergedEngineResources is the guarantee.
 func (v *FireboltEngineCustomValidator) resolveEnginePreset(ctx context.Context, eng *FireboltEngine) *FireboltEnginePreset {
-	var list FireboltEnginePresetList
-	if err := v.Reader.List(ctx, &list, client.InNamespace(eng.Namespace)); err != nil {
+	preset := &FireboltEnginePreset{}
+	key := client.ObjectKey{Namespace: eng.Namespace, Name: FireboltEnginePresetDefaultName}
+	if err := v.Reader.Get(ctx, key, preset); err != nil {
 		return nil
 	}
-	if len(list.Items) != 1 {
-		return nil
-	}
-	return &list.Items[0]
+	return preset
 }
 
 // validateResources rejects engine-container resources entries whose

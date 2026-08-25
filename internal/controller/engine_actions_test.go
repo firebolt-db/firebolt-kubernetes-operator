@@ -78,7 +78,7 @@ var tlaEngineActionMap = map[string][]string{
 	"EnvSetClassReady(FALSE)": {"ApplyClassUnready"},
 
 	// The Preset fail-closed gate. Same shape as the class-Ready gate:
-	// the compute layer cannot see Preset Ready / required / ambiguous,
+	// the compute layer cannot see Preset Ready / required,
 	// only whether an overlay was handed to it.
 	"EnvSetPresetReady(TRUE)":  {"ApplyPresetChange"},
 	"EnvSetPresetReady(FALSE)": {"ApplyPresetUnready"},

@@ -487,25 +487,22 @@ func TestFireboltEngineValidator_EngineWinsOverPresetForBounds(t *testing.T) {
 	}
 }
 
-// TestFireboltEngineValidator_AmbiguousPresetSkipsTier pins the
-// resolution decision for a namespace holding two FireboltEnginePreset
-// (possible with webhooks off): the tier is skipped rather than picking
-// one arbitrarily, so the bounds gate falls through to the class. The
-// reconciler independently fails the engine closed on ambiguity, so
-// admitting here cannot render an unchecked pod.
-func TestFireboltEngineValidator_AmbiguousPresetSkipsTier(t *testing.T) {
-	small := corev1.ResourceRequirements{
-		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
+// TestFireboltEngineValidator_OffNamePresetSkipsTier pins the
+// resolution decision: the Preset tier is a Get by the CEL-enforced
+// fixed name ("firebolt"). An object under any other name (only
+// writable against a CRD missing the CEL rule) is never consumed —
+// exactly mirroring the reconciler, which would not render off it
+// either — so its oversized resources cannot trip the bounds gate.
+func TestFireboltEngineValidator_OffNamePresetSkipsTier(t *testing.T) {
+	oversized := corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
 	}
 	v := &FireboltEngineCustomValidator{
-		Reader: fakeReaderWithObjects(t,
-			enginePresetWithResources("firebolt", small),
-			enginePresetWithResources("second", small),
-		),
+		Reader:         fakeReaderWithObjects(t, enginePresetWithResources("shadow", oversized)),
 		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
 	}
 	if _, err := v.ValidateCreate(context.Background(), fireboltEngineWithRef(nil)); err != nil {
-		t.Fatalf("ValidateCreate: ambiguous Preset should skip the tier, not error; got %v", err)
+		t.Fatalf("ValidateCreate: an off-name Preset object must be skipped, not consumed; got %v", err)
 	}
 }
 
