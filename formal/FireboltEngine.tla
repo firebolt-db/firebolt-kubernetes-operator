@@ -14,10 +14,14 @@
 \*   3. Or use the TLA+ Toolbox / VS Code extension
 \*
 \* Design decisions captured here:
-\*   - The instance gate is a SCHEDULING guard (outer Reconcile), not a
-\*     precondition on compute* functions. When instanceReady is false and
-\*     phase in {stable, stopped, creating}, the state machine does not tick --
-\*     only conditions are updated. Switching/Draining/Cleaning bypass the gate.
+\*   - The instance, class, and Preset fail-closed gates are SCHEDULING
+\*     guards (outer Reconcile), not preconditions on compute* functions.
+\*     When any of instanceReady / classReady / presetReady is false and
+\*     phase in {stable, stopped, creating}, the state machine does not tick
+\*     -- only conditions are updated. Switching/Draining/Cleaning bypass
+\*     those gates. ReconcileInit (phase="" -> creating) is ungated: the
+\*     Go Reconcile writes Creating and returns before resolving any of
+\*     the three objects; the gates apply on the next pass.
 \*   - Each reconcile call is modeled as one atomic step. This is conservative
 \*     (the real code makes multiple K8s writes per reconcile) but correct:
 \*     safety violations found here are real; absence of violations holds in
@@ -257,9 +261,10 @@ EnvSetInstanceReady(v) ==
 \* surfaces ConditionReady=False/FireboltEngineClassUnready on the engine
 \* without rendering a StatefulSet). The gate fires at the same compute*
 \* entry as instanceReady, so every action that respects instanceReady
-\* also respects classReady. Switching/Draining/Cleaning intentionally
-\* bypass the gate (they do not re-resolve the class), matching the
-\* implementation.
+\* also respects classReady. Switching/Draining/Cleaning bypass the
+\* fail-closed check (they do not refuse the pass when the class is
+\* inadmissible). Draining may still read the class for inherited drain
+\* settings. Matches Reconcile: fail-closed is a render gate.
 EnvSetClassReady(v) ==
     /\ classReady # v
     /\ classReady' = v
@@ -273,7 +278,7 @@ EnvSetClassReady(v) ==
 \* surfaces ConditionReady=False/FireboltEnginePreset{Required,
 \* Unready} without rendering a StatefulSet). Missing Ready,
 \* or Ready=False/DeletionBlocked, is admissible — same as class.
-\* Switching/Draining/Cleaning bypass the gate.
+\* Switching/Draining/Cleaning bypass the fail-closed check.
 EnvSetPresetReady(v) ==
     /\ presetReady # v
     /\ presetReady' = v
@@ -307,7 +312,9 @@ EnvSetGatesOpen ==
 
 ReconcileInit ==
     /\ phase = "uninitialized"
-    /\ RenderGatesOpen                        \* instance + class + defaults gates apply
+    \* Status seed only. The Go Reconcile writes phase=creating and returns
+    \* before resolving Instance, Class, or Preset. RenderGatesOpen applies
+    \* on the next pass, once phase is creating.
     /\ phase'      = "creating"
     /\ currentGen' = 0
     /\ activeGen'  = -1
@@ -350,9 +357,8 @@ NewestKept(gcView) == Max2(Max2(gcView, activeGen), drainingGen)
 \* what makes the phase gate unnecessary: mid-rollout it is the generation
 \* serving traffic, and an engine that never reaches a terminal phase is
 \* precisely the one whose abandoned generations accumulate.
-\* Unguarded on instanceReady, classReady, and presetReady, unlike every
-\* reconciler action below: reclaiming an abandoned generation needs neither a
-\* ready instance nor a resolvable class or Preset object. Models
+\* Unguarded on instanceReady, classReady, and presetReady. Reclaiming an
+\* abandoned generation needs none of those render gates. Models
 \* gcOrphanedResources() in engine_gc.go, which the
 \* top-level Reconcile defers so it runs on the way out of every pass, including
 \* the passes those gates end early.
@@ -675,8 +681,8 @@ Safety ==
 \* transitions except on fresh spec drift), so either is acceptable convergence.
 \*
 \* Requires:
-\*   - SF on instance/class/defaults-gated reconcile actions (ReconcileInit,
-\*     ReconcileTerminal_Drift, all ReconcileCreating_*): SF is required rather
+\*   - SF on instance/class/preset-gated reconcile actions (ReconcileTerminal_Drift,
+\*     all ReconcileCreating_*): SF is required rather
 \*     than WF because EnvSetInstanceReady(FALSE) / EnvSetClassReady(FALSE) /
 \*     EnvSetPresetReady(FALSE) have no fairness constraint and can toggle
 \*     a gate back to FALSE immediately after every TRUE. With WF the
@@ -735,9 +741,8 @@ Spec ==
     /\ Init
     /\ [][Next]_vars
     \* Instance-, class-, and Preset-gated actions: SF because the three
-    \* readiness flags can toggle adversarially. Same SF-vs-WF reasoning
-    \* as the instance gate above.
-    /\ SF_vars(ReconcileInit)
+    \* readiness flags can toggle adversarially. ReconcileInit is ungated
+    \* (status seed only) and sits with the WF actions below.
     /\ SF_vars(ReconcileTerminal_Drift)
     /\ SF_vars(ReconcileCreating_SpecDrift)
     /\ SF_vars(ReconcileCreating_SpecDrift_AtMax)
@@ -745,6 +750,7 @@ Spec ==
     /\ SF_vars(ReconcileCreating_EnsureService)
     /\ SF_vars(ReconcileCreating_Advance)
     \* Non-gated actions: WF is sufficient.
+    /\ WF_vars(ReconcileInit)
     /\ WF_vars(ReconcileSwitching_UpdateService)
     /\ WF_vars(ReconcileSwitching_Complete)
     /\ WF_vars(ReconcileDraining_Complete)

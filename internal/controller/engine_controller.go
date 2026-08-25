@@ -277,14 +277,17 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// getEngineState's drain decision and the autoStop both consume
 	// class-inherited settings (rollout, drainCheckEnabled, autoStop), and
 	// computeEngineReconcile merges the class template / storage / config.
-	// Resolution is bubbled up to controller-runtime on every failure.
-	// NotFound (errFireboltEngineClassNotFound) is normally caught at
-	// admission by the FireboltEngine validating webhook, but the helm chart
-	// ships webhooks disabled by default, so a missing class can reach this
-	// point in dev/test deployments; the engine stays stuck at the
-	// Initializing condition and the reconciler-loop log carries the
-	// missing-class name (the resolver wraps the upstream error with the name
-	// + namespace). We intentionally do NOT mint a dedicated
+	//
+	// Fail-closed (missing class, Ready=False/OperatorOwnedFieldSet) is a
+	// render gate: it applies in stable, stopped, and creating, the same
+	// window as the Instance gate. switching / draining / cleaning already
+	// hold rendered resources and must finish even if the class became
+	// inadmissible; draining still uses the class for inherited drain
+	// settings. Resolution is bubbled up to controller-runtime on every
+	// failure outside that bypass. NotFound is normally caught at admission
+	// by the FireboltEngine validating webhook, but the helm chart ships
+	// webhooks disabled by default, so a missing class can reach this point
+	// in dev/test deployments. We intentionally do NOT mint a dedicated
 	// FireboltEngineClassReady condition for the missing-class case: the state
 	// space is binary (exists / doesn't), not a lifecycle worth narrating like
 	// InstanceReady.
@@ -295,27 +298,14 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// ConditionReady=False/FireboltEngineClassUnready on the engine and
 	// refuses to render a StatefulSet off it. The FireboltEngine watch on
 	// FireboltEngineClass re-enqueues when the class status changes.
-	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
-	if classErr != nil {
-		return r.handleFireboltEngineClassError(ctx, engine, classErr)
+	needsRender := engineNeedsRender(engine.Status.Phase)
+	overlays, overlayRes, overlayErr := r.resolveEngineOverlays(ctx, engine, needsRender)
+	if overlayErr != nil || overlayRes != (ctrl.Result{}) {
+		return overlayRes, overlayErr
 	}
-	presetInfo, presetErr := r.resolveFireboltEnginePresetInfo(ctx, engine)
-	if presetErr != nil {
-		return r.handleFireboltEnginePresetError(ctx, engine, presetErr)
-	}
-	if presetInfo != nil {
-		engine.Status.AppliedPresetName = presetInfo.Name
-		engine.Status.AppliedPresetHash = presetInfo.Hash
-	} else {
-		engine.Status.AppliedPresetName = ""
-		engine.Status.AppliedPresetHash = ""
-	}
-	// Keep the unmerged class for diagnostic attribution. overlayPresetOnClass
-	// folds Preset into classInfo.Template, so validators that name the
-	// source object must see the pre-overlay class and the Preset object
-	// separately. Render and reconcile consume the merged info.
-	resolvedClass := classInfo
-	classInfo = overlayPresetOnClass(presetInfo, classInfo)
+	classInfo := overlays.classInfo
+	resolvedClass := overlays.resolvedClass
+	presetInfo := overlays.presetInfo
 
 	current, err = r.getEngineState(ctx, engine, classInfo)
 	if err != nil {
@@ -373,9 +363,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	//
 	// Phase == "" is handled by the early-return above which initializes
 	// status and requeues, so it cannot reach this point.
-	needsInstance := engine.Status.Phase == computev1alpha1.PhaseStable ||
-		engine.Status.Phase == computev1alpha1.PhaseStopped ||
-		engine.Status.Phase == computev1alpha1.PhaseCreating
+	needsInstance := needsRender
 
 	var instanceInfo InstanceInfo
 	if needsInstance {
@@ -418,30 +406,32 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// resource-bound gate to mirror the webhook's validateTemplate→validateResources
 	// order. Refuse to render until the template is fixed; mirrors the
 	// FireboltInstance controller's validateInstanceTemplates gate.
-	if tplErrs := validateEngineTemplates(engine, resolvedClass, presetInfo, instanceInfo); len(tplErrs) > 0 {
-		return r.handleTemplateRejected(ctx, engine, tplErrs)
-	}
+	if needsRender {
+		if tplErrs := validateEngineTemplates(engine, resolvedClass, presetInfo, instanceInfo); len(tplErrs) > 0 {
+			return r.handleTemplateRejected(ctx, engine, tplErrs)
+		}
 
-	// Reported, never blocking: the render drops these, and the roll that carries
-	// the clean generation is the remedy — see engineAliasedSecretVolumes.
-	r.reportAliasedSecretVolumes(ctx, engine, resolvedClass, presetInfo, instanceInfo)
+		// Reported, never blocking: the render drops these, and the roll that carries
+		// the clean generation is the remedy — see engineAliasedSecretVolumes.
+		r.reportAliasedSecretVolumes(ctx, engine, resolvedClass, presetInfo, instanceInfo)
 
-	// Defense-in-depth for the FireboltEngine validating webhook's
-	// resource-bound check. Webhook ON: admission already rejected
-	// anything above the configured --engine-max-* maximum, so this
-	// branch is dead code. Webhook OFF (chart default): this is the
-	// only enforcement — values.yaml advertises the bounds, and a
-	// silent no-op would mislead operators who set them. Same field
-	// path and "exceeds operator-configured maximum" message as the
-	// webhook so diagnostics are stable across admission paths.
-	//
-	// Mirrors the webhook's resolution: check the engine's own template
-	// container first, then fall back to the class container. Otherwise
-	// a class with oversized resources, referenced by an engine that
-	// inherits them, would bypass the controller-side gate even on the
-	// webhook-disabled path.
-	if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, presetInfo); len(boundsErrs) > 0 {
-		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+		// Defense-in-depth for the FireboltEngine validating webhook's
+		// resource-bound check. Webhook ON: admission already rejected
+		// anything above the configured --engine-max-* maximum, so this
+		// branch is dead code. Webhook OFF (chart default): this is the
+		// only enforcement — values.yaml advertises the bounds, and a
+		// silent no-op would mislead operators who set them. Same field
+		// path and "exceeds operator-configured maximum" message as the
+		// webhook so diagnostics are stable across admission paths.
+		//
+		// Mirrors the webhook's resolution: check the engine's own template
+		// container first, then fall back to the class container. Otherwise
+		// a class with oversized resources, referenced by an engine that
+		// inherits them, would bypass the controller-side gate even on the
+		// webhook-disabled path.
+		if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, presetInfo); len(boundsErrs) > 0 {
+			return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+		}
 	}
 
 	result := computeEngineReconcile(
@@ -1020,10 +1010,10 @@ func (r *FireboltEngineReconciler) validateMergedEngineResources(
 // validateEngineTemplate is the controller-side counterpart of the
 // FireboltEngine webhook's validateTemplate gate (api/v1alpha1/
 // fireboltengine_webhook.go). It re-runs the operator-owned-fields
-// allowlist on the engine's own spec.template every reconcile, using
-// the same FireboltEngineClassPodTemplateRules the webhook applies —
-// engine and class templates merge into one pod, so they share the
-// contract.
+// allowlist on the engine's own spec.template when Reconcile is about
+// to render (engineNeedsRender), using the same FireboltEngineClassPodTemplateRules
+// the webhook applies — engine and class templates merge into one pod, so they
+// share the contract.
 //
 // This is defense-in-depth, not bypass: when the validating webhook is
 // in the request path the list is empty by construction (admission
@@ -1416,6 +1406,70 @@ var errFireboltEngineClassNotFound = stderrors.New("FireboltEngineClass referenc
 // every dependent engine's events.
 var errFireboltEngineClassUnready = stderrors.New("FireboltEngineClass referenced by spec.engineClassRef is not Ready")
 
+// engineNeedsRender is the outer-Reconcile window where Instance, Class,
+// and Preset fail-closed gates apply and a StatefulSet may be rendered:
+// stable, stopped, and creating. switching / draining / cleaning operate
+// on already-rendered resources and finish without those gates.
+func engineNeedsRender(phase computev1alpha1.EnginePhase) bool {
+	return phase == computev1alpha1.PhaseStable ||
+		phase == computev1alpha1.PhaseStopped ||
+		phase == computev1alpha1.PhaseCreating
+}
+
+// classRenderGateError reports whether err is a Class fail-closed reason
+// (missing or OperatorOwnedFieldSet). API-read failures are not: those
+// must still abort every phase, including mid-rollout.
+func classRenderGateError(err error) bool {
+	return stderrors.Is(err, errFireboltEngineClassUnready) ||
+		stderrors.Is(err, errFireboltEngineClassNotFound)
+}
+
+type engineOverlays struct {
+	classInfo     *FireboltEngineClassInfo
+	resolvedClass *FireboltEngineClassInfo
+	presetInfo    *FireboltEnginePresetInfo
+}
+
+// resolveEngineOverlays loads Class always (drain settings) and Preset only
+// when needsRender. A fail-closed Class/Preset error in the render window
+// returns the handle* Reconcile result. Mid-rollout, an inadmissible class
+// still yields its info; a missing class continues with nil.
+func (r *FireboltEngineReconciler) resolveEngineOverlays(
+	ctx context.Context,
+	engine *computev1alpha1.FireboltEngine,
+	needsRender bool,
+) (engineOverlays, ctrl.Result, error) {
+	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
+	if classErr != nil {
+		if needsRender || !classRenderGateError(classErr) {
+			res, err := r.handleFireboltEngineClassError(ctx, engine, classErr)
+			return engineOverlays{}, res, err
+		}
+		if stderrors.Is(classErr, errFireboltEngineClassNotFound) {
+			classInfo = nil
+		}
+	}
+	out := engineOverlays{classInfo: classInfo, resolvedClass: classInfo}
+	if !needsRender {
+		return out, ctrl.Result{}, nil
+	}
+	presetInfo, presetErr := r.resolveFireboltEnginePresetInfo(ctx, engine)
+	if presetErr != nil {
+		res, err := r.handleFireboltEnginePresetError(ctx, engine, presetErr)
+		return engineOverlays{}, res, err
+	}
+	if presetInfo != nil {
+		engine.Status.AppliedPresetName = presetInfo.Name
+		engine.Status.AppliedPresetHash = presetInfo.Hash
+	} else {
+		engine.Status.AppliedPresetName = ""
+		engine.Status.AppliedPresetHash = ""
+	}
+	out.presetInfo = presetInfo
+	out.classInfo = overlayPresetOnClass(presetInfo, classInfo)
+	return out, ctrl.Result{}, nil
+}
+
 // reasonFireboltEngineClassUnready is the engine ConditionReady reason set
 // when resolveFireboltEngineClassInfo refuses to consume an
 // OperatorOwnedFieldSet class. Set directly in Reconcile (rather than
@@ -1455,16 +1509,17 @@ const reasonResourceBoundsExceeded = "ResourceBoundsExceeded"
 // A second admission-bypass gate runs here: if the FireboltEngineClassReconciler
 // has stamped Ready=False/OperatorOwnedFieldSet (its defense-in-depth
 // check caught a path the operator owns end-to-end), the resolver
-// returns errFireboltEngineClassUnready and Reconcile surfaces
-// ConditionReady=False/FireboltEngineClassUnready on the engine without
-// rendering a StatefulSet off the offending class. A missing Ready
-// condition (class freshly created, FireboltEngineClassReconciler hasn't run
-// yet) is treated as "not yet evaluated" and allowed through — the
-// engine's next reconcile will pick up the status once the class
-// controller catches up. DeletionBlocked is not a gate: engines that
-// stay bound to a Terminating class are the exact reason the class
-// can't finish deleting, so blocking renders would deadlock
-// (engine stops reconciling → can't be deleted → class can't be
+// returns errFireboltEngineClassUnready together with the class info.
+// Reconcile fail-closes on that error in stable / stopped / creating
+// (ConditionReady=False/FireboltEngineClassUnready, no StatefulSet).
+// switching / draining / cleaning keep the info so inherited drain
+// settings still apply. A missing Ready condition (class freshly created,
+// FireboltEngineClassReconciler hasn't run yet) is treated as "not yet
+// evaluated" and allowed through — the engine's next reconcile will pick
+// up the status once the class controller catches up. DeletionBlocked is
+// not a gate: engines that stay bound to a Terminating class are the
+// exact reason the class can't finish deleting, so blocking renders would
+// deadlock (engine stops reconciling → can't be deleted → class can't be
 // released).
 func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineClassInfo, error) {
 	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
@@ -1480,7 +1535,10 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 	}
 	if cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady); cond != nil &&
 		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
-		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+		// Return the info alongside the error so a mid-rollout pass can
+		// still read drain settings (rollout, drainCheckEnabled, interval)
+		// without rendering the inadmissible template.
+		return newFireboltEngineClassInfo(class), fmt.Errorf("%w: %q in namespace %q: %s",
 			errFireboltEngineClassUnready, class.Name, class.Namespace, cond.Message)
 	}
 	return newFireboltEngineClassInfo(class), nil

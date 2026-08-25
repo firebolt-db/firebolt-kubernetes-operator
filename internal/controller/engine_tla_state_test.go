@@ -260,10 +260,10 @@ func parseSAToken(s string) int {
 // prevent computeEngineReconcile from running at all. The three gates
 // engage when the corresponding flag is false and phase is in {stable,
 // stopped, creating}; the other phases (switching, draining, cleaning)
-// bypass the gates deliberately because they do not re-resolve the
-// instance, the class, or Preset. State cover for the compute layer
-// skips these states because the compute layer runs only when all three
-// gates are open.
+// bypass the gates because fail-closed is a render gate. State cover for
+// the compute layer skips these states because the compute layer runs
+// only when all three gates are open. Init (uninitialized -> creating)
+// is ungated in both the spec and the outer Reconcile.
 func tlaShouldGateOut(s tlaState) bool {
 	if s.InstanceReady && s.ClassReady && s.PresetReady {
 		return false

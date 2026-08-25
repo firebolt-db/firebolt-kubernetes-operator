@@ -281,3 +281,60 @@ func TestEngineReconcile_RequiredPresetSurfacesCondition(t *testing.T) {
 			updated.Status.AppliedPresetName, updated.Status.AppliedPresetHash)
 	}
 }
+
+// TestEngineReconcile_RequiredPresetDoesNotAbortRollout pins that
+// requirePreset + missing object is a render gate, not a cutover gate.
+// switching / draining / cleaning must still run computeEngineReconcile.
+func TestEngineReconcile_RequiredPresetDoesNotAbortRollout(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const ns, instName = "ns-a", "parent-instance"
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status:     computev1alpha1.FireboltInstanceStatus{MetadataEndpoint: "metadata.ns-a.svc:50051"},
+	}
+	phases := []computev1alpha1.EnginePhase{
+		computev1alpha1.PhaseSwitching,
+		computev1alpha1.PhaseDraining,
+		computev1alpha1.PhaseCleaning,
+	}
+	for _, phase := range phases {
+		t.Run(string(phase), func(t *testing.T) {
+			engName := "engine-" + string(phase)
+			engine := engineInRolloutPhaseFixture(engName, ns, "", phase)
+			engine.Spec.InstanceRef = instName
+			engine.Spec.RequirePreset = ptr(true)
+			engine.Status.AppliedPresetName = computev1alpha1.FireboltEnginePresetDefaultName
+			engine.Status.AppliedPresetHash = "already-applied"
+			cli := fake.NewClientBuilder().
+				WithScheme(sch).
+				WithObjects(instance, engine).
+				WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+				Build()
+			r := engineRefTestReconciler(cli, sch)
+			if _, err := r.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: client.ObjectKey{Name: engName, Namespace: ns},
+			}); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			updated := &computev1alpha1.FireboltEngine{}
+			if err := cli.Get(context.Background(), client.ObjectKey{Name: engName, Namespace: ns}, updated); err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
+			if cond != nil && cond.Reason == reasonFireboltEnginePresetRequired {
+				t.Fatalf("Ready.Reason = %q in phase %s; fail-closed must not abort a rollout", cond.Reason, phase)
+			}
+			if updated.Status.AppliedPresetName != computev1alpha1.FireboltEnginePresetDefaultName {
+				t.Errorf("AppliedPresetName = %q, want left alone when Preset is not re-resolved mid-rollout",
+					updated.Status.AppliedPresetName)
+			}
+			if updated.Status.Phase == phase && phase == computev1alpha1.PhaseDraining {
+				t.Fatal("phase still draining: computeDraining did not run")
+			}
+			if updated.Status.Phase == phase && phase == computev1alpha1.PhaseCleaning {
+				t.Fatal("phase still cleaning: computeCleaning did not run")
+			}
+		})
+	}
+}
