@@ -14,7 +14,7 @@ The Firebolt Operator combines TLA+ model checking with generated Go state-cover
 | [`EngineWake.tla`](../../formal/EngineWake.tla) | Wake demand, auto-stop ordering, and demand freshness | `wake_tla_states_data_test.go` |
 | [`WakeAgentHold.tla`](../../formal/WakeAgentHold.tla) | Wake-agent waiter identity and release ordering | No Go binding; covered by TLC and wake-agent unit tests |
 
-The stateful pod-template merge comparator (including the FireboltEngineClass and FireboltEnginePreset overlays), drain probes and timeouts, and the Go implementation of wake-agent waiter bookkeeping are explicitly outside the current model-to-Go bindings. A Preset or class spec edit is modeled as a `specVer` increment; the fail-closed Preset gate is the `defaultsReady` boolean, symmetric to `classReady`. Consult `formal/model-scope.tsv` before describing a change as model-covered.
+The stateful pod-template merge comparator (including the FireboltEngineClass and FireboltEnginePreset overlays), drain probes and timeouts, and the Go implementation of wake-agent waiter bookkeeping are explicitly outside the current model-to-Go bindings. A Preset or class spec edit is modeled as a `specVer` increment; the fail-closed Preset gate is the `presetReady` boolean, symmetric to `classReady`. Consult `formal/model-scope.tsv` before describing a change as model-covered.
 
 ## Verification layers
 

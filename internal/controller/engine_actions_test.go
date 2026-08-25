@@ -80,8 +80,8 @@ var tlaEngineActionMap = map[string][]string{
 	// The Preset fail-closed gate. Same shape as the class-Ready gate:
 	// the compute layer cannot see Preset Ready / required / ambiguous,
 	// only whether an overlay was handed to it.
-	"EnvSetDefaultsReady(TRUE)":  {"ApplyPresetChange"},
-	"EnvSetDefaultsReady(FALSE)": {"ApplyPresetUnready"},
+	"EnvSetPresetReady(TRUE)":  {"ApplyPresetChange"},
+	"EnvSetPresetReady(FALSE)": {"ApplyPresetUnready"},
 
 	// GC of generations that are neither current, active, nor draining.
 	// engineSim.Reconcile runs gcStaleResources on every pass, mirroring the
@@ -127,7 +127,7 @@ var tlaEngineSpecOnlyActions = map[string]string{
 		"enforced above the compute layer",
 
 	"EnvSetGatesOpen": "liveness scaffolding with no safety content. It drives " +
-		"instanceReady, classReady, and defaultsReady TRUE in one step purely so " +
+		"instanceReady, classReady, and presetReady TRUE in one step purely so " +
 		"weak fairness can force a moment when all three gates are open at once; " +
 		"independent fairness on the per-flag actions only makes each TRUE " +
 		"infinitely often. There is no reconciler behavior to reproduce",

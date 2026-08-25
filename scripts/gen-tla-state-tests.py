@@ -530,7 +530,7 @@ type tlaState struct {{
 	PodsDrained    bool
 	InstanceReady  bool
 	ClassReady     bool
-	DefaultsReady  bool
+	PresetReady  bool
 }}
 
 // tlaTestCase references tlaStatePool by index. Start is the index of the
@@ -568,8 +568,8 @@ ENGINE_ENV_ACTIONS = frozenset(
         "EnvSetInstanceReady(FALSE)",
         "EnvSetClassReady(TRUE)",
         "EnvSetClassReady(FALSE)",
-        "EnvSetDefaultsReady(TRUE)",
-        "EnvSetDefaultsReady(FALSE)",
+        "EnvSetPresetReady(TRUE)",
+        "EnvSetPresetReady(FALSE)",
         "EnvSetGatesOpen",
     ]
 )
@@ -621,7 +621,7 @@ def engine_project(state: State) -> StateKey:
         state["podsDrained"],
         state["instanceReady"],
         state["classReady"],
-        state["defaultsReady"],
+        state["presetReady"],
     )
 
 
@@ -643,7 +643,7 @@ def engine_go_state_lit(key: StateKey, ctx: Ctx) -> str:
         pods_drained,
         instance_ready,
         class_ready,
-        defaults_ready,
+        preset_ready,
     ) = key
     assert isinstance(sts, tuple)
     gens = int(ctx["max_gen_plus_one"])
@@ -663,7 +663,7 @@ def engine_go_state_lit(key: StateKey, ctx: Ctx) -> str:
         f"{go_bool(bool(pods_drained))}, "
         f"{go_bool(bool(instance_ready))}, "
         f"{go_bool(bool(class_ready))}, "
-        f"{go_bool(bool(defaults_ready))}"
+        f"{go_bool(bool(preset_ready))}"
         "}"
     )
 
