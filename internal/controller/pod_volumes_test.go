@@ -353,20 +353,20 @@ func TestValidateEngineSecretEnvRefs(t *testing.T) {
 		}
 	})
 
-	t.Run("the Defaults template is checked under its own path", func(t *testing.T) {
-		defaultsInfo := &FireboltEngineDefaultsInfo{
-			Name: computev1alpha1.FireboltEngineDefaultsDefaultName,
+	t.Run("the Preset template is checked under its own path", func(t *testing.T) {
+		presetInfo := &FireboltEnginePresetInfo{
+			Name: computev1alpha1.FireboltEnginePresetDefaultName,
 			Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 				Containers: []corev1.Container{secretEnvContainer("sid", "inst-auth-signing")},
 			}},
 		}
-		errs := validateEngineSecretEnvRefs(&computev1alpha1.FireboltEngine{}, nil, defaultsInfo, info)
+		errs := validateEngineSecretEnvRefs(&computev1alpha1.FireboltEngine{}, nil, presetInfo, info)
 		if len(errs) != 1 {
-			t.Fatalf("want 1 error for the Defaults template, got %d: %v", len(errs), errs)
+			t.Fatalf("want 1 error for the Preset template, got %d: %v", len(errs), errs)
 		}
 		msg := errs[0].Error()
-		if !strings.Contains(msg, "FireboltEngineDefaults") || !strings.Contains(msg, defaultsInfo.Name) {
-			t.Errorf("error %q should point at FireboltEngineDefaults %q", msg, defaultsInfo.Name)
+		if !strings.Contains(msg, "FireboltEnginePreset") || !strings.Contains(msg, presetInfo.Name) {
+			t.Errorf("error %q should point at FireboltEnginePreset %q", msg, presetInfo.Name)
 		}
 		if strings.Contains(msg, "engineClassRef") {
 			t.Errorf("error %q should not point at a class", msg)

@@ -62,6 +62,10 @@ var tlaEngineActionMap = map[string][]string{
 		// class/engine merge arbitration that is its real reason to exist. The
 		// merge layer itself has no model at all -- see formal/model-scope.tsv.
 		"ApplyConflictingClassAndEngine",
+		// Preset overlay identity (PresetHash) is another input to
+		// the spec-content hash specVer abstracts over. The merge layer
+		// itself stays UNMODELLED — see formal/model-scope.tsv.
+		"ApplyPresetChange",
 	},
 	"EnvPodsReady":   {"PodsBecomesReady"},
 	"EnvPodsDrained": {"DrainCompletes"},
@@ -72,6 +76,12 @@ var tlaEngineActionMap = map[string][]string{
 	// resolveFireboltEngineClassInfo does in production.
 	"EnvSetClassReady(TRUE)":  {"ApplyClassChange"},
 	"EnvSetClassReady(FALSE)": {"ApplyClassUnready"},
+
+	// The Preset fail-closed gate. Same shape as the class-Ready gate:
+	// the compute layer cannot see Preset Ready / required,
+	// only whether an overlay was handed to it.
+	"EnvSetPresetReady(TRUE)":  {"ApplyPresetChange"},
+	"EnvSetPresetReady(FALSE)": {"ApplyPresetUnready"},
 
 	// GC of generations that are neither current, active, nor draining.
 	// engineSim.Reconcile runs gcStaleResources on every pass, mirroring the
@@ -117,10 +127,10 @@ var tlaEngineSpecOnlyActions = map[string]string{
 		"enforced above the compute layer",
 
 	"EnvSetGatesOpen": "liveness scaffolding with no safety content. It drives " +
-		"instanceReady and classReady TRUE in one step purely so weak fairness " +
-		"can force a moment when both gates are open at once; independent " +
-		"fairness on the per-flag actions only makes each TRUE infinitely often. " +
-		"There is no reconciler behavior to reproduce",
+		"instanceReady, classReady, and presetReady TRUE in one step purely so " +
+		"weak fairness can force a moment when all three gates are open at once; " +
+		"independent fairness on the per-flag actions only makes each TRUE " +
+		"infinitely often. There is no reconciler behavior to reproduce",
 }
 
 // tlaEngineHarnessOnlyActions are engineSim actions with no `Next ==` disjunct,

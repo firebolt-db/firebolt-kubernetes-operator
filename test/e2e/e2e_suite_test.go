@@ -206,7 +206,7 @@ var _ = SynchronizedBeforeSuite(func() {
 
 	crds := []string{
 		"compute.firebolt.io_fireboltengineclasses.yaml",
-		"compute.firebolt.io_fireboltenginedefaults.yaml",
+		"compute.firebolt.io_fireboltenginepresets.yaml",
 		"compute.firebolt.io_fireboltengines.yaml",
 		"compute.firebolt.io_fireboltinstances.yaml",
 	}
@@ -467,7 +467,7 @@ func ensureMinK8sVersion(cs *kubernetes.Clientset, minMajor, minMinor int) {
 // FireboltEngine.
 func cleanupStaleResources(ctx context.Context) {
 	patchNoFinalizers := []byte(`{"metadata":{"finalizers":null}}`)
-	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses", "fireboltenginedefaults"} {
+	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses", "fireboltenginepresets"} {
 		args := []string{"get", kind, "-n", testNamespace, "-o", "jsonpath={.items[*].metadata.name}"}
 		if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
 			args = append([]string{"--context", "kind-" + kindCluster}, args...)

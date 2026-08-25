@@ -26,11 +26,11 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// FireboltEngineDefaultsInfo is the resolved ambient overlay for one
-// namespace. overlayDefaultsOnClass folds it underneath the engine and
+// FireboltEnginePresetInfo is the resolved ambient overlay for one
+// namespace. overlayPresetOnClass folds it underneath the engine and
 // above the class so existing effective* helpers keep the shape
 // (spec, classInfo).
-type FireboltEngineDefaultsInfo struct {
+type FireboltEnginePresetInfo struct {
 	Name               string
 	Hash               string
 	Template           *corev1.PodTemplateSpec
@@ -38,7 +38,7 @@ type FireboltEngineDefaultsInfo struct {
 	CustomEngineConfig *apiextensionsv1.JSON
 }
 
-func newFireboltEngineDefaultsInfo(d *computev1alpha1.FireboltEngineDefaults) *FireboltEngineDefaultsInfo {
+func newFireboltEnginePresetInfo(d *computev1alpha1.FireboltEnginePreset) *FireboltEnginePresetInfo {
 	if d == nil {
 		return nil
 	}
@@ -48,10 +48,10 @@ func newFireboltEngineDefaultsInfo(d *computev1alpha1.FireboltEngineDefaults) *F
 		// Fall back to the fmt rendering — same pattern as
 		// customEngineConfigHash — so even an impossible marshal failure
 		// yields drift-detectable content instead of an empty hash that
-		// would hide Defaults edits from stsMatchesSpec.
+		// would hide Preset edits from stsMatchesSpec.
 		raw = []byte(fmt.Sprintf("%v", d.Spec))
 	}
-	return &FireboltEngineDefaultsInfo{
+	return &FireboltEnginePresetInfo{
 		Name:               d.Name,
 		Hash:               contentHash(string(raw)),
 		Template:           d.Spec.Template.DeepCopy(),
@@ -60,7 +60,7 @@ func newFireboltEngineDefaultsInfo(d *computev1alpha1.FireboltEngineDefaults) *F
 	}
 }
 
-func defaultsAsEngineSpec(d *FireboltEngineDefaultsInfo) *computev1alpha1.FireboltEngineSpec {
+func presetAsEngineSpec(d *FireboltEnginePresetInfo) *computev1alpha1.FireboltEngineSpec {
 	spec := &computev1alpha1.FireboltEngineSpec{
 		Storage:            d.Storage,
 		CustomEngineConfig: d.CustomEngineConfig,
@@ -71,21 +71,21 @@ func defaultsAsEngineSpec(d *FireboltEngineDefaultsInfo) *computev1alpha1.Firebo
 	return spec
 }
 
-// overlayDefaultsOnClass folds Defaults over the class using the same
+// overlayPresetOnClass folds Preset over the class using the same
 // merge keys as engine-over-class. The result is consumed as classInfo
 // by effective*, so the live resolution order is
-// engine > Defaults > class > operator default. SKU-shaped class
+// engine > Preset > class > operator default. SKU-shaped class
 // fields (rollout, autoStop, uiSidecar, drain checks) pass through
 // unchanged. Class Hash is preserved so AnnotationEngineClassHash
 // still means the class template only.
-func overlayDefaultsOnClass(defaults *FireboltEngineDefaultsInfo, class *FireboltEngineClassInfo) *FireboltEngineClassInfo {
+func overlayPresetOnClass(defaults *FireboltEnginePresetInfo, class *FireboltEngineClassInfo) *FireboltEngineClassInfo {
 	if defaults == nil {
 		return class
 	}
-	fake := defaultsAsEngineSpec(defaults)
+	fake := presetAsEngineSpec(defaults)
 	out := &FireboltEngineClassInfo{
-		DefaultsName: defaults.Name,
-		DefaultsHash: defaults.Hash,
+		PresetName: defaults.Name,
+		PresetHash: defaults.Hash,
 	}
 	if class != nil {
 		out.Name = class.Name
@@ -106,11 +106,11 @@ func overlayDefaultsOnClass(defaults *FireboltEngineDefaultsInfo, class *Firebol
 			out.CustomEngineConfig = &apiextensionsv1.JSON{Raw: raw}
 		}
 	}
-	out.Template = overlayDefaultsPodTemplate(fake, class)
+	out.Template = overlayPresetPodTemplate(fake, class)
 	return out
 }
 
-func overlayDefaultsPodTemplate(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) *corev1.PodTemplateSpec {
+func overlayPresetPodTemplate(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) *corev1.PodTemplateSpec {
 	tmpl := &corev1.PodTemplateSpec{}
 	labels := map[string]string{}
 	if class != nil && class.Template != nil {
@@ -133,11 +133,11 @@ func overlayDefaultsPodTemplate(fake *computev1alpha1.FireboltEngineSpec, class 
 		tmpl.Labels = labels
 	}
 	tmpl.Annotations = effectivePodAnnotations(fake, class)
-	overlayDefaultsPodSpec(&tmpl.Spec, fake, class)
+	overlayPresetPodSpec(&tmpl.Spec, fake, class)
 	return tmpl
 }
 
-func overlayDefaultsPodSpec(spec *corev1.PodSpec, fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) {
+func overlayPresetPodSpec(spec *corev1.PodSpec, fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) {
 	spec.ServiceAccountName = effectiveServiceAccountName(fake, class)
 	spec.NodeSelector = effectiveNodeSelector(fake, class)
 	spec.Tolerations = effectiveTolerations(fake, class)
@@ -161,12 +161,12 @@ func overlayDefaultsPodSpec(spec *corev1.PodSpec, fake *computev1alpha1.Firebolt
 		spec.SecurityContext = class.Template.Spec.SecurityContext.DeepCopy()
 	}
 	spec.InitContainers = effectiveInitContainers(fake, class)
-	spec.Volumes = overlayDefaultsVolumes(fake, class)
+	spec.Volumes = overlayPresetVolumes(fake, class)
 	sidecars := effectiveSidecars(fake, class)
-	spec.Containers = append([]corev1.Container{overlayDefaultsEngineContainer(fake, class)}, sidecars...)
+	spec.Containers = append([]corev1.Container{overlayPresetEngineContainer(fake, class)}, sidecars...)
 }
 
-func overlayDefaultsVolumes(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) []corev1.Volume {
+func overlayPresetVolumes(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) []corev1.Volume {
 	var vols []corev1.Volume
 	if class != nil && class.Template != nil {
 		for i := range class.Template.Spec.Volumes {
@@ -181,7 +181,7 @@ func overlayDefaultsVolumes(fake *computev1alpha1.FireboltEngineSpec, class *Fir
 	return vols
 }
 
-func overlayDefaultsEngineContainer(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) corev1.Container {
+func overlayPresetEngineContainer(fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) corev1.Container {
 	engineC := corev1.Container{Name: computev1alpha1.EngineContainerName}
 	if c := engineSpecContainer(fake); c != nil && c.Image != "" {
 		engineC.Image = c.Image

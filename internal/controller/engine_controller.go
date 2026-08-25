@@ -277,14 +277,17 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// getEngineState's drain decision and the autoStop both consume
 	// class-inherited settings (rollout, drainCheckEnabled, autoStop), and
 	// computeEngineReconcile merges the class template / storage / config.
-	// Resolution is bubbled up to controller-runtime on every failure.
-	// NotFound (errFireboltEngineClassNotFound) is normally caught at
-	// admission by the FireboltEngine validating webhook, but the helm chart
-	// ships webhooks disabled by default, so a missing class can reach this
-	// point in dev/test deployments; the engine stays stuck at the
-	// Initializing condition and the reconciler-loop log carries the
-	// missing-class name (the resolver wraps the upstream error with the name
-	// + namespace). We intentionally do NOT mint a dedicated
+	//
+	// Fail-closed (missing class, Ready=False/OperatorOwnedFieldSet) is a
+	// render gate: it applies in stable, stopped, and creating, the same
+	// window as the Instance gate. switching / draining / cleaning already
+	// hold rendered resources and must finish even if the class became
+	// inadmissible; draining still uses the class for inherited drain
+	// settings. Resolution is bubbled up to controller-runtime on every
+	// failure outside that bypass. NotFound is normally caught at admission
+	// by the FireboltEngine validating webhook, but the helm chart ships
+	// webhooks disabled by default, so a missing class can reach this point
+	// in dev/test deployments. We intentionally do NOT mint a dedicated
 	// FireboltEngineClassReady condition for the missing-class case: the state
 	// space is binary (exists / doesn't), not a lifecycle worth narrating like
 	// InstanceReady.
@@ -295,27 +298,14 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// ConditionReady=False/FireboltEngineClassUnready on the engine and
 	// refuses to render a StatefulSet off it. The FireboltEngine watch on
 	// FireboltEngineClass re-enqueues when the class status changes.
-	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
-	if classErr != nil {
-		return r.handleFireboltEngineClassError(ctx, engine, classErr)
+	needsRender := engineNeedsRender(engine.Status.Phase)
+	overlays, overlayRes, overlayErr := r.resolveEngineOverlays(ctx, engine, needsRender)
+	if overlayErr != nil || overlayRes != (ctrl.Result{}) {
+		return overlayRes, overlayErr
 	}
-	defaultsInfo, defaultsErr := r.resolveFireboltEngineDefaultsInfo(ctx, engine)
-	if defaultsErr != nil {
-		return r.handleFireboltEngineDefaultsError(ctx, engine, defaultsErr)
-	}
-	if defaultsInfo != nil {
-		engine.Status.AppliedDefaultsName = defaultsInfo.Name
-		engine.Status.AppliedDefaultsHash = defaultsInfo.Hash
-	} else {
-		engine.Status.AppliedDefaultsName = ""
-		engine.Status.AppliedDefaultsHash = ""
-	}
-	// Keep the unmerged class for diagnostic attribution. overlayDefaultsOnClass
-	// folds Defaults into classInfo.Template, so validators that name the
-	// source object must see the pre-overlay class and the Defaults object
-	// separately. Render and reconcile consume the merged info.
-	resolvedClass := classInfo
-	classInfo = overlayDefaultsOnClass(defaultsInfo, classInfo)
+	classInfo := overlays.classInfo
+	resolvedClass := overlays.resolvedClass
+	presetInfo := overlays.presetInfo
 
 	current, err = r.getEngineState(ctx, engine, classInfo)
 	if err != nil {
@@ -373,9 +363,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	//
 	// Phase == "" is handled by the early-return above which initializes
 	// status and requeues, so it cannot reach this point.
-	needsInstance := engine.Status.Phase == computev1alpha1.PhaseStable ||
-		engine.Status.Phase == computev1alpha1.PhaseStopped ||
-		engine.Status.Phase == computev1alpha1.PhaseCreating
+	needsInstance := needsRender
 
 	var instanceInfo InstanceInfo
 	if needsInstance {
@@ -418,30 +406,32 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// resource-bound gate to mirror the webhook's validateTemplate→validateResources
 	// order. Refuse to render until the template is fixed; mirrors the
 	// FireboltInstance controller's validateInstanceTemplates gate.
-	if tplErrs := validateEngineTemplates(engine, resolvedClass, defaultsInfo, instanceInfo); len(tplErrs) > 0 {
-		return r.handleTemplateRejected(ctx, engine, tplErrs)
-	}
+	if needsRender {
+		if tplErrs := validateEngineTemplates(engine, resolvedClass, presetInfo, instanceInfo); len(tplErrs) > 0 {
+			return r.handleTemplateRejected(ctx, engine, tplErrs)
+		}
 
-	// Reported, never blocking: the render drops these, and the roll that carries
-	// the clean generation is the remedy — see engineAliasedSecretVolumes.
-	r.reportAliasedSecretVolumes(ctx, engine, resolvedClass, defaultsInfo, instanceInfo)
+		// Reported, never blocking: the render drops these, and the roll that carries
+		// the clean generation is the remedy — see engineAliasedSecretVolumes.
+		r.reportAliasedSecretVolumes(ctx, engine, resolvedClass, presetInfo, instanceInfo)
 
-	// Defense-in-depth for the FireboltEngine validating webhook's
-	// resource-bound check. Webhook ON: admission already rejected
-	// anything above the configured --engine-max-* maximum, so this
-	// branch is dead code. Webhook OFF (chart default): this is the
-	// only enforcement — values.yaml advertises the bounds, and a
-	// silent no-op would mislead operators who set them. Same field
-	// path and "exceeds operator-configured maximum" message as the
-	// webhook so diagnostics are stable across admission paths.
-	//
-	// Mirrors the webhook's resolution: check the engine's own template
-	// container first, then fall back to the class container. Otherwise
-	// a class with oversized resources, referenced by an engine that
-	// inherits them, would bypass the controller-side gate even on the
-	// webhook-disabled path.
-	if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, defaultsInfo); len(boundsErrs) > 0 {
-		return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+		// Defense-in-depth for the FireboltEngine validating webhook's
+		// resource-bound check. Webhook ON: admission already rejected
+		// anything above the configured --engine-max-* maximum, so this
+		// branch is dead code. Webhook OFF (chart default): this is the
+		// only enforcement — values.yaml advertises the bounds, and a
+		// silent no-op would mislead operators who set them. Same field
+		// path and "exceeds operator-configured maximum" message as the
+		// webhook so diagnostics are stable across admission paths.
+		//
+		// Mirrors the webhook's resolution: check the engine's own template
+		// container first, then fall back to the class container. Otherwise
+		// a class with oversized resources, referenced by an engine that
+		// inherits them, would bypass the controller-side gate even on the
+		// webhook-disabled path.
+		if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, presetInfo); len(boundsErrs) > 0 {
+			return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
+		}
 	}
 
 	result := computeEngineReconcile(
@@ -970,23 +960,23 @@ func (r *FireboltEngineReconciler) handleFireboltEngineClassError(ctx context.Co
 // validateMergedEngineResources is the controller-side counterpart of
 // the webhook's validateResources gate. It computes the effective
 // engine-container resources the way the reconciler will: engine
-// template wins wholesale when set, else Defaults container, else
+// template wins wholesale when set, else Preset container, else
 // class container, else empty (which trivially passes any bound).
 //
-// classInfo and defaultsInfo must be the unmerged sources. After
-// overlayDefaultsOnClass the merged template would make a Defaults
+// classInfo and presetInfo must be the unmerged sources. After
+// overlayPresetOnClass the merged template would make a Preset
 // value look like it came from the class (or from an empty class name
 // when no engineClassRef is set).
 //
 // The merged field path stays on the engine
 // (spec.template.spec.containers[engine].resources.*) regardless of
 // source so error messages match the webhook's exactly. When the value
-// came from Defaults or a class, the message detail names that object
+// came from Preset or a class, the message detail names that object
 // so the user knows which side to edit.
 func (r *FireboltEngineReconciler) validateMergedEngineResources(
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-	defaultsInfo *FireboltEngineDefaultsInfo,
+	presetInfo *FireboltEnginePresetInfo,
 ) field.ErrorList {
 	mergedPath := field.NewPath("spec", "template", "spec", "containers").
 		Key(computev1alpha1.EngineContainerName).Child("resources")
@@ -994,12 +984,12 @@ func (r *FireboltEngineReconciler) validateMergedEngineResources(
 	if c := computev1alpha1.EngineContainerInTemplate(engine.Spec.Template); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		return r.ResourceBounds.Validate(c.Resources, mergedPath)
 	}
-	if c := computev1alpha1.EngineContainerInTemplate(defaultsTemplate(defaultsInfo)); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
+	if c := computev1alpha1.EngineContainerInTemplate(presetTemplate(presetInfo)); c != nil && computev1alpha1.HasContainerResources(c.Resources) {
 		errs := r.ResourceBounds.Validate(c.Resources, mergedPath)
 		for i := range errs {
 			errs[i].Detail = fmt.Sprintf(
-				"%s (inherited from FireboltEngineDefaults %q; set spec.template on this engine to override)",
-				errs[i].Detail, defaultsInfo.Name,
+				"%s (inherited from FireboltEnginePreset %q; set spec.template on this engine to override)",
+				errs[i].Detail, presetInfo.Name,
 			)
 		}
 		return errs
@@ -1020,10 +1010,10 @@ func (r *FireboltEngineReconciler) validateMergedEngineResources(
 // validateEngineTemplate is the controller-side counterpart of the
 // FireboltEngine webhook's validateTemplate gate (api/v1alpha1/
 // fireboltengine_webhook.go). It re-runs the operator-owned-fields
-// allowlist on the engine's own spec.template every reconcile, using
-// the same FireboltEngineClassPodTemplateRules the webhook applies —
-// engine and class templates merge into one pod, so they share the
-// contract.
+// allowlist on the engine's own spec.template when Reconcile is about
+// to render (engineNeedsRender), using the same FireboltEngineClassPodTemplateRules
+// the webhook applies — engine and class templates merge into one pod, so they
+// share the contract.
 //
 // This is defense-in-depth, not bypass: when the validating webhook is
 // in the request path the list is empty by construction (admission
@@ -1058,21 +1048,21 @@ func validateEngineTemplate(engine *computev1alpha1.FireboltEngine) field.ErrorL
 func validateEngineTemplates(
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-	defaultsInfo *FireboltEngineDefaultsInfo,
+	presetInfo *FireboltEnginePresetInfo,
 	info InstanceInfo,
 ) field.ErrorList {
 	errs := validateEngineTemplate(engine)
-	return append(errs, validateEngineSecretEnvRefs(engine, classInfo, defaultsInfo, info)...)
+	return append(errs, validateEngineSecretEnvRefs(engine, classInfo, presetInfo, info)...)
 }
 
 // engineTemplates returns the templates that merge into the engine pod, paired
-// with the field path each is reported under. Class and Defaults templates
+// with the field path each is reported under. Class and Preset templates
 // are the unmerged sources: only the engine knows which Instance — and
 // therefore which Secrets — those objects are being rendered against.
 func engineTemplates(
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-	defaultsInfo *FireboltEngineDefaultsInfo,
+	presetInfo *FireboltEnginePresetInfo,
 ) []struct {
 	tpl  *corev1.PodTemplateSpec
 	path *field.Path
@@ -1087,11 +1077,11 @@ func engineTemplates(
 			path *field.Path
 		}{engine.Spec.Template, field.NewPath("spec", "template", "spec")})
 	}
-	if tmpl := defaultsTemplate(defaultsInfo); tmpl != nil {
+	if tmpl := presetTemplate(presetInfo); tmpl != nil {
 		out = append(out, struct {
 			tpl  *corev1.PodTemplateSpec
 			path *field.Path
-		}{tmpl, field.NewPath("FireboltEngineDefaults").Key(defaultsInfo.Name).Child("spec", "template", "spec")})
+		}{tmpl, field.NewPath("FireboltEnginePreset").Key(presetInfo.Name).Child("spec", "template", "spec")})
 	}
 	if classInfo != nil && classInfo.Template != nil {
 		out = append(out, struct {
@@ -1102,11 +1092,11 @@ func engineTemplates(
 	return out
 }
 
-func defaultsTemplate(defaultsInfo *FireboltEngineDefaultsInfo) *corev1.PodTemplateSpec {
-	if defaultsInfo == nil {
+func presetTemplate(presetInfo *FireboltEnginePresetInfo) *corev1.PodTemplateSpec {
+	if presetInfo == nil {
 		return nil
 	}
-	return defaultsInfo.Template
+	return presetInfo.Template
 }
 
 // validateEngineSecretEnvRefs rejects a template container that reads one of the
@@ -1115,12 +1105,12 @@ func defaultsTemplate(defaultsInfo *FireboltEngineDefaultsInfo) *corev1.PodTempl
 func validateEngineSecretEnvRefs(
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-	defaultsInfo *FireboltEngineDefaultsInfo,
+	presetInfo *FireboltEnginePresetInfo,
 	info InstanceInfo,
 ) field.ErrorList {
 	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
-	for _, t := range engineTemplates(engine, classInfo, defaultsInfo) {
+	for _, t := range engineTemplates(engine, classInfo, presetInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
 			t.tpl.Spec.Containers, t.path.Child("containers"), isProtected, "engine")...)
 		errs = append(errs, computev1alpha1.ValidateNoSecretRefEnv(
@@ -1134,9 +1124,9 @@ func validateEngineSecretEnvRefs(
 // still happens.
 func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
 	ctx context.Context, engine *computev1alpha1.FireboltEngine,
-	classInfo *FireboltEngineClassInfo, defaultsInfo *FireboltEngineDefaultsInfo, info InstanceInfo,
+	classInfo *FireboltEngineClassInfo, presetInfo *FireboltEnginePresetInfo, info InstanceInfo,
 ) {
-	errs := engineAliasedSecretVolumes(engine, classInfo, defaultsInfo, info)
+	errs := engineAliasedSecretVolumes(engine, classInfo, presetInfo, info)
 	if len(errs) == 0 {
 		return
 	}
@@ -1164,12 +1154,12 @@ func (r *FireboltEngineReconciler) reportAliasedSecretVolumes(
 func engineAliasedSecretVolumes(
 	engine *computev1alpha1.FireboltEngine,
 	classInfo *FireboltEngineClassInfo,
-	defaultsInfo *FireboltEngineDefaultsInfo,
+	presetInfo *FireboltEnginePresetInfo,
 	info InstanceInfo,
 ) field.ErrorList {
 	isProtected := engineProtectedSecret(info)
 	var errs field.ErrorList
-	for _, t := range engineTemplates(engine, classInfo, defaultsInfo) {
+	for _, t := range engineTemplates(engine, classInfo, presetInfo) {
 		errs = append(errs, computev1alpha1.ValidateNoSecretAliasVolumes(
 			t.tpl.Spec.Volumes, t.path.Child("volumes"), isProtected, "engine")...)
 	}
@@ -1416,6 +1406,70 @@ var errFireboltEngineClassNotFound = stderrors.New("FireboltEngineClass referenc
 // every dependent engine's events.
 var errFireboltEngineClassUnready = stderrors.New("FireboltEngineClass referenced by spec.engineClassRef is not Ready")
 
+// engineNeedsRender is the outer-Reconcile window where Instance, Class,
+// and Preset fail-closed gates apply and a StatefulSet may be rendered:
+// stable, stopped, and creating. switching / draining / cleaning operate
+// on already-rendered resources and finish without those gates.
+func engineNeedsRender(phase computev1alpha1.EnginePhase) bool {
+	return phase == computev1alpha1.PhaseStable ||
+		phase == computev1alpha1.PhaseStopped ||
+		phase == computev1alpha1.PhaseCreating
+}
+
+// classRenderGateError reports whether err is a Class fail-closed reason
+// (missing or OperatorOwnedFieldSet). API-read failures are not: those
+// must still abort every phase, including mid-rollout.
+func classRenderGateError(err error) bool {
+	return stderrors.Is(err, errFireboltEngineClassUnready) ||
+		stderrors.Is(err, errFireboltEngineClassNotFound)
+}
+
+type engineOverlays struct {
+	classInfo     *FireboltEngineClassInfo
+	resolvedClass *FireboltEngineClassInfo
+	presetInfo    *FireboltEnginePresetInfo
+}
+
+// resolveEngineOverlays loads Class always (drain settings) and Preset only
+// when needsRender. A fail-closed Class/Preset error in the render window
+// returns the handle* Reconcile result. Mid-rollout, an inadmissible class
+// still yields its info; a missing class continues with nil.
+func (r *FireboltEngineReconciler) resolveEngineOverlays(
+	ctx context.Context,
+	engine *computev1alpha1.FireboltEngine,
+	needsRender bool,
+) (engineOverlays, ctrl.Result, error) {
+	classInfo, classErr := r.resolveFireboltEngineClassInfo(ctx, engine)
+	if classErr != nil {
+		if needsRender || !classRenderGateError(classErr) {
+			res, err := r.handleFireboltEngineClassError(ctx, engine, classErr)
+			return engineOverlays{}, res, err
+		}
+		if stderrors.Is(classErr, errFireboltEngineClassNotFound) {
+			classInfo = nil
+		}
+	}
+	out := engineOverlays{classInfo: classInfo, resolvedClass: classInfo}
+	if !needsRender {
+		return out, ctrl.Result{}, nil
+	}
+	presetInfo, presetErr := r.resolveFireboltEnginePresetInfo(ctx, engine)
+	if presetErr != nil {
+		res, err := r.handleFireboltEnginePresetError(ctx, engine, presetErr)
+		return engineOverlays{}, res, err
+	}
+	if presetInfo != nil {
+		engine.Status.AppliedPresetName = presetInfo.Name
+		engine.Status.AppliedPresetHash = presetInfo.Hash
+	} else {
+		engine.Status.AppliedPresetName = ""
+		engine.Status.AppliedPresetHash = ""
+	}
+	out.presetInfo = presetInfo
+	out.classInfo = overlayPresetOnClass(presetInfo, classInfo)
+	return out, ctrl.Result{}, nil
+}
+
 // reasonFireboltEngineClassUnready is the engine ConditionReady reason set
 // when resolveFireboltEngineClassInfo refuses to consume an
 // OperatorOwnedFieldSet class. Set directly in Reconcile (rather than
@@ -1455,16 +1509,17 @@ const reasonResourceBoundsExceeded = "ResourceBoundsExceeded"
 // A second admission-bypass gate runs here: if the FireboltEngineClassReconciler
 // has stamped Ready=False/OperatorOwnedFieldSet (its defense-in-depth
 // check caught a path the operator owns end-to-end), the resolver
-// returns errFireboltEngineClassUnready and Reconcile surfaces
-// ConditionReady=False/FireboltEngineClassUnready on the engine without
-// rendering a StatefulSet off the offending class. A missing Ready
-// condition (class freshly created, FireboltEngineClassReconciler hasn't run
-// yet) is treated as "not yet evaluated" and allowed through — the
-// engine's next reconcile will pick up the status once the class
-// controller catches up. DeletionBlocked is not a gate: engines that
-// stay bound to a Terminating class are the exact reason the class
-// can't finish deleting, so blocking renders would deadlock
-// (engine stops reconciling → can't be deleted → class can't be
+// returns errFireboltEngineClassUnready together with the class info.
+// Reconcile fail-closes on that error in stable / stopped / creating
+// (ConditionReady=False/FireboltEngineClassUnready, no StatefulSet).
+// switching / draining / cleaning keep the info so inherited drain
+// settings still apply. A missing Ready condition (class freshly created,
+// FireboltEngineClassReconciler hasn't run yet) is treated as "not yet
+// evaluated" and allowed through — the engine's next reconcile will pick
+// up the status once the class controller catches up. DeletionBlocked is
+// not a gate: engines that stay bound to a Terminating class are the
+// exact reason the class can't finish deleting, so blocking renders would
+// deadlock (engine stops reconciling → can't be deleted → class can't be
 // released).
 func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineClassInfo, error) {
 	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
@@ -1480,86 +1535,84 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 	}
 	if cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady); cond != nil &&
 		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
-		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+		// Return the info alongside the error so a mid-rollout pass can
+		// still read drain settings (rollout, drainCheckEnabled, interval)
+		// without rendering the inadmissible template.
+		return newFireboltEngineClassInfo(class), fmt.Errorf("%w: %q in namespace %q: %s",
 			errFireboltEngineClassUnready, class.Name, class.Namespace, cond.Message)
 	}
 	return newFireboltEngineClassInfo(class), nil
 }
 
 var (
-	errFireboltEngineDefaultsRequired  = stderrors.New("FireboltEngineDefaults is required in this namespace")
-	errFireboltEngineDefaultsAmbiguous = stderrors.New("namespace has more than one FireboltEngineDefaults")
-	errFireboltEngineDefaultsUnready   = stderrors.New("FireboltEngineDefaults is not Ready")
+	errFireboltEnginePresetRequired = stderrors.New("FireboltEnginePreset is required in this namespace")
+	errFireboltEnginePresetUnready  = stderrors.New("FireboltEnginePreset is not Ready")
 )
 
 const (
-	reasonFireboltEngineDefaultsRequired  = "FireboltEngineDefaultsRequired"
-	reasonFireboltEngineDefaultsAmbiguous = "FireboltEngineDefaultsAmbiguous"
-	reasonFireboltEngineDefaultsUnready   = "FireboltEngineDefaultsUnready"
+	reasonFireboltEnginePresetRequired = "FireboltEnginePresetRequired"
+	reasonFireboltEnginePresetUnready  = "FireboltEnginePresetUnready"
 )
 
-// resolveFireboltEngineDefaultsInfo lists FireboltEngineDefaults in the
-// engine's namespace. v1 admits one object: zero is optional unless
-// spec.requireDefaults is true; two or more is always fail-closed;
-// a single object with Ready=False/OperatorOwnedFieldSet, or whose live
-// spec.template still carries operator-owned paths, is always
-// fail-closed. A missing Ready condition on an otherwise admissible
-// object is allowed through so a freshly created Defaults object does
-// not deadlock engines.
-func (r *FireboltEngineReconciler) resolveFireboltEngineDefaultsInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineDefaultsInfo, error) {
-	var list computev1alpha1.FireboltEngineDefaultsList
-	if err := r.List(ctx, &list, client.InNamespace(engine.Namespace)); err != nil {
-		return nil, fmt.Errorf("listing FireboltEngineDefaults in namespace %q: %w", engine.Namespace, err)
+// resolveFireboltEnginePresetInfo fetches the namespace's single
+// FireboltEnginePreset by its CEL-enforced fixed name ("firebolt");
+// apiserver name uniqueness makes a second object impossible, so
+// there is no ambiguity case. Absence is optional unless
+// spec.requirePreset is true; an object with
+// Ready=False/OperatorOwnedFieldSet, or whose live spec.template
+// still carries operator-owned paths, is always fail-closed. A
+// missing Ready condition on an otherwise admissible object is
+// allowed through so a freshly created Preset object does not
+// deadlock engines.
+func (r *FireboltEngineReconciler) resolveFireboltEnginePresetInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEnginePresetInfo, error) {
+	d := &computev1alpha1.FireboltEnginePreset{}
+	key := client.ObjectKey{Namespace: engine.Namespace, Name: computev1alpha1.FireboltEnginePresetDefaultName}
+	if err := r.Get(ctx, key, d); err != nil {
+		if errors.IsNotFound(err) {
+			if engine.Spec.RequirePreset != nil && *engine.Spec.RequirePreset {
+				return nil, fmt.Errorf("%w: namespace %q has no FireboltEnginePreset", errFireboltEnginePresetRequired, engine.Namespace)
+			}
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting FireboltEnginePreset %q in namespace %q: %w", key.Name, engine.Namespace, err)
 	}
-	switch len(list.Items) {
-	case 0:
-		if engine.Spec.RequireDefaults != nil && *engine.Spec.RequireDefaults {
-			return nil, fmt.Errorf("%w: namespace %q has no FireboltEngineDefaults", errFireboltEngineDefaultsRequired, engine.Namespace)
-		}
-		return nil, nil
-	case 1:
-		d := &list.Items[0]
-		if cond := apimeta.FindStatusCondition(d.Status.Conditions, computev1alpha1.FireboltEngineDefaultsConditionReady); cond != nil &&
-			cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
-			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
-				errFireboltEngineDefaultsUnready, d.Name, d.Namespace, cond.Message)
-		}
-		// Re-run the allowlist on the live spec. The Ready condition is
-		// written by a different reconciler, so a webhook-off create (or a
-		// spec patch while DeletionBlocked) can reach this pass before
-		// OperatorOwnedFieldSet is stamped. Overlaying that spec would let
-		// reserved engine env win under kubelet last-wins.
-		if errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(
-			&d.Spec.Template, field.NewPath("spec", "template"),
-		); len(errs) > 0 {
-			return nil, fmt.Errorf("%w: %q in namespace %q: %s",
-				errFireboltEngineDefaultsUnready, d.Name, d.Namespace, errs.ToAggregate().Error())
-		}
-		return newFireboltEngineDefaultsInfo(d), nil
-	default:
-		return nil, fmt.Errorf("%w: namespace %q has %d FireboltEngineDefaults objects",
-			errFireboltEngineDefaultsAmbiguous, engine.Namespace, len(list.Items))
+	if cond := apimeta.FindStatusCondition(d.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady); cond != nil &&
+		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
+		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+			errFireboltEnginePresetUnready, d.Name, d.Namespace, cond.Message)
 	}
+	// Re-run the allowlist on the live spec. The Ready condition is
+	// written by a different reconciler, so a webhook-off create (or a
+	// spec patch while DeletionBlocked) can reach this pass before
+	// OperatorOwnedFieldSet is stamped. Overlaying that spec would let
+	// reserved engine env win under kubelet last-wins.
+	if errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(
+		&d.Spec.Template, field.NewPath("spec", "template"),
+	); len(errs) > 0 {
+		return nil, fmt.Errorf("%w: %q in namespace %q: %s",
+			errFireboltEnginePresetUnready, d.Name, d.Namespace, errs.ToAggregate().Error())
+	}
+	return newFireboltEnginePresetInfo(d), nil
 }
 
-// handleFireboltEngineDefaultsError surfaces fail-closed Defaults
-// states as ConditionReady=False and requeues. API-list failures
-// bubble up for backoff. AppliedDefaultsName/Hash are cleared so
+// handleFireboltEnginePresetError surfaces fail-closed Preset
+// states as ConditionReady=False and requeues. API-read failures
+// bubble up for backoff. AppliedPresetName/Hash are cleared so
 // status cannot keep naming an overlay that this pass refused to
-// resolve (removed, ambiguous, or OperatorOwnedFieldSet).
-func (r *FireboltEngineReconciler) handleFireboltEngineDefaultsError(ctx context.Context, engine *computev1alpha1.FireboltEngine, defaultsErr error) (ctrl.Result, error) {
-	reason, ok := fireboltEngineDefaultsConditionReason(defaultsErr)
+// resolve (removed or OperatorOwnedFieldSet).
+func (r *FireboltEngineReconciler) handleFireboltEnginePresetError(ctx context.Context, engine *computev1alpha1.FireboltEngine, presetErr error) (ctrl.Result, error) {
+	reason, ok := fireboltEnginePresetConditionReason(presetErr)
 	if !ok {
-		return ctrl.Result{}, defaultsErr
+		return ctrl.Result{}, presetErr
 	}
-	engine.Status.AppliedDefaultsName = ""
-	engine.Status.AppliedDefaultsHash = ""
+	engine.Status.AppliedPresetName = ""
+	engine.Status.AppliedPresetHash = ""
 	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 		Type:               computev1alpha1.ConditionReady,
 		Status:             metav1.ConditionFalse,
 		ObservedGeneration: engine.Generation,
 		Reason:             reason,
-		Message:            defaultsErr.Error(),
+		Message:            presetErr.Error(),
 	})
 	if updateErr := r.updateStatus(ctx, engine); updateErr != nil {
 		return ctrl.Result{}, updateErr
@@ -1567,14 +1620,12 @@ func (r *FireboltEngineReconciler) handleFireboltEngineDefaultsError(ctx context
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
-func fireboltEngineDefaultsConditionReason(err error) (string, bool) {
+func fireboltEnginePresetConditionReason(err error) (string, bool) {
 	switch {
-	case stderrors.Is(err, errFireboltEngineDefaultsRequired):
-		return reasonFireboltEngineDefaultsRequired, true
-	case stderrors.Is(err, errFireboltEngineDefaultsAmbiguous):
-		return reasonFireboltEngineDefaultsAmbiguous, true
-	case stderrors.Is(err, errFireboltEngineDefaultsUnready):
-		return reasonFireboltEngineDefaultsUnready, true
+	case stderrors.Is(err, errFireboltEnginePresetRequired):
+		return reasonFireboltEnginePresetRequired, true
+	case stderrors.Is(err, errFireboltEnginePresetUnready):
+		return reasonFireboltEnginePresetUnready, true
 	default:
 		return "", false
 	}
@@ -1791,8 +1842,8 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 			handler.EnqueueRequestsFromMapFunc(r.instanceToEngines)).
 		Watches(&computev1alpha1.FireboltEngineClass{},
 			handler.EnqueueRequestsFromMapFunc(r.engineClassToEngines)).
-		Watches(&computev1alpha1.FireboltEngineDefaults{},
-			handler.EnqueueRequestsFromMapFunc(r.engineDefaultsToEngines)).
+		Watches(&computev1alpha1.FireboltEnginePreset{},
+			handler.EnqueueRequestsFromMapFunc(r.enginePresetToEngines)).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
@@ -1846,13 +1897,13 @@ func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj
 	return requests
 }
 
-// engineDefaultsToEngines maps a FireboltEngineDefaults event to
+// enginePresetToEngines maps a FireboltEnginePreset event to
 // reconcile requests for every FireboltEngine in the same namespace.
-// Defaults is ambient, so every engine consumes it.
-func (r *FireboltEngineReconciler) engineDefaultsToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+// Preset is ambient, so every engine consumes it.
+func (r *FireboltEngineReconciler) enginePresetToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
 	engineList := &computev1alpha1.FireboltEngineList{}
 	if err := r.List(ctx, engineList, client.InNamespace(obj.GetNamespace())); err != nil {
-		logf.FromContext(ctx).Error(err, "Failed to list engines for FireboltEngineDefaults watch", "namespace", obj.GetNamespace())
+		logf.FromContext(ctx).Error(err, "Failed to list engines for FireboltEnginePreset watch", "namespace", obj.GetNamespace())
 		return nil
 	}
 	requests := make([]reconcile.Request, 0, len(engineList.Items))

@@ -27,49 +27,49 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// Serial because FireboltEngineDefaults is an ambient overlay merged under
+// Serial because FireboltEnginePreset is an ambient overlay merged under
 // every engine in the namespace: each create/edit/delete here changes the
 // effective pod template of all co-scheduled specs' engines and rolls them a
 // new blue-green generation, breaking any spec that asserts phase stability
 // or a stable pod IP. Serial also lets the AfterAll deletion complete instead
 // of hanging on the deletion-guard finalizer while other engines exist.
-var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
+var _ = Describe("FireboltEnginePreset merge", Ordered, Serial, func() {
 	var (
 		instanceName = "inst-defaults" + queryConfig.Suffix
 		engineName   = "test-defaults" + queryConfig.Suffix + "-engine"
-		defaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
-		// editedServiceAccount is created by the spec before the Defaults
+		presetName = computev1alpha1.FireboltEnginePresetDefaultName
+		// editedServiceAccount is created by the spec before the Preset
 		// edit references it; pods of the rolled generation run under it.
-		editedServiceAccount = "defaults-sa" + queryConfig.Suffix
+		editedServiceAccount = "preset-sa" + queryConfig.Suffix
 		lc                   *TestInstanceLifecycle
 	)
 	RegisterFailedSpecPodLogDump(&instanceName, &engineName)
 
 	BeforeAll(func() {
-		By("Setting up FireboltInstance for Defaults merge")
+		By("Setting up FireboltInstance for Preset merge")
 		var err error
 		lc, err = SetupTestInstance(ctx, instanceName)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterAll(func() {
-		By("Cleaning up Defaults merge test")
+		By("Cleaning up Preset merge test")
 		defer TeardownTestInstance(ctx, lc)
 		Expect(DeleteEngine(ctx, engineName)).To(Succeed())
 		Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
-		_ = DeleteFireboltEngineDefaults(ctx, defaultsName)
+		_ = DeleteFireboltEnginePreset(ctx, presetName)
 		_ = DeleteServiceAccount(ctx, editedServiceAccount)
 	})
 
-	It("fails closed until Defaults exists, then rolls on a Defaults edit", func() {
-		By("Creating an engine that requires FireboltEngineDefaults")
-		Expect(CreateEngineWithRequireDefaults(ctx, instanceName, engineName, 1)).To(Succeed())
+	It("fails closed until Preset exists, then rolls on a Preset edit", func() {
+		By("Creating an engine that requires FireboltEnginePreset")
+		Expect(CreateEngineWithRequirePreset(ctx, instanceName, engineName, 1)).To(Succeed())
 
-		By("Waiting for Ready=False/FireboltEngineDefaultsRequired")
-		Expect(WaitForEngineReadyCondition(ctx, engineName, metav1.ConditionFalse, "FireboltEngineDefaultsRequired", generationSweepTimeout)).To(Succeed())
+		By("Waiting for Ready=False/FireboltEnginePresetRequired")
+		Expect(WaitForEngineReadyCondition(ctx, engineName, metav1.ConditionFalse, "FireboltEnginePresetRequired", generationSweepTimeout)).To(Succeed())
 
-		By("Creating FireboltEngineDefaults")
-		Expect(CreateFireboltEngineDefaults(ctx, defaultsName, "default")).To(Succeed())
+		By("Creating FireboltEnginePreset")
+		Expect(CreateFireboltEnginePreset(ctx, presetName, "default")).To(Succeed())
 
 		By("Waiting for the engine to become Ready")
 		Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
@@ -77,14 +77,14 @@ var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 		genBefore, _, err := GetEngineGeneration(ctx, engineName)
 		Expect(err).NotTo(HaveOccurred())
 
-		// The ServiceAccount must exist before the Defaults edit points
+		// The ServiceAccount must exist before the Preset edit points
 		// pods at it, or the new generation could never be admitted and
 		// the blue-green roll would wedge.
 		By("Creating the edited ServiceAccount")
 		Expect(CreateServiceAccount(ctx, editedServiceAccount)).To(Succeed())
 
-		By("Editing FireboltEngineDefaults service account")
-		Expect(UpdateFireboltEngineDefaultsServiceAccount(ctx, defaultsName, editedServiceAccount)).To(Succeed())
+		By("Editing FireboltEnginePreset service account")
+		Expect(UpdateFireboltEnginePresetServiceAccount(ctx, presetName, editedServiceAccount)).To(Succeed())
 
 		By("Waiting for the engine to leave PhaseStable")
 		Expect(WaitForEnginePhaseChange(ctx, engineName, computev1alpha1.PhaseStable, clusterTransitionTimeout)).To(Succeed())
@@ -95,7 +95,7 @@ var _ = Describe("FireboltEngineDefaults merge", Ordered, Serial, func() {
 		genAfter, _, err := GetEngineGeneration(ctx, engineName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(genAfter).To(BeNumerically(">", genBefore),
-			"a Defaults spec edit must roll a new blue-green generation")
+			"a Preset spec edit must roll a new blue-green generation")
 
 		By("Verifying the new generation carries the merged service account")
 		sts, err := GetEngineGenerationStatefulSet(ctx, engineName, genAfter)

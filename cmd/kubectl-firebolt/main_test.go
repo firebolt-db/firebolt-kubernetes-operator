@@ -59,13 +59,13 @@ func TestMarshalObjectListIsKubectlStyle(t *testing.T) {
 }
 
 func TestMarshalObjectIsSingleCR(t *testing.T) {
-	obj := v1alpha1.FireboltEngineDefaults{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "compute.firebolt.io/v1alpha1", Kind: "FireboltEngineDefaults"},
+	obj := v1alpha1.FireboltEnginePreset{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "compute.firebolt.io/v1alpha1", Kind: "FireboltEnginePreset"},
 		ObjectMeta: metav1.ObjectMeta{Name: "firebolt"},
-		Status: v1alpha1.FireboltEngineDefaultsStatus{
+		Status: v1alpha1.FireboltEnginePresetStatus{
 			BoundEngines: 3,
 			Conditions: []metav1.Condition{{
-				Type:   v1alpha1.FireboltEngineDefaultsConditionReady,
+				Type:   v1alpha1.FireboltEnginePresetConditionReady,
 				Status: metav1.ConditionTrue,
 			}},
 		},
@@ -78,8 +78,8 @@ func TestMarshalObjectIsSingleCR(t *testing.T) {
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
 	}
-	if got["kind"] != "FireboltEngineDefaults" {
-		t.Errorf("kind = %v, want FireboltEngineDefaults (not a List wrapper)", got["kind"])
+	if got["kind"] != "FireboltEnginePreset" {
+		t.Errorf("kind = %v, want FireboltEnginePreset (not a List wrapper)", got["kind"])
 	}
 	status, ok := got["status"].(map[string]any)
 	if !ok {

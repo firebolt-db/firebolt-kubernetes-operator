@@ -35,7 +35,7 @@ cleanup() {
     fireboltinstances.compute.firebolt.io \
     fireboltengines.compute.firebolt.io \
     fireboltengineclasses.compute.firebolt.io \
-    fireboltenginedefaults.compute.firebolt.io \
+    fireboltenginepresets.compute.firebolt.io \
     --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
   kubectl delete namespace "$NAMESPACE" --wait=false >/dev/null 2>&1 || true
 }
@@ -61,7 +61,7 @@ fi
 # Established by the apiserver. (`kubectl wait --for=condition=Established`
 # errors out when .status.conditions is briefly nil right after creation, so
 # poll instead — same approach as the verify-quickstart helpers.)
-for crd in fireboltinstances fireboltengines fireboltengineclasses fireboltenginedefaults; do
+for crd in fireboltinstances fireboltengines fireboltengineclasses fireboltenginepresets; do
   full="${crd}.compute.firebolt.io"
   established=""
   for _ in $(seq 1 15); do

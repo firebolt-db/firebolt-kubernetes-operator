@@ -1,13 +1,14 @@
-# A FireboltEngineDefaults object. Ambient namespace overlay for service
+# A FireboltEnginePreset object. Ambient namespace overlay for service
 # account, credential env, storage, and customEngineConfig.
 #
-# v1 admits one object per namespace. The conventional name is "firebolt".
-# Engines do not reference this object by name.
+# The object must be named "firebolt" (a CEL rule on the CRD pins the
+# name), so a namespace holds at most one. Engines do not reference this
+# object by name.
 #
 # spec.template uses the same operator-owned-path allowlist as
 # FireboltEngineClass.spec.template.
 apiVersion: compute.firebolt.io/v1alpha1
-kind: FireboltEngineDefaults
+kind: FireboltEnginePreset
 metadata:
   name: firebolt
   namespace: firebolt

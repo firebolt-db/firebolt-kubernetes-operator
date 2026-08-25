@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: fireboltenginedefaults.compute.firebolt.io
+  name: fireboltenginepresets.compute.firebolt.io
 spec:
   group: compute.firebolt.io
   names:
-    kind: FireboltEngineDefaults
-    listKind: FireboltEngineDefaultsList
-    plural: fireboltenginedefaults
+    kind: FireboltEnginePreset
+    listKind: FireboltEnginePresetList
+    plural: fireboltenginepresets
     shortNames:
-    - firengd
-    singular: fireboltenginedefaults
+    - firengp
+    singular: fireboltenginepreset
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -30,10 +30,11 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          FireboltEngineDefaults is a namespaced ambient overlay merged under
+          FireboltEnginePreset is a namespaced ambient overlay merged under
           every FireboltEngine in the same namespace. Engines do not reference
-          it by name. v1 selects the single object in the namespace; the
-          conventional name is "firebolt".
+          it by name. The object must be named "firebolt" (CEL-enforced), so
+          name uniqueness caps a namespace at one Preset; the operator
+          resolves the overlay by that name.
 
           It is namespaced because the template carries namespace-resolved
           identifiers (ServiceAccount names, Secret / ConfigMap references)
@@ -57,23 +58,25 @@ spec:
           metadata:
             type: object
           spec:
-            description: "FireboltEngineDefaultsSpec is the ambient, namespace-level
+            description: "FireboltEnginePresetSpec is the ambient, namespace-level
               engine\noverlay. Every FireboltEngine in the same namespace merges these\nfields
               underneath its own spec and above any referenced\nFireboltEngineClass:\n\n\tengine
-              spec > FireboltEngineDefaults > FireboltEngineClass > operator default\n\nv1
-              admits at most one FireboltEngineDefaults per namespace. The\nobject
-              is not selected by engines: customers keep referencing a\nclass name
-              (or no class). The conventional object name is\nFireboltEngineDefaultsDefaultName
-              (\"firebolt\").\n\nThe carried fields are the namespace-resolved identifiers
-              and\nconfig fragments that are shared by every engine in the namespace\n(service
-              account, credential env, storage, customEngineConfig).\nSKU-shaped settings
-              (resources, instance type, rollout, autoStop,\nuiSidecar) stay on FireboltEngineClass."
+              spec > FireboltEnginePreset > FireboltEngineClass > operator default\n\nA
+              namespace holds at most one FireboltEnginePreset: the CRD CEL\nrule
+              on the root object pins metadata.name to\nFireboltEnginePresetDefaultName
+              (\"firebolt\"), so apiserver name\nuniqueness makes a second object
+              impossible. The object is not\nselected by engines: customers keep referencing
+              a class name (or no\nclass).\n\nThe carried fields are the namespace-resolved
+              identifiers and\nconfig fragments that are shared by every engine in
+              the namespace\n(service account, credential env, storage, customEngineConfig).\nSKU-shaped
+              settings (resources, instance type, rollout, autoStop,\nuiSidecar) stay
+              on FireboltEngineClass."
             properties:
               customEngineConfig:
                 description: |-
                   CustomEngineConfig is deep-merged into the rendered config.yaml
                   after the class config and before the engine config: operator
-                  defaults, then class, then this Defaults object, then the engine
+                  defaults, then class, then this Preset object, then the engine
                   (engine keys win on conflict). Operator-owned paths are stripped
                   before the merge, as they are from the class and the engine.
                 type: object
@@ -3978,12 +3981,12 @@ spec:
             type: object
           status:
             description: |-
-              FireboltEngineDefaultsStatus is the observed state of a
-              FireboltEngineDefaults object.
+              FireboltEnginePresetStatus is the observed state of a
+              FireboltEnginePreset object.
             properties:
               boundEngines:
                 description: |-
-                  BoundEngines counts FireboltEngines in the same namespace. Defaults
+                  BoundEngines counts FireboltEngines in the same namespace. Preset
                   is ambient — every engine in the namespace merges it — so this
                   count is the namespace engine count, not a named-ref count. The
                   deletion webhook and the reconciler's deletion-guard finalizer
@@ -3991,7 +3994,7 @@ spec:
                 format: int32
                 type: integer
               conditions:
-                description: Conditions surface the Defaults object's high-level state.
+                description: Conditions surface the Preset object's high-level state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -4053,6 +4056,10 @@ spec:
                 type: integer
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: FireboltEnginePreset must be named 'firebolt'; the namespace singleton
+            is enforced by name
+          rule: self.metadata.name == 'firebolt'
     served: true
     storage: true
     subresources:
