@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.9.0...firebolt-operator-v0.10.0) (2026-08-25)
+
+
+### Features
+
+* **api:** add namespaced FireboltEnginePreset CRD (FB-3340) ([#167](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/167)) ([8755d70](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8755d70bfc2790a548c27b9212df67d983d82bcb))
+
 ## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.3...firebolt-operator-v0.9.0) (2026-08-25)
 
 
