@@ -173,8 +173,7 @@ func TestFireboltEngineDefaultsValidator_DeleteRefusesWhileEnginesExist(t *testi
 	if err == nil {
 		t.Fatal("ValidateDelete: expected error while a FireboltEngine exists in the namespace")
 	}
-	if !strings.Contains(err.Error(), "referenced by 1 FireboltEngine") &&
-		!strings.Contains(err.Error(), "1 FireboltEngine") {
+	if !strings.Contains(err.Error(), "1 FireboltEngine(s)") {
 		t.Errorf("error %q does not mention the bound engine count", err)
 	}
 }

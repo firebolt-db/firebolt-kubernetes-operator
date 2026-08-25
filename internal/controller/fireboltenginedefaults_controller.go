@@ -134,9 +134,9 @@ func (r *FireboltEngineDefaultsReconciler) reconcileDelete(ctx context.Context, 
 
 	if bound > 0 {
 		message := fmt.Sprintf(
-			"FireboltEngineDefaults %q in namespace %q is referenced by %d FireboltEngine(s); "+
+			"%d FireboltEngine(s) in namespace %q consume FireboltEngineDefaults %q as their ambient overlay; "+
 				"delete those engines before deleting the Defaults object",
-			defaults.Name, defaults.Namespace, bound)
+			bound, defaults.Namespace, defaults.Name)
 		if !engineDefaultsStatusEqual(defaults, bound, metav1.ConditionFalse, reasonDeletionBlocked, message) {
 			defaults.Status.BoundEngines = bound
 			defaults.Status.ObservedGeneration = defaults.Generation

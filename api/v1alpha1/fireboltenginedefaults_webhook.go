@@ -87,9 +87,9 @@ func (v *FireboltEngineDefaultsCustomValidator) ValidateDelete(ctx context.Conte
 	return nil, field.Forbidden(
 		field.NewPath("metadata", "name"),
 		fmt.Sprintf(
-			"FireboltEngineDefaults %q in namespace %q is referenced by %d FireboltEngine(s); "+
+			"%d FireboltEngine(s) in namespace %q consume FireboltEngineDefaults %q as their ambient overlay; "+
 				"delete those engines before deleting the Defaults object",
-			d.Name, d.Namespace, count),
+			count, d.Namespace, d.Name),
 	)
 }
 
