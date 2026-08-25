@@ -150,7 +150,7 @@ func TestParseWatchLabelSelector_NegatedExistence(t *testing.T) {
 // TestScopeManagerCache_ComposesNamespacesAndSelector locks in that
 // --namespaces and --watch-label-selector land in the same cache.Options:
 // DefaultNamespaces carries the namespace scope while ByObject carries
-// the selector for exactly the three Firebolt CRD types (controller-runtime
+// the selector for exactly the four Firebolt CRD types (controller-runtime
 // defaults ByObject entries with nil Namespaces from DefaultNamespaces,
 // so neither setting clobbers the other).
 func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
@@ -169,10 +169,10 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			t.Errorf("DefaultNamespaces missing %q", ns)
 		}
 	}
-	if len(opts.Cache.ByObject) != 3 {
-		t.Fatalf("ByObject has %d entries, want the 3 Firebolt CRD types", len(opts.Cache.ByObject))
+	if len(opts.Cache.ByObject) != 4 {
+		t.Fatalf("ByObject has %d entries, want the 4 Firebolt CRD types", len(opts.Cache.ByObject))
 	}
-	seen := make(map[string]bool, 3)
+	seen := make(map[string]bool, 4)
 	stamped := labels.Set{"example.com/managed": "proj-a"}
 	for key, byObject := range opts.Cache.ByObject {
 		switch key.(type) {
@@ -182,6 +182,8 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			seen["FireboltInstance"] = true
 		case *computev1alpha1.FireboltEngineClass:
 			seen["FireboltEngineClass"] = true
+		case *computev1alpha1.FireboltEnginePreset:
+			seen["FireboltEnginePreset"] = true
 		default:
 			t.Errorf("unexpected ByObject key type %T", key)
 		}
@@ -196,7 +198,7 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			t.Errorf("ByObject[%T].Namespaces = %v, want nil so it inherits DefaultNamespaces", key, byObject.Namespaces)
 		}
 	}
-	for _, want := range []string{"FireboltEngine", "FireboltInstance", "FireboltEngineClass"} {
+	for _, want := range []string{"FireboltEngine", "FireboltInstance", "FireboltEngineClass", "FireboltEnginePreset"} {
 		if !seen[want] {
 			t.Errorf("ByObject missing entry for %s", want)
 		}

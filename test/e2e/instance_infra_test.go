@@ -148,24 +148,20 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		It("should recover when PG pod is deleted", func() {
 			pgName := instanceName + controller.SuffixMetadataPG
+			selector := fmt.Sprintf("%s=%s,%s=postgres", controller.LabelInstance, instanceName, controller.LabelComponent)
 
 			By("Deleting the PostgreSQL pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=postgres", controller.LabelInstance, instanceName, controller.LabelComponent),
+				LabelSelector: selector,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
-			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
+			victim := pods.Items[0]
+			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, victim.Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
-			Eventually(func() int32 {
-				ss, err := k8sClient.AppsV1().StatefulSets(testNamespace).Get(ctx, pgName, metav1.GetOptions{})
-				if err != nil {
-					return -1
-				}
-				return ss.Status.ReadyReplicas
-			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+			By("Waiting for a replacement PostgreSQL pod to become ready")
+			Expect(WaitForReplacementPodReady(ctx, selector, victim.UID, clusterReadyTimeout)).To(Succeed())
 
 			By("Waiting for StatefulSet to recover the pod")
 			Eventually(func() bool {
@@ -228,24 +224,20 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		It("should recover when metadata pod is deleted", func() {
 			mdName := instanceName + controller.SuffixMetadataService
+			selector := fmt.Sprintf("%s=%s,%s=metadata", controller.LabelInstance, instanceName, controller.LabelComponent)
 
 			By("Deleting the metadata pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=metadata", controller.LabelInstance, instanceName, controller.LabelComponent),
+				LabelSelector: selector,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
-			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
+			victim := pods.Items[0]
+			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, victim.Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
-			Eventually(func() int32 {
-				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, mdName, metav1.GetOptions{})
-				if err != nil {
-					return -1
-				}
-				return dep.Status.ReadyReplicas
-			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+			By("Waiting for a replacement metadata pod to become ready")
+			Expect(WaitForReplacementPodReady(ctx, selector, victim.UID, clusterReadyTimeout)).To(Succeed())
 
 			By("Waiting for Deployment to recover the pod")
 			Eventually(func() bool {
@@ -308,24 +300,20 @@ var _ = Describe("FireboltInstance Infrastructure", func() {
 
 		It("should recover when gateway pod is deleted", func() {
 			gwName := instanceName + controller.SuffixGateway
+			selector := fmt.Sprintf("%s=%s,%s=gateway", controller.LabelInstance, instanceName, controller.LabelComponent)
 
 			By("Deleting the gateway pod")
 			pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("%s=%s,%s=gateway", controller.LabelInstance, instanceName, controller.LabelComponent),
+				LabelSelector: selector,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pods.Items).NotTo(BeEmpty())
-			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, pods.Items[0].Name, metav1.DeleteOptions{})
+			victim := pods.Items[0]
+			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, victim.Name, metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for crash to propagate (ReadyReplicas drops to 0)")
-			Eventually(func() int32 {
-				dep, err := k8sClient.AppsV1().Deployments(testNamespace).Get(ctx, gwName, metav1.GetOptions{})
-				if err != nil {
-					return -1
-				}
-				return dep.Status.ReadyReplicas
-			}, clusterReadyTimeout, pollInterval).Should(Equal(int32(0)))
+			By("Waiting for a replacement gateway pod to become ready")
+			Expect(WaitForReplacementPodReady(ctx, selector, victim.UID, clusterReadyTimeout)).To(Succeed())
 
 			By("Waiting for Deployment to recover the pod")
 			Eventually(func() bool {

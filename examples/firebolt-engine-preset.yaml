@@ -1,0 +1,29 @@
+# A FireboltEnginePreset object. Ambient namespace overlay for service
+# account, credential env, storage, and customEngineConfig.
+#
+# The object must be named "firebolt" (a CEL rule on the CRD pins the
+# name), so a namespace holds at most one. Engines do not reference this
+# object by name.
+#
+# spec.template uses the same operator-owned-path allowlist as
+# FireboltEngineClass.spec.template.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEnginePreset
+metadata:
+  name: firebolt
+  namespace: firebolt
+spec:
+  template:
+    spec:
+      serviceAccountName: firebolt-engine
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: engine-object-store
+  storage:
+    emptyDir: {}
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-bucket

@@ -552,6 +552,17 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef, nil)
 }
 
+// CreateEngineWithRequirePreset creates a FireboltEngine that must
+// observe a Ready FireboltEnginePreset object in the namespace before
+// becoming Ready.
+func CreateEngineWithRequirePreset(ctx context.Context, instanceName, name string, replicas int) error {
+	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
+		func(engine *computev1alpha1.FireboltEngine) {
+			require := true
+			engine.Spec.RequirePreset = &require
+		})
+}
+
 // CreateEngineWithDrainCheck creates a FireboltEngine like CreateEngine but
 // with the query-liveness drain check ON (the suite default is off because
 // most specs don't provision the ApiserverProxy scrape path the in-process
@@ -728,6 +739,99 @@ func CreateFireboltEngineClass(ctx context.Context, name, image string) error {
 		},
 	}
 	return cl.Create(ctx, class)
+}
+
+// CreateFireboltEnginePreset creates a FireboltEnginePreset object
+// in testNamespace with the given service account.
+func CreateFireboltEnginePreset(ctx context.Context, name, serviceAccount string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{ServiceAccountName: serviceAccount},
+			},
+		},
+	}
+	return cl.Create(ctx, defaults)
+}
+
+// UpdateFireboltEnginePresetServiceAccount patches spec.template.spec.serviceAccountName.
+func UpdateFireboltEnginePresetServiceAccount(ctx context.Context, name, serviceAccount string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	for i := 0; i < 10; i++ {
+		defaults := &computev1alpha1.FireboltEnginePreset{}
+		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, defaults); err != nil {
+			return err
+		}
+		defaults.Spec.Template.Spec.ServiceAccountName = serviceAccount
+		if err := cl.Update(ctx, defaults); err == nil {
+			return nil
+		} else if !errors.IsConflict(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("updating FireboltEnginePreset %q service account to %q: conflict after 10 retries", name, serviceAccount)
+}
+
+// CreateServiceAccount creates a plain ServiceAccount in testNamespace.
+// Tolerates AlreadyExists so retried specs stay idempotent.
+func CreateServiceAccount(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	if err := cl.Create(ctx, sa); err != nil && !errors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
+}
+
+// DeleteServiceAccount deletes a ServiceAccount from testNamespace,
+// tolerating NotFound.
+func DeleteServiceAccount(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	if err := cl.Delete(ctx, sa); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// GetEngineGenerationStatefulSet fetches the StatefulSet the operator
+// rendered for one blue-green generation of the named engine.
+func GetEngineGenerationStatefulSet(ctx context.Context, engineName string, gen int) (*appsv1.StatefulSet, error) {
+	cl, err := getCRDClient()
+	if err != nil {
+		return nil, err
+	}
+	sts := &appsv1.StatefulSet{}
+	name := fmt.Sprintf("%s-g%d", engineName, gen)
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, sts); err != nil {
+		return nil, err
+	}
+	return sts, nil
+}
+
+// DeleteFireboltEnginePreset deletes a FireboltEnginePreset object.
+func DeleteFireboltEnginePreset(ctx context.Context, name string) error {
+	cl, err := getCRDClient()
+	if err != nil {
+		return err
+	}
+	defaults := &computev1alpha1.FireboltEnginePreset{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	return cl.Delete(ctx, defaults)
 }
 
 // UpdateFireboltEngineClassImage mutates the engine container image on an
@@ -1221,6 +1325,38 @@ func indentBlock(s, prefix string) string {
 		lines[i] = prefix + l
 	}
 	return strings.Join(lines, "\n")
+}
+
+// WaitForReplacementPodReady waits for a pod matching labelSelector whose UID
+// differs from victimUID to report Ready. Identity is compared by UID because
+// StatefulSet replacements reuse the victim's name. This is the race-free way
+// to observe crash recovery: polling for the workload's ReadyReplicas to dip
+// to zero can miss the dip entirely when the replacement becomes ready faster
+// than the poll interval (Envoy restarts in well under a second).
+func WaitForReplacementPodReady(ctx context.Context, labelSelector string, victimUID types.UID, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		pods, err := k8sClient.CoreV1().Pods(testNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err == nil {
+			for _, pod := range pods.Items {
+				if pod.UID == victimUID || pod.DeletionTimestamp != nil {
+					continue
+				}
+				if pod.Status.Phase != corev1.PodRunning {
+					continue
+				}
+				for _, cond := range pod.Status.Conditions {
+					if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+						return nil
+					}
+				}
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("timeout waiting for a ready replacement pod (selector %q)", labelSelector)
 }
 
 // WaitForEngineReady waits for all pods in an engine to be ready AND for the

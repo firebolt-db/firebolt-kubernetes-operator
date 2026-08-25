@@ -72,6 +72,12 @@
               "engineclass/configuration-inheritance"
             ]
           },
+          {
+            "group": "EnginePreset",
+            "pages": [
+              "enginepreset/overview"
+            ]
+          },
           "monitoring",
           "security",
           "troubleshooting",
@@ -80,7 +86,8 @@
             "pages": [
               "crd-reference/instance-crd-reference",
               "crd-reference/engine-crd-reference",
-              "crd-reference/fireboltengineclass-crd-reference"
+              "crd-reference/fireboltengineclass-crd-reference",
+              "crd-reference/fireboltenginepreset-crd-reference"
             ]
           }
         ]

@@ -45,6 +45,7 @@ func addKnownTypes(s *runtime.Scheme) error {
 		&FireboltInstance{}, &FireboltInstanceList{},
 		&FireboltEngine{}, &FireboltEngineList{},
 		&FireboltEngineClass{}, &FireboltEngineClassList{},
+		&FireboltEnginePreset{}, &FireboltEnginePresetList{},
 	)
 	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil

@@ -108,6 +108,34 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 		expectMetaSurvives(got.Spec.Template.ObjectMeta)
 	})
 
+	It("preserves labels and annotations on FireboltEnginePreset.spec.template.metadata", func() {
+		// The Preset CEL rule pins metadata.name to "firebolt"; a random
+		// name would be rejected before the metadata contract is exercised.
+		defaults := &computev1alpha1.FireboltEnginePreset{
+			ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: ns},
+			Spec: computev1alpha1.FireboltEnginePresetSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels:      wantLabels,
+						Annotations: wantAnnotations,
+					},
+					Spec: corev1.PodSpec{
+						ServiceAccountName: "my-sa",
+						Containers:         stubContainers,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(testCtx, defaults)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(context.Background(), defaults)
+		})
+
+		got := &computev1alpha1.FireboltEnginePreset{}
+		Expect(k8sClient.Get(testCtx, client.ObjectKeyFromObject(defaults), got)).To(Succeed())
+		expectMetaSurvives(got.Spec.Template.ObjectMeta)
+	})
+
 	It("preserves labels and annotations on FireboltInstance gateway and metadata template metadata", func() {
 		name := "inst-meta-" + utilrand.String(6)
 		inst := &computev1alpha1.FireboltInstance{

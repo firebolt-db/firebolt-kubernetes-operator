@@ -60,6 +60,11 @@ const reasonDeletionBlocked = "DeletionBlocked"
 // from the offending class.
 const reasonOperatorOwnedFieldSet = "OperatorOwnedFieldSet"
 
+// reasonAdmissible is the Ready=True reason stamped when spec.template
+// contains no operator-owned paths. Shared by FireboltEngineClass and
+// FireboltEnginePreset so kubectl and tests see one token.
+const reasonAdmissible = "Admissible"
+
 // engineClassRequeueAfter is the steady-state safety-net requeue
 // for the FireboltEngineClass reconciler. Engine create / update / delete
 // events already enqueue the class reactively (via the FireboltEngine watch
@@ -281,7 +286,7 @@ func (r *FireboltEngineClassReconciler) countBoundEngines(ctx context.Context, r
 func classReadiness(class *computev1alpha1.FireboltEngineClass) (status metav1.ConditionStatus, reason, message string) {
 	errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(&class.Spec.Template, field.NewPath("spec", "template"))
 	if len(errs) == 0 {
-		return metav1.ConditionTrue, "Admissible", "spec.template contains no operator-owned paths"
+		return metav1.ConditionTrue, reasonAdmissible, "spec.template contains no operator-owned paths"
 	}
 	return metav1.ConditionFalse, reasonOperatorOwnedFieldSet, errs.ToAggregate().Error()
 }

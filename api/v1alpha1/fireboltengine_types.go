@@ -313,6 +313,19 @@ type FireboltEngineSpec struct {
 	// +optional
 	EngineClassRef *string `json:"engineClassRef,omitempty"`
 
+	// RequirePreset, when true, keeps the engine from becoming Ready
+	// until the namespace has a Ready FireboltEnginePreset object
+	// (named "firebolt"; the CRD pins the name so a namespace holds at
+	// most one). The default (false / unset) keeps existing engines
+	// working in namespaces that have no Preset object. A present but
+	// unready Preset object always fails closed, even when this field
+	// is unset.
+	//
+	// The default is applied by the controller, not the CRD, so an unset
+	// value stays empty at admission.
+	// +optional
+	RequirePreset *bool `json:"requirePreset,omitempty"`
+
 	// Replicas is the number of engine nodes. Set to 0 to stop the
 	// engine: the operator tears down the active generation (honoring
 	// spec.rollout for drain behavior) and leaves the CR in the
@@ -331,14 +344,12 @@ type FireboltEngineSpec struct {
 	// podSecurityContext) and any sidecars / init containers / extra
 	// volumes they need.
 	//
-	// When spec.engineClassRef is also set, the operator first merges
-	// the class's spec.template underneath the operator defaults, then
-	// this template on top — engine wins on conflict (whole-struct
-	// ownership for pointer fields; list-type fields like tolerations
-	// / initContainers / sidecars / volumes concatenate class-first
-	// then engine). The same field-by-field precedence the
-	// FireboltEngineClass merge layer has always used now applies to
-	// the engine's own template as the topmost layer.
+	// When a FireboltEnginePreset object and/or spec.engineClassRef
+	// are present, the operator merges
+	// engine > Preset > class > operator default — engine wins on
+	// conflict (whole-struct ownership for pointer fields; list-type
+	// fields like tolerations / initContainers / sidecars / volumes
+	// concatenate lower-layer first).
 	//
 	// The validating webhook rejects user input on paths the operator
 	// owns end-to-end — see FireboltEngineClassPodTemplateRules in
@@ -577,6 +588,21 @@ type FireboltEngineStatus struct {
 	// activeGeneration serialize zero for the same reason.
 	// +optional
 	ReadyReplicas int `json:"readyReplicas"`
+
+	// AppliedPresetName is the FireboltEnginePreset object last
+	// applied to the serving generation (status.activeGeneration).
+	// Empty when that generation was rendered without a Preset, or
+	// when no generation is serving yet.
+	// +optional
+	AppliedPresetName string `json:"appliedPresetName,omitempty"`
+
+	// AppliedPresetHash is the content hash of the Preset spec
+	// stamped on the serving StatefulSet
+	// (firebolt.io/engine-preset-hash). It trails a live Preset
+	// edit until the generation that carries the new hash is
+	// promoted. Empty when AppliedPresetName is empty.
+	// +optional
+	AppliedPresetHash string `json:"appliedPresetHash,omitempty"`
 
 	// Conditions represent the latest available observations of the engine's state.
 	// +optional

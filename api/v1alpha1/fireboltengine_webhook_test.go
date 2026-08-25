@@ -368,6 +368,144 @@ func TestFireboltEngineValidator_EngineWinsOverClassForBounds(t *testing.T) {
 	}
 }
 
+// enginePresetWithResources returns a FireboltEnginePreset fixture
+// in the test namespace ("default") whose template carries the engine
+// container with the supplied resources block.
+func enginePresetWithResources(name string, resources corev1.ResourceRequirements) *FireboltEnginePreset {
+	return &FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: FireboltEnginePresetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:      EngineContainerName,
+						Resources: resources,
+					}},
+				},
+			},
+		},
+	}
+}
+
+// fakeReaderWithObjects builds a fake client preloaded with arbitrary
+// objects. Used by the Preset-tier bounds tests, which need a
+// FireboltEnginePreset and optionally a FireboltEngineClass in the
+// same namespace.
+func fakeReaderWithObjects(t *testing.T, objs ...client.Object) client.Reader {
+	t.Helper()
+	sch := runtime.NewScheme()
+	if err := scheme.AddToScheme(sch); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := AddToScheme(sch); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	return fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
+}
+
+// TestFireboltEngineValidator_PresetResourcesExceedBound covers the
+// Preset-aware tier of the bounds check: an engine without its own
+// template resources inherits the namespace FireboltEnginePreset'
+// engine-container resources, so oversized values there must be
+// rejected at admission and attributed to the Preset object — not to
+// a class, which the engine here does not even reference.
+func TestFireboltEngineValidator_PresetResourcesExceedBound(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithObjects(t, enginePresetWithResources("firebolt", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		})),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := fireboltEngineWithRef(nil)
+	_, err := v.ValidateCreate(context.Background(), eng)
+	if err == nil {
+		t.Fatal("ValidateCreate: Preset cpu limit above bound should be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.limits") {
+		t.Errorf("ValidateCreate: error %q does not surface the merged template-container path", err.Error())
+	}
+	if !strings.Contains(err.Error(), "FireboltEnginePreset") || !strings.Contains(err.Error(), "firebolt") {
+		t.Errorf("ValidateCreate: error %q should name the source FireboltEnginePreset so the user knows where to edit", err.Error())
+	}
+	if strings.Contains(err.Error(), "FireboltEngineClass") {
+		t.Errorf("ValidateCreate: error %q names FireboltEngineClass, which is the wrong source", err.Error())
+	}
+}
+
+// TestFireboltEngineValidator_PresetWinOverClassForBounds covers the
+// merge precedence between the two inherited tiers: Preset sits above
+// the class, so a class with oversized resources is masked by a
+// within-bounds Preset override and the engine must be admitted.
+// Rejecting here would block a spec whose rendered resources are legal
+// and diverge from the webhook-off reconcile outcome.
+func TestFireboltEngineValidator_PresetWinOverClassForBounds(t *testing.T) {
+	class := &FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "compute-big", Namespace: "default"},
+		Spec: FireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+						},
+					}},
+				},
+			},
+		},
+	}
+	defaults := enginePresetWithResources("firebolt", corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16")},
+	})
+	v := &FireboltEngineCustomValidator{
+		Reader:         fakeReaderWithObjects(t, class, defaults),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := fireboltEngineWithRef(ptr.To("compute-big"))
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: Preset override masks the over-bound class, should pass; got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_EngineWinsOverPresetForBounds covers
+// the top of the precedence chain: an engine template with its own
+// within-bounds resources masks an over-bound Preset object, exactly
+// as the renderer's whole-struct merge would.
+func TestFireboltEngineValidator_EngineWinsOverPresetForBounds(t *testing.T) {
+	v := &FireboltEngineCustomValidator{
+		Reader: fakeReaderWithObjects(t, enginePresetWithResources("firebolt", corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+		})),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	eng := engineWithResources(
+		nil,
+		corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
+	)
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: engine wins, engine cpu within bound, should pass; got %v", err)
+	}
+}
+
+// TestFireboltEngineValidator_OffNamePresetSkipsTier pins the
+// resolution decision: the Preset tier is a Get by the CEL-enforced
+// fixed name ("firebolt"). An object under any other name (only
+// writable against a CRD missing the CEL rule) is never consumed —
+// exactly mirroring the reconciler, which would not render off it
+// either — so its oversized resources cannot trip the bounds gate.
+func TestFireboltEngineValidator_OffNamePresetSkipsTier(t *testing.T) {
+	oversized := corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
+	}
+	v := &FireboltEngineCustomValidator{
+		Reader:         fakeReaderWithObjects(t, enginePresetWithResources("shadow", oversized)),
+		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
+	}
+	if _, err := v.ValidateCreate(context.Background(), fireboltEngineWithRef(nil)); err != nil {
+		t.Fatalf("ValidateCreate: an off-name Preset object must be skipped, not consumed; got %v", err)
+	}
+}
+
 // TestFireboltEngineValidator_ClassResourcesUnboundedWhenEngineEmpty
 // confirms the no-op path: a class without resources and an engine
 // without resources together pass the bounds gate, regardless of how

@@ -8,9 +8,9 @@ especially MDX files.
 - Capitalize Firebolt Instance, Instance (when referring to Firebolt Instance) Engine, Firebolt Engine, Metadata Service, Gateway, Postgres
 
 ## CRD reference accuracy
-- The CRD reference pages under `docs/crd-reference/` (`instance-crd-reference.mdx`, `engine-crd-reference.mdx`, `fireboltengineclass-crd-reference.mdx`) are spec/owned-field/phase/status property references only. Narrative design content lives under `docs/engine/`, `docs/engineclass/`, and `docs/instance/`. They are hand-maintained and not generated.
+- The CRD reference pages under `docs/crd-reference/` (`instance-crd-reference.mdx`, `engine-crd-reference.mdx`, `fireboltengineclass-crd-reference.mdx`, `fireboltenginepreset-crd-reference.mdx`) are spec/owned-field/phase/status property references only. Narrative design content lives under `docs/engine/`, `docs/engineclass/`, `docs/enginepreset/`, and `docs/instance/`. They are hand-maintained and not generated.
 - When the CRD API types change, you must update the matching reference page in the same change. Triggers include any edit to `api/v1alpha1/*_types.go` (new, renamed, or removed spec or status fields, defaults, validation, immutability), changes to `// +kubebuilder:printcolumn` markers or short names, and new phases, conditions, or reconciler-managed resources.
-- Keep the documented short names and example `kubectl get` output in sync with the live CRDs: `fire` for FireboltInstance, `fireng` for FireboltEngine, and `firengc` for FireboltEngineClass.
+- Keep the documented short names and example `kubectl get` output in sync with the live CRDs: `fire` for FireboltInstance, `fireng` for FireboltEngine, `firengc` for FireboltEngineClass, and `firengp` for FireboltEnginePreset.
 
 ## Core style guides
 

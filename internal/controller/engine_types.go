@@ -43,6 +43,13 @@ type EngineState struct {
 	// PodRunning phase with PodReady=True. Always <= CurrentPodTotal.
 	CurrentPodReady int
 
+	// ActiveSTS is the StatefulSet of status.ActiveGeneration when that
+	// generation differs from CurrentGeneration (mid-rollout). Outside a
+	// rollout the serving StatefulSet is CurrentSTS; this field stays nil
+	// so the steady state does not carry a second pointer to the same
+	// object.
+	ActiveSTS *appsv1.StatefulSet
+
 	// ActivePodReady is the ready-pod count of status.ActiveGeneration — the
 	// generation the cluster Service selects, hence the one serving traffic.
 	// It equals CurrentPodReady outside a rollout, when the current and active

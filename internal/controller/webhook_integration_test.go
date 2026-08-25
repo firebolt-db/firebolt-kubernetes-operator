@@ -167,6 +167,9 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("setup FireboltEngineClass webhook: %w", err)
 	}
+	if err := computev1alpha1.SetupFireboltEnginePresetWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup FireboltEnginePreset webhook: %w", err)
+	}
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
 	}
@@ -300,6 +303,34 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 						APIGroups:   []string{"compute.firebolt.io"},
 						APIVersions: []string{"v1alpha1"},
 						Resources:   []string{"fireboltengineclasses"},
+						Scope:       &scopeNamespaced,
+					},
+				}},
+				FailurePolicy:           &failPolicyFail,
+				SideEffects:             &sideEffectsNone,
+				MatchPolicy:             &matchPolicyEquivalent,
+				TimeoutSeconds:          &timeout,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+			{
+				Name: "vfireboltenginepreset.compute.firebolt.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-fireboltenginepreset"),
+					},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{
+					Operations: []admissionregistrationv1.OperationType{
+						admissionregistrationv1.Create,
+						admissionregistrationv1.Update,
+						admissionregistrationv1.Delete,
+					},
+					Rule: admissionregistrationv1.Rule{
+						APIGroups:   []string{"compute.firebolt.io"},
+						APIVersions: []string{"v1alpha1"},
+						Resources:   []string{"fireboltenginepresets"},
 						Scope:       &scopeNamespaced,
 					},
 				}},
@@ -452,6 +483,38 @@ func TestWebhook_FireboltEngineClass_RejectsOwnedField(t *testing.T) {
 	}
 }
 
+func TestWebhook_FireboltEnginePreset_RejectsOwnedField(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Named "firebolt": the CRD CEL rule pins the Preset name, and CEL
+	// runs before validating webhooks — any other name would be rejected
+	// by the apiserver before the webhook under test ever fires.
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:    computev1alpha1.EngineContainerName,
+						Image:   "ghcr.io/firebolt-db/engine:dev",
+						Command: []string{"/bin/sh"},
+					}},
+				},
+			},
+		},
+	}
+	err := suite.cli.Create(ctx, defaults)
+	if err == nil {
+		_ = suite.cli.Delete(ctx, defaults)
+		t.Fatal("Create: expected admission rejection for operator-owned command, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.template.spec.containers[0].command") {
+		t.Errorf("Create error %q does not surface the offending field path", err.Error())
+	}
+}
+
 // TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound verifies the
 // delete-time gate over the wire: a DELETE on a FireboltEngineClass that
 // has at least one FireboltEngine referencing it via
@@ -518,6 +581,66 @@ func TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "FireboltEngine") {
 		t.Errorf("Delete error %q does not mention the bound engine(s)", err.Error())
+	}
+}
+
+// TestWebhook_FireboltEnginePreset_RefusesDeleteWhileEnginesExist
+// verifies the delete-time gate over the wire: a DELETE on a
+// FireboltEnginePreset must be refused while any FireboltEngine
+// exists in the same namespace. Preset is ambient — every engine in
+// the namespace consumes it — so the guard is the namespace engine
+// count, not a named reference, and the engine here deliberately sets
+// no engineClassRef. This is the only coverage that would catch the
+// DELETE operation being dropped from the webhook rules or a
+// path/decoder mismatch on delete admission; the unit test on
+// ValidateDelete cannot see either.
+func TestWebhook_FireboltEnginePreset_RefusesDeleteWhileEnginesExist(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Named "firebolt": the CRD CEL rule pins the Preset name.
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: "engine-sa",
+				},
+			},
+		},
+	}
+	if err := suite.cli.Create(ctx, defaults); err != nil {
+		t.Fatalf("Create Preset: %v", err)
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "ambient-consumer", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef: "any-instance",
+			Replicas:    1,
+		},
+	}
+	if err := suite.cli.Create(ctx, engine); err != nil {
+		_ = suite.cli.Delete(ctx, defaults)
+		t.Fatalf("Create engine (namespace occupancy required for the deletion-guard assertion): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = suite.cli.Delete(context.Background(), engine)
+		// Wait for the engine delete to land so the eventual Preset
+		// delete isn't refused by a stale namespace count.
+		_ = waitForNotFound(context.Background(), suite.cli,
+			client.ObjectKey{Name: engine.Name, Namespace: engine.Namespace},
+			&computev1alpha1.FireboltEngine{}, 5*time.Second)
+		_ = suite.cli.Delete(context.Background(), defaults)
+	})
+
+	err := suite.cli.Delete(ctx, defaults)
+	if err == nil {
+		t.Fatal("Delete Preset: expected admission rejection while an engine exists in the namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "FireboltEngine") {
+		t.Errorf("Delete error %q does not mention the namespace engine(s)", err.Error())
 	}
 }
 

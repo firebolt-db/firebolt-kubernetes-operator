@@ -34,6 +34,7 @@ const (
 const (
 	resourceEngine   = "fireboltengine"
 	resourceInstance = "fireboltinstance"
+	resourcePreset   = "fireboltenginepresets"
 )
 
 // version is the plugin version, overridden at build time via
@@ -80,7 +81,7 @@ func newRootCmd() *cobra.Command {
 	// passing either one prints the kubectl commands instead of running them.
 	pf.BoolVar(&flagPrintCommands, "debug", false, "Alias for --print-commands")
 
-	root.AddCommand(newInstanceCmd(), newEngineCmd(), newVersionCmd())
+	root.AddCommand(newInstanceCmd(), newEngineCmd(), newPresetCmd(), newVersionCmd())
 	return root
 }
 
@@ -174,6 +175,74 @@ name is not this argument.`,
 		},
 	}
 	cmd.Flags().IntVar(&localPort, "local-port", 0, "Bind kubectl to this local port instead of letting it pick a free one")
+	return cmd
+}
+
+// ── preset ───────────────────────────────────────────────────────────────────
+
+func newPresetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "preset",
+		Short: "Get and list FireboltEnginePreset",
+	}
+	cmd.AddCommand(newPresetGetCmd(), newPresetListCmd())
+	return cmd
+}
+
+func newPresetGetCmd() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:   "get [name]",
+		Short: "Get a FireboltEnginePreset object",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := infra.DefaultEnginePresetName
+			if len(args) == 1 {
+				name = args[0]
+			}
+			c := newClient()
+			obj, err := c.GetEnginePreset(cmd.Context(), name)
+			if err != nil {
+				return err
+			}
+			if output == outJSON || output == outYAML {
+				return printObject(output, obj)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", resourcePreset, obj.Name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", outName, "Output format: json, yaml, or name")
+	return cmd
+}
+
+func newPresetListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List FireboltEnginePreset",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			c := newClient()
+			items, err := c.ListEnginePreset(cmd.Context())
+			if err != nil {
+				return err
+			}
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tBOUND\tREADY")
+			for _, it := range items {
+				ready := "<none>"
+				if it.Ready != nil {
+					if *it.Ready {
+						ready = "True"
+					} else {
+						ready = "False"
+					}
+				}
+				fmt.Fprintf(w, "%s\t%d\t%s\n", it.Name, it.BoundEngines, ready)
+			}
+			return w.Flush()
+		},
+	}
 	return cmd
 }
 
@@ -275,7 +344,7 @@ func newEngineCreateCmd() *cobra.Command {
 			// resolve the effective config rather than only checking the flags.
 			// Warn (don't block): the operator doesn't require storage, and it may
 			// be supplied another way.
-			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) {
+			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) && !presetProvideStorage(cmd.Context(), c) {
 				warnNoStorage(engineType)
 			}
 			if err := c.CreateEngine(cmd.Context(), spec); err != nil {
@@ -380,16 +449,26 @@ func classProvidesStorage(ctx context.Context, c *infra.Client, engineType strin
 	return ok
 }
 
+func presetProvideStorage(ctx context.Context, c *infra.Client) bool {
+	ok, err := c.EnginePresetProvidesStorage(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not verify whether FireboltEnginePreset supplies object storage: %v\n", err)
+		return false
+	}
+	return ok
+}
+
 // warnNoStorage warns that the engine has no object storage source — neither a
-// --bucket nor a storage-providing class — so it may never reach Ready.
+// --bucket, a storage-providing class, nor FireboltEnginePreset — so it may
+// never reach Ready.
 func warnNoStorage(engineType string) {
 	if engineType != "" {
-		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket nor engine class %q "+
-			"(customEngineConfig.storage) provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
+		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket, engine class %q, "+
+			"nor FireboltEnginePreset provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket nor --type given; "+
-		"the engine may not become Ready unless storage is provided another way")
+	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket, --type, nor FireboltEnginePreset "+
+		"provides a bucket; the engine may not become Ready unless storage is provided another way")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -482,6 +561,29 @@ func marshalObjectList(format string, items any) ([]byte, error) {
 		return yaml.Marshal(list)
 	}
 	return json.MarshalIndent(list, "", "  ")
+}
+
+// marshalObject renders a single typed CR as JSON or YAML, matching
+// `kubectl get <name> -o json|yaml` rather than a List wrapper.
+func marshalObject(format string, obj any) ([]byte, error) {
+	if format == outYAML {
+		return yaml.Marshal(obj)
+	}
+	return json.MarshalIndent(obj, "", "  ")
+}
+
+// printObject writes a single typed CR in the given machine-readable format.
+func printObject(format string, obj any) error {
+	out, err := marshalObject(format, obj)
+	if err != nil {
+		return err
+	}
+	if format == outYAML {
+		fmt.Print(string(out)) // yaml.Marshal already ends with a newline
+	} else {
+		fmt.Println(string(out))
+	}
+	return nil
 }
 
 // printObjects writes the listed objects as a kubectl-style List in the given

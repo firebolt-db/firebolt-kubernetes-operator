@@ -104,13 +104,14 @@ func tlaMakeClusterSvc(gen int) *corev1.Service {
 }
 
 // materializeTLAState constructs an engineSim whose simulated cluster state
-// corresponds to the given TLA+ state. instanceReady is intentionally not
-// plumbed — the real instance gate lives in the outer Reconcile method, not
-// in the compute layer this test exercises; states gated by instanceReady=FALSE
-// are skipped at test time (see tlaShouldGateOut). Both api and cache views
-// are initialized identically: state cover only runs one Reconcile per state,
-// so cache lag is not modeled here (the rapid harness in
-// engine_property_test.go is where lag is exercised via CacheCatchesUp).
+// corresponds to the given TLA+ state. instanceReady, classReady, and
+// presetReady are intentionally not plumbed — the real gates live in the
+// outer Reconcile method, not in the compute layer this test exercises;
+// states gated by any of those flags being FALSE are skipped at test time
+// (see tlaShouldGateOut). Both api and cache views are initialized
+// identically: state cover only runs one Reconcile per state, so cache lag
+// is not modeled here (the rapid harness in engine_property_test.go is
+// where lag is exercised via CacheCatchesUp).
 func materializeTLAState(s tlaState) *engineSim {
 	spec := tlaSpecForState(s)
 	m := &engineSim{
@@ -172,15 +173,15 @@ func materializeTLAState(s tlaState) *engineSim {
 }
 
 // projectEngineSim extracts the TLA+ observable variables from the simulated
-// cluster state. instanceReady and classReady are preserved from the input state
-// because the compute layer cannot change either — both gates are enforced by
-// the outer Reconcile.
+// cluster state. instanceReady, classReady, and presetReady are preserved
+// from the input state because the compute layer cannot change any of them —
+// the three gates are enforced by the outer Reconcile.
 //
 // Every field of tlaState must be populated here. The round-trip guard in
 // TestTLAEngineStateCover (materialize → project == start) is what enforces
 // that: a field left at its zero value silently narrows what
 // tlaClosureContains compares, which weakens every assertion in the suite.
-func projectEngineSim(m *engineSim, instanceReady, classReady bool) tlaState {
+func projectEngineSim(m *engineSim, instanceReady, classReady, presetReady bool) tlaState {
 	st := tlaState{
 		Phase:         string(m.status.Phase),
 		CurrentGen:    m.status.CurrentGeneration,
@@ -193,6 +194,7 @@ func projectEngineSim(m *engineSim, instanceReady, classReady bool) tlaState {
 		PodsDrained:   m.podsDrained,
 		InstanceReady: instanceReady,
 		ClassReady:    classReady,
+		PresetReady:   presetReady,
 	}
 	for g := range st.StsSpecVer {
 		st.StsSpecVer[g] = -1
@@ -254,15 +256,16 @@ func parseSAToken(s string) int {
 }
 
 // tlaShouldGateOut returns true when one of the outer Reconcile method's
-// gates (instance-Ready or class-Ready) would prevent
-// computeEngineReconcile from running at all. Both gates engage when
-// the corresponding flag is false and phase is in {stable, stopped,
-// creating}; the other phases (switching, draining, cleaning) bypass
-// the gates deliberately because they do not re-resolve the instance
-// or the class. State cover for the compute layer skips these states
-// because the compute layer runs only when both gates are open.
+// gates (instance-Ready, class-Ready, or Preset-admissible) would
+// prevent computeEngineReconcile from running at all. The three gates
+// engage when the corresponding flag is false and phase is in {stable,
+// stopped, creating}; the other phases (switching, draining, cleaning)
+// bypass the gates because fail-closed is a render gate. State cover for
+// the compute layer skips these states because the compute layer runs
+// only when all three gates are open. Init (uninitialized -> creating)
+// is ungated in both the spec and the outer Reconcile.
 func tlaShouldGateOut(s tlaState) bool {
-	if s.InstanceReady && s.ClassReady {
+	if s.InstanceReady && s.ClassReady && s.PresetReady {
 		return false
 	}
 	switch s.Phase {
@@ -331,9 +334,9 @@ func tlaInvariants(t *testing.T, m *engineSim) {
 // as an edit in the diff. If one of these assertions fails, the question to
 // answer in the commit message is *why* coverage moved — then update the number.
 const (
-	tlaExpectedCases           = 6404
-	tlaExpectedRan             = 3512
-	tlaExpectedSkippedGate     = 2856
+	tlaExpectedCases           = 12808
+	tlaExpectedRan             = 6108
+	tlaExpectedSkippedGate     = 6664
 	tlaExpectedSkippedBoundary = 36
 )
 
@@ -367,7 +370,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			// dropped field fails the round-trip for any state whose value
 			// differs from that field's zero value. Every state-cover harness
 			// carries this guard, through the same shared comparison.
-			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady); !tlaProjectionEqual(got, start) {
+			if got := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.PresetReady); !tlaProjectionEqual(got, start) {
 				t.Fatalf("materialization does not round-trip\n  want: %+v\n  got:  %+v", start, got)
 			}
 
@@ -383,7 +386,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 			m.gcStaleResources()
 			tlaInvariants(t, m)
 
-			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady)
+			actual := projectEngineSim(m, start.InstanceReady, start.ClassReady, start.PresetReady)
 			if !tlaClosureContains(tlaStatePool, tc.Closure, actual) {
 				t.Fatalf("result not in TLA+ reconciler closure of starting state\n  start:    %+v\n  actual:   %+v\n  closure (%d states):\n%s",
 					start, actual, len(tc.Closure), tlaFormatClosure(tlaStatePool, tc.Closure))
@@ -391,7 +394,7 @@ func TestTLAEngineStateCover(t *testing.T) {
 		})
 	}
 	ran := len(tlaEngineStateCases) - skippedGate - skippedBoundary
-	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
+	t.Logf("state cover: ran %d / %d, skipped %d gated (instanceReady=false OR classReady=false OR presetReady=false in {stable,stopped,creating}), %d at MaxGen boundary",
 		ran, len(tlaEngineStateCases), skippedGate, skippedBoundary)
 
 	// The skip predicates are the other way coverage can quietly vanish: widen
