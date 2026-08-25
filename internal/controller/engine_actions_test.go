@@ -62,10 +62,10 @@ var tlaEngineActionMap = map[string][]string{
 		// class/engine merge arbitration that is its real reason to exist. The
 		// merge layer itself has no model at all -- see formal/model-scope.tsv.
 		"ApplyConflictingClassAndEngine",
-		// Defaults overlay identity (DefaultsHash) is another input to
+		// Preset overlay identity (PresetHash) is another input to
 		// the spec-content hash specVer abstracts over. The merge layer
 		// itself stays UNMODELLED — see formal/model-scope.tsv.
-		"ApplyDefaultsChange",
+		"ApplyPresetChange",
 	},
 	"EnvPodsReady":   {"PodsBecomesReady"},
 	"EnvPodsDrained": {"DrainCompletes"},
@@ -77,11 +77,11 @@ var tlaEngineActionMap = map[string][]string{
 	"EnvSetClassReady(TRUE)":  {"ApplyClassChange"},
 	"EnvSetClassReady(FALSE)": {"ApplyClassUnready"},
 
-	// The Defaults fail-closed gate. Same shape as the class-Ready gate:
-	// the compute layer cannot see Defaults Ready / required / ambiguous,
+	// The Preset fail-closed gate. Same shape as the class-Ready gate:
+	// the compute layer cannot see Preset Ready / required / ambiguous,
 	// only whether an overlay was handed to it.
-	"EnvSetDefaultsReady(TRUE)":  {"ApplyDefaultsChange"},
-	"EnvSetDefaultsReady(FALSE)": {"ApplyDefaultsUnready"},
+	"EnvSetDefaultsReady(TRUE)":  {"ApplyPresetChange"},
+	"EnvSetDefaultsReady(FALSE)": {"ApplyPresetUnready"},
 
 	// GC of generations that are neither current, active, nor draining.
 	// engineSim.Reconcile runs gcStaleResources on every pass, mirroring the

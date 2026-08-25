@@ -371,24 +371,24 @@ func TestEngineReconcile_ClassResourceBoundsExceeded(t *testing.T) {
 	}
 }
 
-// TestEngineReconcile_DefaultsResourceBoundsExceeded pins that
-// oversized resources inherited from FireboltEngineDefaults trip the
-// same gate and name Defaults, not FireboltEngineClass — including
+// TestEngineReconcile_PresetResourceBoundsExceeded pins that
+// oversized resources inherited from FireboltEnginePreset trip the
+// same gate and name Preset, not FireboltEngineClass — including
 // when no engineClassRef is set, so the message cannot fall back to
 // an empty class name.
-func TestEngineReconcile_DefaultsResourceBoundsExceeded(t *testing.T) {
+func TestEngineReconcile_PresetResourceBoundsExceeded(t *testing.T) {
 	sch := resourceBoundsTestScheme(t)
 	const (
-		ns           = "ns-a"
-		instName     = "parent-with-defaults"
-		engName      = "defaults-overbound"
-		defaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
+		ns         = "ns-a"
+		instName   = "parent-with-defaults"
+		engName    = "defaults-overbound"
+		presetName = computev1alpha1.FireboltEnginePresetDefaultName
 	)
 
 	instance := boundsTestInstance(instName, ns)
-	defaults := &computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: defaultsName, Namespace: ns},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: presetName, Namespace: ns},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
@@ -447,12 +447,12 @@ func TestEngineReconcile_DefaultsResourceBoundsExceeded(t *testing.T) {
 		t.Fatal("Ready condition missing")
 	}
 	if cond.Reason != reasonResourceBoundsExceeded {
-		t.Errorf("Ready.Reason = %q, want %q (Defaults resources should trip the gate)",
+		t.Errorf("Ready.Reason = %q, want %q (Preset resources should trip the gate)",
 			cond.Reason, reasonResourceBoundsExceeded)
 	}
-	if !strings.Contains(cond.Message, "FireboltEngineDefaults") || !strings.Contains(cond.Message, defaultsName) {
-		t.Errorf("Ready.Message = %q, want it to name FireboltEngineDefaults %q so users know where to edit",
-			cond.Message, defaultsName)
+	if !strings.Contains(cond.Message, "FireboltEnginePreset") || !strings.Contains(cond.Message, presetName) {
+		t.Errorf("Ready.Message = %q, want it to name FireboltEnginePreset %q so users know where to edit",
+			cond.Message, presetName)
 	}
 	if strings.Contains(cond.Message, "FireboltEngineClass") {
 		t.Errorf("Ready.Message = %q names FireboltEngineClass, which is the wrong source", cond.Message)

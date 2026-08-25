@@ -43,19 +43,19 @@
 \*     TerminalPhase: zero-replica specs land in "stopped", non-zero in
 \*     "stable". Drift detection and re-materialization treat "stopped"
 \*     identically to "stable".
-\*   - FireboltEngineClass and FireboltEngineDefaults edits are modeled
-\*     implicitly by specVer increments. The reconciler's class and Defaults
-\*     watches plus stsMatchesSpec hash comparison make a class or Defaults
+\*   - FireboltEngineClass and FireboltEnginePreset edits are modeled
+\*     implicitly by specVer increments. The reconciler's class and Preset
+\*     watches plus stsMatchesSpec hash comparison make a class or Preset
 \*     spec edit observationally identical to a FireboltEngine spec edit:
 \*     both flip StsMatchesSpec(g) to FALSE and the next reconcile bumps
 \*     currentGeneration through the same code paths. The Go fidelity check
 \*     uses ServiceAccountName as the version carrier in the rapid harness
-\*     (engine_property_test.go) and exercises class- and Defaults-hash
+\*     (engine_property_test.go) and exercises class- and Preset-hash
 \*     drift in the merge unit tests. No per-source TLA+ variable is
 \*     introduced: from the model's perspective both overlays are inputs
 \*     to the spec-content hash specVer abstracts over.
-\*   - The Defaults fail-closed gate is NOT the same as a spec edit. When
-\*     Defaults is required-and-missing, ambiguous, or Ready=False for an
+\*   - The Preset fail-closed gate is NOT the same as a spec edit. When
+\*     Preset is required-and-missing, ambiguous, or Ready=False for an
 \*     operator-owned template path, the outer Reconcile refuses to call
 \*     computeEngineReconcile — the same scheduling window as instanceReady
 \*     and classReady. That is defaultsReady. Merge content stays UNMODELLED.
@@ -166,7 +166,7 @@ VARIABLES
     podsDrained,    \* TRUE when draining gen has zero running/suspended queries
     instanceReady,  \* TRUE when the referenced FireboltInstance is Ready (env-controlled)
     classReady,     \* TRUE when the referenced FireboltEngineClass is Ready (env-controlled)
-    defaultsReady   \* TRUE when FireboltEngineDefaults is admissible for render (env-controlled)
+    defaultsReady   \* TRUE when FireboltEnginePreset is admissible for render (env-controlled)
 
 vars == <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
           stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady, defaultsReady>>
@@ -185,7 +185,7 @@ StsMatchesSpec(g)  == StsExists(g) /\ stsSpecVer[g] = specVer
 TerminalPhase == IF specWantsStop THEN "stopped" ELSE "stable"
 
 \* Outer-Reconcile scheduling gate for {stable, stopped, creating}.
-\* Mirrors resolveFireboltEngineClassInfo + resolveFireboltEngineDefaultsInfo
+\* Mirrors resolveFireboltEngineClassInfo + resolveFireboltEnginePresetInfo
 \* plus the instance-Ready check: the compute layer runs only when all three
 \* are open. Switching/Draining/Cleaning ignore this helper.
 RenderGatesOpen == instanceReady /\ classReady /\ defaultsReady
@@ -264,11 +264,11 @@ EnvSetClassReady(v) ==
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, defaultsReady>>
 
-\* FireboltEngineDefaults becomes admissible or not. Symmetric to
-\* EnvSetClassReady: models the Defaults fail-closed gate
-\* (resolveFireboltEngineDefaultsInfo refuses required-and-missing,
+\* FireboltEnginePreset becomes admissible or not. Symmetric to
+\* EnvSetClassReady: models the Preset fail-closed gate
+\* (resolveFireboltEnginePresetInfo refuses required-and-missing,
 \* two-or-more, or Ready=False/OperatorOwnedFieldSet; Reconcile then
-\* surfaces ConditionReady=False/FireboltEngineDefaults{Required,
+\* surfaces ConditionReady=False/FireboltEnginePreset{Required,
 \* Ambiguous,Unready} without rendering a StatefulSet). Missing Ready,
 \* or Ready=False/DeletionBlocked, is admissible — same as class.
 \* Switching/Draining/Cleaning bypass the gate.
@@ -350,7 +350,7 @@ NewestKept(gcView) == Max2(Max2(gcView, activeGen), drainingGen)
 \* precisely the one whose abandoned generations accumulate.
 \* Unguarded on instanceReady, classReady, and defaultsReady, unlike every
 \* reconciler action below: reclaiming an abandoned generation needs neither a
-\* ready instance nor a resolvable class or Defaults object. Models
+\* ready instance nor a resolvable class or Preset object. Models
 \* gcOrphanedResources() in engine_gc.go, which the
 \* top-level Reconcile defers so it runs on the way out of every pass, including
 \* the passes those gates end early.
@@ -732,7 +732,7 @@ NoDeleteOfCurrentGeneration ==
 Spec ==
     /\ Init
     /\ [][Next]_vars
-    \* Instance-, class-, and Defaults-gated actions: SF because the three
+    \* Instance-, class-, and Preset-gated actions: SF because the three
     \* readiness flags can toggle adversarially. Same SF-vs-WF reasoning
     \* as the instance gate above.
     /\ SF_vars(ReconcileInit)

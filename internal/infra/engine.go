@@ -26,10 +26,10 @@ import (
 
 const (
 	// kubectl resource names (CRD plurals/singulars the API server accepts).
-	resourceEngine         = "fireboltengine"
-	resourceInstance       = "fireboltinstance"
-	resourceEngineClass    = "fireboltengineclass"
-	resourceEngineDefaults = "fireboltenginedefaults"
+	resourceEngine       = "fireboltengine"
+	resourceInstance     = "fireboltinstance"
+	resourceEngineClass  = "fireboltengineclass"
+	resourceEnginePreset = "fireboltenginepresets"
 
 	// engineContainerName is the operator-owned primary container whose image
 	// the engine's spec.template overrides.
@@ -321,17 +321,17 @@ func (c *Client) EngineClassProvidesStorage(ctx context.Context, name string) (b
 	return customConfigHasBucket(class.Spec.CustomEngineConfig), nil
 }
 
-// EngineDefaultsProvidesStorage reports whether the single
-// FireboltEngineDefaults object in the namespace carries object-storage
-// config. Zero or many objects are treated as no storage from Defaults.
-func (c *Client) EngineDefaultsProvidesStorage(ctx context.Context) (bool, error) {
-	out, err := c.kubectl.get(c.namespace, resourceEngineDefaults).Capture(ctx)
+// EnginePresetProvidesStorage reports whether the single
+// FireboltEnginePreset object in the namespace carries object-storage
+// config. Zero or many objects are treated as no storage from Preset.
+func (c *Client) EnginePresetProvidesStorage(ctx context.Context) (bool, error) {
+	out, err := c.kubectl.get(c.namespace, resourceEnginePreset).Capture(ctx)
 	if err != nil {
 		return false, err
 	}
-	var list v1alpha1.FireboltEngineDefaultsList
+	var list v1alpha1.FireboltEnginePresetList
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
-		return false, fmt.Errorf("parsing FireboltEngineDefaults list: %w", err)
+		return false, fmt.Errorf("parsing FireboltEnginePreset list: %w", err)
 	}
 	if len(list.Items) != 1 {
 		return false, nil

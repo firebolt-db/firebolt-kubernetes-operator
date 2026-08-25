@@ -30,10 +30,10 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-func defaultsInfoWith(sa string, env []corev1.EnvVar, nodeSelector map[string]string) *FireboltEngineDefaultsInfo {
-	return newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEngineDefaultsDefaultName},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+func presetInfoWith(sa string, env []corev1.EnvVar, nodeSelector map[string]string) *FireboltEnginePresetInfo {
+	return newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					ServiceAccountName: sa,
@@ -48,7 +48,7 @@ func defaultsInfoWith(sa string, env []corev1.EnvVar, nodeSelector map[string]st
 	})
 }
 
-func TestOverlayDefaultsOnClass_EngineWinsThenDefaultsThenClass(t *testing.T) {
+func TestOverlayPresetOnClass_EngineWinsThenPresetThenClass(t *testing.T) {
 	classInfo := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{
 		ServiceAccountName: "class-sa",
 		NodeSelector:       map[string]string{"pool": "class", "zone": "class-zone"},
@@ -57,11 +57,11 @@ func TestOverlayDefaultsOnClass_EngineWinsThenDefaultsThenClass(t *testing.T) {
 			Env:  []corev1.EnvVar{{Name: "FROM_CLASS", Value: "class"}, {Name: "SHARED", Value: "class"}},
 		}},
 	}))
-	defaults := defaultsInfoWith("defaults-sa", []corev1.EnvVar{
-		{Name: "FROM_DEFAULTS", Value: "defaults"},
-		{Name: "SHARED", Value: "defaults"},
-	}, map[string]string{"pool": "defaults", "region": "defaults-region"})
-	merged := overlayDefaultsOnClass(defaults, classInfo)
+	defaults := presetInfoWith("preset-sa", []corev1.EnvVar{
+		{Name: "FROM_DEFAULTS", Value: "preset"},
+		{Name: "SHARED", Value: "preset"},
+	}, map[string]string{"pool": "preset", "region": "defaults-region"})
+	merged := overlayPresetOnClass(defaults, classInfo)
 
 	engineWins := testSpec()
 	setSpecTemplatePod(engineWins, func(p *corev1.PodSpec) { p.ServiceAccountName = "engine-sa" })
@@ -72,15 +72,15 @@ func TestOverlayDefaultsOnClass_EngineWinsThenDefaultsThenClass(t *testing.T) {
 	if got := effectiveServiceAccountName(engineWins, merged); got != "engine-sa" {
 		t.Errorf("engine SA = %q, want engine-sa", got)
 	}
-	if got := effectiveServiceAccountName(testSpec(), merged); got != "defaults-sa" {
-		t.Errorf("defaults SA = %q, want defaults-sa", got)
+	if got := effectiveServiceAccountName(testSpec(), merged); got != "preset-sa" {
+		t.Errorf("defaults SA = %q, want preset-sa", got)
 	}
-	if got := effectiveServiceAccountName(testSpec(), overlayDefaultsOnClass(nil, classInfo)); got != "class-sa" {
+	if got := effectiveServiceAccountName(testSpec(), overlayPresetOnClass(nil, classInfo)); got != "class-sa" {
 		t.Errorf("class SA = %q, want class-sa", got)
 	}
 
 	sel := effectiveNodeSelector(testSpec(), merged)
-	if sel["pool"] != "defaults" || sel["zone"] != "class-zone" || sel["region"] != "defaults-region" {
+	if sel["pool"] != "preset" || sel["zone"] != "class-zone" || sel["region"] != "defaults-region" {
 		t.Errorf("nodeSelector = %v, want defaults over class with both sides kept", sel)
 	}
 
@@ -89,28 +89,28 @@ func TestOverlayDefaultsOnClass_EngineWinsThenDefaultsThenClass(t *testing.T) {
 	for _, e := range env {
 		got[e.Name] = e.Value
 	}
-	if got["FROM_CLASS"] != "class" || got["FROM_DEFAULTS"] != "defaults" || got["FROM_ENGINE"] != "engine" || got["SHARED"] != "engine" {
-		t.Errorf("env = %v, want class+defaults+engine with engine winning SHARED", got)
+	if got["FROM_CLASS"] != "class" || got["FROM_DEFAULTS"] != "preset" || got["FROM_ENGINE"] != "engine" || got["SHARED"] != "engine" {
+		t.Errorf("env = %v, want class+preset+engine with engine winning SHARED", got)
 	}
 }
 
-func TestOverlayDefaultsOnClass_StorageAndConfig(t *testing.T) {
+func TestOverlayPresetOnClass_StorageAndConfig(t *testing.T) {
 	class := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
 	class.Storage = computev1alpha1.EngineStorageSpec{
 		HostPath: &computev1alpha1.EngineHostPathSpec{Path: "/class"},
 	}
 	class.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(`{"logging":{"level":"class"},"storage":{"managed_table_storage":"s3"}}`)}
 
-	defaults := newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
+	defaults := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: "firebolt"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Storage: computev1alpha1.EngineStorageSpec{
 				EmptyDir: &computev1alpha1.EngineEmptyDirSpec{},
 			},
-			CustomEngineConfig: &apiextensionsv1.JSON{Raw: []byte(`{"logging":{"level":"defaults"},"storage":{"managed_table_bucket_name":"from-defaults"}}`)},
+			CustomEngineConfig: &apiextensionsv1.JSON{Raw: []byte(`{"logging":{"level":"preset"},"storage":{"managed_table_bucket_name":"from-defaults"}}`)},
 		},
 	})
-	merged := overlayDefaultsOnClass(defaults, class)
+	merged := overlayPresetOnClass(defaults, class)
 
 	bare := testSpec()
 	bare.Storage = computev1alpha1.EngineStorageSpec{}
@@ -121,7 +121,7 @@ func TestOverlayDefaultsOnClass_StorageAndConfig(t *testing.T) {
 	cfg := effectiveCustomEngineConfig(bare, merged)
 	logging, _ := cfg["logging"].(map[string]interface{})
 	storage, _ := cfg["storage"].(map[string]interface{})
-	if logging["level"] != "defaults" {
+	if logging["level"] != "preset" {
 		t.Errorf("logging.level = %v, want defaults", logging["level"])
 	}
 	if storage["managed_table_storage"] != "s3" {
@@ -140,7 +140,7 @@ func TestOverlayDefaultsOnClass_StorageAndConfig(t *testing.T) {
 	}
 }
 
-func TestOverlayDefaultsOnClass_DoesNotInheritSKUFields(t *testing.T) {
+func TestOverlayPresetOnClass_DoesNotInheritSKUFields(t *testing.T) {
 	graceful := computev1alpha1.RolloutGraceful
 	class := newFireboltEngineClassInfo(&computev1alpha1.FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "sku"},
@@ -151,10 +151,10 @@ func TestOverlayDefaultsOnClass_DoesNotInheritSKUFields(t *testing.T) {
 			AutoStop:  &computev1alpha1.AutoStopSpec{Enabled: true, ActiveReplicas: 1},
 		},
 	})
-	defaults := defaultsInfoWith("defaults-sa", nil, nil)
-	merged := overlayDefaultsOnClass(defaults, class)
+	defaults := presetInfoWith("preset-sa", nil, nil)
+	merged := overlayPresetOnClass(defaults, class)
 	if !effectiveUISidecarEnabled(testSpec(), merged) {
-		t.Error("uiSidecar should still come from the class, not be dropped by Defaults overlay")
+		t.Error("uiSidecar should still come from the class, not be dropped by Preset overlay")
 	}
 	if effectiveRollout(testSpec(), merged) != computev1alpha1.RolloutGraceful {
 		t.Error("rollout should still come from the class")
@@ -164,48 +164,48 @@ func TestOverlayDefaultsOnClass_DoesNotInheritSKUFields(t *testing.T) {
 	}
 }
 
-func TestBuildStatefulSet_StampsDefaultsHash(t *testing.T) {
-	defaults := defaultsInfoWith("defaults-sa", nil, nil)
-	merged := overlayDefaultsOnClass(defaults, nil)
+func TestBuildStatefulSet_StampsPresetHash(t *testing.T) {
+	defaults := presetInfoWith("preset-sa", nil, nil)
+	merged := overlayPresetOnClass(defaults, nil)
 	sts := buildStatefulSet(testSpec(), testEngineName, testNamespace, 0, InstanceInfo{}, merged)
-	if sts.Spec.Template.Spec.ServiceAccountName != "defaults-sa" {
-		t.Errorf("SA = %q, want defaults-sa", sts.Spec.Template.Spec.ServiceAccountName)
+	if sts.Spec.Template.Spec.ServiceAccountName != "preset-sa" {
+		t.Errorf("SA = %q, want preset-sa", sts.Spec.Template.Spec.ServiceAccountName)
 	}
-	if sts.Annotations[AnnotationEngineDefaultsHash] == "" {
-		t.Fatal("AnnotationEngineDefaultsHash missing")
+	if sts.Annotations[AnnotationEnginePresetHash] == "" {
+		t.Fatal("AnnotationEnginePresetHash missing")
 	}
 	if !stsMatchesSpec(sts, testSpec(), InstanceInfo{}, merged) {
-		t.Error("stsMatchesSpec rejected a freshly built STS with Defaults overlay")
+		t.Error("stsMatchesSpec rejected a freshly built STS with Preset overlay")
 	}
 
-	edited := defaultsInfoWith("other-sa", nil, nil)
-	if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, overlayDefaultsOnClass(edited, nil)) {
-		t.Error("stsMatchesSpec missed a Defaults spec edit")
+	edited := presetInfoWith("other-sa", nil, nil)
+	if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, overlayPresetOnClass(edited, nil)) {
+		t.Error("stsMatchesSpec missed a Preset spec edit")
 	}
 }
 
-func TestOverlayDefaultsOnClass_PreservesClassHash(t *testing.T) {
+func TestOverlayPresetOnClass_PreservesClassHash(t *testing.T) {
 	class := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
-	defaults := defaultsInfoWith("defaults-sa", nil, nil)
-	merged := overlayDefaultsOnClass(defaults, class)
+	defaults := presetInfoWith("preset-sa", nil, nil)
+	merged := overlayPresetOnClass(defaults, class)
 	if merged.Hash != class.Hash {
 		t.Errorf("class Hash = %q, want unchanged %q", merged.Hash, class.Hash)
 	}
-	if merged.DefaultsHash == "" || merged.DefaultsName != computev1alpha1.FireboltEngineDefaultsDefaultName {
-		t.Errorf("defaults identity = %s/%s, want name+hash set", merged.DefaultsName, merged.DefaultsHash)
+	if merged.PresetHash == "" || merged.PresetName != computev1alpha1.FireboltEnginePresetDefaultName {
+		t.Errorf("defaults identity = %s/%s, want name+hash set", merged.PresetName, merged.PresetHash)
 	}
 }
 
-func TestNewFireboltEngineDefaultsInfo_HashChangesWithSpec(t *testing.T) {
-	a := newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
+func TestNewFireboltEnginePresetInfo_HashChangesWithSpec(t *testing.T) {
+	a := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: "firebolt"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: "a"}},
 		},
 	})
-	b := newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
+	b := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: "firebolt"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: "b"}},
 		},
 	})
@@ -228,13 +228,13 @@ func assertNamesInOrder(t *testing.T, field string, got []string, want ...string
 	}
 }
 
-// TestOverlayDefaultsOnClass_ListMergeKeysAcrossTiers locks the merge
-// order for the list-shaped fields at the Defaults tier: class first,
-// then Defaults, then engine — the same concat rule the class layer
+// TestOverlayPresetOnClass_ListMergeKeysAcrossTiers locks the merge
+// order for the list-shaped fields at the Preset tier: class first,
+// then Preset, then engine — the same concat rule the class layer
 // uses for engine-over-class. Each field flows through a dedicated
-// line in overlayDefaultsPodSpec / overlayDefaultsEngineContainer, so
+// line in overlayPresetPodSpec / overlayPresetEngineContainer, so
 // a dropped line loses the field with no other test noticing.
-func TestOverlayDefaultsOnClass_ListMergeKeysAcrossTiers(t *testing.T) {
+func TestOverlayPresetOnClass_ListMergeKeysAcrossTiers(t *testing.T) {
 	secretEnvFrom := func(name string) corev1.EnvFromSource {
 		return corev1.EnvFromSource{SecretRef: &corev1.SecretEnvSource{
 			LocalObjectReference: corev1.LocalObjectReference{Name: name},
@@ -249,9 +249,9 @@ func TestOverlayDefaultsOnClass_ListMergeKeysAcrossTiers(t *testing.T) {
 			{Name: "class-sidecar"},
 		},
 	}))
-	defaults := newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEngineDefaultsDefaultName},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+	defaults := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 				Tolerations:      []corev1.Toleration{{Key: "defaults-taint"}},
 				ImagePullSecrets: []corev1.LocalObjectReference{{Name: "defaults-pull"}},
@@ -263,7 +263,7 @@ func TestOverlayDefaultsOnClass_ListMergeKeysAcrossTiers(t *testing.T) {
 			}},
 		},
 	})
-	merged := overlayDefaultsOnClass(defaults, classInfo)
+	merged := overlayPresetOnClass(defaults, classInfo)
 
 	engine := testSpec()
 	setSpecTemplatePod(engine, func(p *corev1.PodSpec) {
@@ -307,16 +307,16 @@ func TestOverlayDefaultsOnClass_ListMergeKeysAcrossTiers(t *testing.T) {
 	assertNamesInOrder(t, "envFrom", envFromNames, "class-creds", "defaults-creds", "engine-creds")
 }
 
-// TestOverlayDefaultsOnClass_EmptyDefaultsIsRenderInert pins the
-// overlay/effective* lockstep: folding an empty Defaults object over a
+// TestOverlayPresetOnClass_EmptyPresetIsRenderInert pins the
+// overlay/effective* lockstep: folding an empty Preset object over a
 // class must not change anything the class contributed to the rendered
-// StatefulSet. overlayDefaultsPodSpec rebuilds the merged template
+// StatefulSet. overlayPresetPodSpec rebuilds the merged template
 // field-by-field, so a field the render path reads through an
 // effective* helper but the overlay does not copy would silently drop
-// the class value in every namespace that carries a Defaults object.
+// the class value in every namespace that carries a Preset object.
 // The class template here populates every field the overlay handles;
 // the render comparison fails on the first field the overlay loses.
-func TestOverlayDefaultsOnClass_EmptyDefaultsIsRenderInert(t *testing.T) {
+func TestOverlayPresetOnClass_EmptyPresetIsRenderInert(t *testing.T) {
 	class := newFireboltEngineClassInfo(classWith(
 		&metav1.ObjectMeta{
 			Labels:      map[string]string{"team": "analytics"},
@@ -386,10 +386,10 @@ func TestOverlayDefaultsOnClass_EmptyDefaultsIsRenderInert(t *testing.T) {
 	}
 	class.CustomEngineConfig = &apiextensionsv1.JSON{Raw: []byte(`{"logging":{"level":"class"}}`)}
 
-	empty := newFireboltEngineDefaultsInfo(&computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEngineDefaultsDefaultName},
+	empty := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName},
 	})
-	merged := overlayDefaultsOnClass(empty, class)
+	merged := overlayPresetOnClass(empty, class)
 
 	spec := testSpec()
 	direct := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, class)
@@ -404,11 +404,11 @@ func TestOverlayDefaultsOnClass_EmptyDefaultsIsRenderInert(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(directJSON, overlaidJSON) {
-		t.Errorf("empty Defaults overlay changed the rendered STS spec:\nwithout overlay: %s\nwith overlay:    %s", directJSON, overlaidJSON)
+		t.Errorf("empty Preset overlay changed the rendered STS spec:\nwithout overlay: %s\nwith overlay:    %s", directJSON, overlaidJSON)
 	}
 
-	// The Defaults hash annotation is the only allowed metadata delta.
-	wantAnnotations := map[string]string{AnnotationEngineDefaultsHash: merged.DefaultsHash}
+	// The Preset hash annotation is the only allowed metadata delta.
+	wantAnnotations := map[string]string{AnnotationEnginePresetHash: merged.PresetHash}
 	for k, v := range direct.Annotations {
 		wantAnnotations[k] = v
 	}

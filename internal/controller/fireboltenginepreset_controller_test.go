@@ -31,15 +31,15 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-func newDefaultsFixture(name string) *computev1alpha1.FireboltEngineDefaults {
-	return &computev1alpha1.FireboltEngineDefaults{
+func newDefaultsFixture(name string) *computev1alpha1.FireboltEnginePreset {
+	return &computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  "firebolt",
 			Generation: 1,
-			Finalizers: []string{engineDefaultsFinalizerName},
+			Finalizers: []string{enginePresetFinalizerName},
 		},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{ServiceAccountName: "engine-sa"},
 			},
@@ -47,9 +47,9 @@ func newDefaultsFixture(name string) *computev1alpha1.FireboltEngineDefaults {
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_CountsNamespaceEngines(t *testing.T) {
+func TestFireboltEnginePresetReconcile_CountsNamespaceEngines(t *testing.T) {
 	sch := engineClassTestScheme(t)
-	defaults := newDefaultsFixture(computev1alpha1.FireboltEngineDefaultsDefaultName)
+	defaults := newDefaultsFixture(computev1alpha1.FireboltEnginePresetDefaultName)
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(
@@ -58,24 +58,24 @@ func TestFireboltEngineDefaultsReconcile_CountsNamespaceEngines(t *testing.T) {
 			newEngineFixture("b", "firebolt", ""),
 			newEngineFixture("c", "other-ns", "sku-a"),
 		).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: defaults.Name, Namespace: "firebolt"},
 	}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	updated := &computev1alpha1.FireboltEngineDefaults{}
+	updated := &computev1alpha1.FireboltEnginePreset{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: defaults.Name, Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if updated.Status.BoundEngines != 2 {
 		t.Errorf("BoundEngines = %d, want 2 (every engine in the namespace, regardless of class ref)", updated.Status.BoundEngines)
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineDefaultsConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -87,28 +87,28 @@ func TestFireboltEngineDefaultsReconcile_CountsNamespaceEngines(t *testing.T) {
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
+func TestFireboltEnginePresetReconcile_DefenseInDepthRejectsOwnedFields(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	defaults := newDefaultsFixture("bad")
 	defaults.Spec.Template.Spec.Subdomain = "headless"
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(defaults).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: "bad", Namespace: "firebolt"},
 	}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	updated := &computev1alpha1.FireboltEngineDefaults{}
+	updated := &computev1alpha1.FireboltEnginePreset{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "bad", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineDefaultsConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -120,17 +120,17 @@ func TestFireboltEngineDefaultsReconcile_DefenseInDepthRejectsOwnedFields(t *tes
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
+func TestFireboltEnginePresetReconcile_AddsFinalizerOnFirstReconcile(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	defaults := newDefaultsFixture("fresh")
 	defaults.Finalizers = nil
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(defaults).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: "fresh", Namespace: "firebolt"},
 	})
@@ -141,29 +141,29 @@ func TestFireboltEngineDefaultsReconcile_AddsFinalizerOnFirstReconcile(t *testin
 		t.Error("Requeue = false, want true after finalizer add")
 	}
 
-	updated := &computev1alpha1.FireboltEngineDefaults{}
+	updated := &computev1alpha1.FireboltEnginePreset{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "fresh", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if !containsString(updated.Finalizers, engineDefaultsFinalizerName) {
-		t.Errorf("Finalizers = %v, want %q included", updated.Finalizers, engineDefaultsFinalizerName)
+	if !containsString(updated.Finalizers, enginePresetFinalizerName) {
+		t.Errorf("Finalizers = %v, want %q included", updated.Finalizers, enginePresetFinalizerName)
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_DeletionBlockedWhileEnginesExist(t *testing.T) {
+func TestFireboltEnginePresetReconcile_DeletionBlockedWhileEnginesExist(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	defaults := newDefaultsFixture("doomed")
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(defaults, newEngineFixture("a", "firebolt", "")).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
 	if err := cli.Delete(context.Background(), defaults); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: "doomed", Namespace: "firebolt"},
 	})
@@ -171,17 +171,17 @@ func TestFireboltEngineDefaultsReconcile_DeletionBlockedWhileEnginesExist(t *tes
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if res.RequeueAfter == 0 {
-		t.Errorf("RequeueAfter = 0, want %s (deletion held)", engineDefaultsRequeueAfter)
+		t.Errorf("RequeueAfter = 0, want %s (deletion held)", enginePresetRequeueAfter)
 	}
 
-	updated := &computev1alpha1.FireboltEngineDefaults{}
+	updated := &computev1alpha1.FireboltEnginePreset{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "doomed", Namespace: "firebolt"}, updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if !containsString(updated.Finalizers, engineDefaultsFinalizerName) {
-		t.Errorf("Finalizers = %v, want %q still present", updated.Finalizers, engineDefaultsFinalizerName)
+	if !containsString(updated.Finalizers, enginePresetFinalizerName) {
+		t.Errorf("Finalizers = %v, want %q still present", updated.Finalizers, enginePresetFinalizerName)
 	}
-	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEngineDefaultsConditionReady)
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.FireboltEnginePresetConditionReady)
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
@@ -193,27 +193,27 @@ func TestFireboltEngineDefaultsReconcile_DeletionBlockedWhileEnginesExist(t *tes
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_DeletionAllowedWhenNoEngines(t *testing.T) {
+func TestFireboltEnginePresetReconcile_DeletionAllowedWhenNoEngines(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	defaults := newDefaultsFixture("orphan")
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
 		WithObjects(defaults).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
 	if err := cli.Delete(context.Background(), defaults); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: "orphan", Namespace: "firebolt"},
 	}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	updated := &computev1alpha1.FireboltEngineDefaults{}
+	updated := &computev1alpha1.FireboltEnginePreset{}
 	err := cli.Get(context.Background(), client.ObjectKey{Name: "orphan", Namespace: "firebolt"}, updated)
 	if err == nil {
 		t.Fatalf("Get: expected NotFound after finalizer removal, got finalizers=%v", updated.Finalizers)
@@ -223,14 +223,14 @@ func TestFireboltEngineDefaultsReconcile_DeletionAllowedWhenNoEngines(t *testing
 	}
 }
 
-func TestFireboltEngineDefaultsReconcile_NotFoundIsNoOp(t *testing.T) {
+func TestFireboltEnginePresetReconcile_NotFoundIsNoOp(t *testing.T) {
 	sch := engineClassTestScheme(t)
 	cli := fake.NewClientBuilder().
 		WithScheme(sch).
-		WithStatusSubresource(&computev1alpha1.FireboltEngineDefaults{}).
+		WithStatusSubresource(&computev1alpha1.FireboltEnginePreset{}).
 		Build()
 
-	r := &FireboltEngineDefaultsReconciler{Client: cli, Reader: cli, Scheme: sch}
+	r := &FireboltEnginePresetReconciler{Client: cli, Reader: cli, Scheme: sch}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{Name: "missing", Namespace: "firebolt"},
 	})

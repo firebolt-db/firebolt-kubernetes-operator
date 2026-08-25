@@ -129,7 +129,7 @@ func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev
 //  2. The effective engine-container resources sit at or below the
 //     operator-configured ceiling in ResourceBounds, resolved with the
 //     same precedence the reconciler renders: the engine's own template
-//     wins wholesale, else the namespace FireboltEngineDefaults, else
+//     wins wholesale, else the namespace FireboltEnginePreset, else
 //     the referenced class. The bounds protect a namespace from
 //     accidentally admitting an engine whose requests would starve
 //     sibling workloads at scheduling time and an engine whose limits
@@ -197,7 +197,7 @@ func (v *FireboltEngineCustomValidator) ValidateDelete(_ context.Context, _ *Fir
 // resource that fails on both a class-ref typo and a resources bound
 // see both issues at once rather than fixing one and re-submitting.
 //
-// The class and the namespace FireboltEngineDefaults are each loaded at
+// The class and the namespace FireboltEnginePreset are each loaded at
 // most once per admission so the resources gate can fall through to
 // their values without further round-trips to the API server.
 func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *FireboltEngine) field.ErrorList {
@@ -206,7 +206,7 @@ func (v *FireboltEngineCustomValidator) validate(ctx context.Context, eng *Fireb
 	errs = append(errs, refErrs...)
 	errs = append(errs, v.validateTemplate(eng)...)
 	errs = append(errs, v.validateSecretAliases(ctx, eng)...)
-	errs = append(errs, v.validateResources(eng, v.resolveEngineDefaults(ctx, eng), class)...)
+	errs = append(errs, v.validateResources(eng, v.resolveEnginePreset(ctx, eng), class)...)
 	return errs
 }
 
@@ -299,21 +299,21 @@ func (v *FireboltEngineCustomValidator) resolveEngineClass(
 	return class, nil
 }
 
-// resolveEngineDefaults returns the single FireboltEngineDefaults in the
-// engine's namespace, or nil when there is none to consume. Defaults is
+// resolveEnginePreset returns the single FireboltEnginePreset in the
+// engine's namespace, or nil when there is none to consume. Preset is
 // ambient — engines never reference it by name — so resolution is a
 // namespace list, mirroring the reconciler's
-// resolveFireboltEngineDefaultsInfo.
+// resolveFireboltEnginePresetInfo.
 //
-// Unlike the class ref, an unresolvable Defaults never produces an
+// Unlike the class ref, an unresolvable Preset never produces an
 // admission error here: a list failure degrades to the engine → class
 // fallthrough, and an ambiguous namespace (two or more objects) skips
 // the tier because the reconciler fails the engine closed on ambiguity
 // before rendering anything. Admission is the early warning for the
 // bounds gate; the reconciler's validateMergedEngineResources is the
 // guarantee.
-func (v *FireboltEngineCustomValidator) resolveEngineDefaults(ctx context.Context, eng *FireboltEngine) *FireboltEngineDefaults {
-	var list FireboltEngineDefaultsList
+func (v *FireboltEngineCustomValidator) resolveEnginePreset(ctx context.Context, eng *FireboltEngine) *FireboltEnginePreset {
+	var list FireboltEnginePresetList
 	if err := v.Reader.List(ctx, &list, client.InNamespace(eng.Namespace)); err != nil {
 		return nil
 	}
@@ -330,10 +330,10 @@ func (v *FireboltEngineCustomValidator) resolveEngineDefaults(ctx context.Contex
 // Effective resources follow the same precedence the engine reconciler
 // uses: when the engine's own spec.template carries an engine container
 // with any requests/limits, that wins wholesale. Otherwise the
-// namespace FireboltEngineDefaults fills in, then the class. Whichever
+// namespace FireboltEnginePreset fills in, then the class. Whichever
 // source supplies the value rendered onto the StatefulSet pod must
 // clear the ceiling, so all three are checked here in render order —
-// checking a source the merge would mask (the class under a Defaults
+// checking a source the merge would mask (the class under a Preset
 // override) would reject specs whose rendered resources are legal, and
 // skipping a source the merge honors would let oversized values
 // escape admission.
@@ -341,10 +341,10 @@ func (v *FireboltEngineCustomValidator) resolveEngineDefaults(ctx context.Contex
 // The error's field path points at the merged location
 // (spec.template.spec.containers[engine].resources.*) regardless of
 // source: it is where the user should edit to override. When the value
-// came from Defaults or a class, the error detail names that object so
+// came from Preset or a class, the error detail names that object so
 // the user knows which side to edit.
 func (v *FireboltEngineCustomValidator) validateResources(
-	eng *FireboltEngine, defaults *FireboltEngineDefaults, class *FireboltEngineClass,
+	eng *FireboltEngine, defaults *FireboltEnginePreset, class *FireboltEngineClass,
 ) field.ErrorList {
 	mergedPath := field.NewPath("spec", "template", "spec", "containers").Key(EngineContainerName).Child("resources")
 
@@ -356,7 +356,7 @@ func (v *FireboltEngineCustomValidator) validateResources(
 			errs := v.ResourceBounds.Validate(c.Resources, mergedPath)
 			for i := range errs {
 				errs[i].Detail = fmt.Sprintf(
-					"%s (inherited from FireboltEngineDefaults %q; set spec.template on this engine to override)",
+					"%s (inherited from FireboltEnginePreset %q; set spec.template on this engine to override)",
 					errs[i].Detail, defaults.Name,
 				)
 			}

@@ -62,7 +62,7 @@ const reasonOperatorOwnedFieldSet = "OperatorOwnedFieldSet"
 
 // reasonAdmissible is the Ready=True reason stamped when spec.template
 // contains no operator-owned paths. Shared by FireboltEngineClass and
-// FireboltEngineDefaults so kubectl and tests see one token.
+// FireboltEnginePreset so kubectl and tests see one token.
 const reasonAdmissible = "Admissible"
 
 // engineClassRequeueAfter is the steady-state safety-net requeue

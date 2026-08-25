@@ -75,7 +75,7 @@ rules:
   - compute.firebolt.io
   resources:
   - fireboltengineclasses
-  - fireboltenginedefaults
+  - fireboltenginepresets
   verbs:
   - get
   - list
@@ -86,7 +86,7 @@ rules:
   - compute.firebolt.io
   resources:
   - fireboltengineclasses/finalizers
-  - fireboltenginedefaults/finalizers
+  - fireboltenginepresets/finalizers
   - fireboltengines/finalizers
   - fireboltinstances/finalizers
   verbs:
@@ -95,7 +95,7 @@ rules:
   - compute.firebolt.io
   resources:
   - fireboltengineclasses/status
-  - fireboltenginedefaults/status
+  - fireboltenginepresets/status
   - fireboltengines/status
   - fireboltinstances/status
   verbs:

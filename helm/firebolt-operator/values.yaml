@@ -185,7 +185,7 @@ healthProbeBindAddress: ":8081"
 watchNamespaces: []
 
 # -- Label selector restricting which FireboltEngine, FireboltInstance,
-# FireboltEngineClass, and FireboltEngineDefaults objects the operator
+# FireboltEngineClass, and FireboltEnginePreset objects the operator
 # caches and reconciles.
 # Empty (the default) applies no restriction. Non-empty is passed as
 # `--watch-label-selector=<selector>` and applies only to the four
