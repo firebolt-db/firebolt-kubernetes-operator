@@ -76,6 +76,83 @@ CoreWeave Object Storage supports virtual-hosted addressing only, so set `path_s
                 name: coreweave-s3-credentials
 ```
 
+## Tigris
+
+[Tigris](https://www.tigrisdata.com/) exposes a global S3 API endpoint at `https://t3.storage.dev` and supports path-style addressing (the default).
+
+Create a `Secret` from a Tigris access key:
+
+```bash
+kubectl -n firebolt create secret generic tigris-s3-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=<tigris-access-key-id> \
+  --from-literal=AWS_SECRET_ACCESS_KEY=<tigris-secret>
+```
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  replicas: 1
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-firebolt-bucket
+      aws:
+        endpoint: https://t3.storage.dev
+        region: auto
+        path_style_addressing: true # non-AWS S3-compatible store; ignored for AWS S3
+  template:
+    spec:
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: tigris-s3-credentials # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+```
+
+
+## Cloudflare R2
+
+[Cloudflare R2](https://developers.cloudflare.com/r2/) exposes an account-scoped S3 API endpoint at `https://<account-id>.r2.cloudflarestorage.com` and supports path-style addressing. R2 ignores the signing region, so set `region: auto`.
+
+Create a `Secret` from an R2 API token (S3 credentials):
+
+```bash
+kubectl -n firebolt create secret generic r2-s3-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=<r2-access-key-id> \
+  --from-literal=AWS_SECRET_ACCESS_KEY=<r2-secret>
+```
+
+```yaml
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: my-engine
+  namespace: firebolt
+spec:
+  instanceRef: quickstart
+  replicas: 1
+  customEngineConfig:
+    storage:
+      managed_table_storage: s3
+      managed_table_bucket_name: my-firebolt-bucket
+      aws:
+        endpoint: https://<account-id>.r2.cloudflarestorage.com
+        region: auto
+        path_style_addressing: true
+  template:
+    spec:
+      containers:
+        - name: engine
+          envFrom:
+            - secretRef:
+                name: r2-s3-credentials
+```
+
 ## Verify
 
 Apply the manifest, wait for the engine to reach `Ready`, then run a small write/read (for example `CREATE TABLE` + `INSERT` + `SELECT`). Confirm objects appear under your bucket with the provider's CLI (`aws s3 ls s3://my-firebolt-bucket --endpoint-url <endpoint>`). See the [Quickstart](../../quickstart) for connecting to the engine.
