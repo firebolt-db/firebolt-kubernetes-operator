@@ -8,13 +8,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func TestBuildEngineDefaults_TypedKindAndConventionalName(t *testing.T) {
-	d := BuildEngineDefaults("firebolt", "", "engine-sa")
-	if d.Kind != "FireboltEngineDefaults" {
-		t.Errorf("Kind = %q, want FireboltEngineDefaults", d.Kind)
+func TestBuildEnginePreset_TypedKindAndDefaultName(t *testing.T) {
+	d := BuildEnginePreset("firebolt", "", "engine-sa")
+	if d.Kind != "FireboltEnginePreset" {
+		t.Errorf("Kind = %q, want FireboltEnginePreset", d.Kind)
 	}
-	if d.Name != v1alpha1.FireboltEngineDefaultsDefaultName {
-		t.Errorf("Name = %q, want %q", d.Name, v1alpha1.FireboltEngineDefaultsDefaultName)
+	if d.Name != v1alpha1.FireboltEnginePresetDefaultName {
+		t.Errorf("Name = %q, want %q", d.Name, v1alpha1.FireboltEnginePresetDefaultName)
 	}
 	if d.Spec.Template.Spec.ServiceAccountName != "engine-sa" {
 		t.Errorf("serviceAccountName = %q, want engine-sa", d.Spec.Template.Spec.ServiceAccountName)
@@ -24,7 +24,7 @@ func TestBuildEngineDefaults_TypedKindAndConventionalName(t *testing.T) {
 		t.Fatalf("yaml.Marshal: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "kind: FireboltEngineDefaults") {
+	if !strings.Contains(text, "kind: FireboltEnginePreset") {
 		t.Errorf("marshaled YAML missing kind:\n%s", text)
 	}
 	if !strings.Contains(text, "serviceAccountName: engine-sa") {

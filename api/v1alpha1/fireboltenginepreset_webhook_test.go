@@ -24,17 +24,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-// validFireboltEngineDefaults returns a FireboltEngineDefaults whose
+// validFireboltEnginePreset returns a FireboltEnginePreset whose
 // spec.template contains only user-allowed fields. Lives in namespace
 // "firebolt" so delete-webhook tests exercise the same-namespace filter.
-func validFireboltEngineDefaults() *FireboltEngineDefaults {
-	return &FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: FireboltEngineDefaultsDefaultName, Namespace: "firebolt"},
-		Spec: FireboltEngineDefaultsSpec{
+func validFireboltEnginePreset() *FireboltEnginePreset {
+	return &FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: FireboltEnginePresetDefaultName, Namespace: "firebolt"},
+		Spec: FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      map[string]string{"team": "data"},
@@ -60,74 +59,36 @@ func validFireboltEngineDefaults() *FireboltEngineDefaults {
 	}
 }
 
-func defaultsValidatorWithObjects(t *testing.T, objs ...client.Object) *FireboltEngineDefaultsCustomValidator {
-	t.Helper()
-	scheme := fireboltEngineClassWebhookScheme(t)
-	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
-	return &FireboltEngineDefaultsCustomValidator{Reader: cli}
-}
-
-func TestFireboltEngineDefaultsValidator_CreateAcceptsValid(t *testing.T) {
-	v := defaultsValidatorWithObjects(t)
-	if _, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults()); err != nil {
+func TestFireboltEnginePresetValidator_CreateAcceptsValid(t *testing.T) {
+	v := &FireboltEnginePresetCustomValidator{}
+	if _, err := v.ValidateCreate(context.Background(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateCreate: unexpected error on valid spec: %v", err)
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_UpdateAcceptsValid(t *testing.T) {
-	v := &FireboltEngineDefaultsCustomValidator{}
-	if _, err := v.ValidateUpdate(context.Background(), validFireboltEngineDefaults(), validFireboltEngineDefaults()); err != nil {
+func TestFireboltEnginePresetValidator_UpdateAcceptsValid(t *testing.T) {
+	v := &FireboltEnginePresetCustomValidator{}
+	if _, err := v.ValidateUpdate(context.Background(), validFireboltEnginePreset(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateUpdate: unexpected error on valid spec: %v", err)
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_CreateRejectsSecondInNamespace(t *testing.T) {
-	existing := validFireboltEngineDefaults()
-	v := defaultsValidatorWithObjects(t, existing)
-	second := validFireboltEngineDefaults()
-	second.Name = "other"
-	_, err := v.ValidateCreate(context.Background(), second)
-	if err == nil {
-		t.Fatal("ValidateCreate: expected error when a Defaults object already exists in the namespace")
-	}
-	if !strings.Contains(err.Error(), existing.Name) {
-		t.Errorf("error %q does not name the existing object %q", err, existing.Name)
-	}
-}
-
-func TestFireboltEngineDefaultsValidator_CreateAllowsWhenOtherNamespaceHasDefaults(t *testing.T) {
-	other := validFireboltEngineDefaults()
-	other.Namespace = "other-ns"
-	v := defaultsValidatorWithObjects(t, other)
-	if _, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults()); err != nil {
-		t.Fatalf("ValidateCreate: Defaults in another namespace must not block: %v", err)
-	}
-}
-
-func TestFireboltEngineDefaultsValidator_CreateRequiresReader(t *testing.T) {
-	v := &FireboltEngineDefaultsCustomValidator{}
-	_, err := v.ValidateCreate(context.Background(), validFireboltEngineDefaults())
-	if err == nil {
-		t.Fatal("ValidateCreate: expected error when Reader is nil")
-	}
-}
-
-func TestFireboltEngineDefaultsValidator_RejectsOwnedFields(t *testing.T) {
+func TestFireboltEnginePresetValidator_RejectsOwnedFields(t *testing.T) {
 	tests := []struct {
 		name      string
-		mutate    func(*FireboltEngineDefaults)
+		mutate    func(*FireboltEnginePreset)
 		wantField string
 	}{
 		{
 			name: "reserved label prefix",
-			mutate: func(d *FireboltEngineDefaults) {
+			mutate: func(d *FireboltEnginePreset) {
 				d.Spec.Template.Labels["firebolt.io/config-hash"] = "abc"
 			},
 			wantField: "spec.template.metadata.labels",
 		},
 		{
 			name: "pod terminationGracePeriodSeconds",
-			mutate: func(d *FireboltEngineDefaults) {
+			mutate: func(d *FireboltEnginePreset) {
 				v := int64(30)
 				d.Spec.Template.Spec.TerminationGracePeriodSeconds = &v
 			},
@@ -135,7 +96,7 @@ func TestFireboltEngineDefaultsValidator_RejectsOwnedFields(t *testing.T) {
 		},
 		{
 			name: "reserved engine env key",
-			mutate: func(d *FireboltEngineDefaults) {
+			mutate: func(d *FireboltEnginePreset) {
 				d.Spec.Template.Spec.Containers[0].Env = append(
 					d.Spec.Template.Spec.Containers[0].Env,
 					corev1.EnvVar{Name: "POD_INDEX", Value: "0"},
@@ -146,9 +107,9 @@ func TestFireboltEngineDefaultsValidator_RejectsOwnedFields(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := validFireboltEngineDefaults()
+			d := validFireboltEnginePreset()
 			tt.mutate(d)
-			v := &FireboltEngineDefaultsCustomValidator{}
+			v := &FireboltEnginePresetCustomValidator{}
 			_, err := v.ValidateCreate(context.Background(), d)
 			if err == nil {
 				t.Fatalf("ValidateCreate: expected error mentioning %q", tt.wantField)
@@ -160,7 +121,7 @@ func TestFireboltEngineDefaultsValidator_RejectsOwnedFields(t *testing.T) {
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_DeleteRefusesWhileEnginesExist(t *testing.T) {
+func TestFireboltEnginePresetValidator_DeleteRefusesWhileEnginesExist(t *testing.T) {
 	scheme := fireboltEngineClassWebhookScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&FireboltEngine{
@@ -168,8 +129,8 @@ func TestFireboltEngineDefaultsValidator_DeleteRefusesWhileEnginesExist(t *testi
 			Spec:       FireboltEngineSpec{InstanceRef: "inst", Replicas: 1},
 		},
 	).Build()
-	v := &FireboltEngineDefaultsCustomValidator{Reader: cli}
-	_, err := v.ValidateDelete(context.Background(), validFireboltEngineDefaults())
+	v := &FireboltEnginePresetCustomValidator{Reader: cli}
+	_, err := v.ValidateDelete(context.Background(), validFireboltEnginePreset())
 	if err == nil {
 		t.Fatal("ValidateDelete: expected error while a FireboltEngine exists in the namespace")
 	}
@@ -178,16 +139,16 @@ func TestFireboltEngineDefaultsValidator_DeleteRefusesWhileEnginesExist(t *testi
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_DeleteAllowsWhenNoEngines(t *testing.T) {
+func TestFireboltEnginePresetValidator_DeleteAllowsWhenNoEngines(t *testing.T) {
 	scheme := fireboltEngineClassWebhookScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(scheme).Build()
-	v := &FireboltEngineDefaultsCustomValidator{Reader: cli}
-	if _, err := v.ValidateDelete(context.Background(), validFireboltEngineDefaults()); err != nil {
+	v := &FireboltEnginePresetCustomValidator{Reader: cli}
+	if _, err := v.ValidateDelete(context.Background(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateDelete: unexpected error with no engines: %v", err)
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_DeleteIgnoresOtherNamespaceEngines(t *testing.T) {
+func TestFireboltEnginePresetValidator_DeleteIgnoresOtherNamespaceEngines(t *testing.T) {
 	scheme := fireboltEngineClassWebhookScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&FireboltEngine{
@@ -195,15 +156,15 @@ func TestFireboltEngineDefaultsValidator_DeleteIgnoresOtherNamespaceEngines(t *t
 			Spec:       FireboltEngineSpec{InstanceRef: "inst", Replicas: 1, EngineClassRef: ptr.To("x")},
 		},
 	).Build()
-	v := &FireboltEngineDefaultsCustomValidator{Reader: cli}
-	if _, err := v.ValidateDelete(context.Background(), validFireboltEngineDefaults()); err != nil {
+	v := &FireboltEnginePresetCustomValidator{Reader: cli}
+	if _, err := v.ValidateDelete(context.Background(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateDelete: engine in another namespace must not block: %v", err)
 	}
 }
 
-func TestFireboltEngineDefaultsValidator_DeleteRequiresReader(t *testing.T) {
-	v := &FireboltEngineDefaultsCustomValidator{}
-	_, err := v.ValidateDelete(context.Background(), validFireboltEngineDefaults())
+func TestFireboltEnginePresetValidator_DeleteRequiresReader(t *testing.T) {
+	v := &FireboltEnginePresetCustomValidator{}
+	_, err := v.ValidateDelete(context.Background(), validFireboltEnginePreset())
 	if err == nil {
 		t.Fatal("ValidateDelete: expected error when Reader is nil")
 	}

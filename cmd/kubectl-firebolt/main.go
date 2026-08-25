@@ -34,7 +34,7 @@ const (
 const (
 	resourceEngine   = "fireboltengine"
 	resourceInstance = "fireboltinstance"
-	resourceDefaults = "fireboltenginedefaults"
+	resourcePreset   = "fireboltenginepresets"
 )
 
 // version is the plugin version, overridden at build time via
@@ -81,7 +81,7 @@ func newRootCmd() *cobra.Command {
 	// passing either one prints the kubectl commands instead of running them.
 	pf.BoolVar(&flagPrintCommands, "debug", false, "Alias for --print-commands")
 
-	root.AddCommand(newInstanceCmd(), newEngineCmd(), newDefaultsCmd(), newVersionCmd())
+	root.AddCommand(newInstanceCmd(), newEngineCmd(), newPresetCmd(), newVersionCmd())
 	return root
 }
 
@@ -178,37 +178,37 @@ name is not this argument.`,
 	return cmd
 }
 
-// ── defaults ─────────────────────────────────────────────────────────────────
+// ── preset ───────────────────────────────────────────────────────────────────
 
-func newDefaultsCmd() *cobra.Command {
+func newPresetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "defaults",
-		Short: "Get and list FireboltEngineDefaults",
+		Use:   "preset",
+		Short: "Get and list FireboltEnginePreset",
 	}
-	cmd.AddCommand(newDefaultsGetCmd(), newDefaultsListCmd())
+	cmd.AddCommand(newPresetGetCmd(), newPresetListCmd())
 	return cmd
 }
 
-func newDefaultsGetCmd() *cobra.Command {
+func newPresetGetCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "get [name]",
-		Short: "Get a FireboltEngineDefaults object",
+		Short: "Get a FireboltEnginePreset object",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := infra.BuildEngineDefaults("", "", "").Name
+			name := infra.DefaultEnginePresetName
 			if len(args) == 1 {
 				name = args[0]
 			}
 			c := newClient()
-			obj, err := c.GetEngineDefaults(cmd.Context(), name)
+			obj, err := c.GetEnginePreset(cmd.Context(), name)
 			if err != nil {
 				return err
 			}
 			if output == outJSON || output == outYAML {
 				return printObject(output, obj)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", resourceDefaults, obj.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s/%s\n", resourcePreset, obj.Name)
 			return nil
 		},
 	}
@@ -216,14 +216,14 @@ func newDefaultsGetCmd() *cobra.Command {
 	return cmd
 }
 
-func newDefaultsListCmd() *cobra.Command {
+func newPresetListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List FireboltEngineDefaults",
+		Short: "List FireboltEnginePreset",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := newClient()
-			items, err := c.ListEngineDefaults(cmd.Context())
+			items, err := c.ListEnginePreset(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -344,7 +344,7 @@ func newEngineCreateCmd() *cobra.Command {
 			// resolve the effective config rather than only checking the flags.
 			// Warn (don't block): the operator doesn't require storage, and it may
 			// be supplied another way.
-			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) {
+			if bucket == "" && !classProvidesStorage(cmd.Context(), c, engineType) && !presetProvideStorage(cmd.Context(), c) {
 				warnNoStorage(engineType)
 			}
 			if err := c.CreateEngine(cmd.Context(), spec); err != nil {
@@ -449,16 +449,26 @@ func classProvidesStorage(ctx context.Context, c *infra.Client, engineType strin
 	return ok
 }
 
+func presetProvideStorage(ctx context.Context, c *infra.Client) bool {
+	ok, err := c.EnginePresetProvidesStorage(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not verify whether FireboltEnginePreset supplies object storage: %v\n", err)
+		return false
+	}
+	return ok
+}
+
 // warnNoStorage warns that the engine has no object storage source — neither a
-// --bucket nor a storage-providing class — so it may never reach Ready.
+// --bucket, a storage-providing class, nor FireboltEnginePreset — so it may
+// never reach Ready.
 func warnNoStorage(engineType string) {
 	if engineType != "" {
-		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket nor engine class %q "+
-			"(customEngineConfig.storage) provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
+		fmt.Fprintf(os.Stderr, "warning: no object storage configured — neither --bucket, engine class %q, "+
+			"nor FireboltEnginePreset provides a bucket; the engine may not become Ready unless storage is provided another way\n", engineType)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket nor --type given; "+
-		"the engine may not become Ready unless storage is provided another way")
+	fmt.Fprintln(os.Stderr, "warning: no object storage configured — neither --bucket, --type, nor FireboltEnginePreset "+
+		"provides a bucket; the engine may not become Ready unless storage is provided another way")
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

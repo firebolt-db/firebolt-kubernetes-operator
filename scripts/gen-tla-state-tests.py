@@ -530,6 +530,7 @@ type tlaState struct {{
 	PodsDrained    bool
 	InstanceReady  bool
 	ClassReady     bool
+	PresetReady  bool
 }}
 
 // tlaTestCase references tlaStatePool by index. Start is the index of the
@@ -567,6 +568,8 @@ ENGINE_ENV_ACTIONS = frozenset(
         "EnvSetInstanceReady(FALSE)",
         "EnvSetClassReady(TRUE)",
         "EnvSetClassReady(FALSE)",
+        "EnvSetPresetReady(TRUE)",
+        "EnvSetPresetReady(FALSE)",
         "EnvSetGatesOpen",
     ]
 )
@@ -597,7 +600,7 @@ def engine_check_env_actions(edges: List[Edge]) -> None:
         )
 
 
-# The TLA+ state has 12 variables. We project to a reduced "observable" tuple
+# The TLA+ state has 13 variables. We project to a reduced "observable" tuple
 # that the engineSim can faithfully reproduce and assert against. specVer is
 # carried by the spec template's ServiceAccountName; specWantsStop by
 # spec.replicas; stsSpecVer[g] by the per-gen STS pod template.
@@ -618,6 +621,7 @@ def engine_project(state: State) -> StateKey:
         state["podsDrained"],
         state["instanceReady"],
         state["classReady"],
+        state["presetReady"],
     )
 
 
@@ -639,6 +643,7 @@ def engine_go_state_lit(key: StateKey, ctx: Ctx) -> str:
         pods_drained,
         instance_ready,
         class_ready,
+        preset_ready,
     ) = key
     assert isinstance(sts, tuple)
     gens = int(ctx["max_gen_plus_one"])
@@ -657,7 +662,8 @@ def engine_go_state_lit(key: StateKey, ctx: Ctx) -> str:
         f"{go_bool(bool(pods_ready))}, "
         f"{go_bool(bool(pods_drained))}, "
         f"{go_bool(bool(instance_ready))}, "
-        f"{go_bool(bool(class_ready))}"
+        f"{go_bool(bool(class_ready))}, "
+        f"{go_bool(bool(preset_ready))}"
         "}"
     )
 

@@ -9,27 +9,28 @@ A `FireboltEngineClass` provides reusable defaults to Engines in the same namesp
 Values resolve in this order:
 
 1. The Engine value
-2. The referenced EngineClass value
-3. The Firebolt Operator default
+2. The namespace `FireboltEnginePreset` value, when one object exists
+3. The referenced EngineClass value
+4. The Firebolt Operator default
 
 An EngineClass is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims.
 
 ## Pod template precedence
 
-The Engine template overrides the class template for conflicting scalar values. Collection behavior depends on the field:
+The Engine template overrides Preset, and Preset overrides the class, for conflicting scalar values. Collection behavior depends on the field:
 
 | Field | Resolution |
 |---|---|
-| `serviceAccountName` | Engine, then class |
-| `nodeSelector` | Maps merge; Engine keys win |
-| `tolerations`, `topologySpreadConstraints`, `imagePullSecrets` | Class entries followed by Engine entries |
-| `affinity`, pod `securityContext` | Engine value replaces class value when set |
+| `serviceAccountName` | Engine, then Preset, then class |
+| `nodeSelector` | Maps merge; Engine keys win over Preset keys, which win over class keys |
+| `tolerations`, `topologySpreadConstraints`, `imagePullSecrets` | Class entries, then Preset entries, then Engine entries |
+| `affinity`, pod `securityContext` | Engine value replaces Preset, which replaces class, when set |
 | labels and annotations | Maps merge; Engine keys win; `firebolt.io/` keys are reserved |
-| volumes | Class entries followed by Engine entries; Firebolt Operator volume names are reserved |
-| init containers and sidecars | Class entries followed by Engine entries |
-| Engine container image and pull policy | Engine, then class, then Firebolt Operator default |
-| Engine container resources | The Engine block replaces the class block when the Engine sets requests, limits, or claims |
-| Engine container environment and mounts | Firebolt Operator entries, then class entries, then Engine entries; reserved names are rejected or omitted |
+| volumes | Class entries, then Preset entries, then Engine entries; Firebolt Operator volume names are reserved |
+| init containers and sidecars | Class entries, then Preset entries, then Engine entries |
+| Engine container image and pull policy | Engine, then Preset, then class, then Firebolt Operator default |
+| Engine container resources | The Engine block replaces the Preset or class block when the Engine sets requests, limits, or claims |
+| Engine container environment and mounts | Firebolt Operator entries, then class entries, then Preset entries, then Engine entries; reserved names are rejected or omitted |
 
 The Firebolt Operator owns fields required for Engine identity, networking, probes, and StatefulSet behavior. See the [FireboltEngineClass CRD reference](../crd-reference/fireboltengineclass-crd-reference) for the complete allowed-field table.
 
@@ -74,17 +75,25 @@ spec:
 
 | Field | Resolution |
 |---|---|
-| `storage` | Whole setting. The Engine backend wins when set; otherwise the class backend applies; default is `emptyDir`. |
-| `customEngineConfig` | Deep merge: Firebolt Operator configuration, class configuration, then Engine configuration. Engine keys win. Protected identity, routing, and topology paths cannot be overridden. |
-| `rollout` | Engine, class, then `graceful` |
-| `drainCheckEnabled` | Engine, class, then `true` |
-| `drainCheckInterval` | Engine, class, then Firebolt Operator default |
-| `autoStop` | Whole setting. The Engine policy replaces the class policy when set. |
-| `uiSidecar` | Engine, class, then `false` |
+| `storage` | Whole setting. The Engine backend wins when set; otherwise Preset; otherwise the class; default is `emptyDir`. |
+| `customEngineConfig` | Deep merge: Firebolt Operator configuration, class configuration, Preset configuration, then Engine configuration. Engine keys win. Protected identity, routing, and topology paths cannot be overridden. |
+| `rollout` | Engine, class, then `graceful`. Preset does not carry this field. |
+| `drainCheckEnabled` | Engine, class, then `true`. Preset does not carry this field. |
+| `drainCheckInterval` | Engine, class, then Firebolt Operator default. Preset does not carry this field. |
+| `autoStop` | Whole setting. The Engine policy replaces the class policy when set. Preset does not carry this field. |
+| `uiSidecar` | Engine, class, then `false`. Preset does not carry this field. |
+
+## FireboltEnginePreset
+
+`FireboltEnginePreset` is an optional ambient overlay in the same namespace. Engines do not reference it by name. The object must be named `firebolt` — a validation rule baked into the CRD pins the name, so name uniqueness caps a namespace at one object.
+
+Set `spec.requirePreset: true` on an Engine to keep it from becoming Ready until that object exists and is Ready. A present but unready Preset object fails closed for every Engine in the namespace even when `requirePreset` is unset.
+
+See [FireboltEnginePreset overview](../enginepreset/overview).
 
 ## Class changes
 
-Changes to class settings that alter Engine pods roll every bound Engine in the namespace. These include the pod template, storage, custom Engine configuration, and UI sidecar setting.
+Changes to class settings that alter Engine pods roll every bound Engine in the namespace. These include the pod template, storage, custom Engine configuration, and UI sidecar setting. A `FireboltEnginePreset` edit to the pod template, storage, or custom Engine configuration rolls every Engine in the namespace.
 
 Changes to rollout, drain-check, and auto-stop policy take effect without forcing a pod rollout by themselves.
 

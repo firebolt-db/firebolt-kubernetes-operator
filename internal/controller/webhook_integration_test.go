@@ -167,8 +167,8 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("setup FireboltEngineClass webhook: %w", err)
 	}
-	if err := computev1alpha1.SetupFireboltEngineDefaultsWebhookWithManager(mgr); err != nil {
-		return fmt.Errorf("setup FireboltEngineDefaults webhook: %w", err)
+	if err := computev1alpha1.SetupFireboltEnginePresetWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup FireboltEnginePreset webhook: %w", err)
 	}
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
@@ -313,12 +313,12 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 				AdmissionReviewVersions: []string{"v1"},
 			},
 			{
-				Name: "vfireboltenginedefaults.compute.firebolt.io",
+				Name: "vfireboltenginepreset.compute.firebolt.io",
 				ClientConfig: admissionregistrationv1.WebhookClientConfig{
 					Service: &admissionregistrationv1.ServiceReference{
 						Namespace: "default",
 						Name:      "webhook-service",
-						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-fireboltenginedefaults"),
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-fireboltenginepreset"),
 					},
 				},
 				Rules: []admissionregistrationv1.RuleWithOperations{{
@@ -330,7 +330,7 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 					Rule: admissionregistrationv1.Rule{
 						APIGroups:   []string{"compute.firebolt.io"},
 						APIVersions: []string{"v1alpha1"},
-						Resources:   []string{"fireboltenginedefaults"},
+						Resources:   []string{"fireboltenginepresets"},
 						Scope:       &scopeNamespaced,
 					},
 				}},
@@ -483,14 +483,17 @@ func TestWebhook_FireboltEngineClass_RejectsOwnedField(t *testing.T) {
 	}
 }
 
-func TestWebhook_FireboltEngineDefaults_RejectsOwnedField(t *testing.T) {
+func TestWebhook_FireboltEnginePreset_RejectsOwnedField(t *testing.T) {
 	requireWebhookSuite(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	defaults := &computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: "bad-defaults", Namespace: "default"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+	// Named "firebolt": the CRD CEL rule pins the Preset name, and CEL
+	// runs before validating webhooks — any other name would be rejected
+	// by the apiserver before the webhook under test ever fires.
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
@@ -509,39 +512,6 @@ func TestWebhook_FireboltEngineDefaults_RejectsOwnedField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "spec.template.spec.containers[0].command") {
 		t.Errorf("Create error %q does not surface the offending field path", err.Error())
-	}
-}
-
-func TestWebhook_FireboltEngineDefaults_RejectsSecondInNamespace(t *testing.T) {
-	requireWebhookSuite(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	first := &computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: "first-defaults", Namespace: "default"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					ServiceAccountName: "engine-sa",
-				},
-			},
-		},
-	}
-	if err := suite.cli.Create(ctx, first); err != nil {
-		t.Fatalf("Create first Defaults: %v", err)
-	}
-	t.Cleanup(func() { _ = suite.cli.Delete(context.Background(), first) })
-
-	second := first.DeepCopy()
-	second.Name = "second-defaults"
-	second.ResourceVersion = ""
-	err := suite.cli.Create(ctx, second)
-	if err == nil {
-		_ = suite.cli.Delete(ctx, second)
-		t.Fatal("Create: expected admission rejection for a second Defaults in the namespace, got nil")
-	}
-	if !strings.Contains(err.Error(), first.Name) {
-		t.Errorf("Create error %q does not name the existing object %q", err.Error(), first.Name)
 	}
 }
 
@@ -614,24 +584,25 @@ func TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound(t *testing.T) {
 	}
 }
 
-// TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist
+// TestWebhook_FireboltEnginePreset_RefusesDeleteWhileEnginesExist
 // verifies the delete-time gate over the wire: a DELETE on a
-// FireboltEngineDefaults must be refused while any FireboltEngine
-// exists in the same namespace. Defaults is ambient — every engine in
+// FireboltEnginePreset must be refused while any FireboltEngine
+// exists in the same namespace. Preset is ambient — every engine in
 // the namespace consumes it — so the guard is the namespace engine
 // count, not a named reference, and the engine here deliberately sets
 // no engineClassRef. This is the only coverage that would catch the
 // DELETE operation being dropped from the webhook rules or a
 // path/decoder mismatch on delete admission; the unit test on
 // ValidateDelete cannot see either.
-func TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist(t *testing.T) {
+func TestWebhook_FireboltEnginePreset_RefusesDeleteWhileEnginesExist(t *testing.T) {
 	requireWebhookSuite(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	defaults := &computev1alpha1.FireboltEngineDefaults{
-		ObjectMeta: metav1.ObjectMeta{Name: "ambient-defaults", Namespace: "default"},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+	// Named "firebolt": the CRD CEL rule pins the Preset name.
+	defaults := &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					ServiceAccountName: "engine-sa",
@@ -640,7 +611,7 @@ func TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist(t *testin
 		},
 	}
 	if err := suite.cli.Create(ctx, defaults); err != nil {
-		t.Fatalf("Create Defaults: %v", err)
+		t.Fatalf("Create Preset: %v", err)
 	}
 
 	engine := &computev1alpha1.FireboltEngine{
@@ -656,7 +627,7 @@ func TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist(t *testin
 	}
 	t.Cleanup(func() {
 		_ = suite.cli.Delete(context.Background(), engine)
-		// Wait for the engine delete to land so the eventual Defaults
+		// Wait for the engine delete to land so the eventual Preset
 		// delete isn't refused by a stale namespace count.
 		_ = waitForNotFound(context.Background(), suite.cli,
 			client.ObjectKey{Name: engine.Name, Namespace: engine.Namespace},
@@ -666,7 +637,7 @@ func TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist(t *testin
 
 	err := suite.cli.Delete(ctx, defaults)
 	if err == nil {
-		t.Fatal("Delete Defaults: expected admission rejection while an engine exists in the namespace, got nil")
+		t.Fatal("Delete Preset: expected admission rejection while an engine exists in the namespace, got nil")
 	}
 	if !strings.Contains(err.Error(), "FireboltEngine") {
 		t.Errorf("Delete error %q does not mention the namespace engine(s)", err.Error())

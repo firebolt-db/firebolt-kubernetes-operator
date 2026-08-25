@@ -268,6 +268,19 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              requirePreset:
+                description: |-
+                  RequirePreset, when true, keeps the engine from becoming Ready
+                  until the namespace has a Ready FireboltEnginePreset object
+                  (named "firebolt"; the CRD pins the name so a namespace holds at
+                  most one). The default (false / unset) keeps existing engines
+                  working in namespaces that have no Preset object. A present but
+                  unready Preset object always fails closed, even when this field
+                  is unset.
+
+                  The default is applied by the controller, not the CRD, so an unset
+                  value stays empty at admission.
+                type: boolean
               rollout:
                 description: |-
                   Rollout strategy for transitions: "graceful" waits for drain, "recreate"
@@ -401,14 +414,12 @@ spec:
                   podSecurityContext) and any sidecars / init containers / extra
                   volumes they need.
 
-                  When spec.engineClassRef is also set, the operator first merges
-                  the class's spec.template underneath the operator defaults, then
-                  this template on top — engine wins on conflict (whole-struct
-                  ownership for pointer fields; list-type fields like tolerations
-                  / initContainers / sidecars / volumes concatenate class-first
-                  then engine). The same field-by-field precedence the
-                  FireboltEngineClass merge layer has always used now applies to
-                  the engine's own template as the topmost layer.
+                  When a FireboltEnginePreset object and/or spec.engineClassRef
+                  are present, the operator merges
+                  engine > Preset > class > operator default — engine wins on
+                  conflict (whole-struct ownership for pointer fields; list-type
+                  fields like tolerations / initContainers / sidecars / volumes
+                  concatenate lower-layer first).
 
                   The validating webhook rejects user input on paths the operator
                   owns end-to-end — see FireboltEngineClassPodTemplateRules in
@@ -8920,6 +8931,21 @@ spec:
                 description: ActiveGeneration is the generation currently serving
                   traffic.
                 type: integer
+              appliedPresetHash:
+                description: |-
+                  AppliedPresetHash is the content hash of the Preset spec
+                  stamped on the serving StatefulSet
+                  (firebolt.io/engine-preset-hash). It trails a live Preset
+                  edit until the generation that carries the new hash is
+                  promoted. Empty when AppliedPresetName is empty.
+                type: string
+              appliedPresetName:
+                description: |-
+                  AppliedPresetName is the FireboltEnginePreset object last
+                  applied to the serving generation (status.activeGeneration).
+                  Empty when that generation was rendered without a Preset, or
+                  when no generation is serving yet.
+                type: string
               autoStopReason:
                 description: |-
                   AutoStopReason is a short token describing the most recent auto-stop

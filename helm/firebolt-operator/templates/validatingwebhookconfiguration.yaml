@@ -61,19 +61,19 @@ webhooks:
     matchPolicy: Equivalent
     timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
     admissionReviewVersions: ["v1"]
-  - name: vfireboltenginedefaults.compute.firebolt.io
+  - name: vfireboltenginepreset.compute.firebolt.io
     clientConfig:
       service:
         namespace: {{ .Release.Namespace }}
         name: {{ include "firebolt-operator.fullname" . }}-webhook
-        path: /validate-compute-firebolt-io-v1alpha1-fireboltenginedefaults
+        path: /validate-compute-firebolt-io-v1alpha1-fireboltenginepreset
         port: {{ .Values.webhook.port }}
       {{- with .Values.webhook.caBundle }}
       caBundle: {{ . | quote }}
       {{- end }}
     # DELETE is included so the webhook can block deletion of a
-    # FireboltEngineDefaults while at least one FireboltEngine exists in
-    # the same namespace. Defaults is ambient: every engine in the
+    # FireboltEnginePreset while at least one FireboltEngine exists in
+    # the same namespace. Preset is ambient: every engine in the
     # namespace merges it. The check lists engines live from the API
     # server. failurePolicy: Fail (set via values) is the load-bearing
     # piece — a webhook outage must not open a window in which ambient
@@ -82,7 +82,7 @@ webhooks:
       - operations: ["CREATE", "UPDATE", "DELETE"]
         apiGroups: ["compute.firebolt.io"]
         apiVersions: ["v1alpha1"]
-        resources: ["fireboltenginedefaults"]
+        resources: ["fireboltenginepresets"]
         scope: "Namespaced"
     sideEffects: None
     failurePolicy: {{ .Values.webhook.validatingWebhookConfiguration.failurePolicy }}

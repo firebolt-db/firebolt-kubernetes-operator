@@ -220,6 +220,14 @@ type FireboltEngineClassInfo struct {
 	// AutoStop do not reshape the StatefulSet and are read live, so they
 	// are not hashed.
 	Hash string
+
+	// PresetName and PresetHash identify the FireboltEnginePreset
+	// object folded into this info by overlayPresetOnClass. Empty when
+	// the namespace has no Preset object. Hash is compared against
+	// AnnotationEnginePresetHash; status.appliedPreset* is derived
+	// from the serving StatefulSet annotation, not from this field.
+	PresetName string
+	PresetHash string
 }
 
 // newFireboltEngineClassInfo wraps a FireboltEngineClass into a
@@ -1140,6 +1148,9 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 	if classInfo != nil {
 		annotations[AnnotationEngineClassHash] = classInfo.Hash
+		if classInfo.PresetHash != "" {
+			annotations[AnnotationEnginePresetHash] = classInfo.PresetHash
+		}
 	}
 
 	// Engine container image flows from the engine's own spec.template's
@@ -1195,7 +1206,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 			},
 		}
 	case BackendPersistentVolumeClaim:
-		pvc := resolvePersistentVolumeClaimDefaults(storage.PersistentVolumeClaim)
+		pvc := resolvePersistentVolumeClaimPreset(storage.PersistentVolumeClaim)
 		volumeClaimTemplates = []corev1.PersistentVolumeClaim{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   DataVolumeName,
@@ -2188,10 +2199,9 @@ func effectiveEngineResources(spec *computev1alpha1.FireboltEngineSpec, classInf
 // template — class first, engine after. Reserved keys (POD_INDEX and
 // FB_AWS_EC2_METADATA_CLIENT_ENABLED) on either surface are rejected before
 // this runs: the validating webhook gates them at admission, and the
-// always-on controller backstops re-run the same rules every reconcile (the
-// engine template via
-// validateEngineTemplate, the class template via the class's
-// Ready=False/OperatorOwnedFieldSet condition read in
+// controller backstops re-run the same rules before a render (the
+// engine template via validateEngineTemplate, the class template via
+// the class's Ready=False/OperatorOwnedFieldSet condition read in
 // resolveFireboltEngineClassInfo). A rejected engine never reaches the
 // renderer, so the result is safe to append to the operator-injected
 // env list without further filtering.
@@ -3406,10 +3416,15 @@ func annotationsMatchSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.Firebol
 	}
 
 	expectedClassHash := ""
+	expectedPresetHash := ""
 	if classInfo != nil {
 		expectedClassHash = classInfo.Hash
+		expectedPresetHash = classInfo.PresetHash
 	}
-	return sts.Annotations[AnnotationEngineClassHash] == expectedClassHash
+	if sts.Annotations[AnnotationEngineClassHash] != expectedClassHash {
+		return false
+	}
+	return sts.Annotations[AnnotationEnginePresetHash] == expectedPresetHash
 }
 
 // sidecarsMatch compares the user-owned sidecar containers (those whose
@@ -3481,7 +3496,7 @@ func storageMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltE
 		if len(sts.Spec.VolumeClaimTemplates) == 0 {
 			return false
 		}
-		pvc := resolvePersistentVolumeClaimDefaults(storage.PersistentVolumeClaim)
+		pvc := resolvePersistentVolumeClaimPreset(storage.PersistentVolumeClaim)
 		vct := sts.Spec.VolumeClaimTemplates[0]
 		if vct.Name != DataVolumeName {
 			return false
@@ -3556,7 +3571,7 @@ func resolveStorageBackend(s computev1alpha1.EngineStorageSpec) StorageBackend {
 	}
 }
 
-// resolvePersistentVolumeClaimDefaults returns the effective per-pod PVC
+// resolvePersistentVolumeClaimPreset returns the effective per-pod PVC
 // configuration for the engine. nil input (no PersistentVolumeClaim sub-spec
 // set, or the whole EngineStorageSpec omitted) is treated as "accept all
 // defaults" — 1Gi, ReadWriteOnce, cluster-default StorageClass — which
@@ -3565,7 +3580,7 @@ func resolveStorageBackend(s computev1alpha1.EngineStorageSpec) StorageBackend {
 // EnginePersistentVolumeClaimSpec only fire when the parent sub-struct is
 // present in the user's manifest, so the controller has to backfill them
 // for the implicit-default case.
-func resolvePersistentVolumeClaimDefaults(p *computev1alpha1.EnginePersistentVolumeClaimSpec) computev1alpha1.EnginePersistentVolumeClaimSpec {
+func resolvePersistentVolumeClaimPreset(p *computev1alpha1.EnginePersistentVolumeClaimSpec) computev1alpha1.EnginePersistentVolumeClaimSpec {
 	out := computev1alpha1.EnginePersistentVolumeClaimSpec{
 		Size:        resource.MustParse(DefaultEngineStorageSize),
 		AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},

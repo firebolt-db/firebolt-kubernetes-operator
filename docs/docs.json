@@ -73,9 +73,9 @@
             ]
           },
           {
-            "group": "EngineDefaults",
+            "group": "EnginePreset",
             "pages": [
-              "enginedefaults/overview"
+              "enginepreset/overview"
             ]
           },
           "monitoring",
@@ -87,7 +87,7 @@
               "crd-reference/instance-crd-reference",
               "crd-reference/engine-crd-reference",
               "crd-reference/fireboltengineclass-crd-reference",
-              "crd-reference/fireboltenginedefaults-crd-reference"
+              "crd-reference/fireboltenginepreset-crd-reference"
             ]
           }
         ]

@@ -216,9 +216,12 @@ func TestResolveFireboltEngineClassInfo_BlocksOnOperatorOwnedFieldSet(t *testing
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "bad-class")
-	_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+	info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 	if err == nil {
 		t.Fatal("resolveFireboltEngineClassInfo: expected error for unready class, got nil")
+	}
+	if info == nil {
+		t.Error("info = nil, want the class so a mid-rollout drain can still read inherited drain settings")
 	}
 	if !stderrors.Is(err, errFireboltEngineClassUnready) {
 		t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
@@ -396,5 +399,90 @@ func TestEngineReconcile_UnreadyClassSurfacesCondition(t *testing.T) {
 			names = append(names, stsList.Items[i].Name)
 		}
 		t.Errorf("StatefulSets = %v, want none (gate must short-circuit before applyEngineState)", names)
+	}
+}
+
+// engineInRolloutPhaseFixture is an engine already past creating, so
+// fail-closed Class/Preset gates must not abort the pass. CurrentGeneration
+// is 1; switching still serves generation 0, while draining/cleaning have
+// generation 0 recorded as DrainingGeneration.
+func engineInRolloutPhaseFixture(name, namespace, classRef string, phase computev1alpha1.EnginePhase) *computev1alpha1.FireboltEngine {
+	eng := engineRefingClassFixture(name, namespace, classRef)
+	eng.Finalizers = []string{finalizerName}
+	eng.Generation = 1
+	eng.Status.Phase = phase
+	eng.Status.CurrentGeneration = 1
+	eng.Status.ActiveGeneration = 1
+	eng.Status.ObservedGeneration = 1
+	switch phase {
+	case computev1alpha1.PhaseSwitching:
+		eng.Status.ActiveGeneration = 0
+	case computev1alpha1.PhaseDraining, computev1alpha1.PhaseCleaning:
+		dg := 0
+		eng.Status.DrainingGeneration = &dg
+	default:
+		// Helper is only used for switching / draining / cleaning.
+	}
+	return eng
+}
+
+// TestEngineReconcile_UnreadyClassDoesNotAbortRollout pins the render-gate
+// window: OperatorOwnedFieldSet refuse a new StatefulSet in creating, but
+// switching / draining / cleaning already hold rendered resources and must
+// still run computeEngineReconcile. A closed class must not freeze cutover.
+func TestEngineReconcile_UnreadyClassDoesNotAbortRollout(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const (
+		ns        = "ns-a"
+		instName  = "parent-instance"
+		className = "bad-class"
+	)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata.ns-a.svc.cluster.local:50051",
+		},
+	}
+	class := classWithReadyCondition(className,
+		metav1.ConditionFalse, reasonOperatorOwnedFieldSet,
+		"spec.template.spec.containers[0].command: Forbidden: engine container command is operator-owned")
+
+	phases := []computev1alpha1.EnginePhase{
+		computev1alpha1.PhaseSwitching,
+		computev1alpha1.PhaseDraining,
+		computev1alpha1.PhaseCleaning,
+	}
+	for _, phase := range phases {
+		t.Run(string(phase), func(t *testing.T) {
+			engName := "engine-" + string(phase)
+			engine := engineInRolloutPhaseFixture(engName, ns, className, phase)
+			engine.Spec.InstanceRef = instName
+			cli := fake.NewClientBuilder().
+				WithScheme(sch).
+				WithObjects(instance, engine, class).
+				WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+				Build()
+			r := engineRefTestReconciler(cli, sch)
+			if _, err := r.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+			}); err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			updated := &computev1alpha1.FireboltEngine{}
+			if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+				t.Fatalf("Get engine: %v", err)
+			}
+			cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
+			if cond != nil && cond.Reason == reasonFireboltEngineClassUnready {
+				t.Fatalf("Ready.Reason = %q in phase %s; fail-closed must not abort a rollout", cond.Reason, phase)
+			}
+			if updated.Status.Phase == phase && phase == computev1alpha1.PhaseDraining {
+				t.Fatal("phase still draining: computeDraining did not run (no draining STS, so the pass should have advanced to cleaning)")
+			}
+			if updated.Status.Phase == phase && phase == computev1alpha1.PhaseCleaning {
+				t.Fatal("phase still cleaning: computeCleaning did not run (should have returned to a terminal phase)")
+			}
+		})
 	}
 }

@@ -141,6 +141,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "requirePreset": {
+          "description": "RequirePreset, when true, keeps the engine from becoming Ready\nuntil the namespace has a Ready FireboltEnginePreset object\n(named \"firebolt\"; the CRD pins the name so a namespace holds at\nmost one). The default (false / unset) keeps existing engines\nworking in namespaces that have no Preset object. A present but\nunready Preset object always fails closed, even when this field\nis unset.\n\nThe default is applied by the controller, not the CRD, so an unset\nvalue stays empty at admission.",
+          "type": "boolean"
+        },
         "rollout": {
           "description": "Rollout strategy for transitions: \"graceful\" waits for drain, \"recreate\"\ndeletes immediately. Resolution is engine-if-set \u2192\nFireboltEngineClass-if-set \u2192 operator default (graceful). The default is\napplied by the controller, not the CRD, so an unset value here falls\nthrough to the referenced class instead of being materialized to\ngraceful at admission.",
           "enum": [
@@ -246,7 +250,7 @@
           "additionalProperties": false
         },
         "template": {
-          "description": "Template is the pod template the operator merges with its\nown-rendered engine container, data volume, projected ConfigMap,\nprobes, and pod-level securityContext to produce the engine\nStatefulSet's pod spec. Most users set only\ntemplate.spec.containers[name==\"engine\"].image and\n.resources, plus scheduling fields (nodeSelector / tolerations /\naffinity / topologySpreadConstraints / priorityClassName /\npodSecurityContext) and any sidecars / init containers / extra\nvolumes they need.\n\nWhen spec.engineClassRef is also set, the operator first merges\nthe class's spec.template underneath the operator defaults, then\nthis template on top \u2014 engine wins on conflict (whole-struct\nownership for pointer fields; list-type fields like tolerations\n/ initContainers / sidecars / volumes concatenate class-first\nthen engine). The same field-by-field precedence the\nFireboltEngineClass merge layer has always used now applies to\nthe engine's own template as the topmost layer.\n\nThe validating webhook rejects user input on paths the operator\nowns end-to-end \u2014 see FireboltEngineClassPodTemplateRules in\noperatorauthority.go for the authoritative allowlist. Notably,\nterminationGracePeriodSeconds is rejected: TGPS is operator-stamped\nfrom an internal default (60s), matching the same rejection on the\nclass template.\n\nChanges to this field trigger a new blue-green generation.",
+          "description": "Template is the pod template the operator merges with its\nown-rendered engine container, data volume, projected ConfigMap,\nprobes, and pod-level securityContext to produce the engine\nStatefulSet's pod spec. Most users set only\ntemplate.spec.containers[name==\"engine\"].image and\n.resources, plus scheduling fields (nodeSelector / tolerations /\naffinity / topologySpreadConstraints / priorityClassName /\npodSecurityContext) and any sidecars / init containers / extra\nvolumes they need.\n\nWhen a FireboltEnginePreset object and/or spec.engineClassRef\nare present, the operator merges\nengine > Preset > class > operator default \u2014 engine wins on\nconflict (whole-struct ownership for pointer fields; list-type\nfields like tolerations / initContainers / sidecars / volumes\nconcatenate lower-layer first).\n\nThe validating webhook rejects user input on paths the operator\nowns end-to-end \u2014 see FireboltEngineClassPodTemplateRules in\noperatorauthority.go for the authoritative allowlist. Notably,\nterminationGracePeriodSeconds is rejected: TGPS is operator-stamped\nfrom an internal default (60s), matching the same rejection on the\nclass template.\n\nChanges to this field trigger a new blue-green generation.",
           "properties": {
             "metadata": {
               "description": "Standard object's metadata.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
@@ -7476,6 +7480,14 @@
         "activeGeneration": {
           "description": "ActiveGeneration is the generation currently serving traffic.",
           "type": "integer"
+        },
+        "appliedPresetHash": {
+          "description": "AppliedPresetHash is the content hash of the Preset spec\nstamped on the serving StatefulSet\n(firebolt.io/engine-preset-hash). It trails a live Preset\nedit until the generation that carries the new hash is\npromoted. Empty when AppliedPresetName is empty.",
+          "type": "string"
+        },
+        "appliedPresetName": {
+          "description": "AppliedPresetName is the FireboltEnginePreset object last\napplied to the serving generation (status.activeGeneration).\nEmpty when that generation was rendered without a Preset, or\nwhen no generation is serving yet.",
+          "type": "string"
         },
         "autoStopReason": {
           "description": "AutoStopReason is a short token describing the most recent auto-stop\ndecision: \"Idle\", \"ScheduleActive\", \"ActivityObserved\", \"ScrapeFailed\",\n\"Disabled\", \"Stopped\", \"Initializing\", \"WakeRequested\".",

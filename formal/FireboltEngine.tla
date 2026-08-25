@@ -14,10 +14,14 @@
 \*   3. Or use the TLA+ Toolbox / VS Code extension
 \*
 \* Design decisions captured here:
-\*   - The instance gate is a SCHEDULING guard (outer Reconcile), not a
-\*     precondition on compute* functions. When instanceReady is false and
-\*     phase in {stable, stopped, creating}, the state machine does not tick --
-\*     only conditions are updated. Switching/Draining/Cleaning bypass the gate.
+\*   - The instance, class, and Preset fail-closed gates are SCHEDULING
+\*     guards (outer Reconcile), not preconditions on compute* functions.
+\*     When any of instanceReady / classReady / presetReady is false and
+\*     phase in {stable, stopped, creating}, the state machine does not tick
+\*     -- only conditions are updated. Switching/Draining/Cleaning bypass
+\*     those gates. ReconcileInit (phase="" -> creating) is ungated: the
+\*     Go Reconcile writes Creating and returns before resolving any of
+\*     the three objects; the gates apply on the next pass.
 \*   - Each reconcile call is modeled as one atomic step. This is conservative
 \*     (the real code makes multiple K8s writes per reconcile) but correct:
 \*     safety violations found here are real; absence of violations holds in
@@ -43,16 +47,24 @@
 \*     TerminalPhase: zero-replica specs land in "stopped", non-zero in
 \*     "stable". Drift detection and re-materialization treat "stopped"
 \*     identically to "stable".
-\*   - FireboltEngineClass edits are modeled implicitly by specVer increments. The
-\*     reconciler's class watch + stsMatchesSpec class-hash comparison
-\*     make a class spec edit observationally identical to a FireboltEngine
-\*     spec edit: both flip StsMatchesSpec(g) to FALSE and the next
-\*     reconcile bumps currentGeneration through the same code paths. The
-\*     Go fidelity check uses ServiceAccountName as the version carrier in
-\*     the rapid harness (engine_property_test.go) and exercises class-
-\*     hash drift directly in engine_class_merge_test.go. No new TLA+
-\*     variable is introduced: from the model's perspective the class is
-\*     just another input to the spec-content hash specVer abstracts over.
+\*   - FireboltEngineClass and FireboltEnginePreset edits are modeled
+\*     implicitly by specVer increments. The reconciler's class and Preset
+\*     watches plus stsMatchesSpec hash comparison make a class or Preset
+\*     spec edit observationally identical to a FireboltEngine spec edit:
+\*     both flip StsMatchesSpec(g) to FALSE and the next reconcile bumps
+\*     currentGeneration through the same code paths. The Go fidelity check
+\*     uses ServiceAccountName as the version carrier in the rapid harness
+\*     (engine_property_test.go) and exercises class- and Preset-hash
+\*     drift in the merge unit tests. No per-source TLA+ variable is
+\*     introduced: from the model's perspective both overlays are inputs
+\*     to the spec-content hash specVer abstracts over.
+\*   - The Preset fail-closed gate is NOT the same as a spec edit. When
+\*     Preset is required-and-missing or Ready=False for an
+\*     operator-owned template path, the outer Reconcile refuses to call
+\*     computeEngineReconcile — the same scheduling window as instanceReady
+\*     and classReady. That is presetReady. Merge content stays UNMODELLED.
+\*     (A second Preset per namespace is impossible: the CRD CEL rule pins
+\*     metadata.name, so there is no ambiguity state to model.)
 
 EXTENDS Integers, TLC
 
@@ -159,10 +171,11 @@ VARIABLES
     podsReady,      \* TRUE when all pods in currentGen are Running+Ready
     podsDrained,    \* TRUE when draining gen has zero running/suspended queries
     instanceReady,  \* TRUE when the referenced FireboltInstance is Ready (env-controlled)
-    classReady      \* TRUE when the referenced FireboltEngineClass is Ready (env-controlled)
+    classReady,     \* TRUE when the referenced FireboltEngineClass is Ready (env-controlled)
+    presetReady   \* TRUE when FireboltEnginePreset is admissible for render (env-controlled)
 
 vars == <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-          stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+          stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ---------------------------------------------------------------------------
 \* Helpers
@@ -176,6 +189,12 @@ StsMatchesSpec(g)  == StsExists(g) /\ stsSpecVer[g] = specVer
 \* stable-vs-stopped distinction; every "reconcile is done" write funnels
 \* through this helper, so any drift between the two terminals is a bug.
 TerminalPhase == IF specWantsStop THEN "stopped" ELSE "stable"
+
+\* Outer-Reconcile scheduling gate for {stable, stopped, creating}.
+\* Mirrors resolveFireboltEngineClassInfo + resolveFireboltEnginePresetInfo
+\* plus the instance-Ready check: the compute layer runs only when all three
+\* are open. Switching/Draining/Cleaning ignore this helper.
+RenderGatesOpen == instanceReady /\ classReady /\ presetReady
 
 \* ---------------------------------------------------------------------------
 \* Initial state
@@ -194,6 +213,7 @@ Init ==
     /\ podsDrained   = TRUE
     /\ instanceReady = TRUE
     /\ classReady    = TRUE
+    /\ presetReady = TRUE
 
 \* ---------------------------------------------------------------------------
 \* Environment actions  (non-deterministic; can fire at any time)
@@ -209,7 +229,7 @@ EnvChangeSpec ==
     /\ specVer' = specVer + 1
     /\ specWantsStop' \in BOOLEAN
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* Pods in currentGen become all-ready. For spec.replicas=0 this fires
 \* trivially (0/0 pods ready) in the real code; here we require the env
@@ -218,21 +238,21 @@ EnvPodsReady ==
     /\ ~podsReady
     /\ podsReady' = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady, presetReady>>
 
 \* Pods in drainingGen finish draining (zero running/suspended queries)
 EnvPodsDrained ==
     /\ ~podsDrained
     /\ podsDrained' = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady>>
+                   stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady, presetReady>>
 
 \* Instance becomes ready or not-ready
 EnvSetInstanceReady(v) ==
     /\ instanceReady # v
     /\ instanceReady' = v
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, classReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, classReady, presetReady>>
 
 \* FireboltEngineClass becomes ready or not-ready. Symmetric to
 \* EnvSetInstanceReady: models the class-Ready gate
@@ -241,28 +261,44 @@ EnvSetInstanceReady(v) ==
 \* surfaces ConditionReady=False/FireboltEngineClassUnready on the engine
 \* without rendering a StatefulSet). The gate fires at the same compute*
 \* entry as instanceReady, so every action that respects instanceReady
-\* also respects classReady. Switching/Draining/Cleaning intentionally
-\* bypass the gate (they do not re-resolve the class), matching the
-\* implementation.
+\* also respects classReady. Switching/Draining/Cleaning bypass the
+\* fail-closed check (they do not refuse the pass when the class is
+\* inadmissible). Draining may still read the class for inherited drain
+\* settings. Matches Reconcile: fail-closed is a render gate.
 EnvSetClassReady(v) ==
     /\ classReady # v
     /\ classReady' = v
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, presetReady>>
 
-\* Atomic env action that drives BOTH instanceReady and classReady to
-\* TRUE in a single step. Used purely for liveness: independent WF on
-\* the per-flag (TRUE) actions only guarantees each flag is TRUE
-\* infinitely often, not simultaneously, so TLC can find a behavior
-\* where the two flags alternate and the gated reconcile never opens.
-\* WF on EnvSetGatesOpen forces a moment where both gates are open,
-\* satisfying the SF on the gated reconcile actions. A single-flag
-\* gate would not need this; the two-flag gate does.
+\* FireboltEnginePreset becomes admissible or not. Symmetric to
+\* EnvSetClassReady: models the Preset fail-closed gate
+\* (resolveFireboltEnginePresetInfo refuses required-and-missing
+\* or Ready=False/OperatorOwnedFieldSet; Reconcile then
+\* surfaces ConditionReady=False/FireboltEnginePreset{Required,
+\* Unready} without rendering a StatefulSet). Missing Ready,
+\* or Ready=False/DeletionBlocked, is admissible — same as class.
+\* Switching/Draining/Cleaning bypass the fail-closed check.
+EnvSetPresetReady(v) ==
+    /\ presetReady # v
+    /\ presetReady' = v
+    /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+
+\* Atomic env action that drives instanceReady, classReady, and
+\* presetReady to TRUE in a single step. Used purely for liveness:
+\* independent WF on the per-flag (TRUE) actions only guarantees each
+\* flag is TRUE infinitely often, not simultaneously, so TLC can find
+\* a behavior where the flags alternate and the gated reconcile never
+\* opens. WF on EnvSetGatesOpen forces a moment where all three gates
+\* are open, satisfying the SF on the gated reconcile actions.
 EnvSetGatesOpen ==
     /\ \/ instanceReady = FALSE
-       \/ classReady = FALSE
+       \/ classReady    = FALSE
+       \/ presetReady = FALSE
     /\ instanceReady' = TRUE
     /\ classReady'    = TRUE
+    /\ presetReady' = TRUE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
                    stsSpecVer, svcTargetGen, podsReady, podsDrained>>
 
@@ -276,13 +312,14 @@ EnvSetGatesOpen ==
 
 ReconcileInit ==
     /\ phase = "uninitialized"
-    /\ instanceReady                          \* gate applies
-    /\ classReady                             \* gate applies
+    \* Status seed only. The Go Reconcile writes phase=creating and returns
+    \* before resolving Instance, Class, or Preset. RenderGatesOpen applies
+    \* on the next pass, once phase is creating.
     /\ phase'      = "creating"
     /\ currentGen' = 0
     /\ activeGen'  = -1
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
+    /\ UNCHANGED <<drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ------ Phase: stable / stopped (terminal) ------
 \* Detect spec drift or missing STS; start a new generation if needed.
@@ -296,14 +333,13 @@ ReconcileTerminal_Drift ==
     \* Spec changed or STS missing -> bump currentGen, go to creating.
     \* This is the only path out of a terminal phase.
     /\ phase \in DriftPhases
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen' = currentGen + 1
     /\ phase'      = "creating"
     /\ podsReady'  = FALSE
-    /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady>>
+    /\ UNCHANGED <<activeGen, drainingGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsDrained, instanceReady, classReady, presetReady>>
 
 \* The newest generation a sweep is keeping, given the currentGeneration it
 \* observed: the floor at or above which it may delete nothing. activeGen and
@@ -321,9 +357,9 @@ NewestKept(gcView) == Max2(Max2(gcView, activeGen), drainingGen)
 \* what makes the phase gate unnecessary: mid-rollout it is the generation
 \* serving traffic, and an engine that never reaches a terminal phase is
 \* precisely the one whose abandoned generations accumulate.
-\* Unguarded on instanceReady and classReady, unlike every reconciler action
-\* below: reclaiming an abandoned generation needs neither a ready instance nor
-\* a resolvable class. Models gcOrphanedResources() in engine_gc.go, which the
+\* Unguarded on instanceReady, classReady, and presetReady. Reclaiming an
+\* abandoned generation needs none of those render gates. Models
+\* gcOrphanedResources() in engine_gc.go, which the
 \* top-level Reconcile defers so it runs on the way out of every pass, including
 \* the passes those gates end early.
 GCOrphans ==
@@ -356,7 +392,7 @@ GCOrphans ==
            /\ (g # drainingGen \/ GCDrainingGeneration)
            /\ stsSpecVer' = [stsSpecVer EXCEPT ![g] = -1]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ------ Phase: creating ------
 \* Four mutually-exclusive sub-cases (checked in order in the real code):
@@ -373,65 +409,60 @@ GCOrphans ==
 ReconcileCreating_SpecDrift ==
     \* Mirrors the early-return spec-drift check in computeCreating.
     /\ phase = "creating"
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen < MaxGen
     /\ currentGen'  = currentGen + 1
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
-    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, specWantsStop, svcTargetGen, podsDrained, instanceReady, classReady>>
+    /\ UNCHANGED <<phase, activeGen, drainingGen, specVer, specWantsStop, svcTargetGen, podsDrained, instanceReady, classReady, presetReady>>
 
 ReconcileCreating_SpecDrift_AtMax ==
     \* Boundary case: spec drifted but currentGen is already at the model ceiling.
     \* Delete the stale STS so EnsureSTS can rebuild it at the new specVer.
     \* podsReady is reset to FALSE: the old pods are gone with the deleted STS.
     /\ phase = "creating"
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)
     /\ currentGen = MaxGen
     /\ stsSpecVer'  = [stsSpecVer EXCEPT ![currentGen] = -1]
     /\ podsReady'   = FALSE
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsDrained, instanceReady, classReady>>
+                   svcTargetGen, podsDrained, instanceReady, classReady, presetReady>>
 
 ReconcileCreating_EnsureSTS ==
     \* Create the StatefulSet for currentGen (also creates ConfigMap + headless Service
     \* in the real code; omitted here as they don't affect the phase state machine).
     /\ phase = "creating"
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ ~StsExists(currentGen)                                   \* STS absent
     /\ ~(StsExists(currentGen) /\ ~StsMatchesSpec(currentGen)) \* no spec drift
     /\ stsSpecVer' = [stsSpecVer EXCEPT ![currentGen] = specVer]
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 ReconcileCreating_EnsureService ==
     \* Create the cluster Service when it does not yet exist (first deployment only;
     \* on subsequent rollouts the service already exists from the previous generation).
     \* The service initially points to currentGen and is updated in switching.
     /\ phase = "creating"
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ StsMatchesSpec(currentGen)
     /\ svcTargetGen = -1
     /\ svcTargetGen' = currentGen
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 ReconcileCreating_Advance ==
     \* STS exists, service exists, pods ready -> transition to switching.
     /\ phase = "creating"
-    /\ instanceReady
-    /\ classReady
+    /\ RenderGatesOpen
     /\ (StsMatchesSpec(currentGen) \/ AdvanceWithoutMatchingSTS)
     /\ svcTargetGen # -1
     /\ podsReady
     /\ phase' = "switching"
     /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ------ Phase: switching ------
 \* Two sub-steps (matches computeSwitching):
@@ -444,7 +475,7 @@ ReconcileSwitching_UpdateService ==
     /\ svcTargetGen # currentGen
     /\ svcTargetGen' = currentGen
     /\ UNCHANGED <<phase, currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 ReconcileSwitching_Complete ==
     \* Service already points to currentGen: finalise the switch.
@@ -464,7 +495,7 @@ ReconcileSwitching_Complete ==
           /\ phase'       = "draining"
           /\ drainingGen' = activeGen
           /\ podsDrained' = FALSE         \* reset; new draining target
-    /\ UNCHANGED <<currentGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady>>
+    /\ UNCHANGED <<currentGen, specVer, specWantsStop, stsSpecVer, svcTargetGen, podsReady, instanceReady, classReady, presetReady>>
 
 \* ------ Phase: draining ------
 \* Wait for drain completion, then go to cleaning.
@@ -476,7 +507,7 @@ ReconcileDraining_Complete ==
     /\ podsDrained
     /\ phase' = "cleaning"
     /\ UNCHANGED <<currentGen, activeGen, drainingGen, specVer, specWantsStop,
-                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   stsSpecVer, svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ------ Phase: cleaning ------
 \* Delete old-generation resources and return to a terminal phase (stable or
@@ -489,7 +520,7 @@ ReconcileCleaning ==
     /\ drainingGen' = -1
     /\ phase'       = TerminalPhase
     /\ UNCHANGED <<currentGen, activeGen, specVer, specWantsStop,
-                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady>>
+                   svcTargetGen, podsReady, podsDrained, instanceReady, classReady, presetReady>>
 
 \* ---------------------------------------------------------------------------
 \* Next-state relation
@@ -503,6 +534,8 @@ Next ==
     \/ EnvSetInstanceReady(FALSE)
     \/ EnvSetClassReady(TRUE)
     \/ EnvSetClassReady(FALSE)
+    \/ EnvSetPresetReady(TRUE)
+    \/ EnvSetPresetReady(FALSE)
     \/ EnvSetGatesOpen
     \/ ReconcileInit
     \/ ReconcileTerminal_Drift
@@ -534,6 +567,7 @@ TypeOK ==
     /\ podsDrained   \in BOOLEAN
     /\ instanceReady \in BOOLEAN
     /\ classReady    \in BOOLEAN
+    /\ presetReady \in BOOLEAN
 
 \* Matches user-confirmed invariant from code review:
 \* "Any persistent CurrentGeneration != ActiveGeneration while the engine is in
@@ -647,14 +681,15 @@ Safety ==
 \* transitions except on fresh spec drift), so either is acceptable convergence.
 \*
 \* Requires:
-\*   - SF on instance-gated reconcile actions (ReconcileInit, ReconcileTerminal_Drift,
-\*     all ReconcileCreating_*): SF is required rather than WF because
-\*     EnvSetInstanceReady(FALSE) has no fairness constraint and can toggle
-\*     instanceReady back to FALSE immediately after every TRUE. With WF the
+\*   - SF on instance/class/preset-gated reconcile actions (ReconcileTerminal_Drift,
+\*     all ReconcileCreating_*): SF is required rather
+\*     than WF because EnvSetInstanceReady(FALSE) / EnvSetClassReady(FALSE) /
+\*     EnvSetPresetReady(FALSE) have no fairness constraint and can toggle
+\*     a gate back to FALSE immediately after every TRUE. With WF the
 \*     gate-disabled state satisfies "not continuously enabled", letting WF
 \*     fire vacuously forever. SF: if a gated action is enabled infinitely
-\*     often (because instanceReady becomes TRUE infinitely often), it fires
-\*     infinitely often -- progress is guaranteed.
+\*     often (because EnvSetGatesOpen becomes enabled infinitely often), it
+\*     fires infinitely often -- progress is guaranteed.
 \*   - WF on non-gated reconcile actions (Switching/Draining/Cleaning): these
 \*     do not depend on instanceReady so WF is sufficient.
 \*   - WF on environment actions that unblock progress:
@@ -705,10 +740,9 @@ NoDeleteOfCurrentGeneration ==
 Spec ==
     /\ Init
     /\ [][Next]_vars
-    \* Instance- AND class-gated actions: SF because both readiness flags
-    \* can toggle adversarially. Same SF-vs-WF reasoning as the instance
-    \* gate above.
-    /\ SF_vars(ReconcileInit)
+    \* Instance-, class-, and Preset-gated actions: SF because the three
+    \* readiness flags can toggle adversarially. ReconcileInit is ungated
+    \* (status seed only) and sits with the WF actions below.
     /\ SF_vars(ReconcileTerminal_Drift)
     /\ SF_vars(ReconcileCreating_SpecDrift)
     /\ SF_vars(ReconcileCreating_SpecDrift_AtMax)
@@ -716,6 +750,7 @@ Spec ==
     /\ SF_vars(ReconcileCreating_EnsureService)
     /\ SF_vars(ReconcileCreating_Advance)
     \* Non-gated actions: WF is sufficient.
+    /\ WF_vars(ReconcileInit)
     /\ WF_vars(ReconcileSwitching_UpdateService)
     /\ WF_vars(ReconcileSwitching_Complete)
     /\ WF_vars(ReconcileDraining_Complete)
@@ -724,6 +759,7 @@ Spec ==
     /\ WF_vars(EnvPodsDrained)
     /\ WF_vars(EnvSetInstanceReady(TRUE))
     /\ WF_vars(EnvSetClassReady(TRUE))
+    /\ WF_vars(EnvSetPresetReady(TRUE))
     /\ WF_vars(EnvSetGatesOpen)
 
 \* Theorems (checked by TLC, provable by TLAPS for the infinite-state version)

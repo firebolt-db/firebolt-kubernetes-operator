@@ -182,8 +182,8 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			seen["FireboltInstance"] = true
 		case *computev1alpha1.FireboltEngineClass:
 			seen["FireboltEngineClass"] = true
-		case *computev1alpha1.FireboltEngineDefaults:
-			seen["FireboltEngineDefaults"] = true
+		case *computev1alpha1.FireboltEnginePreset:
+			seen["FireboltEnginePreset"] = true
 		default:
 			t.Errorf("unexpected ByObject key type %T", key)
 		}
@@ -198,7 +198,7 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			t.Errorf("ByObject[%T].Namespaces = %v, want nil so it inherits DefaultNamespaces", key, byObject.Namespaces)
 		}
 	}
-	for _, want := range []string{"FireboltEngine", "FireboltInstance", "FireboltEngineClass", "FireboltEngineDefaults"} {
+	for _, want := range []string{"FireboltEngine", "FireboltInstance", "FireboltEngineClass", "FireboltEnginePreset"} {
 		if !seen[want] {
 			t.Errorf("ByObject missing entry for %s", want)
 		}
