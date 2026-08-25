@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.6.3...firebolt-operator-chart-0.7.0) (2026-08-25)
+
+
+### Features
+
+* **api:** report observed ready replicas on FireboltEngine status (FB-3263) ([#159](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/159)) ([cc89cb1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cc89cb127eb500ae2549379926355fd41cdb1a54))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.8.3 ([559446c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/559446c31a37fc9a3ac0f4c45c032e0260340e78))
+
 ## [0.6.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.6.2...firebolt-operator-chart-0.6.3) (2026-08-24)
 
 
