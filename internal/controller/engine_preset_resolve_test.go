@@ -19,9 +19,11 @@ package controller
 import (
 	"context"
 	stderrors "errors"
+	"strconv"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -277,7 +279,7 @@ func TestEngineReconcile_RequiredPresetSurfacesCondition(t *testing.T) {
 		t.Errorf("Ready.Status = %s, want False", cond.Status)
 	}
 	if updated.Status.AppliedPresetName != "" || updated.Status.AppliedPresetHash != "" {
-		t.Errorf("AppliedPreset = %q/%q, want cleared when Preset resolve fails closed",
+		t.Errorf("AppliedPreset = %q/%q, want empty when no generation is serving",
 			updated.Status.AppliedPresetName, updated.Status.AppliedPresetHash)
 	}
 }
@@ -306,9 +308,10 @@ func TestEngineReconcile_RequiredPresetDoesNotAbortRollout(t *testing.T) {
 			engine.Spec.RequirePreset = ptr(true)
 			engine.Status.AppliedPresetName = computev1alpha1.FireboltEnginePresetDefaultName
 			engine.Status.AppliedPresetHash = "already-applied"
+			activeSTS := presetHashSTS(engName, ns, engine.Status.ActiveGeneration, "already-applied")
 			cli := fake.NewClientBuilder().
 				WithScheme(sch).
-				WithObjects(instance, engine).
+				WithObjects(instance, engine, activeSTS).
 				WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
 				Build()
 			r := engineRefTestReconciler(cli, sch)
@@ -326,8 +329,12 @@ func TestEngineReconcile_RequiredPresetDoesNotAbortRollout(t *testing.T) {
 				t.Fatalf("Ready.Reason = %q in phase %s; fail-closed must not abort a rollout", cond.Reason, phase)
 			}
 			if updated.Status.AppliedPresetName != computev1alpha1.FireboltEnginePresetDefaultName {
-				t.Errorf("AppliedPresetName = %q, want left alone when Preset is not re-resolved mid-rollout",
+				t.Errorf("AppliedPresetName = %q, want the serving generation's Preset",
 					updated.Status.AppliedPresetName)
+			}
+			if updated.Status.AppliedPresetHash != "already-applied" {
+				t.Errorf("AppliedPresetHash = %q, want the serving StatefulSet annotation",
+					updated.Status.AppliedPresetHash)
 			}
 			if updated.Status.Phase == phase && phase == computev1alpha1.PhaseDraining {
 				t.Fatal("phase still draining: computeDraining did not run")
@@ -336,5 +343,119 @@ func TestEngineReconcile_RequiredPresetDoesNotAbortRollout(t *testing.T) {
 				t.Fatal("phase still cleaning: computeCleaning did not run")
 			}
 		})
+	}
+}
+
+// TestEngineReconcile_AppliedPresetNotWrittenBeforeApply pins the
+// status contract: AppliedPresetName/Hash are the overlay last applied
+// to the serving generation, not the live resolved Preset. Creating
+// with ActiveGeneration=-1 has nothing serving, so a present Preset
+// must not populate status on the instance-gate early return.
+func TestEngineReconcile_AppliedPresetNotWrittenBeforeApply(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const ns, engName = "ns-a", "engine-creating"
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef: "missing-instance",
+			Replicas:    1,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase:            computev1alpha1.PhaseCreating,
+			ActiveGeneration: -1,
+		},
+	}
+	preset := defaultsOnlyFixture(computev1alpha1.FireboltEnginePresetDefaultName, ns)
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(engine, preset).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}).
+		Build()
+	r := engineRefTestReconciler(cli, sch)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Name: engName, Namespace: ns},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Status.AppliedPresetName != "" || updated.Status.AppliedPresetHash != "" {
+		t.Errorf("AppliedPreset = %q/%q, want empty until a generation is serving",
+			updated.Status.AppliedPresetName, updated.Status.AppliedPresetHash)
+	}
+}
+
+// TestEngineReconcile_AppliedPresetFollowsActiveGeneration pins that a
+// mid-rollout pass reports the serving StatefulSet annotation, not the
+// incoming generation's hash or the live resolved Preset.
+func TestEngineReconcile_AppliedPresetFollowsActiveGeneration(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const ns, instName, engName = "ns-a", "parent-instance", "engine-roll"
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status:     computev1alpha1.FireboltInstanceStatus{MetadataEndpoint: "metadata.ns-a.svc:50051"},
+	}
+	engine := engineInRolloutPhaseFixture(engName, ns, "", computev1alpha1.PhaseSwitching)
+	engine.Spec.InstanceRef = instName
+	preset := defaultsOnlyFixture(computev1alpha1.FireboltEnginePresetDefaultName, ns)
+	serving := presetHashSTS(engName, ns, 0, "serving-hash")
+	incoming := presetHashSTS(engName, ns, 1, "incoming-hash")
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      engName + SuffixService,
+			Namespace: ns,
+			Labels:    map[string]string{LabelEngine: engName},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				LabelEngine:     engName,
+				LabelGeneration: "0",
+			},
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, engine, preset, serving, incoming, svc).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+	r := engineRefTestReconciler(cli, sch)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Name: engName, Namespace: ns},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Status.AppliedPresetName != computev1alpha1.FireboltEnginePresetDefaultName {
+		t.Errorf("AppliedPresetName = %q, want %q",
+			updated.Status.AppliedPresetName, computev1alpha1.FireboltEnginePresetDefaultName)
+	}
+	if updated.Status.AppliedPresetHash != "serving-hash" {
+		t.Errorf("AppliedPresetHash = %q, want serving-hash from active generation 0",
+			updated.Status.AppliedPresetHash)
+	}
+}
+
+func presetHashSTS(engineName, namespace string, gen int, hash string) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      genResourceName(engineName, gen, ""),
+			Namespace: namespace,
+			Labels: map[string]string{
+				LabelEngine:     engineName,
+				LabelGeneration: strconv.Itoa(gen),
+			},
+			Annotations: map[string]string{AnnotationEnginePresetHash: hash},
+		},
 	}
 }

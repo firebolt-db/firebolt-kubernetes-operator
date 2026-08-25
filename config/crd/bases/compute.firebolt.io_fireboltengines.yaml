@@ -8934,14 +8934,17 @@ spec:
               appliedPresetHash:
                 description: |-
                   AppliedPresetHash is the content hash of the Preset spec
-                  last applied to this engine. Empty when no Preset object
-                  was merged.
+                  stamped on the serving StatefulSet
+                  (firebolt.io/engine-preset-hash). It trails a live Preset
+                  edit until the generation that carries the new hash is
+                  promoted. Empty when AppliedPresetName is empty.
                 type: string
               appliedPresetName:
                 description: |-
-                  AppliedPresetName is the FireboltEnginePreset object merged
-                  into this engine when one exists in the namespace. Empty when
-                  the namespace has no Preset object.
+                  AppliedPresetName is the FireboltEnginePreset object last
+                  applied to the serving generation (status.activeGeneration).
+                  Empty when that generation was rendered without a Preset, or
+                  when no generation is serving yet.
                 type: string
               autoStopReason:
                 description: |-

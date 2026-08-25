@@ -134,6 +134,7 @@ func assembleEngineState(
 	case activeGen == currentGen:
 		state.ActivePodReady = state.CurrentPodReady
 	case raw.ActiveSTS != nil:
+		state.ActiveSTS = raw.ActiveSTS
 		state.ActivePodReady = raw.ActivePodReady
 	}
 

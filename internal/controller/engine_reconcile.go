@@ -224,7 +224,8 @@ type FireboltEngineClassInfo struct {
 	// PresetName and PresetHash identify the FireboltEnginePreset
 	// object folded into this info by overlayPresetOnClass. Empty when
 	// the namespace has no Preset object. Hash is compared against
-	// AnnotationEnginePresetHash; Name is recorded on engine status.
+	// AnnotationEnginePresetHash; status.appliedPreset* is derived
+	// from the serving StatefulSet annotation, not from this field.
 	PresetName string
 	PresetHash string
 }

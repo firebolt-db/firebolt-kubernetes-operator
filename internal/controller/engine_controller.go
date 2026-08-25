@@ -326,6 +326,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		return ctrl.Result{}, fmt.Errorf("getEngineState failed: %w", err)
 	}
+	syncAppliedPresetStatus(&engine.Status, appliedPresetStatefulSet(&engine.Status, &engine.Status, current))
 
 	// Only PhaseStable, PhaseStopped, and PhaseCreating actually consume
 	// InstanceInfo (to render ConfigMaps with instance.multi_engine.
@@ -444,6 +445,7 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		instanceInfo,
 		classInfo,
 	)
+	syncAppliedPresetStatus(&result.Status, appliedPresetStatefulSet(&engine.Status, &result.Status, current))
 
 	if result.Status.Phase != engine.Status.Phase {
 		log.Info("Phase transition", "from", engine.Status.Phase, "to", result.Status.Phase)
@@ -944,6 +946,7 @@ func (r *FireboltEngineReconciler) handleFireboltEngineClassError(ctx context.Co
 	if !stderrors.Is(classErr, errFireboltEngineClassUnready) {
 		return ctrl.Result{}, classErr
 	}
+	r.syncAppliedPresetFromCluster(ctx, engine)
 	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 		Type:               computev1alpha1.ConditionReady,
 		Status:             metav1.ConditionFalse,
@@ -1458,13 +1461,6 @@ func (r *FireboltEngineReconciler) resolveEngineOverlays(
 		res, err := r.handleFireboltEnginePresetError(ctx, engine, presetErr)
 		return engineOverlays{}, res, err
 	}
-	if presetInfo != nil {
-		engine.Status.AppliedPresetName = presetInfo.Name
-		engine.Status.AppliedPresetHash = presetInfo.Hash
-	} else {
-		engine.Status.AppliedPresetName = ""
-		engine.Status.AppliedPresetHash = ""
-	}
 	out.presetInfo = presetInfo
 	out.classInfo = overlayPresetOnClass(presetInfo, classInfo)
 	return out, ctrl.Result{}, nil
@@ -1597,16 +1593,15 @@ func (r *FireboltEngineReconciler) resolveFireboltEnginePresetInfo(ctx context.C
 
 // handleFireboltEnginePresetError surfaces fail-closed Preset
 // states as ConditionReady=False and requeues. API-read failures
-// bubble up for backoff. AppliedPresetName/Hash are cleared so
-// status cannot keep naming an overlay that this pass refused to
-// resolve (removed or OperatorOwnedFieldSet).
+// bubble up for backoff. AppliedPresetName/Hash are synced from
+// the serving StatefulSet (or cleared when none exists) so a
+// refused overlay does not rewrite status ahead of apply.
 func (r *FireboltEngineReconciler) handleFireboltEnginePresetError(ctx context.Context, engine *computev1alpha1.FireboltEngine, presetErr error) (ctrl.Result, error) {
 	reason, ok := fireboltEnginePresetConditionReason(presetErr)
 	if !ok {
 		return ctrl.Result{}, presetErr
 	}
-	engine.Status.AppliedPresetName = ""
-	engine.Status.AppliedPresetHash = ""
+	r.syncAppliedPresetFromCluster(ctx, engine)
 	apimeta.SetStatusCondition(&engine.Status.Conditions, metav1.Condition{
 		Type:               computev1alpha1.ConditionReady,
 		Status:             metav1.ConditionFalse,
@@ -1629,6 +1624,56 @@ func fireboltEnginePresetConditionReason(err error) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// syncAppliedPresetStatus copies the serving generation's Preset
+// identity into status. The annotation is what buildStatefulSet
+// stamped; empty means that generation was rendered without a Preset.
+func syncAppliedPresetStatus(status *computev1alpha1.FireboltEngineStatus, activeSTS *appsv1.StatefulSet) {
+	hash := ""
+	if activeSTS != nil {
+		hash = activeSTS.Annotations[AnnotationEnginePresetHash]
+	}
+	if hash == "" {
+		status.AppliedPresetName = ""
+		status.AppliedPresetHash = ""
+		return
+	}
+	status.AppliedPresetName = computev1alpha1.FireboltEnginePresetDefaultName
+	status.AppliedPresetHash = hash
+}
+
+// appliedPresetStatefulSet returns the StatefulSet whose
+// firebolt.io/engine-preset-hash annotation status.appliedPreset* must
+// report: the generation computed.ActiveGeneration will serve after
+// this pass. observed is the status getEngineState read, so
+// current.CurrentSTS / current.ActiveSTS still name those generations.
+func appliedPresetStatefulSet(
+	observed, computed *computev1alpha1.FireboltEngineStatus,
+	current EngineState,
+) *appsv1.StatefulSet {
+	if computed.ActiveGeneration < 0 {
+		return nil
+	}
+	if computed.ActiveGeneration == observed.CurrentGeneration {
+		return current.CurrentSTS
+	}
+	return current.ActiveSTS
+}
+
+// syncAppliedPresetFromCluster is the fail-closed counterpart of
+// appliedPresetStatefulSet: those paths return before getEngineState,
+// so they read the serving StatefulSet directly.
+func (r *FireboltEngineReconciler) syncAppliedPresetFromCluster(ctx context.Context, engine *computev1alpha1.FireboltEngine) {
+	if engine.Status.ActiveGeneration < 0 {
+		syncAppliedPresetStatus(&engine.Status, nil)
+		return
+	}
+	sts, err := r.getStatefulSet(ctx, engine.Name, engine.Namespace, engine.Status.ActiveGeneration)
+	if err != nil {
+		return
+	}
+	syncAppliedPresetStatus(&engine.Status, sts)
 }
 
 // resolveInstanceInfo looks up the FireboltInstance referenced by the engine's

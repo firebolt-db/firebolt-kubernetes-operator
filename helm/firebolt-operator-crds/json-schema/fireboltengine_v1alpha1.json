@@ -7482,11 +7482,11 @@
           "type": "integer"
         },
         "appliedPresetHash": {
-          "description": "AppliedPresetHash is the content hash of the Preset spec\nlast applied to this engine. Empty when no Preset object\nwas merged.",
+          "description": "AppliedPresetHash is the content hash of the Preset spec\nstamped on the serving StatefulSet\n(firebolt.io/engine-preset-hash). It trails a live Preset\nedit until the generation that carries the new hash is\npromoted. Empty when AppliedPresetName is empty.",
           "type": "string"
         },
         "appliedPresetName": {
-          "description": "AppliedPresetName is the FireboltEnginePreset object merged\ninto this engine when one exists in the namespace. Empty when\nthe namespace has no Preset object.",
+          "description": "AppliedPresetName is the FireboltEnginePreset object last\napplied to the serving generation (status.activeGeneration).\nEmpty when that generation was rendered without a Preset, or\nwhen no generation is serving yet.",
           "type": "string"
         },
         "autoStopReason": {

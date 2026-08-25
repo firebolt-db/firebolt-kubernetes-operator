@@ -100,8 +100,8 @@ the full class-side allowlist.
 | `status.lastActivityTime` | Most recent Engine activity used by auto-stop. |
 | `status.lastScaledAt` | Most recent auto-stop replica change. |
 | `status.autoStopReason` | Most recent auto-stop decision. |
-| `status.appliedPresetName` | Name of the `FireboltEnginePreset` object merged into this Engine, when one exists. |
-| `status.appliedPresetHash` | Content hash of that Preset spec last applied. |
+| `status.appliedPresetName` | Name of the `FireboltEnginePreset` last applied to the serving generation. Empty when that generation was rendered without a Preset, or when no generation is serving yet. |
+| `status.appliedPresetHash` | Content hash of that Preset spec stamped on the serving StatefulSet (`firebolt.io/engine-preset-hash`). Trails a live Preset edit until the generation that carries the new hash is promoted. |
 | `status.conditions` | `InstanceReady`, `Ready`. See [Conditions](#conditions). |
 
 Short name: `fireng`.
