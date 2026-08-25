@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.4.0...firebolt-operator-crds-chart-0.5.0) (2026-08-25)
+
+
+### Features
+
+* **api:** add namespaced FireboltEnginePreset CRD (FB-3340) ([#167](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/167)) ([8755d70](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/8755d70bfc2790a548c27b9212df67d983d82bcb))
+
 ## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.3.1...firebolt-operator-crds-chart-0.4.0) (2026-08-25)
 
 
