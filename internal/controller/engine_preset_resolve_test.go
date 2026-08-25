@@ -84,21 +84,31 @@ func TestResolveFireboltEnginePresetInfo_RequiredWhenMissing(t *testing.T) {
 	}
 }
 
-func TestResolveFireboltEnginePresetInfo_AmbiguousWhenTwo(t *testing.T) {
+// TestResolveFireboltEnginePresetInfo_OffNameObjectIsNotSelected pins
+// that resolution is a Get by the CEL-enforced fixed name: an object
+// under any other name (only writable against a CRD missing the CEL
+// rule) is not consumed, and its absence-equivalent keeps the
+// requirePreset gate closed.
+func TestResolveFireboltEnginePresetInfo_OffNameObjectIsNotSelected(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
-		defaultsOnlyFixture("a", "ns-a"),
-		defaultsOnlyFixture("b", "ns-a"),
-		defaultsOnlyFixture("c", "other"),
+		defaultsOnlyFixture("shadow", "ns-a"),
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
-	if err == nil {
-		t.Fatal("expected errFireboltEnginePresetAmbiguous")
+	info, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
 	}
-	if !stderrors.Is(err, errFireboltEnginePresetAmbiguous) {
-		t.Errorf("error %q does not wrap errFireboltEnginePresetAmbiguous", err)
+	if info != nil {
+		t.Errorf("info = %+v, want nil: an off-name object must not be selected", info)
+	}
+
+	eng := engineRefingClassFixture("e", "ns-a", "")
+	eng.Spec.RequirePreset = ptr(true)
+	_, err = r.resolveFireboltEnginePresetInfo(context.Background(), eng)
+	if !stderrors.Is(err, errFireboltEnginePresetRequired) {
+		t.Errorf("error %v does not wrap errFireboltEnginePresetRequired for an off-name-only namespace", err)
 	}
 }
 
@@ -140,15 +150,15 @@ func TestResolveFireboltEnginePresetInfo_PassesOnReadyAndMissingCondition(t *tes
 	}
 
 	cli = fake.NewClientBuilder().WithScheme(sch).WithObjects(
-		defaultsOnlyFixture("fresh", "ns-a"),
+		defaultsOnlyFixture("firebolt", "ns-b"),
 	).Build()
 	r = engineRefTestReconciler(cli, sch)
-	info, err = r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	info, err = r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-b", ""))
 	if err != nil {
 		t.Fatalf("missing Ready: %v", err)
 	}
-	if info == nil || info.Name != "fresh" {
-		t.Errorf("info = %+v, want fresh", info)
+	if info == nil || info.Name != "firebolt" {
+		t.Errorf("info = %+v, want the freshly created object despite its missing Ready condition", info)
 	}
 }
 

@@ -502,9 +502,9 @@ func (m *engineSim) ApplyPresetChange(t *rapid.T) {
 
 // ApplyPresetUnready models the Preset fail-closed gate by
 // withholding the overlay. The production controller's
-// resolveFireboltEnginePresetInfo refuses to consume an unready,
-// required-missing, or ambiguous Preset object and short-circuits
-// the reconcile, so the compute layer never sees the overlay — the
+// resolveFireboltEnginePresetInfo refuses to consume an unready or
+// required-missing Preset object and short-circuits the
+// reconcile, so the compute layer never sees the overlay — the
 // inner harness models that by clearing PresetName / PresetHash.
 // Distinct from drawing v=0 in ApplyPresetChange (which models
 // "the namespace Preset object was deleted"): the engine may still
