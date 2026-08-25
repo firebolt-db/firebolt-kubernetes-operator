@@ -41,7 +41,7 @@ kubectl firebolt engine delete my-engine -n my-ns
 
 # Preset (namespace ambient overlay; short name firengp)
 kubectl firebolt preset list -n my-ns
-kubectl firebolt preset get -n my-ns          # conventional name "firebolt" when omitted
+kubectl firebolt preset get -n my-ns          # CRD-pinned name "firebolt" when omitted
 
 # Plugin version
 kubectl firebolt version

@@ -109,9 +109,10 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 	})
 
 	It("preserves labels and annotations on FireboltEnginePreset.spec.template.metadata", func() {
-		name := "defaults-meta-" + utilrand.String(6)
+		// The Preset CEL rule pins metadata.name to "firebolt"; a random
+		// name would be rejected before the metadata contract is exercised.
 		defaults := &computev1alpha1.FireboltEnginePreset{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: ns},
 			Spec: computev1alpha1.FireboltEnginePresetSpec{
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{

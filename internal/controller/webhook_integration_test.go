@@ -488,8 +488,11 @@ func TestWebhook_FireboltEnginePreset_RejectsOwnedField(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Named "firebolt": the CRD CEL rule pins the Preset name, and CEL
+	// runs before validating webhooks — any other name would be rejected
+	// by the apiserver before the webhook under test ever fires.
 	defaults := &computev1alpha1.FireboltEnginePreset{
-		ObjectMeta: metav1.ObjectMeta{Name: "bad-defaults", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
 		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
@@ -509,39 +512,6 @@ func TestWebhook_FireboltEnginePreset_RejectsOwnedField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "spec.template.spec.containers[0].command") {
 		t.Errorf("Create error %q does not surface the offending field path", err.Error())
-	}
-}
-
-func TestWebhook_FireboltEnginePreset_RejectsSecondInNamespace(t *testing.T) {
-	requireWebhookSuite(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	first := &computev1alpha1.FireboltEnginePreset{
-		ObjectMeta: metav1.ObjectMeta{Name: "first-defaults", Namespace: "default"},
-		Spec: computev1alpha1.FireboltEnginePresetSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					ServiceAccountName: "engine-sa",
-				},
-			},
-		},
-	}
-	if err := suite.cli.Create(ctx, first); err != nil {
-		t.Fatalf("Create first Preset: %v", err)
-	}
-	t.Cleanup(func() { _ = suite.cli.Delete(context.Background(), first) })
-
-	second := first.DeepCopy()
-	second.Name = "second-defaults"
-	second.ResourceVersion = ""
-	err := suite.cli.Create(ctx, second)
-	if err == nil {
-		_ = suite.cli.Delete(ctx, second)
-		t.Fatal("Create: expected admission rejection for a second Preset in the namespace, got nil")
-	}
-	if !strings.Contains(err.Error(), first.Name) {
-		t.Errorf("Create error %q does not name the existing object %q", err.Error(), first.Name)
 	}
 }
 
@@ -629,8 +599,9 @@ func TestWebhook_FireboltEnginePreset_RefusesDeleteWhileEnginesExist(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Named "firebolt": the CRD CEL rule pins the Preset name.
 	defaults := &computev1alpha1.FireboltEnginePreset{
-		ObjectMeta: metav1.ObjectMeta{Name: "ambient-defaults", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "default"},
 		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
