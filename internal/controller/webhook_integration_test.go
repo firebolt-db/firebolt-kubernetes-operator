@@ -614,6 +614,65 @@ func TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound(t *testing.T) {
 	}
 }
 
+// TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist
+// verifies the delete-time gate over the wire: a DELETE on a
+// FireboltEngineDefaults must be refused while any FireboltEngine
+// exists in the same namespace. Defaults is ambient — every engine in
+// the namespace consumes it — so the guard is the namespace engine
+// count, not a named reference, and the engine here deliberately sets
+// no engineClassRef. This is the only coverage that would catch the
+// DELETE operation being dropped from the webhook rules or a
+// path/decoder mismatch on delete admission; the unit test on
+// ValidateDelete cannot see either.
+func TestWebhook_FireboltEngineDefaults_RefusesDeleteWhileEnginesExist(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	defaults := &computev1alpha1.FireboltEngineDefaults{
+		ObjectMeta: metav1.ObjectMeta{Name: "ambient-defaults", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					ServiceAccountName: "engine-sa",
+				},
+			},
+		},
+	}
+	if err := suite.cli.Create(ctx, defaults); err != nil {
+		t.Fatalf("Create Defaults: %v", err)
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "ambient-consumer", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef: "any-instance",
+			Replicas:    1,
+		},
+	}
+	if err := suite.cli.Create(ctx, engine); err != nil {
+		_ = suite.cli.Delete(ctx, defaults)
+		t.Fatalf("Create engine (namespace occupancy required for the deletion-guard assertion): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = suite.cli.Delete(context.Background(), engine)
+		// Wait for the engine delete to land so the eventual Defaults
+		// delete isn't refused by a stale namespace count.
+		_ = waitForNotFound(context.Background(), suite.cli,
+			client.ObjectKey{Name: engine.Name, Namespace: engine.Namespace},
+			&computev1alpha1.FireboltEngine{}, 5*time.Second)
+		_ = suite.cli.Delete(context.Background(), defaults)
+	})
+
+	err := suite.cli.Delete(ctx, defaults)
+	if err == nil {
+		t.Fatal("Delete Defaults: expected admission rejection while an engine exists in the namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "FireboltEngine") {
+		t.Errorf("Delete error %q does not mention the namespace engine(s)", err.Error())
+	}
+}
+
 // waitForNotFound polls Get until the named object returns NotFound
 // or the deadline expires. Used in test cleanup so subsequent deletes
 // don't race against the deletion-guard validator.
