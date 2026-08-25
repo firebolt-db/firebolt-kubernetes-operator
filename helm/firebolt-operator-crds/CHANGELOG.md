@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.3.1...firebolt-operator-crds-chart-0.4.0) (2026-08-25)
+
+
+### Features
+
+* **api:** report observed ready replicas on FireboltEngine status (FB-3263) ([#159](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/159)) ([cc89cb1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cc89cb127eb500ae2549379926355fd41cdb1a54))
+
 ## [0.3.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.3.0...firebolt-operator-crds-chart-0.3.1) (2026-08-17)
 
 
