@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.3...firebolt-operator-v0.9.0) (2026-08-25)
+
+
+### Features
+
+* **api:** report observed ready replicas on FireboltEngine status (FB-3263) ([#159](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/159)) ([cc89cb1](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cc89cb127eb500ae2549379926355fd41cdb1a54))
+
+
+### Dependencies
+
+* **deps:** bump github.com/onsi/ginkgo/v2 from 2.32.0 to 2.32.1 in the ginkgo-gomega group ([#164](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/164)) ([c7f3c5f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c7f3c5f9036c3062e3d69665db5e2f6101d0d584))
+* **deps:** bump golang from 1.26.5 to 1.26.6 ([#165](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/165)) ([f810634](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f810634b3367ef55cde03884d523842d706b3374))
+
 ## [0.8.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.2...firebolt-operator-v0.8.3) (2026-08-24)
 
 
