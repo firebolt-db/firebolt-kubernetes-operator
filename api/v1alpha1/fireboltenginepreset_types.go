@@ -22,30 +22,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// FireboltEngineDefaultsDefaultName is the conventional metadata.name for
-// the single FireboltEngineDefaults object in a namespace. The operator
-// selects by "the one Defaults in the namespace" rather than this name;
+// FireboltEnginePresetDefaultName is the conventional metadata.name for
+// the single FireboltEnginePreset object in a namespace. The operator
+// selects by "the one Preset in the namespace" rather than this name;
 // the constant exists so samples, docs, and clients agree on a name.
-const FireboltEngineDefaultsDefaultName = "firebolt"
+const FireboltEnginePresetDefaultName = "firebolt"
 
-// FireboltEngineDefaultsSpec is the ambient, namespace-level engine
+// FireboltEnginePresetSpec is the ambient, namespace-level engine
 // overlay. Every FireboltEngine in the same namespace merges these
 // fields underneath its own spec and above any referenced
 // FireboltEngineClass:
 //
-//	engine spec > FireboltEngineDefaults > FireboltEngineClass > operator default
+//	engine spec > FireboltEnginePreset > FireboltEngineClass > operator default
 //
-// v1 admits at most one FireboltEngineDefaults per namespace. The
+// v1 admits at most one FireboltEnginePreset per namespace. The
 // object is not selected by engines: customers keep referencing a
 // class name (or no class). The conventional object name is
-// FireboltEngineDefaultsDefaultName ("firebolt").
+// FireboltEnginePresetDefaultName ("firebolt").
 //
 // The carried fields are the namespace-resolved identifiers and
 // config fragments that are shared by every engine in the namespace
 // (service account, credential env, storage, customEngineConfig).
 // SKU-shaped settings (resources, instance type, rollout, autoStop,
 // uiSidecar) stay on FireboltEngineClass.
-type FireboltEngineDefaultsSpec struct {
+type FireboltEnginePresetSpec struct {
 	// Template is the pod-template fragment merged under every engine
 	// in this namespace. See FireboltEngineClassSpec.Template for the
 	// operator-owned path rejection set — the same
@@ -67,7 +67,7 @@ type FireboltEngineDefaultsSpec struct {
 
 	// CustomEngineConfig is deep-merged into the rendered config.yaml
 	// after the class config and before the engine config: operator
-	// defaults, then class, then this Defaults object, then the engine
+	// defaults, then class, then this Preset object, then the engine
 	// (engine keys win on conflict). Operator-owned paths are stripped
 	// before the merge, as they are from the class and the engine.
 	// +kubebuilder:pruning:PreserveUnknownFields
@@ -77,14 +77,14 @@ type FireboltEngineDefaultsSpec struct {
 	CustomEngineConfig *apiextensionsv1.JSON `json:"customEngineConfig,omitempty"`
 }
 
-// FireboltEngineDefaultsStatus is the observed state of a
-// FireboltEngineDefaults object.
-type FireboltEngineDefaultsStatus struct {
+// FireboltEnginePresetStatus is the observed state of a
+// FireboltEnginePreset object.
+type FireboltEnginePresetStatus struct {
 	// ObservedGeneration is the metadata.generation last reconciled.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// BoundEngines counts FireboltEngines in the same namespace. Defaults
+	// BoundEngines counts FireboltEngines in the same namespace. Preset
 	// is ambient — every engine in the namespace merges it — so this
 	// count is the namespace engine count, not a named-ref count. The
 	// deletion webhook and the reconciler's deletion-guard finalizer
@@ -92,26 +92,26 @@ type FireboltEngineDefaultsStatus struct {
 	// +optional
 	BoundEngines int32 `json:"boundEngines,omitempty"`
 
-	// Conditions surface the Defaults object's high-level state.
+	// Conditions surface the Preset object's high-level state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// FireboltEngineDefaultsConditionReady is the top-level roll-up
+// FireboltEnginePresetConditionReady is the top-level roll-up
 // condition: True when spec.template is admissible. The validating
 // webhook normally rejects offending specs at admission; the
 // condition is defense in depth for objects admitted under an older
 // operator with a narrower rejection set.
-const FireboltEngineDefaultsConditionReady = "Ready"
+const FireboltEnginePresetConditionReady = "Ready"
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=firengd
+// +kubebuilder:resource:shortName=firengp
 // +kubebuilder:printcolumn:name="Bound",type=integer,JSONPath=`.status.boundEngines`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// FireboltEngineDefaults is a namespaced ambient overlay merged under
+// FireboltEnginePreset is a namespaced ambient overlay merged under
 // every FireboltEngine in the same namespace. Engines do not reference
 // it by name. v1 selects the single object in the namespace; the
 // conventional name is "firebolt".
@@ -119,19 +119,19 @@ const FireboltEngineDefaultsConditionReady = "Ready"
 // It is namespaced because the template carries namespace-resolved
 // identifiers (ServiceAccount names, Secret / ConfigMap references)
 // that Kubernetes resolves in the engine's own namespace.
-type FireboltEngineDefaults struct {
+type FireboltEnginePreset struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   FireboltEngineDefaultsSpec   `json:"spec,omitempty"`
-	Status FireboltEngineDefaultsStatus `json:"status,omitempty"`
+	Spec   FireboltEnginePresetSpec   `json:"spec,omitempty"`
+	Status FireboltEnginePresetStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// FireboltEngineDefaultsList contains a list of FireboltEngineDefaults.
-type FireboltEngineDefaultsList struct {
+// FireboltEnginePresetList contains a list of FireboltEnginePreset.
+type FireboltEnginePresetList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []FireboltEngineDefaults `json:"items"`
+	Items           []FireboltEnginePreset `json:"items"`
 }

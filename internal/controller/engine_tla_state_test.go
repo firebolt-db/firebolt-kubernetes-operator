@@ -256,12 +256,12 @@ func parseSAToken(s string) int {
 }
 
 // tlaShouldGateOut returns true when one of the outer Reconcile method's
-// gates (instance-Ready, class-Ready, or Defaults-admissible) would
+// gates (instance-Ready, class-Ready, or Preset-admissible) would
 // prevent computeEngineReconcile from running at all. The three gates
 // engage when the corresponding flag is false and phase is in {stable,
 // stopped, creating}; the other phases (switching, draining, cleaning)
 // bypass the gates deliberately because they do not re-resolve the
-// instance, the class, or Defaults. State cover for the compute layer
+// instance, the class, or Preset. State cover for the compute layer
 // skips these states because the compute layer runs only when all three
 // gates are open.
 func tlaShouldGateOut(s tlaState) bool {

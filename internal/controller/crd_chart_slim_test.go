@@ -46,9 +46,9 @@ var crdChartCopies = map[string][]string{
 		"firebolt-operator-crds/templates/fireboltengineclasses.yaml",
 		"firebolt-operator/crds/fireboltengineclasses.yaml",
 	},
-	"compute.firebolt.io_fireboltenginedefaults.yaml": {
-		"firebolt-operator-crds/templates/fireboltenginedefaults.yaml",
-		"firebolt-operator/crds/fireboltenginedefaults.yaml",
+	"compute.firebolt.io_fireboltenginepresets.yaml": {
+		"firebolt-operator-crds/templates/fireboltenginepresets.yaml",
+		"firebolt-operator/crds/fireboltenginepresets.yaml",
 	},
 }
 

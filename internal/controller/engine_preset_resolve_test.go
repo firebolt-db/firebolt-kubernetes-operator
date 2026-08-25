@@ -32,10 +32,10 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-func defaultsOnlyFixture(name, namespace string) *computev1alpha1.FireboltEngineDefaults {
-	return &computev1alpha1.FireboltEngineDefaults{
+func defaultsOnlyFixture(name, namespace string) *computev1alpha1.FireboltEnginePreset {
+	return &computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{ServiceAccountName: name + "-sa"},
 			},
@@ -43,10 +43,10 @@ func defaultsOnlyFixture(name, namespace string) *computev1alpha1.FireboltEngine
 	}
 }
 
-func defaultsWithReadyCondition(name, namespace string, status metav1.ConditionStatus, reason, message string) *computev1alpha1.FireboltEngineDefaults {
+func defaultsWithReadyCondition(name, namespace string, status metav1.ConditionStatus, reason, message string) *computev1alpha1.FireboltEnginePreset {
 	d := defaultsOnlyFixture(name, namespace)
 	apimeta.SetStatusCondition(&d.Status.Conditions, metav1.Condition{
-		Type:    computev1alpha1.FireboltEngineDefaultsConditionReady,
+		Type:    computev1alpha1.FireboltEnginePresetConditionReady,
 		Status:  status,
 		Reason:  reason,
 		Message: message,
@@ -54,37 +54,37 @@ func defaultsWithReadyCondition(name, namespace string, status metav1.ConditionS
 	return d
 }
 
-func TestResolveFireboltEngineDefaultsInfo_AbsentIsOptional(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_AbsentIsOptional(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	info, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	info, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if info != nil {
-		t.Errorf("info = %+v, want nil when no Defaults exist and requireDefaults is unset", info)
+		t.Errorf("info = %+v, want nil when no Preset exist and requirePreset is unset", info)
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_RequiredWhenMissing(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_RequiredWhenMissing(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).Build()
 	r := engineRefTestReconciler(cli, sch)
 
 	eng := engineRefingClassFixture("e", "ns-a", "")
-	eng.Spec.RequireDefaults = ptr(true)
-	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), eng)
+	eng.Spec.RequirePreset = ptr(true)
+	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), eng)
 	if err == nil {
-		t.Fatal("expected errFireboltEngineDefaultsRequired")
+		t.Fatal("expected errFireboltEnginePresetRequired")
 	}
-	if !stderrors.Is(err, errFireboltEngineDefaultsRequired) {
-		t.Errorf("error %q does not wrap errFireboltEngineDefaultsRequired", err)
+	if !stderrors.Is(err, errFireboltEnginePresetRequired) {
+		t.Errorf("error %q does not wrap errFireboltEnginePresetRequired", err)
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_AmbiguousWhenTwo(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_AmbiguousWhenTwo(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		defaultsOnlyFixture("a", "ns-a"),
@@ -93,16 +93,16 @@ func TestResolveFireboltEngineDefaultsInfo_AmbiguousWhenTwo(t *testing.T) {
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err == nil {
-		t.Fatal("expected errFireboltEngineDefaultsAmbiguous")
+		t.Fatal("expected errFireboltEnginePresetAmbiguous")
 	}
-	if !stderrors.Is(err, errFireboltEngineDefaultsAmbiguous) {
-		t.Errorf("error %q does not wrap errFireboltEngineDefaultsAmbiguous", err)
+	if !stderrors.Is(err, errFireboltEnginePresetAmbiguous) {
+		t.Errorf("error %q does not wrap errFireboltEnginePresetAmbiguous", err)
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_BlocksOnOperatorOwnedFieldSet(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		defaultsWithReadyCondition("firebolt", "ns-a",
@@ -111,19 +111,19 @@ func TestResolveFireboltEngineDefaultsInfo_BlocksOnOperatorOwnedFieldSet(t *test
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err == nil {
-		t.Fatal("expected errFireboltEngineDefaultsUnready")
+		t.Fatal("expected errFireboltEnginePresetUnready")
 	}
-	if !stderrors.Is(err, errFireboltEngineDefaultsUnready) {
-		t.Errorf("error %q does not wrap errFireboltEngineDefaultsUnready", err)
+	if !stderrors.Is(err, errFireboltEnginePresetUnready) {
+		t.Errorf("error %q does not wrap errFireboltEnginePresetUnready", err)
 	}
 	if !strings.Contains(err.Error(), "firebolt") || !strings.Contains(err.Error(), "ns-a") {
 		t.Errorf("error %q should name the object", err)
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_PassesOnReadyAndMissingCondition(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_PassesOnReadyAndMissingCondition(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		defaultsWithReadyCondition("firebolt", "ns-a",
@@ -131,9 +131,9 @@ func TestResolveFireboltEngineDefaultsInfo_PassesOnReadyAndMissingCondition(t *t
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
 
-	info, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	info, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err != nil {
-		t.Fatalf("ready Defaults: %v", err)
+		t.Fatalf("ready Preset: %v", err)
 	}
 	if info == nil || info.Name != "firebolt" || info.Hash == "" {
 		t.Errorf("info = %+v, want name+hash", info)
@@ -143,7 +143,7 @@ func TestResolveFireboltEngineDefaultsInfo_PassesOnReadyAndMissingCondition(t *t
 		defaultsOnlyFixture("fresh", "ns-a"),
 	).Build()
 	r = engineRefTestReconciler(cli, sch)
-	info, err = r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	info, err = r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err != nil {
 		t.Fatalf("missing Ready: %v", err)
 	}
@@ -152,14 +152,14 @@ func TestResolveFireboltEngineDefaultsInfo_PassesOnReadyAndMissingCondition(t *t
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_PassesOnDeletionBlocked(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_PassesOnDeletionBlocked(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		defaultsWithReadyCondition("firebolt", "ns-a",
 			metav1.ConditionFalse, reasonDeletionBlocked, "held"),
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
-	info, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	info, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err != nil {
 		t.Fatalf("DeletionBlocked: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestResolveFireboltEngineDefaultsInfo_PassesOnDeletionBlocked(t *testing.T)
 	}
 }
 
-func defaultsWithReservedEngineEnv(name, namespace string) *computev1alpha1.FireboltEngineDefaults {
+func defaultsWithReservedEngineEnv(name, namespace string) *computev1alpha1.FireboltEnginePreset {
 	d := defaultsOnlyFixture(name, namespace)
 	d.Spec.Template.Spec.Containers = []corev1.Container{{
 		Name: computev1alpha1.EngineContainerName,
@@ -177,28 +177,28 @@ func defaultsWithReservedEngineEnv(name, namespace string) *computev1alpha1.Fire
 	return d
 }
 
-func TestResolveFireboltEngineDefaultsInfo_BlocksOnLiveOwnedFieldsWithoutReady(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_BlocksOnLiveOwnedFieldsWithoutReady(t *testing.T) {
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 		defaultsWithReservedEngineEnv("firebolt", "ns-a"),
 	).Build()
 	r := engineRefTestReconciler(cli, sch)
-	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err == nil {
-		t.Fatal("expected errFireboltEngineDefaultsUnready when live spec has reserved env and Ready is unset")
+		t.Fatal("expected errFireboltEnginePresetUnready when live spec has reserved env and Ready is unset")
 	}
-	if !stderrors.Is(err, errFireboltEngineDefaultsUnready) {
-		t.Errorf("error %q does not wrap errFireboltEngineDefaultsUnready", err)
+	if !stderrors.Is(err, errFireboltEnginePresetUnready) {
+		t.Errorf("error %q does not wrap errFireboltEnginePresetUnready", err)
 	}
 	if !strings.Contains(err.Error(), "POD_INDEX") {
 		t.Errorf("error %q should name the reserved env key", err)
 	}
 }
 
-func TestResolveFireboltEngineDefaultsInfo_BlocksOnLiveOwnedFieldsWhileDeletionBlocked(t *testing.T) {
+func TestResolveFireboltEnginePresetInfo_BlocksOnLiveOwnedFieldsWhileDeletionBlocked(t *testing.T) {
 	d := defaultsWithReservedEngineEnv("firebolt", "ns-a")
 	apimeta.SetStatusCondition(&d.Status.Conditions, metav1.Condition{
-		Type:    computev1alpha1.FireboltEngineDefaultsConditionReady,
+		Type:    computev1alpha1.FireboltEnginePresetConditionReady,
 		Status:  metav1.ConditionFalse,
 		Reason:  reasonDeletionBlocked,
 		Message: "held",
@@ -206,16 +206,16 @@ func TestResolveFireboltEngineDefaultsInfo_BlocksOnLiveOwnedFieldsWhileDeletionB
 	sch := classRefTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(d).Build()
 	r := engineRefTestReconciler(cli, sch)
-	_, err := r.resolveFireboltEngineDefaultsInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
+	_, err := r.resolveFireboltEnginePresetInfo(context.Background(), engineRefingClassFixture("e", "ns-a", ""))
 	if err == nil {
-		t.Fatal("expected errFireboltEngineDefaultsUnready when DeletionBlocked Defaults spec carries reserved env")
+		t.Fatal("expected errFireboltEnginePresetUnready when DeletionBlocked Preset spec carries reserved env")
 	}
-	if !stderrors.Is(err, errFireboltEngineDefaultsUnready) {
-		t.Errorf("error %q does not wrap errFireboltEngineDefaultsUnready", err)
+	if !stderrors.Is(err, errFireboltEnginePresetUnready) {
+		t.Errorf("error %q does not wrap errFireboltEnginePresetUnready", err)
 	}
 }
 
-func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
+func TestEngineReconcile_RequiredPresetSurfacesCondition(t *testing.T) {
 	sch := classRefTestScheme(t)
 	const ns, instName, engName = "ns-a", "parent-instance", "engine-blocked"
 	instance := &computev1alpha1.FireboltInstance{
@@ -231,14 +231,14 @@ func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
 			Generation: 1,
 		},
 		Spec: computev1alpha1.FireboltEngineSpec{
-			InstanceRef:     instName,
-			Replicas:        1,
-			RequireDefaults: ptr(true),
+			InstanceRef:   instName,
+			Replicas:      1,
+			RequirePreset: ptr(true),
 		},
 		Status: computev1alpha1.FireboltEngineStatus{
-			Phase:               computev1alpha1.PhaseCreating,
-			AppliedDefaultsName: "stale-defaults",
-			AppliedDefaultsHash: "stale-hash",
+			Phase:             computev1alpha1.PhaseCreating,
+			AppliedPresetName: "stale-preset",
+			AppliedPresetHash: "stale-hash",
 		},
 	}
 	cli := fake.NewClientBuilder().
@@ -260,14 +260,14 @@ func TestEngineReconcile_RequiredDefaultsSurfacesCondition(t *testing.T) {
 	if cond == nil {
 		t.Fatal("Ready condition missing")
 	}
-	if cond.Reason != reasonFireboltEngineDefaultsRequired {
-		t.Errorf("Ready.Reason = %q, want %s", cond.Reason, reasonFireboltEngineDefaultsRequired)
+	if cond.Reason != reasonFireboltEnginePresetRequired {
+		t.Errorf("Ready.Reason = %q, want %s", cond.Reason, reasonFireboltEnginePresetRequired)
 	}
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("Ready.Status = %s, want False", cond.Status)
 	}
-	if updated.Status.AppliedDefaultsName != "" || updated.Status.AppliedDefaultsHash != "" {
-		t.Errorf("AppliedDefaults = %q/%q, want cleared when Defaults resolve fails closed",
-			updated.Status.AppliedDefaultsName, updated.Status.AppliedDefaultsHash)
+	if updated.Status.AppliedPresetName != "" || updated.Status.AppliedPresetHash != "" {
+		t.Errorf("AppliedPreset = %q/%q, want cleared when Preset resolve fails closed",
+			updated.Status.AppliedPresetName, updated.Status.AppliedPresetHash)
 	}
 }

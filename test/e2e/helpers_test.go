@@ -552,14 +552,14 @@ func CreateEngineWithClass(ctx context.Context, instanceName, name string, repli
 	return createEngine(ctx, instanceName, name, replicas, "graceful", &classRef, nil)
 }
 
-// CreateEngineWithRequireDefaults creates a FireboltEngine that must
-// observe a Ready FireboltEngineDefaults object in the namespace before
+// CreateEngineWithRequirePreset creates a FireboltEngine that must
+// observe a Ready FireboltEnginePreset object in the namespace before
 // becoming Ready.
-func CreateEngineWithRequireDefaults(ctx context.Context, instanceName, name string, replicas int) error {
+func CreateEngineWithRequirePreset(ctx context.Context, instanceName, name string, replicas int) error {
 	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
 		func(engine *computev1alpha1.FireboltEngine) {
 			require := true
-			engine.Spec.RequireDefaults = &require
+			engine.Spec.RequirePreset = &require
 		})
 }
 
@@ -741,16 +741,16 @@ func CreateFireboltEngineClass(ctx context.Context, name, image string) error {
 	return cl.Create(ctx, class)
 }
 
-// CreateFireboltEngineDefaults creates a FireboltEngineDefaults object
+// CreateFireboltEnginePreset creates a FireboltEnginePreset object
 // in testNamespace with the given service account.
-func CreateFireboltEngineDefaults(ctx context.Context, name, serviceAccount string) error {
+func CreateFireboltEnginePreset(ctx context.Context, name, serviceAccount string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
-	defaults := &computev1alpha1.FireboltEngineDefaults{
+	defaults := &computev1alpha1.FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
-		Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{ServiceAccountName: serviceAccount},
 			},
@@ -759,14 +759,14 @@ func CreateFireboltEngineDefaults(ctx context.Context, name, serviceAccount stri
 	return cl.Create(ctx, defaults)
 }
 
-// UpdateFireboltEngineDefaultsServiceAccount patches spec.template.spec.serviceAccountName.
-func UpdateFireboltEngineDefaultsServiceAccount(ctx context.Context, name, serviceAccount string) error {
+// UpdateFireboltEnginePresetServiceAccount patches spec.template.spec.serviceAccountName.
+func UpdateFireboltEnginePresetServiceAccount(ctx context.Context, name, serviceAccount string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
 	for i := 0; i < 10; i++ {
-		defaults := &computev1alpha1.FireboltEngineDefaults{}
+		defaults := &computev1alpha1.FireboltEnginePreset{}
 		if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, defaults); err != nil {
 			return err
 		}
@@ -778,7 +778,7 @@ func UpdateFireboltEngineDefaultsServiceAccount(ctx context.Context, name, servi
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("updating FireboltEngineDefaults %q service account to %q: conflict after 10 retries", name, serviceAccount)
+	return fmt.Errorf("updating FireboltEnginePreset %q service account to %q: conflict after 10 retries", name, serviceAccount)
 }
 
 // CreateServiceAccount creates a plain ServiceAccount in testNamespace.
@@ -824,13 +824,13 @@ func GetEngineGenerationStatefulSet(ctx context.Context, engineName string, gen 
 	return sts, nil
 }
 
-// DeleteFireboltEngineDefaults deletes a FireboltEngineDefaults object.
-func DeleteFireboltEngineDefaults(ctx context.Context, name string) error {
+// DeleteFireboltEnginePreset deletes a FireboltEnginePreset object.
+func DeleteFireboltEnginePreset(ctx context.Context, name string) error {
 	cl, err := getCRDClient()
 	if err != nil {
 		return err
 	}
-	defaults := &computev1alpha1.FireboltEngineDefaults{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
+	defaults := &computev1alpha1.FireboltEnginePreset{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
 	return cl.Delete(ctx, defaults)
 }
 

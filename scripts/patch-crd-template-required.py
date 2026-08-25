@@ -3,7 +3,7 @@
 # `.spec` in our CRDs.
 #
 # Each CRD embeds a corev1.PodTemplateSpec (FireboltEngine.spec.template,
-# FireboltEngineClass.spec.template, FireboltEngineDefaults.spec.template,
+# FireboltEngineClass.spec.template, FireboltEnginePreset.spec.template,
 # and FireboltInstance.spec.{gateway, metadata}.template). controller-gen
 # faithfully renders PodSpec's `containers`
 # as a required field, emitting `required: [containers]` under each

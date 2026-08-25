@@ -118,14 +118,14 @@ type engineSim struct {
 
 	// classInfo carries the resolved FireboltEngineClass template when the
 	// engine has spec.engineClassRef set. nil here models "no class
-	// referenced and no Defaults overlay"; ApplyClassChange flips the
+	// referenced and no Preset overlay"; ApplyClassChange flips the
 	// class fields between empty, classA, classB, … to exercise the
-	// stsMatchesSpec class-hash drift path. Defaults overlay identity
-	// lives on the same struct (DefaultsName / DefaultsHash); ApplyDefaultsChange
-	// flips those fields so stsMatchesSpec sees Defaults-hash drift.
-	// Class actions preserve the Defaults overlay: the two gates are
-	// independent in production (overlayDefaultsOnClass folds Defaults
-	// over a nil class), so a class edit must not drop DefaultsHash.
+	// stsMatchesSpec class-hash drift path. Preset overlay identity
+	// lives on the same struct (PresetName / PresetHash); ApplyPresetChange
+	// flips those fields so stsMatchesSpec sees Preset-hash drift.
+	// Class actions preserve the Preset overlay: the two gates are
+	// independent in production (overlayPresetOnClass folds Preset
+	// over a nil class), so a class edit must not drop PresetHash.
 	classInfo *FireboltEngineClassInfo
 
 	// podsReady reflects whether all pods in currentGen are Running+Ready.
@@ -448,12 +448,12 @@ func (m *engineSim) ApplySpecChange(t *rapid.T) {
 func (m *engineSim) ApplyClassChange(t *rapid.T) {
 	m.specDirty = true
 	v := rapid.IntRange(0, 99).Draw(t, "classVersion")
-	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
+	presetName, presetHash := presetOverlayOf(m.classInfo)
 	if v == 0 {
-		m.classInfo = classInfoWithDefaultsOverlay(nil, defaultsName, defaultsHash)
+		m.classInfo = classInfoWithPresetOverlay(nil, presetName, presetHash)
 		return
 	}
-	m.classInfo = classInfoWithDefaultsOverlay(&FireboltEngineClassInfo{
+	m.classInfo = classInfoWithPresetOverlay(&FireboltEngineClassInfo{
 		Name: fmt.Sprintf("class-v%d", v),
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -461,7 +461,7 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 			},
 		},
 		Hash: fmt.Sprintf("class-hash-v%d", v),
-	}, defaultsName, defaultsHash)
+	}, presetName, presetHash)
 }
 
 // ApplyClassUnready models the class-Ready gate by
@@ -470,51 +470,51 @@ func (m *engineSim) ApplyClassChange(t *rapid.T) {
 // and short-circuits the reconcile, so the compute layer never sees
 // the class — the inner harness models that by clearing class Name /
 // Template / Hash. Distinct from drawing v=0 in ApplyClassChange (which
-// models "engineClassRef cleared by the user"). Defaults overlay is
+// models "engineClassRef cleared by the user"). Preset overlay is
 // independent of the class gate and is preserved, matching
-// overlayDefaultsOnClass(defaults, nil).
+// overlayPresetOnClass(defaults, nil).
 func (m *engineSim) ApplyClassUnready(_ *rapid.T) {
-	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
-	m.classInfo = classInfoWithDefaultsOverlay(nil, defaultsName, defaultsHash)
+	presetName, presetHash := presetOverlayOf(m.classInfo)
+	m.classInfo = classInfoWithPresetOverlay(nil, presetName, presetHash)
 }
 
-// ApplyDefaultsChange mutates the resolved FireboltEngineDefaults overlay
-// folded into classInfo. Models a real FireboltEngineDefaults spec edit:
-// the production overlay stamps a fresh DefaultsHash and
-// stsMatchesSpec compares AnnotationEngineDefaultsHash. Drawing v=0
-// clears the overlay (namespace has no Defaults object). classInfo is
-// created when missing so a Defaults-only namespace (no engineClassRef)
+// ApplyPresetChange mutates the resolved FireboltEnginePreset overlay
+// folded into classInfo. Models a real FireboltEnginePreset spec edit:
+// the production overlay stamps a fresh PresetHash and
+// stsMatchesSpec compares AnnotationEnginePresetHash. Drawing v=0
+// clears the overlay (namespace has no Preset object). classInfo is
+// created when missing so a Preset-only namespace (no engineClassRef)
 // is still reachable.
-func (m *engineSim) ApplyDefaultsChange(t *rapid.T) {
+func (m *engineSim) ApplyPresetChange(t *rapid.T) {
 	m.specDirty = true
 	v := rapid.IntRange(0, 99).Draw(t, "defaultsVersion")
 	if m.classInfo == nil {
 		m.classInfo = &FireboltEngineClassInfo{}
 	}
 	if v == 0 {
-		m.classInfo.DefaultsName = ""
-		m.classInfo.DefaultsHash = ""
+		m.classInfo.PresetName = ""
+		m.classInfo.PresetHash = ""
 		return
 	}
-	m.classInfo.DefaultsName = computev1alpha1.FireboltEngineDefaultsDefaultName
-	m.classInfo.DefaultsHash = fmt.Sprintf("defaults-hash-v%d", v)
+	m.classInfo.PresetName = computev1alpha1.FireboltEnginePresetDefaultName
+	m.classInfo.PresetHash = fmt.Sprintf("preset-hash-v%d", v)
 }
 
-// ApplyDefaultsUnready models the Defaults fail-closed gate by
+// ApplyPresetUnready models the Preset fail-closed gate by
 // withholding the overlay. The production controller's
-// resolveFireboltEngineDefaultsInfo refuses to consume an unready,
-// required-missing, or ambiguous Defaults object and short-circuits
+// resolveFireboltEnginePresetInfo refuses to consume an unready,
+// required-missing, or ambiguous Preset object and short-circuits
 // the reconcile, so the compute layer never sees the overlay — the
-// inner harness models that by clearing DefaultsName / DefaultsHash.
-// Distinct from drawing v=0 in ApplyDefaultsChange (which models
-// "the namespace Defaults object was deleted"): the engine may still
-// require Defaults, the object is just transiently inadmissible.
-func (m *engineSim) ApplyDefaultsUnready(_ *rapid.T) {
+// inner harness models that by clearing PresetName / PresetHash.
+// Distinct from drawing v=0 in ApplyPresetChange (which models
+// "the namespace Preset object was deleted"): the engine may still
+// require Preset, the object is just transiently inadmissible.
+func (m *engineSim) ApplyPresetUnready(_ *rapid.T) {
 	if m.classInfo == nil {
 		return
 	}
-	m.classInfo.DefaultsName = ""
-	m.classInfo.DefaultsHash = ""
+	m.classInfo.PresetName = ""
+	m.classInfo.PresetHash = ""
 }
 
 // ApplyConflictingClassAndEngine sets the *same* pod-template field
@@ -540,8 +540,8 @@ func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
 		m.spec.Template = &corev1.PodTemplateSpec{}
 	}
 	m.spec.Template.Spec.ServiceAccountName = fmt.Sprintf("engine-sa-v%d", v)
-	defaultsName, defaultsHash := defaultsOverlayOf(m.classInfo)
-	m.classInfo = classInfoWithDefaultsOverlay(&FireboltEngineClassInfo{
+	presetName, presetHash := presetOverlayOf(m.classInfo)
+	m.classInfo = classInfoWithPresetOverlay(&FireboltEngineClassInfo{
 		Name: fmt.Sprintf("class-conflict-v%d", v),
 		Template: &corev1.PodTemplateSpec{
 			Spec: corev1.PodSpec{
@@ -549,45 +549,45 @@ func (m *engineSim) ApplyConflictingClassAndEngine(t *rapid.T) {
 			},
 		},
 		Hash: fmt.Sprintf("class-conflict-hash-v%d", v),
-	}, defaultsName, defaultsHash)
+	}, presetName, presetHash)
 }
 
-// defaultsOverlayOf copies Defaults identity off classInfo so class
+// presetOverlayOf copies Preset identity off classInfo so class
 // actions can replace the class without dropping the overlay.
-func defaultsOverlayOf(classInfo *FireboltEngineClassInfo) (name, hash string) {
+func presetOverlayOf(classInfo *FireboltEngineClassInfo) (name, hash string) {
 	if classInfo == nil {
 		return "", ""
 	}
-	return classInfo.DefaultsName, classInfo.DefaultsHash
+	return classInfo.PresetName, classInfo.PresetHash
 }
 
-// classInfoWithDefaultsOverlay returns class (or a Defaults-only
-// info when class is nil) with DefaultsName/Hash restored. Nil when
-// there is neither a class nor a Defaults overlay.
-func classInfoWithDefaultsOverlay(class *FireboltEngineClassInfo, defaultsName, defaultsHash string) *FireboltEngineClassInfo {
+// classInfoWithPresetOverlay returns class (or a Preset-only
+// info when class is nil) with PresetName/Hash restored. Nil when
+// there is neither a class nor a Preset overlay.
+func classInfoWithPresetOverlay(class *FireboltEngineClassInfo, presetName, presetHash string) *FireboltEngineClassInfo {
 	if class == nil {
-		if defaultsName == "" && defaultsHash == "" {
+		if presetName == "" && presetHash == "" {
 			return nil
 		}
-		return &FireboltEngineClassInfo{DefaultsName: defaultsName, DefaultsHash: defaultsHash}
+		return &FireboltEngineClassInfo{PresetName: presetName, PresetHash: presetHash}
 	}
-	class.DefaultsName = defaultsName
-	class.DefaultsHash = defaultsHash
+	class.PresetName = presetName
+	class.PresetHash = presetHash
 	return class
 }
 
-func TestClassInfoWithDefaultsOverlay_PreservesDefaultsWithoutClass(t *testing.T) {
-	if got := classInfoWithDefaultsOverlay(nil, "", ""); got != nil {
+func TestClassInfoWithPresetOverlay_PreservesPresetWithoutClass(t *testing.T) {
+	if got := classInfoWithPresetOverlay(nil, "", ""); got != nil {
 		t.Errorf("empty overlay = %+v, want nil", got)
 	}
-	got := classInfoWithDefaultsOverlay(nil, "firebolt", "hash-1")
-	if got == nil || got.DefaultsName != "firebolt" || got.DefaultsHash != "hash-1" || got.Name != "" {
-		t.Errorf("defaults-only = %+v, want Name empty and Defaults set", got)
+	got := classInfoWithPresetOverlay(nil, "firebolt", "hash-1")
+	if got == nil || got.PresetName != "firebolt" || got.PresetHash != "hash-1" || got.Name != "" {
+		t.Errorf("preset-only = %+v, want Name empty and Preset set", got)
 	}
 	cls := &FireboltEngineClassInfo{Name: "c", Hash: "ch"}
-	got = classInfoWithDefaultsOverlay(cls, "firebolt", "hash-1")
-	if got.Name != "c" || got.Hash != "ch" || got.DefaultsName != "firebolt" || got.DefaultsHash != "hash-1" {
-		t.Errorf("class+defaults = %+v, want class fields and Defaults set", got)
+	got = classInfoWithPresetOverlay(cls, "firebolt", "hash-1")
+	if got.Name != "c" || got.Hash != "ch" || got.PresetName != "firebolt" || got.PresetHash != "hash-1" {
+		t.Errorf("class+preset = %+v, want class fields and Preset set", got)
 	}
 }
 
@@ -678,7 +678,7 @@ func (m *engineSim) Check(t *rapid.T) {
 //
 // Gated states are excluded for exactly the reason the state cover skips them
 // (tlaShouldGateOut): the compute layer only runs when the outer Reconcile's
-// instance, class, and Defaults gates are open, and this harness calls the
+// instance, class, and Preset gates are open, and this harness calls the
 // compute layer directly. States on the model's MaxGen ceiling are kept --
 // unlike the state cover, this harness has no closure oracle to disagree with,
 // and a Go-side generation bump past the model's bound is legitimate behavior

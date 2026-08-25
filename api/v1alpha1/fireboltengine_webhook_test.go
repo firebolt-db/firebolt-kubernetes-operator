@@ -368,13 +368,13 @@ func TestFireboltEngineValidator_EngineWinsOverClassForBounds(t *testing.T) {
 	}
 }
 
-// engineDefaultsWithResources returns a FireboltEngineDefaults fixture
+// enginePresetWithResources returns a FireboltEnginePreset fixture
 // in the test namespace ("default") whose template carries the engine
 // container with the supplied resources block.
-func engineDefaultsWithResources(name string, resources corev1.ResourceRequirements) *FireboltEngineDefaults {
-	return &FireboltEngineDefaults{
+func enginePresetWithResources(name string, resources corev1.ResourceRequirements) *FireboltEnginePreset {
+	return &FireboltEnginePreset{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: FireboltEngineDefaultsSpec{
+		Spec: FireboltEnginePresetSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
@@ -388,8 +388,8 @@ func engineDefaultsWithResources(name string, resources corev1.ResourceRequireme
 }
 
 // fakeReaderWithObjects builds a fake client preloaded with arbitrary
-// objects. Used by the Defaults-tier bounds tests, which need a
-// FireboltEngineDefaults and optionally a FireboltEngineClass in the
+// objects. Used by the Preset-tier bounds tests, which need a
+// FireboltEnginePreset and optionally a FireboltEngineClass in the
 // same namespace.
 func fakeReaderWithObjects(t *testing.T, objs ...client.Object) client.Reader {
 	t.Helper()
@@ -403,15 +403,15 @@ func fakeReaderWithObjects(t *testing.T, objs ...client.Object) client.Reader {
 	return fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
 }
 
-// TestFireboltEngineValidator_DefaultsResourcesExceedBound covers the
-// Defaults-aware tier of the bounds check: an engine without its own
-// template resources inherits the namespace FireboltEngineDefaults'
+// TestFireboltEngineValidator_PresetResourcesExceedBound covers the
+// Preset-aware tier of the bounds check: an engine without its own
+// template resources inherits the namespace FireboltEnginePreset'
 // engine-container resources, so oversized values there must be
-// rejected at admission and attributed to the Defaults object — not to
+// rejected at admission and attributed to the Preset object — not to
 // a class, which the engine here does not even reference.
-func TestFireboltEngineValidator_DefaultsResourcesExceedBound(t *testing.T) {
+func TestFireboltEngineValidator_PresetResourcesExceedBound(t *testing.T) {
 	v := &FireboltEngineCustomValidator{
-		Reader: fakeReaderWithObjects(t, engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+		Reader: fakeReaderWithObjects(t, enginePresetWithResources("firebolt", corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
 		})),
 		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
@@ -419,26 +419,26 @@ func TestFireboltEngineValidator_DefaultsResourcesExceedBound(t *testing.T) {
 	eng := fireboltEngineWithRef(nil)
 	_, err := v.ValidateCreate(context.Background(), eng)
 	if err == nil {
-		t.Fatal("ValidateCreate: Defaults cpu limit above bound should be rejected, got nil")
+		t.Fatal("ValidateCreate: Preset cpu limit above bound should be rejected, got nil")
 	}
 	if !strings.Contains(err.Error(), "spec.template.spec.containers") || !strings.Contains(err.Error(), "resources.limits") {
 		t.Errorf("ValidateCreate: error %q does not surface the merged template-container path", err.Error())
 	}
-	if !strings.Contains(err.Error(), "FireboltEngineDefaults") || !strings.Contains(err.Error(), "firebolt") {
-		t.Errorf("ValidateCreate: error %q should name the source FireboltEngineDefaults so the user knows where to edit", err.Error())
+	if !strings.Contains(err.Error(), "FireboltEnginePreset") || !strings.Contains(err.Error(), "firebolt") {
+		t.Errorf("ValidateCreate: error %q should name the source FireboltEnginePreset so the user knows where to edit", err.Error())
 	}
 	if strings.Contains(err.Error(), "FireboltEngineClass") {
 		t.Errorf("ValidateCreate: error %q names FireboltEngineClass, which is the wrong source", err.Error())
 	}
 }
 
-// TestFireboltEngineValidator_DefaultsWinOverClassForBounds covers the
-// merge precedence between the two inherited tiers: Defaults sits above
+// TestFireboltEngineValidator_PresetWinOverClassForBounds covers the
+// merge precedence between the two inherited tiers: Preset sits above
 // the class, so a class with oversized resources is masked by a
-// within-bounds Defaults override and the engine must be admitted.
+// within-bounds Preset override and the engine must be admitted.
 // Rejecting here would block a spec whose rendered resources are legal
 // and diverge from the webhook-off reconcile outcome.
-func TestFireboltEngineValidator_DefaultsWinOverClassForBounds(t *testing.T) {
+func TestFireboltEngineValidator_PresetWinOverClassForBounds(t *testing.T) {
 	class := &FireboltEngineClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "compute-big", Namespace: "default"},
 		Spec: FireboltEngineClassSpec{
@@ -454,7 +454,7 @@ func TestFireboltEngineValidator_DefaultsWinOverClassForBounds(t *testing.T) {
 			},
 		},
 	}
-	defaults := engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+	defaults := enginePresetWithResources("firebolt", corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16")},
 	})
 	v := &FireboltEngineCustomValidator{
@@ -463,17 +463,17 @@ func TestFireboltEngineValidator_DefaultsWinOverClassForBounds(t *testing.T) {
 	}
 	eng := fireboltEngineWithRef(ptr.To("compute-big"))
 	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
-		t.Fatalf("ValidateCreate: Defaults override masks the over-bound class, should pass; got %v", err)
+		t.Fatalf("ValidateCreate: Preset override masks the over-bound class, should pass; got %v", err)
 	}
 }
 
-// TestFireboltEngineValidator_EngineWinsOverDefaultsForBounds covers
+// TestFireboltEngineValidator_EngineWinsOverPresetForBounds covers
 // the top of the precedence chain: an engine template with its own
-// within-bounds resources masks an over-bound Defaults object, exactly
+// within-bounds resources masks an over-bound Preset object, exactly
 // as the renderer's whole-struct merge would.
-func TestFireboltEngineValidator_EngineWinsOverDefaultsForBounds(t *testing.T) {
+func TestFireboltEngineValidator_EngineWinsOverPresetForBounds(t *testing.T) {
 	v := &FireboltEngineCustomValidator{
-		Reader: fakeReaderWithObjects(t, engineDefaultsWithResources("firebolt", corev1.ResourceRequirements{
+		Reader: fakeReaderWithObjects(t, enginePresetWithResources("firebolt", corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("64")},
 		})),
 		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
@@ -487,25 +487,25 @@ func TestFireboltEngineValidator_EngineWinsOverDefaultsForBounds(t *testing.T) {
 	}
 }
 
-// TestFireboltEngineValidator_AmbiguousDefaultsSkipsTier pins the
-// resolution decision for a namespace holding two FireboltEngineDefaults
+// TestFireboltEngineValidator_AmbiguousPresetSkipsTier pins the
+// resolution decision for a namespace holding two FireboltEnginePreset
 // (possible with webhooks off): the tier is skipped rather than picking
 // one arbitrarily, so the bounds gate falls through to the class. The
 // reconciler independently fails the engine closed on ambiguity, so
 // admitting here cannot render an unchecked pod.
-func TestFireboltEngineValidator_AmbiguousDefaultsSkipsTier(t *testing.T) {
+func TestFireboltEngineValidator_AmbiguousPresetSkipsTier(t *testing.T) {
 	small := corev1.ResourceRequirements{
 		Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("8")},
 	}
 	v := &FireboltEngineCustomValidator{
 		Reader: fakeReaderWithObjects(t,
-			engineDefaultsWithResources("firebolt", small),
-			engineDefaultsWithResources("second", small),
+			enginePresetWithResources("firebolt", small),
+			enginePresetWithResources("second", small),
 		),
 		ResourceBounds: EngineResourceBounds{MaxCPU: resource.MustParse("32")},
 	}
 	if _, err := v.ValidateCreate(context.Background(), fireboltEngineWithRef(nil)); err != nil {
-		t.Fatalf("ValidateCreate: ambiguous Defaults should skip the tier, not error; got %v", err)
+		t.Fatalf("ValidateCreate: ambiguous Preset should skip the tier, not error; got %v", err)
 	}
 }
 

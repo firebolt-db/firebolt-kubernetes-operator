@@ -108,11 +108,11 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 		expectMetaSurvives(got.Spec.Template.ObjectMeta)
 	})
 
-	It("preserves labels and annotations on FireboltEngineDefaults.spec.template.metadata", func() {
+	It("preserves labels and annotations on FireboltEnginePreset.spec.template.metadata", func() {
 		name := "defaults-meta-" + utilrand.String(6)
-		defaults := &computev1alpha1.FireboltEngineDefaults{
+		defaults := &computev1alpha1.FireboltEnginePreset{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-			Spec: computev1alpha1.FireboltEngineDefaultsSpec{
+			Spec: computev1alpha1.FireboltEnginePresetSpec{
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels:      wantLabels,
@@ -130,7 +130,7 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 			_ = k8sClient.Delete(context.Background(), defaults)
 		})
 
-		got := &computev1alpha1.FireboltEngineDefaults{}
+		got := &computev1alpha1.FireboltEnginePreset{}
 		Expect(k8sClient.Get(testCtx, client.ObjectKeyFromObject(defaults), got)).To(Succeed())
 		expectMetaSurvives(got.Spec.Template.ObjectMeta)
 	})
