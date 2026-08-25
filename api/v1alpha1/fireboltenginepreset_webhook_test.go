@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -60,15 +59,8 @@ func validFireboltEnginePreset() *FireboltEnginePreset {
 	}
 }
 
-func defaultsValidatorWithObjects(t *testing.T, objs ...client.Object) *FireboltEnginePresetCustomValidator {
-	t.Helper()
-	scheme := fireboltEngineClassWebhookScheme(t)
-	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
-	return &FireboltEnginePresetCustomValidator{Reader: cli}
-}
-
 func TestFireboltEnginePresetValidator_CreateAcceptsValid(t *testing.T) {
-	v := defaultsValidatorWithObjects(t)
+	v := &FireboltEnginePresetCustomValidator{}
 	if _, err := v.ValidateCreate(context.Background(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateCreate: unexpected error on valid spec: %v", err)
 	}
@@ -78,37 +70,6 @@ func TestFireboltEnginePresetValidator_UpdateAcceptsValid(t *testing.T) {
 	v := &FireboltEnginePresetCustomValidator{}
 	if _, err := v.ValidateUpdate(context.Background(), validFireboltEnginePreset(), validFireboltEnginePreset()); err != nil {
 		t.Fatalf("ValidateUpdate: unexpected error on valid spec: %v", err)
-	}
-}
-
-func TestFireboltEnginePresetValidator_CreateRejectsSecondInNamespace(t *testing.T) {
-	existing := validFireboltEnginePreset()
-	v := defaultsValidatorWithObjects(t, existing)
-	second := validFireboltEnginePreset()
-	second.Name = "other"
-	_, err := v.ValidateCreate(context.Background(), second)
-	if err == nil {
-		t.Fatal("ValidateCreate: expected error when a Preset object already exists in the namespace")
-	}
-	if !strings.Contains(err.Error(), existing.Name) {
-		t.Errorf("error %q does not name the existing object %q", err, existing.Name)
-	}
-}
-
-func TestFireboltEnginePresetValidator_CreateAllowsWhenOtherNamespaceHasPreset(t *testing.T) {
-	other := validFireboltEnginePreset()
-	other.Namespace = "other-ns"
-	v := defaultsValidatorWithObjects(t, other)
-	if _, err := v.ValidateCreate(context.Background(), validFireboltEnginePreset()); err != nil {
-		t.Fatalf("ValidateCreate: Preset in another namespace must not block: %v", err)
-	}
-}
-
-func TestFireboltEnginePresetValidator_CreateRequiresReader(t *testing.T) {
-	v := &FireboltEnginePresetCustomValidator{}
-	_, err := v.ValidateCreate(context.Background(), validFireboltEnginePreset())
-	if err == nil {
-		t.Fatal("ValidateCreate: expected error when Reader is nil")
 	}
 }
 

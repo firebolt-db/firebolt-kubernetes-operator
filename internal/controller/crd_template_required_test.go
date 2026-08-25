@@ -83,8 +83,10 @@ var _ = Describe("CRD pod-template containers-optional contract", func() {
 	})
 
 	It("admits a FireboltEnginePreset whose spec.template has no containers", func() {
+		// The Preset CEL rule pins metadata.name to "firebolt", so this is
+		// the one object in this spec that cannot carry a random name.
 		Expect(tryCreate(&computev1alpha1.FireboltEnginePreset{
-			ObjectMeta: metav1.ObjectMeta{Name: "tmpl-nocont-" + utilrand.String(6), Namespace: ns},
+			ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: ns},
 			Spec: computev1alpha1.FireboltEnginePresetSpec{
 				Template: *bareTemplate(),
 			},

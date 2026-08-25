@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func TestBuildEnginePreset_TypedKindAndConventionalName(t *testing.T) {
+func TestBuildEnginePreset_TypedKindAndDefaultName(t *testing.T) {
 	d := BuildEnginePreset("firebolt", "", "engine-sa")
 	if d.Kind != "FireboltEnginePreset" {
 		t.Errorf("Kind = %q, want FireboltEnginePreset", d.Kind)
