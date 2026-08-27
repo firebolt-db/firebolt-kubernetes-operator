@@ -36,8 +36,10 @@ import (
 )
 
 const (
-	metadataCredsMount  = "/secrets/postgres" //nolint:gosec // mount path, not a credential
-	metadataConfigMount = "/configs"
+	metadataCredsMount         = "/secrets/postgres" //nolint:gosec // mount path, not a credential
+	metadataPostgresCAMount    = "/secrets/postgres-ca"
+	metadataPostgresCAFileName = "ca.crt"
+	metadataConfigMount        = "/configs"
 )
 
 // ensureMetadataResources creates or updates the ConfigMap, Deployment, and
@@ -247,9 +249,10 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 }
 
 // metadataConfigHash preserves the config-only rollout hash for internal
-// PostgreSQL. For external PostgreSQL it also hashes the referenced Secret's
-// resource version, so credential changes roll the metadata pod without hashing
-// credential bytes into a non-Secret object.
+// PostgreSQL. For external PostgreSQL it also includes the referenced
+// credentials and CA Secret ResourceVersions, when applicable, so an in-place
+// rotation rolls the metadata pod. ResourceVersion, not Secret bytes, detects
+// every write without moving Secret material into a pod annotation.
 func (r *FireboltInstanceReconciler) metadataConfigHash(
 	ctx context.Context,
 	instance *computev1alpha1.FireboltInstance,
@@ -265,11 +268,31 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 		return "", fmt.Errorf("reading metadata credentials Secret %s/%s for rollout hash: %w",
 			instance.Namespace, name, err)
 	}
-	return aggregateContentHash(
-		[]byte("metadata-config-and-postgres-secret-version-v1"),
+	hashParts := [][]byte{
+		[]byte("metadata-config-and-postgres-secret-versions-v1"),
 		[]byte(configYAML),
+		[]byte(name),
 		[]byte(secret.ResourceVersion),
-	), nil
+	}
+
+	tls := instance.Spec.Metadata.Postgres.TLS
+	if tls != nil {
+		caName := tls.CASecretRef.Name
+		caKey := tls.CASecretRef.Key
+		caVersion, err := checkSecretKeyPresent(
+			ctx,
+			r.Client,
+			instance.Namespace,
+			caName,
+			caKey,
+			"external postgres CA Secret",
+		)
+		if err != nil {
+			return "", fmt.Errorf("reading metadata postgres CA for rollout hash: %w", err)
+		}
+		hashParts = append(hashParts, []byte(caName), []byte(caKey), []byte(caVersion))
+	}
+	return aggregateContentHash(hashParts...), nil
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
@@ -403,6 +426,23 @@ func effectiveMetadataPodTemplate(
 			{Name: computev1alpha1.MetadataTmpVolumeName, MountPath: "/tmp"},
 		},
 	}
+	if tls := instance.Spec.Metadata.Postgres; tls != nil && tls.TLS != nil {
+		pensieve.Env = append(pensieve.Env,
+			corev1.EnvVar{
+				Name:  computev1alpha1.MetadataPostgresSSLModeEnvKey,
+				Value: string(computev1alpha1.PostgresTLSModeVerifyFull),
+			},
+			corev1.EnvVar{
+				Name:  computev1alpha1.MetadataPostgresSSLRootCertEnvKey,
+				Value: metadataPostgresCAMount + "/" + metadataPostgresCAFileName,
+			},
+		)
+		pensieve.VolumeMounts = append(pensieve.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.MetadataPostgresCAVolumeName,
+			MountPath: metadataPostgresCAMount,
+			ReadOnly:  true,
+		})
+	}
 	if userPrimary != nil && computev1alpha1.HasContainerResources(userPrimary.Resources) {
 		pensieve.Resources = *userPrimary.Resources.DeepCopy()
 	}
@@ -427,11 +467,26 @@ func effectiveMetadataPodTemplate(
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
+	if pg := instance.Spec.Metadata.Postgres; pg != nil && pg.TLS != nil {
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.MetadataPostgresCAVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: pg.TLS.CASecretRef.Name,
+					Items: []corev1.KeyToPath{{
+						Key:  pg.TLS.CASecretRef.Key,
+						Path: metadataPostgresCAFileName,
+					}},
+				},
+			},
+		})
+	}
 
 	containers := append([]corev1.Container{pensieve}, userSidecars...)
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
 		computev1alpha1.MetadataConfigVolumeName,
 		computev1alpha1.MetadataPostgresCredsVolumeName,
+		computev1alpha1.MetadataPostgresCAVolumeName,
 		computev1alpha1.MetadataTmpVolumeName,
 	)
 

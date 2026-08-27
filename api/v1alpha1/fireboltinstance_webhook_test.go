@@ -73,6 +73,31 @@ func TestDefaulter_PreservesExistingID(t *testing.T) {
 	}
 }
 
+func TestDefaulter_DefaultsExternalPostgresTLSMode(t *testing.T) {
+	d := &FireboltInstanceDefaulter{}
+	inst := &FireboltInstance{
+		Spec: FireboltInstanceSpec{
+			Metadata: MetadataSpec{
+				Postgres: &PostgresSpec{
+					TLS: &PostgresTLSSpec{
+						CASecretRef: corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+							Key:                  "ca.pem",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := d.Default(context.Background(), inst); err != nil {
+		t.Fatalf("Default: unexpected error: %v", err)
+	}
+	if got := inst.Spec.Metadata.Postgres.TLS.Mode; got != PostgresTLSModeVerifyFull {
+		t.Errorf("TLS mode = %q, want %q", got, PostgresTLSModeVerifyFull)
+	}
+}
+
 // spec.id immutability is enforced by CEL on the CRD, not by the
 // webhook. The rule allows the one-time empty->value transition used
 // by the controller fallback and a case-only rewrite of an existing
@@ -373,9 +398,9 @@ func TestValidatePodTemplate_NonSecretVolumesMountableBySidecars(t *testing.T) {
 }
 
 // TestValidatePodTemplate_SecretVolumesStillReserved keeps the credential half
-// of the rule pinned for the instance components: the postgres credentials
-// Secret and the wake-agent's projected ServiceAccount token stay off limits
-// to any additional container.
+// of the rule pinned for the instance components: PostgreSQL credentials and
+// CA Secrets, plus the wake-agent's projected ServiceAccount token, stay off
+// limits to any additional container.
 func TestValidatePodTemplate_SecretVolumesStillReserved(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -384,6 +409,7 @@ func TestValidatePodTemplate_SecretVolumesStillReserved(t *testing.T) {
 		vol     string
 	}{
 		{"metadata postgres creds", MetadataContainerName, &MetadataPodTemplateRules, MetadataPostgresCredsVolumeName},
+		{"metadata postgres CA", MetadataContainerName, &MetadataPodTemplateRules, MetadataPostgresCAVolumeName},
 		{"gateway wake-agent token", GatewayContainerName, &GatewayPodTemplateRules, GatewayWakeAgentTokenVolumeName},
 		{"gateway downstream TLS", GatewayContainerName, &GatewayPodTemplateRules, GatewayTLSVolumeName},
 	}
@@ -566,14 +592,13 @@ func TestValidateReservedKeys(t *testing.T) {
 
 func TestValidateExternalPostgres(t *testing.T) {
 	tests := []struct {
-		name      string
-		postgres  *PostgresSpec
-		wantError bool
+		name           string
+		postgres       *PostgresSpec
+		wantErrorField string
 	}{
 		{
-			name:      "nil postgres (internal) is valid",
-			postgres:  nil,
-			wantError: false,
+			name:     "nil postgres (internal) is valid",
+			postgres: nil,
 		},
 		{
 			name: "external postgres with secret name is valid",
@@ -584,7 +609,23 @@ func TestValidateExternalPostgres(t *testing.T) {
 					Name: "pg-creds",
 				},
 			},
-			wantError: false,
+		},
+		{
+			name: "external postgres with verified TLS is valid",
+			postgres: &PostgresSpec{
+				Host:     "pg.example.com",
+				Database: "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{
+					Name: "pg-creds",
+				},
+				TLS: &PostgresTLSSpec{
+					Mode: PostgresTLSModeVerifyFull,
+					CASecretRef: corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "pg-ca"},
+						Key:                  "root.pem",
+					},
+				},
+			},
 		},
 		{
 			name: "external postgres with empty secret name is rejected",
@@ -592,7 +633,68 @@ func TestValidateExternalPostgres(t *testing.T) {
 				Host:     "pg.example.com",
 				Database: "firebolt",
 			},
-			wantError: true,
+			wantErrorField: "credentialsSecretRef.name",
+		},
+		{
+			name: "unsupported TLS mode is rejected",
+			postgres: &PostgresSpec{
+				Host:                 "pg.example.com",
+				Database:             "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "pg-creds"},
+				TLS: &PostgresTLSSpec{
+					Mode: "require",
+					CASecretRef: corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "pg-ca"},
+						Key:                  "root.pem",
+					},
+				},
+			},
+			wantErrorField: "tls.mode",
+		},
+		{
+			name: "empty CA Secret name is rejected",
+			postgres: &PostgresSpec{
+				Host:                 "pg.example.com",
+				Database:             "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "pg-creds"},
+				TLS: &PostgresTLSSpec{
+					Mode:        PostgresTLSModeVerifyFull,
+					CASecretRef: corev1.SecretKeySelector{Key: "root.pem"},
+				},
+			},
+			wantErrorField: "tls.caSecretRef.name",
+		},
+		{
+			name: "empty CA Secret key is rejected",
+			postgres: &PostgresSpec{
+				Host:                 "pg.example.com",
+				Database:             "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "pg-creds"},
+				TLS: &PostgresTLSSpec{
+					Mode: PostgresTLSModeVerifyFull,
+					CASecretRef: corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "pg-ca"},
+					},
+				},
+			},
+			wantErrorField: "tls.caSecretRef.key",
+		},
+		{
+			name: "optional CA key is rejected",
+			postgres: &PostgresSpec{
+				Host:                 "pg.example.com",
+				Database:             "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "pg-creds"},
+				TLS: &PostgresTLSSpec{
+					Mode: PostgresTLSModeVerifyFull,
+					CASecretRef: corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "pg-ca"},
+						Key:                  "root.pem",
+						Optional:             ptr.To(true),
+					},
+				},
+			},
+			wantErrorField: "tls.caSecretRef.optional",
 		},
 	}
 
@@ -610,13 +712,49 @@ func TestValidateExternalPostgres(t *testing.T) {
 			}
 
 			_, err := v.ValidateCreate(context.Background(), inst)
-			if tc.wantError && err == nil {
-				t.Error("ValidateCreate: expected error, got nil")
+			if tc.wantErrorField != "" && err == nil {
+				t.Fatalf("ValidateCreate: expected error for %s, got nil", tc.wantErrorField)
 			}
-			if !tc.wantError && err != nil {
+			if tc.wantErrorField == "" && err != nil {
 				t.Errorf("ValidateCreate: unexpected error: %v", err)
 			}
+			if tc.wantErrorField != "" && !strings.Contains(err.Error(), tc.wantErrorField) {
+				t.Errorf("ValidateCreate error = %q, want field %q", err, tc.wantErrorField)
+			}
 		})
+	}
+}
+
+func TestValidateExternalPostgresRejectsOperatorProvisionedCASecret(t *testing.T) {
+	inst := &FireboltInstance{
+		Spec: FireboltInstanceSpec{
+			Metadata: MetadataSpec{Postgres: &PostgresSpec{
+				Host:                 "pg.example.com",
+				Database:             "firebolt",
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "pg-creds"},
+				TLS: &PostgresTLSSpec{
+					Mode: PostgresTLSModeVerifyFull,
+					CASecretRef: corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "signing-key"},
+						Key:                  "ca.crt",
+					},
+				},
+			}},
+		},
+		Status: FireboltInstanceStatus{
+			Auth: &AuthStatus{SigningKeys: []SigningKeyStatus{{
+				ID:         "key-1",
+				SecretName: "signing-key",
+			}}},
+		},
+	}
+
+	errs := ValidateExternalPostgres(inst)
+	if len(errs) == 0 {
+		t.Fatal("ValidateExternalPostgres: expected operator-provisioned Secret rejection")
+	}
+	if !strings.Contains(errs.ToAggregate().Error(), "tls.caSecretRef.name") {
+		t.Errorf("ValidateExternalPostgres error = %q, want caSecretRef.name", errs.ToAggregate())
 	}
 }
 

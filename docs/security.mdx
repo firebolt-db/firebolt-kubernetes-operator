@@ -406,11 +406,11 @@ owner reference to the FireboltInstance, and never re-rotated by the
 Firebolt Operator. The metadata and PostgreSQL Deployments load it via
 `envFrom`.
 
-User-supplied credentials (external PostgreSQL, external object
-store) are referenced by name on the FireboltInstance / FireboltEngine
-spec and resolved at reconcile time. The Firebolt Operator never reads or
-materializes a user-supplied secret's value into its own status,
-events, or logs.
+User-supplied Secrets for external PostgreSQL, external object storage, and
+certificate trust are referenced by name on the FireboltInstance or
+FireboltEngine spec and resolved at reconcile time. The Firebolt Operator does
+not materialize their values into status, events, logs, ConfigMaps, or pod
+annotations.
 
 When auth or TLS is enabled, these additional Secrets exist:
 
@@ -421,11 +421,12 @@ When auth or TLS is enabled, these additional Secrets exist:
 | Engine TLS certificate | cert-manager (no `secretRef` for this listener) | Engine pods, plus its CA in the Gateway's trust bundle | cert-manager renewal on a bounded lifetime (90 days by default, `certManager.duration`). A reissue rolls a fresh Engine generation. |
 | Gateway TLS certificate | cert-manager, or your own via `secretRef` | Gateway pods | cert-manager renewal on the same bounded default. A reissue rolls the Gateway Deployment. |
 | Gateway client CA | You create it; referenced by `clientCASecretRef` | Gateway pods (public certificate only) | Yours. A swap is treated as a tightening transition. |
+| External PostgreSQL CA | You create it; referenced by `spec.metadata.postgres.tls.caSecretRef` | Metadata pod (only the selected key, mounted read-only) | Yours. Updating the Secret rolls the Metadata Deployment. |
 
 The Firebolt Operator reads a signing key's public-key fingerprint to detect key
-replacement, and a Secret's `resourceVersion` to detect an in-place password
-change. Neither the private key nor the password value is ever written to
-status, events, or logs.
+replacement, and Secret `resourceVersion` values to detect in-place credential
+or CA changes. Secret values are never written to status, events, logs, or pod
+annotations.
 
 ### Signing key provenance
 

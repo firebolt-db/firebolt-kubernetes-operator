@@ -19,6 +19,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
@@ -64,6 +65,83 @@ var _ = Describe("FireboltInstance external postgres admission validation", func
 
 	It("accepts a typical DNS hostname / database / schema", func() {
 		Expect(tryCreate(mkInstance("pg-ok", validPG()))).To(Succeed())
+	})
+
+	It("defaults external PostgreSQL TLS to verify-full", func() {
+		pg := validPG()
+		pg.TLS = &computev1alpha1.PostgresTLSSpec{
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				Key:                  "root.pem",
+			},
+		}
+		inst := mkInstance("pg-tls-default", pg)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		Expect(k8sClient.Create(ctx, inst)).To(Succeed())
+		DeferCleanup(func() {
+			Expect(k8sClient.Delete(context.Background(), inst)).To(Succeed())
+		})
+
+		stored := &computev1alpha1.FireboltInstance{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(inst), stored)).To(Succeed())
+		Expect(stored.Spec.Metadata.Postgres.TLS.Mode).To(Equal(computev1alpha1.PostgresTLSModeVerifyFull))
+	})
+
+	It("rejects an unsupported external PostgreSQL TLS mode", func() {
+		pg := validPG()
+		pg.TLS = &computev1alpha1.PostgresTLSSpec{
+			Mode: "require",
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				Key:                  "root.pem",
+			},
+		}
+		err := tryCreate(mkInstance("pg-tls-mode", pg))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.metadata.postgres.tls.mode"))
+	})
+
+	It("requires the external PostgreSQL CA Secret name and key", func() {
+		for _, tc := range []struct {
+			name string
+			ref  corev1.SecretKeySelector
+			path string
+		}{
+			{
+				name: "name",
+				ref:  corev1.SecretKeySelector{Key: "root.pem"},
+				path: "caSecretRef.name",
+			},
+			{
+				name: "key",
+				ref: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				},
+				path: "caSecretRef.key",
+			},
+		} {
+			pg := validPG()
+			pg.TLS = &computev1alpha1.PostgresTLSSpec{CASecretRef: tc.ref}
+			err := tryCreate(mkInstance("pg-tls-"+tc.name, pg))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(tc.path))
+		}
+	})
+
+	It("rejects an optional external PostgreSQL CA key", func() {
+		optional := true
+		pg := validPG()
+		pg.TLS = &computev1alpha1.PostgresTLSSpec{
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				Key:                  "root.pem",
+				Optional:             &optional,
+			},
+		}
+		err := tryCreate(mkInstance("pg-tls-optional", pg))
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("caSecretRef.optional"))
 	})
 
 	It("accepts an IPv4 host", func() {

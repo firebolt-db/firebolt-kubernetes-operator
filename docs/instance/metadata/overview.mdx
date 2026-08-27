@@ -10,6 +10,30 @@ The metadata service stores and serves engine metadata. It uses PostgreSQL as th
 
 **Experimental:** `spec.metadataNG: true` selects metadata-ng configuration and UID/GID, but does not select the metadata image. Legacy behavior remains the default.
 
+## External PostgreSQL TLS
+
+To verify an external PostgreSQL server certificate and hostname, configure
+`spec.metadata.postgres.tls`:
+
+```yaml
+spec:
+  metadata:
+    postgres:
+      host: postgres.example.com
+      database: metadata
+      credentialsSecretRef:
+        name: postgres-credentials
+      tls:
+        mode: verify-full
+        caSecretRef:
+          name: postgres-ca
+          key: ca.crt
+```
+
+Create the CA Secret in the FireboltInstance namespace. The Firebolt Operator
+mounts only the selected key into the Metadata container. Updating the
+credentials Secret or CA Secret rolls the Metadata pod.
+
 ## Rolling update parameters
 
 ### Metadata deployment

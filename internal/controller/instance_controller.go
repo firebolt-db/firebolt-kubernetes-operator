@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	stderrors "errors"
 	"fmt"
 	"time"
 
@@ -51,7 +50,7 @@ import (
 const (
 	instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
 
-	externalPostgresCredentialsSecretIndexField = "spec.metadata.postgres.credentialsSecretRef.name" //nolint:gosec // field-index path, not a credential
+	externalPostgresSecretIndexField = "spec.metadata.postgres.secretRefs" //nolint:gosec // field-index path, not a credential
 )
 
 // reasonTemplateRejected is the per-component Ready=False reason
@@ -63,13 +62,6 @@ const (
 // forbidden field. Reusing the existing component conditions keeps the
 // Ready roll-up consumer unchanged.
 const reasonTemplateRejected = "TemplateRejected"
-
-// errPostgresSecretRefEmpty is returned at runtime when the webhook is
-// bypassed and an instance still has an empty credentialsSecretRef.Name.
-// Normally the validating webhook rejects this at admission time.
-var errPostgresSecretRefEmpty = stderrors.New(
-	"spec.metadata.postgres.credentialsSecretRef.name is empty",
-)
 
 // FireboltInstanceReconciler reconciles FireboltInstance objects by deploying
 // PostgreSQL, the metadata service, and the gateway.
@@ -610,7 +602,8 @@ func validateTemplateSecretRefs(
 //
 //   - computev1alpha1.InstanceOperatorSecretNames: everything derivable from the
 //     CR (admin password, signing keys, engine-TLS anchor, gateway serving cert,
-//     gateway client CA, an external Postgres credential).
+//     gateway client CA, external Postgres credentials, and an external
+//     Postgres CA).
 //   - the two names formed from suffixes private to this package: the engine CA
 //     bundle, and the operator-generated Postgres credential.
 //   - a SHAPE match for per-generation engine-TLS Secrets, deliberately NOT bound
@@ -669,35 +662,39 @@ func isGeneratedEngineTLSSecretName(name string) bool {
 	return computev1alpha1.IsGeneratedEngineTLSSecretName(name)
 }
 
-// checkExternalPostgresSecret verifies the Secret referenced by
-// spec.metadata.postgres.credentialsSecretRef exists in the instance's
-// namespace. It does NOT inspect the Secret's data (key presence,
-// formatting, rotation): users who mis-key the Secret will still hit a
-// crash-loop on the metadata pod itself, but the far more common
-// mistakes — typoed Secret name, forgotten Secret creation, deleted
-// Secret — are caught here with a message that names the missing Secret.
-//
-// Admission-time webhook validation already rejects empty
-// credentialsSecretRef.Name; this function guards against the runtime
-// case where the Name is set but the Secret does not (yet) exist.
+// checkExternalPostgresSecret validates the external PostgreSQL block and
+// preflights every Secret input before rendering the metadata Deployment. The
+// credential Secret is checked for existence; the optional TLS CA Secret must
+// also contain the selected non-empty key.
 func (r *FireboltInstanceReconciler) checkExternalPostgresSecret(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	pg := instance.Spec.Metadata.Postgres
 	if pg == nil {
 		return nil
 	}
-	name := pg.CredentialsSecretRef.Name
-	if name == "" {
-		return errPostgresSecretRefEmpty
+	if errs := computev1alpha1.ValidateExternalPostgres(instance); len(errs) > 0 {
+		return errs.ToAggregate()
 	}
+	name := pg.CredentialsSecretRef.Name
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, &secret)
-	if err == nil {
-		return nil
-	}
 	if errors.IsNotFound(err) {
 		return fmt.Errorf("external postgres credentials secret %s/%s not found", instance.Namespace, name)
 	}
-	return fmt.Errorf("getting external postgres credentials secret %s/%s: %w", instance.Namespace, name, err)
+	if err != nil {
+		return fmt.Errorf("getting external postgres credentials secret %s/%s: %w", instance.Namespace, name, err)
+	}
+	if pg.TLS == nil {
+		return nil
+	}
+	_, err = checkSecretKeyPresent(
+		ctx,
+		r.Client,
+		instance.Namespace,
+		pg.TLS.CASecretRef.Name,
+		pg.TLS.CASecretRef.Key,
+		"external postgres CA Secret",
+	)
+	return err
 }
 
 // writeStatusAndPoll persists the current in-memory status and schedules a
@@ -932,14 +929,14 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&computev1alpha1.FireboltInstance{},
-		externalPostgresCredentialsSecretIndexField,
-		externalPostgresCredentialsSecretIndexValues,
+		externalPostgresSecretIndexField,
+		externalPostgresSecretIndexValues,
 	); err != nil {
-		return fmt.Errorf("indexing external postgres credential Secret references: %w", err)
+		return fmt.Errorf("indexing external postgres Secret references: %w", err)
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapMetadataCredentialsSecretToInstances)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapMetadataPostgresSecretToInstances)).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
@@ -980,28 +977,32 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 		Complete(r)
 }
 
-// externalPostgresCredentialsSecretIndexValues indexes only explicit external
-// PostgreSQL credential references. Internal PostgreSQL uses an
-// operator-generated Secret, whose events must remain covered solely by the
-// ordinary owned-resource reconcile path.
-func externalPostgresCredentialsSecretIndexValues(obj client.Object) []string {
+// externalPostgresSecretIndexValues indexes explicit external PostgreSQL
+// credential and CA Secret references. Internal PostgreSQL uses an
+// operator-generated Secret, whose events remain covered by the ordinary
+// owned-resource reconcile path.
+func externalPostgresSecretIndexValues(obj client.Object) []string {
 	instance, ok := obj.(*computev1alpha1.FireboltInstance)
 	if !ok || instance.Spec.Metadata.Postgres == nil {
 		return nil
 	}
-	name := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
-	if name == "" {
-		return nil
+	pg := instance.Spec.Metadata.Postgres
+	names := make([]string, 0, 2)
+	if pg.CredentialsSecretRef.Name != "" {
+		names = append(names, pg.CredentialsSecretRef.Name)
 	}
-	return []string{name}
+	if pg.TLS != nil && pg.TLS.CASecretRef.Name != "" && pg.TLS.CASecretRef.Name != pg.CredentialsSecretRef.Name {
+		names = append(names, pg.TLS.CASecretRef.Name)
+	}
+	return names
 }
 
-// mapMetadataCredentialsSecretToInstances makes an external credentials Secret
+// mapMetadataPostgresSecretToInstances makes an external PostgreSQL Secret
 // refresh an explicit reconcile input. Secret synchronization controllers do
 // not set the FireboltInstance as owner, so Owns cannot observe these updates.
 // The field index keeps unrelated and internal Secret events from scanning
 // every Instance in the namespace.
-func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
+func (r *FireboltInstanceReconciler) mapMetadataPostgresSecretToInstances(
 	ctx context.Context,
 	obj client.Object,
 ) []ctrl.Request {
@@ -1014,15 +1015,20 @@ func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
 		ctx,
 		instances,
 		client.InNamespace(secret.Namespace),
-		client.MatchingFields{externalPostgresCredentialsSecretIndexField: secret.Name},
+		client.MatchingFields{externalPostgresSecretIndexField: secret.Name},
 	); err != nil {
 		return nil
 	}
 	requests := make([]ctrl.Request, 0, len(instances.Items))
 	for i := range instances.Items {
 		instance := &instances.Items[i]
-		if instance.Spec.Metadata.Postgres == nil ||
-			instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name != secret.Name {
+		if instance.Spec.Metadata.Postgres == nil {
+			continue
+		}
+		pg := instance.Spec.Metadata.Postgres
+		referencesCredentials := pg.CredentialsSecretRef.Name == secret.Name
+		referencesCA := pg.TLS != nil && pg.TLS.CASecretRef.Name == secret.Name
+		if !referencesCredentials && !referencesCA {
 			continue
 		}
 		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(instance)})

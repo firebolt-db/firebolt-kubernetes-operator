@@ -99,7 +99,7 @@ func TestMetadataConfigHashInternalPostgresUsesConfigOnly(t *testing.T) {
 	}
 }
 
-func TestMetadataConfigHashExternalPostgresUsesSecretResourceVersion(t *testing.T) {
+func TestMetadataConfigHashExternalPostgresWithoutTLSIncludesCredentialsSecretVersion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -202,7 +202,139 @@ func TestEnsureMetadataDeploymentAppliesComputedConfigHash(t *testing.T) {
 	}
 }
 
-func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
+func TestMetadataConfigHashExternalPostgresTLSIncludesCASecretVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	instance := mkMetadataInstance()
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "postgres.example.com",
+		Database:             "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+		TLS: &computev1alpha1.PostgresTLSSpec{
+			Mode: computev1alpha1.PostgresTLSModeVerifyFull,
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "external-ca"},
+				Key:                  "root.pem",
+			},
+		},
+	}
+	configYAML := buildMetadataConfigYAML(instance)
+	hashForVersions := func(credentialsVersion, caVersion string) string {
+		t.Helper()
+		credentials := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+			Name: "external-creds", Namespace: instance.Namespace, ResourceVersion: credentialsVersion,
+		}}
+		ca := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "external-ca", Namespace: instance.Namespace, ResourceVersion: caVersion,
+			},
+			Data: map[string][]byte{"root.pem": []byte("test CA")},
+		}
+		reconciler := &FireboltInstanceReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(credentials, ca).Build(),
+		}
+		hash, err := reconciler.metadataConfigHash(context.Background(), instance, configYAML)
+		if err != nil {
+			t.Fatalf("metadataConfigHash: %v", err)
+		}
+		return hash
+	}
+
+	baseline := hashForVersions("10", "20")
+	if rotatedCredentials := hashForVersions("11", "20"); baseline == rotatedCredentials {
+		t.Fatalf("metadata config hash did not change across credentials Secret rotation: %q", baseline)
+	}
+	if rotatedCA := hashForVersions("10", "21"); baseline == rotatedCA {
+		t.Fatalf("metadata config hash did not change across CA Secret rotation: %q", baseline)
+	}
+}
+
+func TestCheckExternalPostgresSecretPreflightsTLSCAKey(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	instance := mkMetadataInstance()
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "postgres.example.com",
+		Database:             "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+		TLS: &computev1alpha1.PostgresTLSSpec{
+			Mode: computev1alpha1.PostgresTLSModeVerifyFull,
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "external-ca"},
+				Key:                  "root.pem",
+			},
+		},
+	}
+	credentials := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-creds", Namespace: instance.Namespace},
+	}
+
+	tests := []struct {
+		name      string
+		ca        *corev1.Secret
+		wantError string
+	}{
+		{
+			name: "selected key is present",
+			ca: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "external-ca", Namespace: instance.Namespace},
+				Data:       map[string][]byte{"root.pem": []byte("test CA"), "unused.pem": []byte("unused")},
+			},
+		},
+		{
+			name:      "CA Secret is missing",
+			wantError: "external postgres CA Secret ns-1/external-ca not found",
+		},
+		{
+			name: "selected key is missing",
+			ca: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "external-ca", Namespace: instance.Namespace},
+				Data:       map[string][]byte{"another.pem": []byte("test CA")},
+			},
+			wantError: `missing or empty for key "root.pem"`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := []runtime.Object{credentials.DeepCopy()}
+			if tc.ca != nil {
+				objects = append(objects, tc.ca)
+			}
+			reconciler := &FireboltInstanceReconciler{
+				Client: fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build(),
+			}
+			err := reconciler.checkExternalPostgresSecret(context.Background(), instance)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("checkExternalPostgresSecret: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("checkExternalPostgresSecret error = %v, want substring %q", err, tc.wantError)
+			}
+		})
+	}
+
+	t.Run("controller rejects unsupported TLS mode", func(t *testing.T) {
+		invalid := instance.DeepCopy()
+		invalid.Spec.Metadata.Postgres.TLS.Mode = "require"
+		reconciler := &FireboltInstanceReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		}
+		err := reconciler.checkExternalPostgresSecret(context.Background(), invalid)
+		if err == nil || !strings.Contains(err.Error(), "tls.mode") {
+			t.Fatalf("checkExternalPostgresSecret error = %v, want tls.mode validation error", err)
+		}
+	})
+}
+
+func TestMetadataPostgresSecretsMapOnlyExternalReferences(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -215,6 +347,12 @@ func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
 	referencing.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
 		Host: "postgres.example.com", Database: "metadata",
 		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+		TLS: &computev1alpha1.PostgresTLSSpec{
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "external-ca"},
+				Key:                  "root.pem",
+			},
+		},
 	}
 	other := mkMetadataInstance()
 	other.Name = "other-instance"
@@ -230,8 +368,8 @@ func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
 			WithObjects(referencing, other, internal).
 			WithIndex(
 				&computev1alpha1.FireboltInstance{},
-				externalPostgresCredentialsSecretIndexField,
-				externalPostgresCredentialsSecretIndexValues,
+				externalPostgresSecretIndexField,
+				externalPostgresSecretIndexValues,
 			).
 			Build(),
 	}
@@ -242,8 +380,13 @@ func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
 		wantRequest string
 	}{
 		{
-			name:        "referenced external Secret",
+			name:        "referenced credentials Secret",
 			secretName:  "external-creds",
+			wantRequest: referencing.Name,
+		},
+		{
+			name:        "referenced CA Secret",
+			secretName:  "external-ca",
 			wantRequest: referencing.Name,
 		},
 		{
@@ -257,7 +400,7 @@ func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			requests := reconciler.mapMetadataCredentialsSecretToInstances(context.Background(), &corev1.Secret{
+			requests := reconciler.mapMetadataPostgresSecretToInstances(context.Background(), &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: tc.secretName, Namespace: referencing.Namespace},
 			})
 			if tc.wantRequest == "" {
@@ -461,6 +604,108 @@ func mkMetadataInstance() *computev1alpha1.FireboltInstance {
 		Spec: computev1alpha1.FireboltInstanceSpec{
 			ID: "acc-1",
 		},
+	}
+}
+
+func TestBuildMetadataDeploymentPostgresTLSIsOptIn(t *testing.T) {
+	external := mkMetadataInstance()
+	external.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "postgres.example.com",
+		Database:             "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+	}
+	for _, tc := range []struct {
+		name     string
+		instance *computev1alpha1.FireboltInstance
+	}{
+		{name: "internal PostgreSQL", instance: mkMetadataInstance()},
+		{name: "external PostgreSQL without TLS", instance: external},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dep := buildMetadataDeployment(tc.instance, buildMetadataConfigYAML(tc.instance))
+			pod := dep.Spec.Template.Spec
+			container := pod.Containers[0]
+
+			for _, env := range container.Env {
+				if env.Name == computev1alpha1.MetadataPostgresSSLModeEnvKey ||
+					env.Name == computev1alpha1.MetadataPostgresSSLRootCertEnvKey {
+					t.Errorf("rendered unexpected environment variable %q", env.Name)
+				}
+			}
+			for _, mount := range container.VolumeMounts {
+				if mount.Name == computev1alpha1.MetadataPostgresCAVolumeName {
+					t.Errorf("rendered unexpected CA mount: %+v", mount)
+				}
+			}
+			for _, volume := range pod.Volumes {
+				if volume.Name == computev1alpha1.MetadataPostgresCAVolumeName {
+					t.Errorf("rendered unexpected CA volume: %+v", volume)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildMetadataDeploymentPostgresTLSUsesSelectedCAKey(t *testing.T) {
+	instance := mkMetadataInstance()
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "postgres.example.com",
+		Database:             "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+		TLS: &computev1alpha1.PostgresTLSSpec{
+			Mode: computev1alpha1.PostgresTLSModeVerifyFull,
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				Key:                  "provider-root.pem",
+			},
+		},
+	}
+	dep := buildMetadataDeployment(instance, buildMetadataConfigYAML(instance))
+	pod := dep.Spec.Template.Spec
+	container := pod.Containers[0]
+
+	env := make(map[string]string, len(container.Env))
+	for _, item := range container.Env {
+		env[item.Name] = item.Value
+	}
+	if got := env[computev1alpha1.MetadataPostgresSSLModeEnvKey]; got != "verify-full" {
+		t.Errorf("PGSSLMODE = %q, want verify-full", got)
+	}
+	wantRootCert := metadataPostgresCAMount + "/" + metadataPostgresCAFileName
+	if got := env[computev1alpha1.MetadataPostgresSSLRootCertEnvKey]; got != wantRootCert {
+		t.Errorf("PGSSLROOTCERT = %q, want %q", got, wantRootCert)
+	}
+
+	var caMount *corev1.VolumeMount
+	for i := range container.VolumeMounts {
+		if container.VolumeMounts[i].Name == computev1alpha1.MetadataPostgresCAVolumeName {
+			caMount = &container.VolumeMounts[i]
+		}
+	}
+	if caMount == nil {
+		t.Fatal("metadata container is missing the PostgreSQL CA mount")
+	}
+	if !caMount.ReadOnly || caMount.MountPath != metadataPostgresCAMount {
+		t.Errorf("PostgreSQL CA mount = %+v, want read-only at %q", caMount, metadataPostgresCAMount)
+	}
+
+	var caVolume *corev1.Volume
+	for i := range pod.Volumes {
+		if pod.Volumes[i].Name == computev1alpha1.MetadataPostgresCAVolumeName {
+			caVolume = &pod.Volumes[i]
+		}
+	}
+	if caVolume == nil || caVolume.Secret == nil {
+		t.Fatalf("PostgreSQL CA Secret volume missing: %+v", caVolume)
+	}
+	if caVolume.Secret.SecretName != "postgres-ca" {
+		t.Errorf("CA Secret name = %q, want postgres-ca", caVolume.Secret.SecretName)
+	}
+	if len(caVolume.Secret.Items) != 1 {
+		t.Fatalf("CA Secret projects %d keys, want exactly one", len(caVolume.Secret.Items))
+	}
+	if got := caVolume.Secret.Items[0]; got.Key != "provider-root.pem" || got.Path != metadataPostgresCAFileName {
+		t.Errorf("CA Secret projection = %+v, want provider-root.pem -> %s", got, metadataPostgresCAFileName)
 	}
 }
 

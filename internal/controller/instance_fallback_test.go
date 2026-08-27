@@ -22,7 +22,9 @@ import (
 	"testing"
 
 	"github.com/oklog/ulid/v2"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -99,11 +101,11 @@ func TestInstanceReconcile_GeneratesULIDWhenSpecIDEmpty(t *testing.T) {
 
 // TestInstanceReconcile_PostgresSecretEmptyNameSurfacesCondition pins
 // the controller's defense-in-depth for the validating webhook's
-// validateExternalPostgres: when admission is bypassed and a
+// ValidateExternalPostgres: when admission is bypassed and a
 // FireboltInstance ships with spec.metadata.postgres set but
 // credentialsSecretRef.Name empty, the metadata branch must surface
 // MetadataReady=False/PostgresSecretPreflightFailed with the
-// errPostgresSecretRefEmpty message, refuse to render metadata
+// field-specific validation message, refuse to render metadata
 // resources, and return the error so controller-runtime backs off
 // until the user fixes the spec.
 func TestInstanceReconcile_PostgresSecretEmptyNameSurfacesCondition(t *testing.T) {
@@ -146,12 +148,67 @@ func TestInstanceReconcile_PostgresSecretEmptyNameSurfacesCondition(t *testing.T
 	if cond.Reason != "PostgresSecretPreflightFailed" {
 		t.Errorf("MetadataReady.Reason = %q, want PostgresSecretPreflightFailed", cond.Reason)
 	}
-	// The errPostgresSecretRefEmpty message names the field path so
+	// The validation message names the field path so
 	// kubectl describe points at exactly what the user needs to fix.
 	if !strings.Contains(cond.Message, "credentialsSecretRef.name") {
 		t.Errorf("MetadataReady.Message = %q, want it to name the offending field", cond.Message)
 	}
 	if updated.Status.MetadataReady {
 		t.Error("Status.MetadataReady = true, want false (the boolean mirror should follow the condition)")
+	}
+}
+
+func TestInstanceReconcile_PostgresCAMissingSurfacesCondition(t *testing.T) {
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "pg.example.com",
+		Database:             "firebolt",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "postgres-creds"},
+		TLS: &computev1alpha1.PostgresTLSSpec{
+			Mode: computev1alpha1.PostgresTLSModeVerifyFull,
+			CASecretRef: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+				Key:                  "root.pem",
+			},
+		},
+	}
+	credentials := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "postgres-creds", Namespace: inst.Namespace},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst, credentials).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace},
+	})
+	if err == nil || !strings.Contains(err.Error(), "postgres-ca not found") {
+		t.Fatalf("Reconcile error = %v, want missing CA Secret", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), client.ObjectKeyFromObject(inst), updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionMetadataReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "PostgresSecretPreflightFailed" {
+		t.Fatalf("MetadataReady condition = %+v, want False/PostgresSecretPreflightFailed", cond)
+	}
+
+	deployment := &appsv1.Deployment{}
+	err = cli.Get(context.Background(), client.ObjectKey{
+		Name:      inst.Name + SuffixMetadataService,
+		Namespace: inst.Namespace,
+	}, deployment)
+	if !errors.IsNotFound(err) {
+		t.Fatalf("metadata Deployment Get error = %v, want NotFound", err)
 	}
 }

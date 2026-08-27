@@ -9092,6 +9092,56 @@ spec:
                         minLength: 1
                         pattern: ^[A-Za-z0-9_.\-]+$
                         type: string
+                      tls:
+                        description: |-
+                          TLS enables verified TLS for the external PostgreSQL connection. When
+                          omitted, the operator does not set libpq TLS environment variables.
+                        properties:
+                          caSecretRef:
+                            description: |-
+                              CASecretRef selects the CA certificate used to verify the PostgreSQL
+                              server. The Secret is resolved in the FireboltInstance namespace, and
+                              only the selected key is mounted into the Metadata container.
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          mode:
+                            default: verify-full
+                            description: |-
+                              Mode is the libpq server verification mode. Only verify-full is
+                              supported.
+                            enum:
+                            - verify-full
+                            type: string
+                        required:
+                        - caSecretRef
+                        type: object
+                        x-kubernetes-validations:
+                        - message: caSecretRef.name must be set
+                          rule: size(self.caSecretRef.name) > 0
+                        - message: caSecretRef.key must be set
+                          rule: size(self.caSecretRef.key) > 0
+                        - message: caSecretRef.optional cannot be true
+                          rule: '!has(self.caSecretRef.optional) || !self.caSecretRef.optional'
                     required:
                     - credentialsSecretRef
                     - database
