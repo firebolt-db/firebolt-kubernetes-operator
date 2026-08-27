@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -226,6 +227,12 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 	desired := buildMetadataDeployment(instance, configYAML)
 	desired.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"}
 
+	configHash, err := r.metadataConfigHash(ctx, instance, configYAML)
+	if err != nil {
+		return err
+	}
+	desired.Spec.Template.Annotations[AnnotationConfigHash] = configHash
+
 	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
 		return err
 	}
@@ -236,6 +243,32 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 		"replicas", *desired.Spec.Replicas,
 		"image", desired.Spec.Template.Spec.Containers[0].Image)
 	return applySSA(ctx, r.Client, desired)
+}
+
+// metadataConfigHash preserves the config-only rollout hash for internal
+// PostgreSQL. For external PostgreSQL it also includes the referenced
+// credentials Secret's ResourceVersion so an in-place password rotation rolls
+// the metadata pod. Pensieve reads the credential files at process start; the
+// rendered YAML and Secret name do not change when a Secret synchronization
+// controller refreshes the same object. ResourceVersion, not credential bytes,
+// is sufficient to detect every write without moving secret material into a
+// pod annotation.
+func (r *FireboltInstanceReconciler) metadataConfigHash(
+	ctx context.Context,
+	instance *computev1alpha1.FireboltInstance,
+	configYAML string,
+) (string, error) {
+	if instance.Spec.Metadata.Postgres == nil {
+		return contentHash(configYAML), nil
+	}
+
+	name := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, secret); err != nil {
+		return "", fmt.Errorf("reading metadata credentials Secret %s/%s for rollout hash: %w",
+			instance.Namespace, name, err)
+	}
+	return contentHash(configYAML + "\x00" + name + "=" + secret.ResourceVersion), nil
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the

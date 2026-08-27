@@ -40,13 +40,18 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
-const instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
+const (
+	instanceFinalizerName = "compute.firebolt.io/instance-cleanup"
+
+	externalPostgresCredentialsSecretIndexField = "spec.metadata.postgres.credentialsSecretRef.name" //nolint:gosec // field-index path, not a credential
+)
 
 // reasonTemplateRejected is the per-component Ready=False reason
 // surfaced when validatePodTemplates rejects spec.gateway.template or
@@ -922,8 +927,17 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 	if r.EventRecorder == nil {
 		r.EventRecorder = mgr.GetEventRecorder(name)
 	}
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&computev1alpha1.FireboltInstance{},
+		externalPostgresCredentialsSecretIndexField,
+		externalPostgresCredentialsSecretIndexValues,
+	); err != nil {
+		return fmt.Errorf("indexing external postgres credential Secret references: %w", err)
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&computev1alpha1.FireboltInstance{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapMetadataCredentialsSecretToInstances)).
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
@@ -931,4 +945,54 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Named(name).
 		Complete(r)
+}
+
+// externalPostgresCredentialsSecretIndexValues indexes only explicit external
+// PostgreSQL credential references. Internal PostgreSQL uses an
+// operator-generated Secret, whose events must remain covered solely by the
+// ordinary owned-resource reconcile path.
+func externalPostgresCredentialsSecretIndexValues(obj client.Object) []string {
+	instance, ok := obj.(*computev1alpha1.FireboltInstance)
+	if !ok || instance.Spec.Metadata.Postgres == nil {
+		return nil
+	}
+	name := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
+	if name == "" {
+		return nil
+	}
+	return []string{name}
+}
+
+// mapMetadataCredentialsSecretToInstances makes an external credentials Secret
+// refresh an explicit reconcile input. Secret synchronization controllers do
+// not set the FireboltInstance as owner, so Owns cannot observe these updates.
+// The field index keeps unrelated and internal Secret events from scanning
+// every Instance in the namespace.
+func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
+	ctx context.Context,
+	obj client.Object,
+) []ctrl.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+	instances := &computev1alpha1.FireboltInstanceList{}
+	if err := r.List(
+		ctx,
+		instances,
+		client.InNamespace(secret.Namespace),
+		client.MatchingFields{externalPostgresCredentialsSecretIndexField: secret.Name},
+	); err != nil {
+		return nil
+	}
+	requests := make([]ctrl.Request, 0, len(instances.Items))
+	for i := range instances.Items {
+		instance := &instances.Items[i]
+		if instance.Spec.Metadata.Postgres == nil ||
+			instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name != secret.Name {
+			continue
+		}
+		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(instance)})
+	}
+	return requests
 }
