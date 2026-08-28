@@ -446,8 +446,8 @@ func TestWebhook_Defaulter_MintsULID(t *testing.T) {
 		t.Fatalf("spec.id length = %d, want 26 (ULID minted by mutating webhook): %q",
 			len(got.Spec.ID), got.Spec.ID)
 	}
-	if got.Spec.ID != strings.ToUpper(got.Spec.ID) {
-		t.Errorf("minted spec.id %q is not uppercase while the canonicalize floor is empty", got.Spec.ID)
+	if got.Spec.ID != strings.ToLower(got.Spec.ID) {
+		t.Errorf("minted spec.id %q is not lowercase; the defaulter must mint the encoding images at the canonicalize floor consume", got.Spec.ID)
 	}
 	if _, err := ulid.Parse(got.Spec.ID); err != nil {
 		t.Errorf("minted spec.id %q is not a ULID: %v", got.Spec.ID, err)

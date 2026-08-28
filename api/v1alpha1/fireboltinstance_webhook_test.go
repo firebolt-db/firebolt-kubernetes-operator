@@ -47,8 +47,8 @@ func TestDefaulter_GeneratesULID(t *testing.T) {
 	if len(inst.Spec.ID) != 26 {
 		t.Errorf("Default: expected 26-char ULID, got %d chars: %q", len(inst.Spec.ID), inst.Spec.ID)
 	}
-	if inst.Spec.ID != strings.ToUpper(inst.Spec.ID) {
-		t.Errorf("Default: minted spec.id %q is not uppercase while the canonicalize floor is empty", inst.Spec.ID)
+	if inst.Spec.ID != strings.ToLower(inst.Spec.ID) {
+		t.Errorf("Default: minted spec.id %q is not lowercase; engine and metadata images at the canonicalize floor read spec.id as the lowercase account ID", inst.Spec.ID)
 	}
 	if _, err := ulid.Parse(inst.Spec.ID); err != nil {
 		t.Errorf("Default: minted spec.id %q is not a ULID: %v", inst.Spec.ID, err)

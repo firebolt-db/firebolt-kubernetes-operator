@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
 	fireboltmetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
@@ -67,6 +68,7 @@ func TestImageMeetsCanonicalFloor(t *testing.T) {
 	orig := computev1alpha1.CanonicalInstanceIDImageFloor
 	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
+	computev1alpha1.CanonicalInstanceIDImageFloor = ""
 	if imageMeetsCanonicalFloor("oci.example/engine:" + DefaultEngineTag) {
 		t.Fatal("empty floor must not treat any image as meeting it")
 	}
@@ -93,6 +95,27 @@ func TestImageMeetsCanonicalFloor(t *testing.T) {
 	// A digest pin carries no tag to compare against the floor.
 	if imageMeetsCanonicalFloor("oci.example/engine@sha256:" + strings.Repeat("a", 64)) {
 		t.Error("digest-pinned image must not meet the floor")
+	}
+}
+
+// TestDefaultImagesMeetCanonicalFloor keeps the shipped image defaults
+// and the canonicalize floor from drifting apart. MintInstanceID emits
+// lowercase ids as soon as the floor is set, so a build whose own
+// default engine or metadata image sits below that floor would hand a
+// fresh instance an account ID its images cannot read — and would
+// refuse to canonicalize it afterwards, because the gate compares
+// against those same images. Holds for both variants: the "latest"
+// defaults pin the floor tag itself, and the "dev" aliases track the
+// dev-branch build of it.
+func TestDefaultImagesMeetCanonicalFloor(t *testing.T) {
+	if computev1alpha1.CanonicalInstanceIDImageFloor == "" {
+		t.Skip("canonicalize floor is unpublished; default images are not gated on it")
+	}
+	for _, image := range []string{images.DefaultEngine(), images.DefaultMetadata()} {
+		if !imageMeetsCanonicalFloor(image) {
+			t.Errorf("default %s image %q is below the canonicalize floor %q; bump the %s variant defaults and the floor together",
+				images.Variant(), image, computev1alpha1.CanonicalInstanceIDImageFloor, images.Variant())
+		}
 	}
 }
 

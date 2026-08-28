@@ -18,7 +18,7 @@ The implementation should share validation functions between webhook and control
 
 | Input or operation | Admission behavior | Controller behavior |
 | --- | --- | --- |
-| Empty `FireboltInstance.spec.id` | Mutating webhook generates a Crockford ULID (`MintInstanceID`: uppercase while the canonicalize floor is empty, lowercase once it is set) | First reconcile generates the same encoding and updates the CR |
+| Empty `FireboltInstance.spec.id` | Mutating webhook generates a Crockford ULID (`MintInstanceID`: lowercase, or uppercase on a build whose canonicalize floor is empty) | First reconcile generates the same encoding and updates the CR |
 | Uppercase Crockford `FireboltInstance.spec.id` | CEL allows a case-only Update | Controller lowercases the field once metadata and every bound engine image meet the canonicalize floor; otherwise leaves the CR unchanged and reports `InstanceIDCanonical=False/ImageBelowFloor` |
 | Instance authentication | `ValidateAuth` rejects invalid combinations | `ensureAuth` re-runs `ValidateAuth` and reports `AuthReady=False/AuthSpecInvalid` |
 | Instance TLS | `ValidateTLS` rejects invalid listener, CA, CRL, and protected-Secret combinations | Engine and gateway TLS reconcilers re-run `ValidateTLS` and report `TLSSpecInvalid` |

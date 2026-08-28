@@ -16,7 +16,7 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `spec.id` | No | (auto-generated ULID) | Stable unique identifier for the instance, used as the metadata account ID. Newly minted values are uppercase Crockford ULIDs while the canonicalize floor is unset, and lowercase once that floor is published. Immutable once set except for a case-only rewrite: the Firebolt Operator lowercases an existing uppercase Crockford ULID after engine and metadata images meet the canonicalize floor. |
+| `spec.id` | No | (auto-generated ULID) | Stable unique identifier for the instance, used as the metadata account ID. Newly minted values are lowercase Crockford ULIDs (uppercase only on an operator build that has no canonicalize floor compiled in). Immutable once set except for a case-only rewrite: the Firebolt Operator lowercases an existing uppercase Crockford ULID after engine and metadata images meet the canonicalize floor. |
 | `spec.metadataNG` | No | `false` | **Experimental.** Use the metadata-ng configuration and UID/GID. The image remains user-selected. |
 | `spec.metadata` | **Yes** | - | Metadata service configuration (can be empty `{}` for defaults) |
 | `spec.metadata.postgres` | No | (internal) | External PostgreSQL connection. If omitted, the Firebolt Operator deploys an internal PostgreSQL StatefulSet. |

@@ -24,19 +24,25 @@ import (
 )
 
 // CanonicalInstanceIDImageFloor is the engine and metadata tag at which
-// lowercase FireboltInstance.spec.id is required. Empty means the floor
-// is not published: MintInstanceID returns the uppercase Crockford
-// encoding current images consume, and the controller leaves existing
-// CRs unchanged.
-var CanonicalInstanceIDImageFloor string
+// lowercase FireboltInstance.spec.id is required: the first packdb build
+// that reads spec.id as the metadata account ID in the lowercase
+// Crockford encoding. It matches the ENGINE_TAG / METADATA_TAG pins in
+// config/images/defaults.latest.env, and both must move together — an
+// image bump that leaves the floor behind stops canonicalizing ids on
+// clusters that are already on the new build.
+//
+// Empty means the floor is not published: MintInstanceID returns the
+// uppercase Crockford encoding older images consume, and the controller
+// leaves existing CRs unchanged. Tests clear it to exercise that path.
+var CanonicalInstanceIDImageFloor = "release-5.0.0-pre.0.20260828194119.d0f954993097"
 
-// MintInstanceID returns a new 26-character Crockford-base32 ULID. While
-// CanonicalInstanceIDImageFloor is empty it returns the uppercase
-// encoding current engine and metadata images consume as the account
-// ID. Once the floor is set it returns lowercase, matching the
-// encoding those images require. The mutating webhook and the
-// controller fallback both call this so an admission-bypassed create
-// still persists the same encoding.
+// MintInstanceID returns a new 26-character Crockford-base32 ULID in the
+// lowercase encoding engine and metadata images consume as the account
+// ID. While CanonicalInstanceIDImageFloor is empty it returns the
+// uppercase encoding instead, which is what images below the floor
+// consume. The mutating webhook and the controller fallback both call
+// this so an admission-bypassed create still persists the same
+// encoding.
 func MintInstanceID() string {
 	id := ulid.MustNew(ulid.Now(), rand.Reader).String()
 	if CanonicalInstanceIDImageFloor == "" {
