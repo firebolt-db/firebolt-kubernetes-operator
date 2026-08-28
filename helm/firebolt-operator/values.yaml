@@ -158,8 +158,8 @@ webhook:
     # validation (reserved keys, metadata replicas, external Postgres
     # secret presence), FireboltEngineClass validation (operator-owned
     # pod template paths, deletion blocking while bound by FireboltEngines),
-    # and ClusterFireboltEngineClass validation (SKU-only template,
-    # deletion blocking while any engine has resolved to the catalog).
+    # and ClusterFireboltEngineClass validation (SKU-only template on
+    # CREATE and UPDATE; catalog delete is allowed).
     # Only effective when `webhook.enabled` is also true.
     enabled: true
     # -- failurePolicy for the validating webhook.
@@ -181,8 +181,8 @@ healthProbeBindAddress: ":8081"
 # starts with `--namespaces=""` (controller-runtime watches every
 # namespace). A non-empty list renders a `Role` + `RoleBinding` pair
 # per listed namespace for namespaced resources, plus a ClusterRole
-# for ClusterFireboltEngineClass and the cluster-wide engine/class
-# list the catalog deletion guard needs. The operator starts with
+# granting `get/list/watch` on ClusterFireboltEngineClass (the shared
+# SKU catalog is read-only). The operator starts with
 # `--namespaces=<comma-list>` so its cache spans only those
 # namespaces. Switching modes is a `helm upgrade` plus an operator
 # restart.

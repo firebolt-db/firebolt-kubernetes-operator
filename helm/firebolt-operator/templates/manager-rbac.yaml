@@ -9,8 +9,7 @@ be overwritten on the next `make manifests`.
 Empty `watchNamespaces` renders a cluster-wide ClusterRole +
 ClusterRoleBinding. A non-empty list renders a Role + RoleBinding in
 each listed namespace for namespaced resources, plus a ClusterRole
-for cluster-scoped CRs (ClusterFireboltEngineClass) and the
-cluster-wide engine/class list the catalog deletion guard needs.
+for cluster-scoped CRs (ClusterFireboltEngineClass get/list/watch).
 */ -}}
 {{- if .Values.rbac.create -}}
 {{- if empty .Values.watchNamespaces }}
@@ -96,6 +95,13 @@ rules:
       - compute.firebolt.io
     resources:
       - clusterfireboltengineclasses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - compute.firebolt.io
+    resources:
       - fireboltengineclasses
       - fireboltenginepresets
     verbs:
@@ -107,7 +113,6 @@ rules:
   - apiGroups:
       - compute.firebolt.io
     resources:
-      - clusterfireboltengineclasses/finalizers
       - fireboltengineclasses/finalizers
       - fireboltenginepresets/finalizers
       - fireboltengines/finalizers
@@ -117,7 +122,6 @@ rules:
   - apiGroups:
       - compute.firebolt.io
     resources:
-      - clusterfireboltengineclasses/status
       - fireboltengineclasses/status
       - fireboltenginepresets/status
       - fireboltengines/status
@@ -402,31 +406,7 @@ rules:
     verbs:
       - get
       - list
-      - patch
-      - update
       - watch
-  - apiGroups:
-      - compute.firebolt.io
-    resources:
-      - clusterfireboltengineclasses/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - compute.firebolt.io
-    resources:
-      - clusterfireboltengineclasses/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - compute.firebolt.io
-    resources:
-      - fireboltengines
-      - fireboltengineclasses
-    verbs:
-      - get
-      - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

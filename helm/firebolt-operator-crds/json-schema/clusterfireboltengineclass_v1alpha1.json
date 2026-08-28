@@ -1,5 +1,5 @@
 {
-  "description": "ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.\nEngines select it by name through spec.engineClassRef. The operator\nresolves that name to a namespaced FireboltEngineClass if one exists\nin the engine's namespace, otherwise to this cluster object.\n\nThe catalog is SKU-only: instance type, resources, and node setup.\nNamespace-resolved identifiers (ServiceAccount name, Secret refs, IAM\nannotations) belong on FireboltEnginePreset, not here. A namespaced\nFireboltEngineClass of the same name is an explicit override.",
+  "description": "ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.\nEngines select it by name through spec.engineClassRef. The operator\nresolves that name to a namespaced FireboltEngineClass if one exists\nin the engine's namespace, otherwise to this cluster object.\n\nThe catalog is SKU-only: instance type, resources, and node setup.\nNamespace-resolved identifiers (ServiceAccount name, Secret refs, IAM\nannotations) belong on FireboltEnginePreset, not here. A namespaced\nFireboltEngineClass of the same name is an explicit override.\n\nThe operator does not reconcile this object: it is authored by\ncluster admins or a cell manager, and consumed read-only by engine\nreconcilers. Deleting it does not tear down running pods; engines\nthat still name it emit EngineClassNotFound and keep the last\napplied StatefulSet.",
   "properties": {
     "apiVersion": {
       "description": "APIVersion defines the versioned schema of this representation of an object.\nServers should convert recognized schemas to the latest internal value, and\nmay reject unrecognized values.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
@@ -13,7 +13,7 @@
       "type": "object"
     },
     "spec": {
-      "description": "ClusterFireboltEngineClassSpec is the SKU-only catalog payload.\n\nIt carries a pod-template fragment: instance type / family, engine\ncontainer resources, node affinity / tolerations, and init-container\nnode setup. Namespace-resolved identifiers (serviceAccountName,\nSecret refs, IAM annotations) are rejected by the validating webhook\nand by the controller's Ready condition. Storage, rollout, drain-check,\nautoStop, uiSidecar, and customEngineConfig stay on the namespaced\nFireboltEngineClass / FireboltEnginePreset / engine spec.",
+      "description": "ClusterFireboltEngineClassSpec is the SKU-only catalog payload.\n\nIt carries a pod-template fragment: instance type / family, engine\ncontainer resources, node affinity / tolerations, and init-container\nnode setup. Namespace-resolved identifiers (serviceAccountName,\nSecret refs, IAM annotations) are rejected by the validating webhook\nand by the engine resolver's live-spec check. Storage, rollout,\ndrain-check, autoStop, uiSidecar, and customEngineConfig stay on the\nnamespaced FireboltEngineClass / FireboltEnginePreset / engine spec.",
       "properties": {
         "template": {
           "description": "Template is the SKU pod template merged into engines that resolve\nthis catalog object. See the type-level doc for the SKU-only lock\nand the operator-owned paths the validating webhook rejects.\n\nThe CRD schema for template.metadata is patched post-controller-gen\n(scripts/patch-crd-template-metadata.py, invoked by `make manifests`)\nso labels and annotations survive structural-schema pruning.",
@@ -7226,79 +7226,6 @@
       "required": [
         "template"
       ],
-      "type": "object",
-      "additionalProperties": false
-    },
-    "status": {
-      "description": "ClusterFireboltEngineClassStatus is the observed state of a\nClusterFireboltEngineClass.",
-      "properties": {
-        "boundEngines": {
-          "description": "BoundEngines counts FireboltEngines in any namespace that resolved\nspec.engineClassRef to this cluster object: the engine names this\nobject and no FireboltEngineClass of the same name exists in the\nengine's namespace. The deletion webhook and the reconciler's\ndeletion-guard finalizer re-list live rather than trusting this\ncached value.",
-          "format": "int32",
-          "type": "integer"
-        },
-        "conditions": {
-          "description": "Conditions surface the catalog object's high-level state.",
-          "items": {
-            "description": "Condition contains details for one aspect of the current state of this API Resource.",
-            "properties": {
-              "lastTransitionTime": {
-                "description": "lastTransitionTime is the last time the condition transitioned from one status to another.\nThis should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.",
-                "format": "date-time",
-                "type": "string"
-              },
-              "message": {
-                "description": "message is a human readable message indicating details about the transition.\nThis may be an empty string.",
-                "maxLength": 32768,
-                "type": "string"
-              },
-              "observedGeneration": {
-                "description": "observedGeneration represents the .metadata.generation that the condition was set based upon.\nFor instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date\nwith respect to the current state of the instance.",
-                "format": "int64",
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "description": "reason contains a programmatic identifier indicating the reason for the condition's last transition.\nProducers of specific condition types may define expected values and meanings for this field,\nand whether the values are considered a guaranteed API.\nThe value should be a CamelCase string.\nThis field may not be empty.",
-                "maxLength": 1024,
-                "minLength": 1,
-                "pattern": "^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$",
-                "type": "string"
-              },
-              "status": {
-                "description": "status of the condition, one of True, False, Unknown.",
-                "enum": [
-                  "True",
-                  "False",
-                  "Unknown"
-                ],
-                "type": "string"
-              },
-              "type": {
-                "description": "type of condition in CamelCase or in foo.example.com/CamelCase.",
-                "maxLength": 316,
-                "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$",
-                "type": "string"
-              }
-            },
-            "required": [
-              "lastTransitionTime",
-              "message",
-              "reason",
-              "status",
-              "type"
-            ],
-            "type": "object",
-            "additionalProperties": false
-          },
-          "type": "array"
-        },
-        "observedGeneration": {
-          "description": "ObservedGeneration is the metadata.generation last reconciled.",
-          "format": "int64",
-          "type": "integer"
-        }
-      },
       "type": "object",
       "additionalProperties": false
     }

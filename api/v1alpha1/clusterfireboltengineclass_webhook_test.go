@@ -24,7 +24,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func validClusterFireboltEngineClass() *ClusterFireboltEngineClass {
@@ -66,50 +65,10 @@ func TestClusterFireboltEngineClassValidator_RejectsServiceAccount(t *testing.T)
 	}
 }
 
-func TestClusterFireboltEngineClassValidator_RejectsDeleteWhileResolved(t *testing.T) {
-	scheme := fireboltEngineClassWebhookScheme(t)
+func TestClusterFireboltEngineClassValidator_DeleteIsAlwaysAllowed(t *testing.T) {
 	cc := validClusterFireboltEngineClass()
-	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		fireboltEngineRefingClass("e1", "ns-a", cc.Name),
-		fireboltEngineRefingClass("e2", "ns-b", cc.Name),
-		// Namespaced override: this engine must not count.
-		&FireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: cc.Name, Namespace: "ns-c"}},
-		fireboltEngineRefingClass("e3", "ns-c", cc.Name),
-	).Build()
-	v := &ClusterFireboltEngineClassCustomValidator{Reader: reader}
-	_, err := v.ValidateDelete(context.Background(), cc)
-	if err == nil {
-		t.Fatal("ValidateDelete: expected refusal while engines resolve to the catalog")
-	}
-	if !strings.Contains(err.Error(), "2 FireboltEngine") {
-		t.Errorf("error %q does not mention resolved count 2", err.Error())
-	}
-}
-
-func TestClusterFireboltEngineClassValidator_AllowsDeleteWhenOnlyNamespacedOverride(t *testing.T) {
-	scheme := fireboltEngineClassWebhookScheme(t)
-	cc := validClusterFireboltEngineClass()
-	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		&FireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: cc.Name, Namespace: "ns-a"}},
-		fireboltEngineRefingClass("e1", "ns-a", cc.Name),
-	).Build()
-	v := &ClusterFireboltEngineClassCustomValidator{Reader: reader}
-	if _, err := v.ValidateDelete(context.Background(), cc); err != nil {
-		t.Fatalf("ValidateDelete: namespaced override must not block catalog delete: %v", err)
-	}
-}
-
-func TestClusterFireboltEngineClassValidator_AllowsDeleteWhenUnbound(t *testing.T) {
-	scheme := fireboltEngineClassWebhookScheme(t)
-	v := &ClusterFireboltEngineClassCustomValidator{Reader: fake.NewClientBuilder().WithScheme(scheme).Build()}
-	if _, err := v.ValidateDelete(context.Background(), validClusterFireboltEngineClass()); err != nil {
-		t.Fatalf("ValidateDelete: unexpected refusal with no engines: %v", err)
-	}
-}
-
-func TestClusterFireboltEngineClassValidator_DeleteFailsWithoutReader(t *testing.T) {
 	v := &ClusterFireboltEngineClassCustomValidator{}
-	if _, err := v.ValidateDelete(context.Background(), validClusterFireboltEngineClass()); err == nil {
-		t.Fatal("ValidateDelete: expected error when Reader is nil")
+	if _, err := v.ValidateDelete(context.Background(), cc); err != nil {
+		t.Fatalf("ValidateDelete: %v", err)
 	}
 }

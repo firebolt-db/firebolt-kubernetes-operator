@@ -75,6 +75,13 @@ rules:
   - compute.firebolt.io
   resources:
   - clusterfireboltengineclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - compute.firebolt.io
+  resources:
   - fireboltengineclasses
   - fireboltenginepresets
   verbs:
@@ -86,7 +93,6 @@ rules:
 - apiGroups:
   - compute.firebolt.io
   resources:
-  - clusterfireboltengineclasses/finalizers
   - fireboltengineclasses/finalizers
   - fireboltenginepresets/finalizers
   - fireboltengines/finalizers
@@ -96,7 +102,6 @@ rules:
 - apiGroups:
   - compute.firebolt.io
   resources:
-  - clusterfireboltengineclasses/status
   - fireboltengineclasses/status
   - fireboltenginepresets/status
   - fireboltengines/status

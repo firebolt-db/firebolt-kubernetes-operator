@@ -186,11 +186,12 @@ helm upgrade --skip-crds --install firebolt-operator \
 ```
 
 The chart then renders a `Role` plus `RoleBinding` in each listed
-namespace (carrying the same rule set the `ClusterRole` would have)
-and starts the manager with `--namespaces=tenant-a,tenant-b` so its
-cache only spans those namespaces. The Firebolt Operator's blast
-radius is bounded to that list; CRs created in other namespaces are
-silently ignored.
+namespace for namespaced resources, plus a `ClusterRole` granting
+`get/list/watch` on `ClusterFireboltEngineClass` so engines can resolve
+the shared SKU catalog. The manager starts with
+`--namespaces=tenant-a,tenant-b` so its cache only spans those
+namespaces. The Firebolt Operator's blast radius is bounded to that
+list; CRs created in other namespaces are silently ignored.
 
 To onboard a new tenant namespace, add it to `watchNamespaces` and
 re-run `helm upgrade`. The new `Role` and `RoleBinding` land in the

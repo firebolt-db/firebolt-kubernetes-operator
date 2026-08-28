@@ -10,8 +10,9 @@ needs the SAME rule set in two shapes:
     one `ClusterRoleBinding`.
   - namespaced install (`watchNamespaces=[ns1, ns2, …]`): one `Role`
     plus one `RoleBinding` in each listed namespace for namespaced
-    resources, plus a ClusterRole for cluster-scoped CRs and the
-    cluster-wide engine/class list the catalog deletion guard needs.
+    resources, plus a ClusterRole for cluster-scoped CRs
+    (ClusterFireboltEngineClass get/list/watch). Engine reconcilers
+    consume the catalog read-only; they do not write it.
 
 Both shapes live in a single generated template
 `helm/firebolt-operator/templates/manager-rbac.yaml`. The chart toggle
@@ -45,8 +46,7 @@ be overwritten on the next `make manifests`.
 Empty `watchNamespaces` renders a cluster-wide ClusterRole +
 ClusterRoleBinding. A non-empty list renders a Role + RoleBinding in
 each listed namespace for namespaced resources, plus a ClusterRole
-for cluster-scoped CRs (ClusterFireboltEngineClass) and the
-cluster-wide engine/class list the catalog deletion guard needs.
+for cluster-scoped CRs (ClusterFireboltEngineClass get/list/watch).
 */ -}}
 {{- if .Values.rbac.create -}}
 {{- if empty .Values.watchNamespaces }}
@@ -177,17 +177,6 @@ FOOTER = "{{- end }}\n"
 # start with these prefixes always land in a ClusterRole.
 CLUSTER_SCOPED_PREFIXES = ("clusterfireboltengineclasses",)
 
-# Namespaced installs still need a cluster-wide list of engines and
-# namespaced classes so the catalog deletion guard can see every
-# engine that resolved to a ClusterFireboltEngineClass.
-CLUSTER_GUARD_RULES = [
-    {
-        "apiGroups": ["compute.firebolt.io"],
-        "resources": ["fireboltengines", "fireboltengineclasses"],
-        "verbs": ["get", "list"],
-    },
-]
-
 
 def is_cluster_scoped(resource: str) -> bool:
     return any(resource == p or resource.startswith(p + "/") for p in CLUSTER_SCOPED_PREFIXES)
@@ -255,7 +244,7 @@ def main() -> int:
     cluster_rules, namespaced_rules = split_rules(rules)
     all_rules_body = render_rules(rules)
     namespaced_rules_body = render_rules(namespaced_rules)
-    cluster_ns_rules_body = render_rules(cluster_rules + CLUSTER_GUARD_RULES)
+    cluster_ns_rules_body = render_rules(cluster_rules)
 
     rendered = (
         HEADER

@@ -71,16 +71,12 @@ webhooks:
       {{- with .Values.webhook.caBundle }}
       caBundle: {{ . | quote }}
       {{- end }}
-    # DELETE is included so the webhook can block deletion of a
-    # ClusterFireboltEngineClass while any FireboltEngine in any
-    # namespace has resolved to it (spec.engineClassRef matches and no
-    # namespaced FireboltEngineClass of the same name exists in that
-    # engine's namespace). The check lists engines and namespaced
-    # classes live from the API server. failurePolicy: Fail (set via
-    # values) is the load-bearing piece — a webhook outage must not
-    # open a window in which a resolved catalog object can be removed.
+    # CREATE and UPDATE reject operator-owned paths and namespace-resolved
+    # identifiers. DELETE is omitted: the catalog is shared and plane-owned;
+    # engines that still name a deleted SKU emit EngineClassNotFound and
+    # keep the last applied pods.
     rules:
-      - operations: ["CREATE", "UPDATE", "DELETE"]
+      - operations: ["CREATE", "UPDATE"]
         apiGroups: ["compute.firebolt.io"]
         apiVersions: ["v1alpha1"]
         resources: ["clusterfireboltengineclasses"]

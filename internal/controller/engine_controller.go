@@ -80,6 +80,13 @@ const reasonExternalFinalizer = "ExternalFinalizer"
 // collection, since the condition disappears with the CR.
 const eventReasonExternalFinalizer = "ExternalFinalizerOnOwnedResource"
 
+// eventReasonEngineClassNotFound is the Reason on the Warning Event
+// emitted when spec.engineClassRef matches neither a namespaced
+// FireboltEngineClass nor a ClusterFireboltEngineClass. The Event
+// names both lookups; ConditionReady is not rewritten (missing class
+// is not a lifecycle).
+const eventReasonEngineClassNotFound = "EngineClassNotFound"
+
 // FireboltEngineReconciler reconciles FireboltEngine objects by managing
 // blue-green generational deployments of Firebolt engine StatefulSets.
 type FireboltEngineReconciler struct {
@@ -279,26 +286,26 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// class-inherited settings (rollout, drainCheckEnabled, autoStop), and
 	// computeEngineReconcile merges the class template / storage / config.
 	//
-	// Fail-closed (missing class, Ready=False/OperatorOwnedFieldSet) is a
-	// render gate: it applies in stable, stopped, and creating, the same
-	// window as the Instance gate. switching / draining / cleaning already
-	// hold rendered resources and must finish even if the class became
-	// inadmissible; draining still uses the class for inherited drain
-	// settings. Resolution is bubbled up to controller-runtime on every
-	// failure outside that bypass. NotFound is normally caught at admission
-	// by the FireboltEngine validating webhook, but the helm chart ships
-	// webhooks disabled by default, so a missing class can reach this point
-	// in dev/test deployments. We intentionally do NOT mint a dedicated
-	// FireboltEngineClassReady condition for the missing-class case: the state
-	// space is binary (exists / doesn't), not a lifecycle worth narrating like
-	// InstanceReady.
+	// Fail-closed (missing class, Ready=False/OperatorOwnedFieldSet, or
+	// a catalog live spec that fails SKU-only / operator-owned checks)
+	// is a render gate: it applies in stable, stopped, and creating,
+	// the same window as the Instance gate. switching / draining /
+	// cleaning already hold rendered resources and must finish even if
+	// the class became inadmissible; draining still uses the class for
+	// inherited drain settings. Resolution is bubbled up to
+	// controller-runtime on every failure outside that bypass. NotFound
+	// is normally caught at admission by the FireboltEngine validating
+	// webhook, but the helm chart ships webhooks disabled by default,
+	// so a missing class can reach this point. handleFireboltEngineClassError
+	// emits a Warning Event naming both lookups; we do not mint a
+	// dedicated Ready condition — missing class is not a lifecycle.
 	//
-	// errFireboltEngineClassUnready is treated differently: the class exists
-	// but the FireboltEngineClassReconciler stamped Ready=False/
-	// OperatorOwnedFieldSet. handleFireboltEngineClassError surfaces
+	// errFireboltEngineClassUnready is treated differently: the class
+	// exists but is inadmissible (namespaced Ready=False/OperatorOwnedFieldSet,
+	// or a catalog live spec that fails the SKU-only / owned-path check).
+	// handleFireboltEngineClassError surfaces
 	// ConditionReady=False/FireboltEngineClassUnready on the engine and
-	// refuses to render a StatefulSet off it. The FireboltEngine watch on
-	// FireboltEngineClass re-enqueues when the class status changes.
+	// refuses to render a StatefulSet off it.
 	needsRender := engineNeedsRender(engine.Status.Phase)
 	overlays, overlayRes, overlayErr := r.resolveEngineOverlays(ctx, engine, needsRender)
 	if overlayErr != nil || overlayRes != (ctrl.Result{}) {
@@ -935,15 +942,21 @@ func setDrainCheckFailingCondition(status *computev1alpha1.FireboltEngineStatus,
 }
 
 // handleFireboltEngineClassError translates a non-nil error from
-// resolveFireboltEngineClassInfo into the appropriate Reconcile result. The
+// resolveFireboltEngineClassInfo into the appropriate Reconcile result.
+// Missing class emits a Warning Event naming both lookups and bubbles
+// the error for backoff; ConditionReady is left alone. The
 // errFireboltEngineClassUnready branch surfaces ConditionReady=False/
 // FireboltEngineClassUnready on the engine and requeues without returning
 // an error to controller-runtime (the engine is correctly reconciled
 // given the unready class; backoff would only delay the next
-// reactive watch event). Every other error — a missing class, an
-// apiserver outage — is bubbled up so controller-runtime applies
-// exponential backoff per the existing missing-class contract.
+// reactive watch event). API-read failures bubble for backoff.
 func (r *FireboltEngineReconciler) handleFireboltEngineClassError(ctx context.Context, engine *computev1alpha1.FireboltEngine, classErr error) (ctrl.Result, error) {
+	if stderrors.Is(classErr, errFireboltEngineClassNotFound) {
+		if r.EventRecorder != nil {
+			r.EventRecorder.Eventf(engine, nil, corev1.EventTypeWarning, eventReasonEngineClassNotFound, "Reconcile", "%s", classErr.Error())
+		}
+		return ctrl.Result{}, classErr
+	}
 	if !stderrors.Is(classErr, errFireboltEngineClassUnready) {
 		return ctrl.Result{}, classErr
 	}
@@ -1386,15 +1399,9 @@ func isInstanceConditionTrue(conds []metav1.Condition) bool {
 }
 
 // errFireboltEngineClassNotFound is returned by resolveFireboltEngineClassInfo
-// when the engine's spec.engineClassRef names a FireboltEngineClass that
-// does not exist in the engine's namespace. Wrapping via stderrors.Is lets
-// future callers distinguish this user-actionable case (typo, class in wrong
-// namespace) from transient API errors (apiserver down, RBAC race).
-// Today's single caller — Reconcile — bubbles both kinds up to
-// controller-runtime for backoff retry; admission catches the
-// missing-class case in normal deployments. The sentinel earns its
-// keep against future evolution: an Event emitter on the engine, or a
-// different log severity on the actionable path, would key off it.
+// when spec.engineClassRef matches neither a FireboltEngineClass in the
+// engine namespace nor a ClusterFireboltEngineClass of that name.
+// Reconcile emits a Warning Event and bubbles the error for backoff.
 var errFireboltEngineClassNotFound = stderrors.New("FireboltEngineClass referenced by spec.engineClassRef not found")
 
 // errFireboltEngineClassUnready is returned by resolveFireboltEngineClassInfo
@@ -1541,21 +1548,29 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 
 // resolveClusterFireboltEngineClassInfo is the namespaced-miss fallback:
 // Get ClusterFireboltEngineClass/<name>. Missing both objects is the
-// existing not-found gate. Unready (OperatorOwnedFieldSet or
-// NamespaceResolvedFieldSet) is the existing unready gate.
+// existing not-found gate. The live spec is re-validated here (operator-
+// owned paths and SKU-only) because no catalog controller stamps Ready.
 func (r *FireboltEngineReconciler) resolveClusterFireboltEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineClassInfo, error) {
 	cc := &computev1alpha1.ClusterFireboltEngineClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: *engine.Spec.EngineClassRef}, cc); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: %q in namespace %q", errFireboltEngineClassNotFound, *engine.Spec.EngineClassRef, engine.Namespace)
+			ref := *engine.Spec.EngineClassRef
+			return nil, fmt.Errorf("%w: spec.engineClassRef %q: FireboltEngineClass %s/%s not found, ClusterFireboltEngineClass %s not found",
+				errFireboltEngineClassNotFound, ref, engine.Namespace, ref, ref)
 		}
 		return nil, fmt.Errorf("getting ClusterFireboltEngineClass %q: %w", *engine.Spec.EngineClassRef, err)
 	}
-	if cond := apimeta.FindStatusCondition(cc.Status.Conditions, computev1alpha1.ClusterFireboltEngineClassConditionReady); classReadyBlocksRender(cond) {
+	if errs := clusterClassLiveSpecErrors(&cc.Spec.Template); len(errs) > 0 {
 		return newClusterFireboltEngineClassInfo(cc), fmt.Errorf("%w: ClusterFireboltEngineClass %q: %s",
-			errFireboltEngineClassUnready, cc.Name, cond.Message)
+			errFireboltEngineClassUnready, cc.Name, errs.ToAggregate().Error())
 	}
 	return newClusterFireboltEngineClassInfo(cc), nil
+}
+
+func clusterClassLiveSpecErrors(template *corev1.PodTemplateSpec) field.ErrorList {
+	base := field.NewPath("spec", "template")
+	errs := computev1alpha1.ValidateOperatorOwnedPodTemplate(template, base)
+	return append(errs, computev1alpha1.ValidateClusterEngineClassSKUOnly(template, base)...)
 }
 
 var (
@@ -1964,8 +1979,8 @@ func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj
 
 // clusterEngineClassToEngines maps a ClusterFireboltEngineClass event to
 // reconcile requests for every FireboltEngine whose spec.engineClassRef
-// matches the catalog name. The list is cluster-wide: a catalog edit
-// changes the effective template of every engine that resolved that name.
+// matches the catalog name. The list uses the manager cache, so a
+// namespaced install only enqueues engines in watchNamespaces.
 func (r *FireboltEngineReconciler) clusterEngineClassToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
 	className := obj.GetName()
 	engineList := &computev1alpha1.FireboltEngineList{}

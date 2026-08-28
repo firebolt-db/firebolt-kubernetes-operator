@@ -27,9 +27,9 @@ import (
 // container resources, node affinity / tolerations, and init-container
 // node setup. Namespace-resolved identifiers (serviceAccountName,
 // Secret refs, IAM annotations) are rejected by the validating webhook
-// and by the controller's Ready condition. Storage, rollout, drain-check,
-// autoStop, uiSidecar, and customEngineConfig stay on the namespaced
-// FireboltEngineClass / FireboltEnginePreset / engine spec.
+// and by the engine resolver's live-spec check. Storage, rollout,
+// drain-check, autoStop, uiSidecar, and customEngineConfig stay on the
+// namespaced FireboltEngineClass / FireboltEnginePreset / engine spec.
 type ClusterFireboltEngineClassSpec struct {
 	// Template is the SKU pod template merged into engines that resolve
 	// this catalog object. See the type-level doc for the SKU-only lock
@@ -41,36 +41,8 @@ type ClusterFireboltEngineClassSpec struct {
 	Template corev1.PodTemplateSpec `json:"template"`
 }
 
-// ClusterFireboltEngineClassStatus is the observed state of a
-// ClusterFireboltEngineClass.
-type ClusterFireboltEngineClassStatus struct {
-	// ObservedGeneration is the metadata.generation last reconciled.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// BoundEngines counts FireboltEngines in any namespace that resolved
-	// spec.engineClassRef to this cluster object: the engine names this
-	// object and no FireboltEngineClass of the same name exists in the
-	// engine's namespace. The deletion webhook and the reconciler's
-	// deletion-guard finalizer re-list live rather than trusting this
-	// cached value.
-	// +optional
-	BoundEngines int32 `json:"boundEngines,omitempty"`
-
-	// Conditions surface the catalog object's high-level state.
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// ClusterFireboltEngineClassConditionReady is the top-level roll-up
-// condition: True when spec.template is admissible and SKU-only.
-const ClusterFireboltEngineClassConditionReady = "Ready"
-
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=cfirengc
-// +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Bound",type=integer,JSONPath=`.status.boundEngines`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.
@@ -82,12 +54,17 @@ const ClusterFireboltEngineClassConditionReady = "Ready"
 // Namespace-resolved identifiers (ServiceAccount name, Secret refs, IAM
 // annotations) belong on FireboltEnginePreset, not here. A namespaced
 // FireboltEngineClass of the same name is an explicit override.
+//
+// The operator does not reconcile this object: it is authored by
+// cluster admins or a cell manager, and consumed read-only by engine
+// reconcilers. Deleting it does not tear down running pods; engines
+// that still name it emit EngineClassNotFound and keep the last
+// applied StatefulSet.
 type ClusterFireboltEngineClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ClusterFireboltEngineClassSpec   `json:"spec,omitempty"`
-	Status ClusterFireboltEngineClassStatus `json:"status,omitempty"`
+	Spec ClusterFireboltEngineClassSpec `json:"spec,omitempty"`
 }
 
 // +kubebuilder:object:root=true

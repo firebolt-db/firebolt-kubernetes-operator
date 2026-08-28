@@ -345,14 +345,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "FireboltEnginePreset")
 		os.Exit(1)
 	}
-	if err := (&controller.ClusterFireboltEngineClassReconciler{
-		Client: mgr.GetClient(),
-		Reader: mgr.GetAPIReader(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ClusterFireboltEngineClass")
-		os.Exit(1)
-	}
 	if enableWebhooks {
 		if err := setupAdmissionWebhooks(mgr, &engineBounds); err != nil {
 			setupLog.Error(err, "unable to create webhooks")

@@ -108,3 +108,5 @@ kubectl get firengc production -n firebolt
 Class deletion remains blocked while Engines in the same namespace reference it. Remove or replace `spec.engineClassRef` on every bound Engine, wait for those updates to reconcile, then delete the class.
 
 If deletion is blocked, `status.conditions[type=Ready]` reports reason `DeletionBlocked` and `status.boundEngines` shows the current consumer count.
+
+`ClusterFireboltEngineClass` delete is not blocked. Engines that still name the SKU emit a Warning `EngineClassNotFound` Event and keep running the last applied pods until the catalog object is restored or `spec.engineClassRef` is changed.

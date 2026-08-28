@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -146,9 +147,9 @@ func TestResolveFireboltEngineClassInfo_NamespacedLookup(t *testing.T) {
 	})
 }
 
-func clusterClassOnlyFixture(name string) *computev1alpha1.ClusterFireboltEngineClass {
+func clusterClassOnlyFixture() *computev1alpha1.ClusterFireboltEngineClass {
 	return &computev1alpha1.ClusterFireboltEngineClass{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: "s-amd-co"},
 		Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
@@ -165,17 +166,6 @@ func clusterClassOnlyFixture(name string) *computev1alpha1.ClusterFireboltEngine
 	}
 }
 
-func clusterClassWithReady(name string, status metav1.ConditionStatus, reason, message string) *computev1alpha1.ClusterFireboltEngineClass {
-	cc := clusterClassOnlyFixture(name)
-	apimeta.SetStatusCondition(&cc.Status.Conditions, metav1.Condition{
-		Type:    computev1alpha1.ClusterFireboltEngineClassConditionReady,
-		Status:  status,
-		Reason:  reason,
-		Message: message,
-	})
-	return cc
-}
-
 // TestResolveFireboltEngineClassInfo_ClusterFallback pins namespaced-first
 // resolve: a ClusterFireboltEngineClass of the same name is used only when
 // no FireboltEngineClass exists in the engine namespace. Same-name objects
@@ -185,7 +175,7 @@ func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
 
 	t.Run("cluster-only resolve", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
-			clusterClassOnlyFixture("s-amd-co"),
+			clusterClassOnlyFixture(),
 		).Build()
 		r := engineRefTestReconciler(cli, sch)
 		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
@@ -213,7 +203,7 @@ func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
 	t.Run("namespaced class in another namespace does not override", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			classOnlyFixture("s-amd-co", "ns-b"),
-			clusterClassOnlyFixture("s-amd-co"),
+			clusterClassOnlyFixture(),
 		).Build()
 		r := engineRefTestReconciler(cli, sch)
 		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
@@ -229,7 +219,7 @@ func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
 	t.Run("namespaced same-name wins over cluster", func(t *testing.T) {
 		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
 			classOnlyFixture("s-amd-co", "ns-a"),
-			clusterClassOnlyFixture("s-amd-co"),
+			clusterClassOnlyFixture(),
 		).Build()
 		r := engineRefTestReconciler(cli, sch)
 		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
@@ -259,22 +249,29 @@ func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
 		if !stderrors.Is(err, errFireboltEngineClassNotFound) {
 			t.Errorf("error %q does not wrap errFireboltEngineClassNotFound", err.Error())
 		}
+		if !strings.Contains(err.Error(), "FireboltEngineClass ns-a/s-amd-co") {
+			t.Errorf("error %q does not name the namespaced lookup", err.Error())
+		}
+		if !strings.Contains(err.Error(), "ClusterFireboltEngineClass s-amd-co") {
+			t.Errorf("error %q does not name the catalog lookup", err.Error())
+		}
 	})
 
-	t.Run("unready cluster class is gated", func(t *testing.T) {
-		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
-			clusterClassWithReady("s-amd-co",
-				metav1.ConditionFalse, reasonOperatorOwnedFieldSet,
-				"spec.template.spec.containers[0].command: Forbidden"),
-		).Build()
+	t.Run("live serviceAccountName on catalog is gated", func(t *testing.T) {
+		cc := clusterClassOnlyFixture()
+		cc.Spec.Template.Spec.ServiceAccountName = "tenant-sa"
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(cc).Build()
 		r := engineRefTestReconciler(cli, sch)
 		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
 		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
 		if err == nil {
-			t.Fatal("expected unready error")
+			t.Fatal("expected unready error for catalog serviceAccountName")
 		}
 		if !stderrors.Is(err, errFireboltEngineClassUnready) {
 			t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
+		}
+		if !strings.Contains(err.Error(), "serviceAccountName") {
+			t.Errorf("error %q does not name serviceAccountName", err.Error())
 		}
 		if info == nil {
 			t.Error("info = nil, want the cluster class so a mid-rollout drain can still read it")
@@ -319,6 +316,23 @@ func TestFireboltEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	want := []string{"a", "b"}
 	if len(gotNames) != len(want) || gotNames[0] != want[0] || gotNames[1] != want[1] {
 		t.Errorf("enqueued engines = %v, want %v (cross-namespace engine e must be filtered out)", gotNames, want)
+	}
+}
+
+func TestClusterEngineClassToEngines_AllNamespaces(t *testing.T) {
+	sch := classRefTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		engineRefingClassFixture("a", "ns-a", "s-amd-co"),
+		engineRefingClassFixture("b", "ns-b", "s-amd-co"),
+		engineRefingClassFixture("c", "ns-a", "other"),
+	).Build()
+	r := engineRefTestReconciler(cli, sch)
+
+	got := r.clusterEngineClassToEngines(context.Background(), &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "s-amd-co"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("enqueued = %d, want 2 (every namespace that names the catalog)", len(got))
 	}
 }
 
@@ -536,6 +550,85 @@ func TestEngineReconcile_UnreadyClassSurfacesCondition(t *testing.T) {
 			names = append(names, stsList.Items[i].Name)
 		}
 		t.Errorf("StatefulSets = %v, want none (gate must short-circuit before applyEngineState)", names)
+	}
+}
+
+// TestEngineReconcile_MissingClassEmitsEvent pins the user-facing
+// signal when spec.engineClassRef matches nothing in either scope:
+// a Warning Event on the engine naming both lookups, no Ready
+// condition rewrite, and the error still bubbles for backoff.
+func TestEngineReconcile_MissingClassEmitsEvent(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const (
+		ns       = "ns-a"
+		instName = "parent-instance"
+		engName  = "engine-missing-class"
+		classRef = "s-amd-co"
+	)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata.ns-a.svc.cluster.local:50051",
+		},
+	}
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    instName,
+			EngineClassRef: func() *string { s := classRef; return &s }(),
+			Replicas:       1,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase: computev1alpha1.PhaseCreating,
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, engine).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+	rec := events.NewFakeRecorder(8)
+	r := &FireboltEngineReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
+		EventRecorder:   rec,
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+	}); err == nil {
+		t.Fatal("Reconcile: expected missing-class error for backoff")
+	} else if !stderrors.Is(err, errFireboltEngineClassNotFound) {
+		t.Fatalf("Reconcile: %v, want errFireboltEngineClassNotFound", err)
+	}
+
+	evs := drainEvents(rec)
+	if len(evs) != 1 {
+		t.Fatalf("events = %v, want exactly one Warning", evs)
+	}
+	ev := evs[0]
+	if !strings.Contains(ev, "Warning") || !strings.Contains(ev, eventReasonEngineClassNotFound) {
+		t.Errorf("Event %q does not look like Warning/%s", ev, eventReasonEngineClassNotFound)
+	}
+	if !strings.Contains(ev, "FireboltEngineClass ns-a/s-amd-co") {
+		t.Errorf("Event %q does not name the namespaced lookup", ev)
+	}
+	if !strings.Contains(ev, "ClusterFireboltEngineClass s-amd-co") {
+		t.Errorf("Event %q does not name the catalog lookup", ev)
+	}
+
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady); cond != nil {
+		t.Errorf("Ready = %+v, want no condition rewrite on missing class", cond)
 	}
 }
 

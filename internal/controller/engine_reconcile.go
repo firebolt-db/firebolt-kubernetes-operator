@@ -277,15 +277,15 @@ func newClusterFireboltEngineClassInfo(cc *computev1alpha1.ClusterFireboltEngine
 	}
 }
 
-// classReadyBlocksRender reports whether a Ready condition should
-// fail-close engine render. OperatorOwnedFieldSet is the namespaced
-// class gate; NamespaceResolvedFieldSet is the cluster catalog SKU-only
-// counterpart. DeletionBlocked is not a gate.
+// classReadyBlocksRender reports whether a namespaced class Ready
+// condition should fail-close engine render. OperatorOwnedFieldSet is
+// the gate; DeletionBlocked is not. Cluster catalog objects have no
+// Ready stamp — the engine resolver re-validates the live spec.
 func classReadyBlocksRender(cond *metav1.Condition) bool {
 	if cond == nil || cond.Status != metav1.ConditionFalse {
 		return false
 	}
-	return cond.Reason == reasonOperatorOwnedFieldSet || cond.Reason == reasonNamespaceResolvedFieldSet
+	return cond.Reason == reasonOperatorOwnedFieldSet
 }
 
 // computeEngineReconcile determines what resources need to be created, updated,
