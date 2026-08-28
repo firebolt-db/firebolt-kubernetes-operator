@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.0...firebolt-operator-v0.10.1) (2026-08-28)
+
+
+### Bug Fixes
+
+* **controller:** pin internal postgres image by multi-arch digest (FB-2544) ([#171](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/171)) ([f3311d4](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f3311d46e4972c6d01c4b1f14f04318988ab5761))
+
 ## [0.10.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.9.0...firebolt-operator-v0.10.0) (2026-08-25)
 
 
