@@ -17,11 +17,17 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -73,6 +79,197 @@ func TestBuildMetadataConfigYAMLSchema(t *testing.T) {
 			got := buildMetadataConfigYAML(inst)
 			if !strings.Contains(got, tc.want) {
 				t.Errorf("expected %q in rendered config; got:\n%s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestMetadataConfigHashInternalPostgresUsesConfigOnly(t *testing.T) {
+	instance := mkMetadataInstance()
+	configYAML := buildMetadataConfigYAML(instance)
+
+	// Internal PostgreSQL must use only the config hash and never read a Secret.
+	reconciler := &FireboltInstanceReconciler{}
+	got, err := reconciler.metadataConfigHash(context.Background(), instance, configYAML)
+	if err != nil {
+		t.Fatalf("metadataConfigHash: %v", err)
+	}
+	if want := contentHash(configYAML); got != want {
+		t.Fatalf("internal metadata config hash = %q, want config-only hash %q", got, want)
+	}
+}
+
+func TestMetadataConfigHashExternalPostgresUsesSecretResourceVersion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	instance := mkMetadataInstance()
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host: "postgres.example.com", Database: "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+	}
+	configYAML := buildMetadataConfigYAML(instance)
+	hashForSecret := func(secret *corev1.Secret) string {
+		t.Helper()
+		reconciler := &FireboltInstanceReconciler{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build(),
+		}
+		hash, err := reconciler.metadataConfigHash(context.Background(), instance, configYAML)
+		if err != nil {
+			t.Fatalf("metadataConfigHash: %v", err)
+		}
+		return hash
+	}
+
+	secret := func(resourceVersion, username, password string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "external-creds",
+				Namespace:       instance.Namespace,
+				ResourceVersion: resourceVersion,
+			},
+			Data: map[string][]byte{
+				"username": []byte(username),
+				"password": []byte(password),
+				"database": []byte("ignored"),
+			},
+		}
+	}
+	base := secret("10", "metadata-user", "password-one")
+	baseHash := hashForSecret(base)
+
+	sameCredentials := secret("11", "metadata-user", "password-one")
+	sameCredentials.Annotations = map[string]string{"synchronizer.example/version": "2"}
+	if got := hashForSecret(sameCredentials); got == baseHash {
+		t.Fatalf("Secret resource-version change did not change metadata config hash: %q", got)
+	}
+	differentCredentialsSameVersion := secret("10", "metadata-user-2", "password-two")
+	if got := hashForSecret(differentCredentialsSameVersion); got != baseHash {
+		t.Fatalf("credential bytes entered metadata config hash: got %q, want %q", got, baseHash)
+	}
+	for _, credential := range []string{"metadata-user", "password-one"} {
+		if strings.Contains(baseHash, credential) || baseHash == contentHash(credential) {
+			t.Fatalf("metadata config hash exposes an individual credential: %q", baseHash)
+		}
+	}
+}
+
+func TestEnsureMetadataDeploymentAppliesComputedConfigHash(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	instance := mkMetadataInstance()
+	instance.UID = types.UID("instance-uid")
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host: "postgres.example.com", Database: "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-creds", Namespace: instance.Namespace},
+		Data: map[string][]byte{
+			"username": []byte("metadata-user"),
+			"password": []byte("metadata-password"),
+		},
+	}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(instance, secret).Build()
+	reconciler := &FireboltInstanceReconciler{Client: client, Scheme: scheme}
+	configYAML := buildMetadataConfigYAML(instance)
+	want, err := reconciler.metadataConfigHash(context.Background(), instance, configYAML)
+	if err != nil {
+		t.Fatalf("metadataConfigHash: %v", err)
+	}
+
+	if err := reconciler.ensureMetadataDeployment(context.Background(), instance, configYAML); err != nil {
+		t.Fatalf("ensureMetadataDeployment: %v", err)
+	}
+	applied := &appsv1.Deployment{}
+	if err := client.Get(context.Background(), types.NamespacedName{
+		Namespace: instance.Namespace,
+		Name:      instance.Name + SuffixMetadataService,
+	}, applied); err != nil {
+		t.Fatalf("get applied metadata Deployment: %v", err)
+	}
+	if got := applied.Spec.Template.Annotations[AnnotationConfigHash]; got != want {
+		t.Fatalf("applied metadata config hash = %q, want %q", got, want)
+	}
+	if got := len(applied.Spec.Template.Annotations); got != 1 {
+		t.Fatalf("applied metadata Deployment has %d annotations, want one aggregate hash", got)
+	}
+}
+
+func TestMetadataCredentialsSecretMapsOnlyExternalReferences(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	referencing := mkMetadataInstance()
+	referencing.Name = "references-secret"
+	referencing.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host: "postgres.example.com", Database: "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+	}
+	other := mkMetadataInstance()
+	other.Name = "other-instance"
+	other.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host: "postgres.example.com", Database: "other",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "other-creds"},
+	}
+	internal := mkMetadataInstance()
+	internal.Name = "internal-instance"
+	reconciler := &FireboltInstanceReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(referencing, other, internal).
+			WithIndex(
+				&computev1alpha1.FireboltInstance{},
+				externalPostgresCredentialsSecretIndexField,
+				externalPostgresCredentialsSecretIndexValues,
+			).
+			Build(),
+	}
+
+	tests := []struct {
+		name        string
+		secretName  string
+		wantRequest string
+	}{
+		{
+			name:        "referenced external Secret",
+			secretName:  "external-creds",
+			wantRequest: referencing.Name,
+		},
+		{
+			name:       "unrelated Secret",
+			secretName: "unrelated",
+		},
+		{
+			name:       "operator-generated internal credentials Secret",
+			secretName: pgCredentialsSecretName(internal.Name),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := reconciler.mapMetadataCredentialsSecretToInstances(context.Background(), &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: tc.secretName, Namespace: referencing.Namespace},
+			})
+			if tc.wantRequest == "" {
+				if len(requests) != 0 {
+					t.Fatalf("mapped requests = %#v, want none", requests)
+				}
+				return
+			}
+			if len(requests) != 1 || requests[0].Name != tc.wantRequest ||
+				requests[0].Namespace != referencing.Namespace {
+				t.Fatalf("mapped requests = %#v, want only %s/%s",
+					requests, referencing.Namespace, tc.wantRequest)
 			}
 		})
 	}

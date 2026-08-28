@@ -35,6 +35,21 @@ The same scheduling window applies to the fail-closed EngineClass and FireboltEn
 
 An Engine may also reference one EngineClass in the same namespace through `spec.engineClassRef`. Settings resolve Engine, then FireboltEnginePreset, then EngineClass, then Firebolt Operator defaults. See [EngineClass configuration inheritance](./engineclass/configuration-inheritance).
 
+### External metadata PostgreSQL
+
+When `FireboltInstance.spec.metadata.postgres` is present, the Firebolt Operator
+does not create the internal PostgreSQL StatefulSet. It renders the supplied
+host, port, database, and schema into the Metadata Service configuration and
+mounts the referenced Secret directly; credential bytes are not copied into the
+Instance or ConfigMap.
+
+The Instance controller watches credential Secrets that its Instances reference.
+It folds the Secret's `resourceVersion` into the Metadata Service pod-template
+hash, so a credential change rolls the single metadata pod even though the
+Secret name and rendered configuration remain unchanged. This may also roll the
+pod after a metadata-only Secret update, but keeps credential bytes and their
+digests out of non-Secret objects.
+
 ## Query traffic
 
 Clients connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
