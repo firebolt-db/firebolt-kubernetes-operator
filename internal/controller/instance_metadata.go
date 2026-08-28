@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -263,8 +264,8 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 	}
 
 	name := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, secret); err != nil {
+	credentialsVersion, err := secretResourceVersion(ctx, r.Client, instance.Namespace, name)
+	if err != nil {
 		return "", fmt.Errorf("reading metadata credentials Secret %s/%s for rollout hash: %w",
 			instance.Namespace, name, err)
 	}
@@ -272,27 +273,42 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 		[]byte("metadata-config-and-postgres-secret-versions-v1"),
 		[]byte(configYAML),
 		[]byte(name),
-		[]byte(secret.ResourceVersion),
+		[]byte(credentialsVersion),
 	}
 
 	tls := instance.Spec.Metadata.Postgres.TLS
 	if tls != nil {
 		caName := tls.CASecretRef.Name
 		caKey := tls.CASecretRef.Key
-		caVersion, err := checkSecretKeyPresent(
+		if _, err := checkSecretKeyPresent(
 			ctx,
 			r.Client,
 			instance.Namespace,
 			caName,
 			caKey,
 			"external postgres CA Secret",
-		)
-		if err != nil {
+		); err != nil {
 			return "", fmt.Errorf("reading metadata postgres CA for rollout hash: %w", err)
+		}
+		caVersion, err := secretResourceVersion(ctx, r.Client, instance.Namespace, caName)
+		if err != nil {
+			return "", fmt.Errorf("reading metadata postgres CA version for rollout hash: %w", err)
 		}
 		hashParts = append(hashParts, []byte(caName), []byte(caKey), []byte(caVersion))
 	}
 	return aggregateContentHash(hashParts...), nil
+}
+
+// secretResourceVersion requests only object metadata. Keeping Secret data out
+// of this rollout-hash path makes the non-sensitive input boundary explicit.
+func secretResourceVersion(ctx context.Context, cli client.Client, namespace, name string) (string, error) {
+	metadata := &metav1.PartialObjectMetadata{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+	}
+	if err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, metadata); err != nil {
+		return "", err
+	}
+	return metadata.ResourceVersion, nil
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
