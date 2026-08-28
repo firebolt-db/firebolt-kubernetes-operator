@@ -4,16 +4,16 @@ description: Share Engine settings while allowing per-Engine overrides.
 sidebarTitle: Configuration inheritance
 ---
 
-A `FireboltEngineClass` provides reusable defaults to Engines in the same namespace. Set `FireboltEngine.spec.engineClassRef` to the class name.
+Set `FireboltEngine.spec.engineClassRef` to a class name. The Firebolt Operator resolves that name namespaced-first: a `FireboltEngineClass` in the Engine's namespace if present, otherwise a `ClusterFireboltEngineClass` of the same name. Same name in both scopes is allowed; the namespaced object is the override and wins wholesale.
 
 Values resolve in this order:
 
 1. The Engine value
 2. The namespace `FireboltEnginePreset` value, when one object exists
-3. The referenced EngineClass value
+3. The resolved class value (`FireboltEngineClass`, else `ClusterFireboltEngineClass`)
 4. The Firebolt Operator default
 
-An EngineClass is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims.
+`FireboltEngineClass` is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims. `ClusterFireboltEngineClass` is SKU-only: instance type, resources, affinity/tolerations, init containers, and an optional engine image. It does not carry ServiceAccount names, Secret refs, IAM annotations, storage, rollout, drain-check, autoStop, or `uiSidecar`. Those stay on the namespaced class, Preset, or Engine spec.
 
 ## Pod template precedence
 

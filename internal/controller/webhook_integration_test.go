@@ -173,6 +173,9 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
 	}
+	if err := computev1alpha1.SetupClusterFireboltEngineClassWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup ClusterFireboltEngineClass webhook: %w", err)
+	}
 
 	mgrCtx, cancel := context.WithCancel(context.Background())
 	suite.mgrCancel = cancel
@@ -222,6 +225,7 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 	sideEffectsNone := admissionregistrationv1.SideEffectClassNone
 	matchPolicyEquivalent := admissionregistrationv1.Equivalent
 	scopeNamespaced := admissionregistrationv1.NamespacedScope
+	scopeCluster := admissionregistrationv1.ClusterScope
 	timeout := int32(10)
 
 	mutating := &admissionregistrationv1.MutatingWebhookConfiguration{
@@ -304,6 +308,34 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 						APIVersions: []string{"v1alpha1"},
 						Resources:   []string{"fireboltengineclasses"},
 						Scope:       &scopeNamespaced,
+					},
+				}},
+				FailurePolicy:           &failPolicyFail,
+				SideEffects:             &sideEffectsNone,
+				MatchPolicy:             &matchPolicyEquivalent,
+				TimeoutSeconds:          &timeout,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+			{
+				Name: "vclusterfireboltengineclass.compute.firebolt.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-clusterfireboltengineclass"),
+					},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{
+					Operations: []admissionregistrationv1.OperationType{
+						admissionregistrationv1.Create,
+						admissionregistrationv1.Update,
+						admissionregistrationv1.Delete,
+					},
+					Rule: admissionregistrationv1.Rule{
+						APIGroups:   []string{"compute.firebolt.io"},
+						APIVersions: []string{"v1alpha1"},
+						Resources:   []string{"clusterfireboltengineclasses"},
+						Scope:       &scopeCluster,
 					},
 				}},
 				FailurePolicy:           &failPolicyFail,

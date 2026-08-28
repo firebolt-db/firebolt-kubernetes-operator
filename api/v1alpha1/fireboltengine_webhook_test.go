@@ -135,6 +135,24 @@ func TestFireboltEngineValidator_ClassInDifferentNamespaceIsRejected(t *testing.
 	}
 }
 
+func TestFireboltEngineValidator_ClusterClassIsAllowed(t *testing.T) {
+	sch := runtime.NewScheme()
+	if err := scheme.AddToScheme(sch); err != nil {
+		t.Fatalf("scheme.AddToScheme: %v", err)
+	}
+	if err := AddToScheme(sch); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	reader := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		&ClusterFireboltEngineClass{ObjectMeta: metav1.ObjectMeta{Name: "s-amd-co"}},
+	).Build()
+	v := &FireboltEngineCustomValidator{Reader: reader}
+	eng := fireboltEngineWithRef(ptr.To("s-amd-co"))
+	if _, err := v.ValidateCreate(context.Background(), eng); err != nil {
+		t.Fatalf("ValidateCreate: cluster catalog should satisfy engineClassRef, got %v", err)
+	}
+}
+
 func TestFireboltEngineValidator_DeleteIsNoOp(t *testing.T) {
 	v := &FireboltEngineCustomValidator{Reader: fakeReaderWithClasses(t)}
 	if _, err := v.ValidateDelete(context.Background(), fireboltEngineWithRef(ptr.To("any"))); err != nil {

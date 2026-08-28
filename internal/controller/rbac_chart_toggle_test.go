@@ -117,6 +117,9 @@ func TestChartRBACToggle_ClusterWideDefault(t *testing.T) {
 	if got := count(ms, "ClusterRole", "firebolt-operator-apiserver-proxy"); len(got) != 0 {
 		t.Errorf("rbac.apiserverProxyGrant off must not render apiserver-proxy ClusterRole; got %d", len(got))
 	}
+	if got := count(ms, "ClusterRole", "firebolt-operator-cluster-resources"); len(got) != 0 {
+		t.Errorf("cluster-wide mode must not render the namespaced-install cluster-resources ClusterRole; got %d", len(got))
+	}
 }
 
 func TestChartRBACToggle_Namespaced(t *testing.T) {
@@ -136,6 +139,12 @@ func TestChartRBACToggle_Namespaced(t *testing.T) {
 	bindings := count(ms, "RoleBinding", "firebolt-operator-manager", "tenant-a", "tenant-b")
 	if len(bindings) != 2 {
 		t.Errorf("RoleBinding firebolt-operator-manager across tenant-a,tenant-b: want 2, got %d", len(bindings))
+	}
+	if got := count(ms, "ClusterRole", "firebolt-operator-cluster-resources"); len(got) != 1 {
+		t.Errorf("namespaced mode must render cluster-resources ClusterRole; got %d", len(got))
+	}
+	if got := count(ms, "ClusterRoleBinding", "firebolt-operator-cluster-resources"); len(got) != 1 {
+		t.Errorf("namespaced mode must render cluster-resources ClusterRoleBinding; got %d", len(got))
 	}
 }
 

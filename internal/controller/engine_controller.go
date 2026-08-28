@@ -150,6 +150,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines/finalizers,verbs=update
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengineclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengineclasses/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=compute.firebolt.io,resources=clusterfireboltengineclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
@@ -1487,10 +1488,9 @@ const reasonResourceBoundsExceeded = "ResourceBoundsExceeded"
 // content hash. Returns nil info (and no error) when no class is
 // referenced — that engine falls back to operator defaults.
 //
-// FireboltEngineClass is namespaced; the lookup is scoped to the engine's
-// namespace, matching the FireboltEngine validating webhook and how
-// Kubernetes resolves the volume / SA / secret refs the template
-// carries.
+// Resolution is namespaced-first: FireboltEngineClass in the engine's
+// namespace if present, otherwise ClusterFireboltEngineClass of the
+// same name. That matches the FireboltEngine validating webhook.
 //
 // Admission normally rejects a missing engineClassRef. A NotFound at
 // reconcile time means either the class was removed out of band (force
@@ -1525,12 +1525,11 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 	key := types.NamespacedName{Name: *engine.Spec.EngineClassRef, Namespace: engine.Namespace}
 	if err := r.Get(ctx, key, class); err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("%w: %q in namespace %q", errFireboltEngineClassNotFound, *engine.Spec.EngineClassRef, engine.Namespace)
+			return r.resolveClusterFireboltEngineClassInfo(ctx, engine)
 		}
 		return nil, fmt.Errorf("getting FireboltEngineClass %q in namespace %q: %w", *engine.Spec.EngineClassRef, engine.Namespace, err)
 	}
-	if cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady); cond != nil &&
-		cond.Status == metav1.ConditionFalse && cond.Reason == reasonOperatorOwnedFieldSet {
+	if cond := apimeta.FindStatusCondition(class.Status.Conditions, computev1alpha1.FireboltEngineClassConditionReady); classReadyBlocksRender(cond) {
 		// Return the info alongside the error so a mid-rollout pass can
 		// still read drain settings (rollout, drainCheckEnabled, interval)
 		// without rendering the inadmissible template.
@@ -1538,6 +1537,25 @@ func (r *FireboltEngineReconciler) resolveFireboltEngineClassInfo(ctx context.Co
 			errFireboltEngineClassUnready, class.Name, class.Namespace, cond.Message)
 	}
 	return newFireboltEngineClassInfo(class), nil
+}
+
+// resolveClusterFireboltEngineClassInfo is the namespaced-miss fallback:
+// Get ClusterFireboltEngineClass/<name>. Missing both objects is the
+// existing not-found gate. Unready (OperatorOwnedFieldSet or
+// NamespaceResolvedFieldSet) is the existing unready gate.
+func (r *FireboltEngineReconciler) resolveClusterFireboltEngineClassInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEngineClassInfo, error) {
+	cc := &computev1alpha1.ClusterFireboltEngineClass{}
+	if err := r.Get(ctx, client.ObjectKey{Name: *engine.Spec.EngineClassRef}, cc); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: %q in namespace %q", errFireboltEngineClassNotFound, *engine.Spec.EngineClassRef, engine.Namespace)
+		}
+		return nil, fmt.Errorf("getting ClusterFireboltEngineClass %q: %w", *engine.Spec.EngineClassRef, err)
+	}
+	if cond := apimeta.FindStatusCondition(cc.Status.Conditions, computev1alpha1.ClusterFireboltEngineClassConditionReady); classReadyBlocksRender(cond) {
+		return newClusterFireboltEngineClassInfo(cc), fmt.Errorf("%w: ClusterFireboltEngineClass %q: %s",
+			errFireboltEngineClassUnready, cc.Name, cond.Message)
+	}
+	return newClusterFireboltEngineClassInfo(cc), nil
 }
 
 var (
@@ -1887,6 +1905,8 @@ func (r *FireboltEngineReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name 
 			handler.EnqueueRequestsFromMapFunc(r.instanceToEngines)).
 		Watches(&computev1alpha1.FireboltEngineClass{},
 			handler.EnqueueRequestsFromMapFunc(r.engineClassToEngines)).
+		Watches(&computev1alpha1.ClusterFireboltEngineClass{},
+			handler.EnqueueRequestsFromMapFunc(r.clusterEngineClassToEngines)).
 		Watches(&computev1alpha1.FireboltEnginePreset{},
 			handler.EnqueueRequestsFromMapFunc(r.enginePresetToEngines)).
 		Owns(&appsv1.StatefulSet{}).
@@ -1924,6 +1944,33 @@ func (r *FireboltEngineReconciler) engineClassToEngines(ctx context.Context, obj
 	engineList := &computev1alpha1.FireboltEngineList{}
 	if err := r.List(ctx, engineList, client.InNamespace(classNamespace)); err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to list engines for FireboltEngineClass watch", "fireboltengineclass", className, "namespace", classNamespace)
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(engineList.Items))
+	for i := range engineList.Items {
+		ref := engineList.Items[i].Spec.EngineClassRef
+		if ref == nil || *ref != className {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      engineList.Items[i].Name,
+				Namespace: engineList.Items[i].Namespace,
+			},
+		})
+	}
+	return requests
+}
+
+// clusterEngineClassToEngines maps a ClusterFireboltEngineClass event to
+// reconcile requests for every FireboltEngine whose spec.engineClassRef
+// matches the catalog name. The list is cluster-wide: a catalog edit
+// changes the effective template of every engine that resolved that name.
+func (r *FireboltEngineReconciler) clusterEngineClassToEngines(ctx context.Context, obj client.Object) []reconcile.Request {
+	className := obj.GetName()
+	engineList := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engineList); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for ClusterFireboltEngineClass watch", "clusterfireboltengineclass", className)
 		return nil
 	}
 	requests := make([]reconcile.Request, 0, len(engineList.Items))

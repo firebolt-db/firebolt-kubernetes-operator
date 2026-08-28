@@ -156,8 +156,10 @@ webhook:
   validatingWebhookConfiguration:
     # -- Render the ValidatingWebhookConfiguration for FireboltInstance
     # validation (reserved keys, metadata replicas, external Postgres
-    # secret presence) and FireboltEngineClass validation (operator-owned
-    # pod template paths, deletion blocking while bound by FireboltEngines).
+    # secret presence), FireboltEngineClass validation (operator-owned
+    # pod template paths, deletion blocking while bound by FireboltEngines),
+    # and ClusterFireboltEngineClass validation (SKU-only template,
+    # deletion blocking while any engine has resolved to the catalog).
     # Only effective when `webhook.enabled` is also true.
     enabled: true
     # -- failurePolicy for the validating webhook.
@@ -178,17 +180,19 @@ healthProbeBindAddress: ":8081"
 # `ClusterRole` + `ClusterRoleBinding` for the manager, and the operator
 # starts with `--namespaces=""` (controller-runtime watches every
 # namespace). A non-empty list renders a `Role` + `RoleBinding` pair
-# per listed namespace with the same rule set, and the operator starts
-# with `--namespaces=<comma-list>` so its cache spans only those
+# per listed namespace for namespaced resources, plus a ClusterRole
+# for ClusterFireboltEngineClass and the cluster-wide engine/class
+# list the catalog deletion guard needs. The operator starts with
+# `--namespaces=<comma-list>` so its cache spans only those
 # namespaces. Switching modes is a `helm upgrade` plus an operator
 # restart.
 watchNamespaces: []
 
 # -- Label selector restricting which FireboltEngine, FireboltInstance,
-# FireboltEngineClass, and FireboltEnginePreset objects the operator
-# caches and reconciles.
+# FireboltEngineClass, FireboltEnginePreset, and ClusterFireboltEngineClass
+# objects the operator caches and reconciles.
 # Empty (the default) applies no restriction. Non-empty is passed as
-# `--watch-label-selector=<selector>` and applies only to the four
+# `--watch-label-selector=<selector>` and applies only to the five
 # Firebolt CRD types — child objects and third-party Secrets are cached
 # unfiltered, so they never need the label. Lets a cluster-wide install
 # ignore CRs owned by namespace-scoped installs, e.g.

@@ -257,6 +257,37 @@ func newFireboltEngineClassInfo(ec *computev1alpha1.FireboltEngineClass) *Firebo
 	}
 }
 
+// newClusterFireboltEngineClassInfo wraps a ClusterFireboltEngineClass
+// into the same merge info the namespaced class uses. Only Template
+// is populated: the catalog is SKU-only, so storage / rollout /
+// autoStop stay empty and fall through to Preset or the operator default.
+func newClusterFireboltEngineClassInfo(cc *computev1alpha1.ClusterFireboltEngineClass) *FireboltEngineClassInfo {
+	if cc == nil {
+		return nil
+	}
+	raw, err := json.Marshal(cc.Spec.Template)
+	hash := ""
+	if err == nil {
+		hash = contentHash(string(raw))
+	}
+	return &FireboltEngineClassInfo{
+		Name:     cc.Name,
+		Template: cc.Spec.Template.DeepCopy(),
+		Hash:     hash,
+	}
+}
+
+// classReadyBlocksRender reports whether a Ready condition should
+// fail-close engine render. OperatorOwnedFieldSet is the namespaced
+// class gate; NamespaceResolvedFieldSet is the cluster catalog SKU-only
+// counterpart. DeletionBlocked is not a gate.
+func classReadyBlocksRender(cond *metav1.Condition) bool {
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		return false
+	}
+	return cond.Reason == reasonOperatorOwnedFieldSet || cond.Reason == reasonNamespaceResolvedFieldSet
+}
+
 // computeEngineReconcile determines what resources need to be created, updated,
 // or deleted based on the engine spec, its current status, and the observed
 // cluster state. It does not perform any I/O.

@@ -41,5 +41,6 @@ helm uninstall firebolt-crds
 | `fireboltengines.compute.firebolt.io` | FireboltEngine |
 | `fireboltinstances.compute.firebolt.io` | FireboltInstance |
 | `fireboltengineclasses.compute.firebolt.io` | FireboltEngineClass |
+| `clusterfireboltengineclasses.compute.firebolt.io` | ClusterFireboltEngineClass |
 | `fireboltenginepresets.compute.firebolt.io` | FireboltEnginePreset |
 

@@ -1,0 +1,60 @@
+---
+title: ClusterFireboltEngineClass CRD reference
+description: Spec, status, and SKU-only template fields for ClusterFireboltEngineClass.
+sidebarTitle: ClusterFireboltEngineClass CRD reference
+---
+
+## Spec reference
+
+`ClusterFireboltEngineClass` is a cluster-scoped SKU catalog. Engines select it by name through `spec.engineClassRef`. The Firebolt Operator resolves that name namespaced-first: a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in the Engine's namespace if present, otherwise this cluster object.
+
+The catalog carries only `spec.template`. Namespace-resolved identifiers (ServiceAccount name, Secret refs, IAM annotations) and non-template Engine settings (`storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, `autoStop`, `uiSidecar`) stay on [`FireboltEnginePreset`](./fireboltenginepreset-crd-reference), [`FireboltEngineClass`](./fireboltengineclass-crd-reference), or the Engine spec.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each Engine that resolves this catalog object. See [SKU-only fields](#sku-only-fields) and [EngineClass configuration inheritance](../engineclass/configuration-inheritance). |
+
+A catalog edit to `spec.template` reshapes the rendered engine pod, so it rolls a new blue-green generation on every Engine that resolved to this object.
+
+## SKU-only fields
+
+The validating webhook and the catalog controller reject namespace-resolved identifiers on `spec.template`:
+
+| Path | Allowed | Notes |
+|---|---|---|
+| `spec.template.spec.nodeSelector` | Yes | Instance type / family. |
+| `spec.template.spec.tolerations` | Yes | Node taints for the SKU pool. |
+| `spec.template.spec.affinity` | Yes | SKU placement. |
+| `spec.template.spec.initContainers` | Yes | Node setup. Secret env and Secret volumes are rejected. |
+| `spec.template.spec.containers[name=="engine"].image` | Yes | Optional default engine image. |
+| `spec.template.spec.containers[name=="engine"].resources` | Yes | SKU resource requests and limits. |
+| `spec.template.spec.serviceAccountName` | No | Belongs on FireboltEnginePreset. |
+| `spec.template.spec.imagePullSecrets` | No | Namespace-resolved Secret names. |
+| `spec.template.metadata.annotations[iam.amazonaws.com/role]` | No | kube2iam / kiam identity. |
+| `spec.template.metadata.annotations[eks.amazonaws.com/role-arn]` | No | IRSA identity. |
+| Secret volumes and Secret env | No | Credential material is namespaced. |
+
+Firebolt Operator-owned paths on the template are the same as [`FireboltEngineClass.spec.template`](./fireboltengineclass-crd-reference#firebolt-operator-owned-fields-on-class-templates).
+
+## Status
+
+| Field | Description |
+|---|---|
+| `status.boundEngines` | Count of FireboltEngines in any namespace that resolved `spec.engineClassRef` to this object: the Engine names this catalog and no `FireboltEngineClass` of the same name exists in the Engine's namespace. |
+| `status.observedGeneration` | `metadata.generation` last reconciled. |
+| `status.conditions[type=Ready]` | `True`/`Admissible` when the template is SKU-only and contains no operator-owned paths. `False`/`OperatorOwnedFieldSet` or `False`/`NamespaceResolvedFieldSet` when the template is inadmissible. `False`/`DeletionBlocked` while a delete is held. |
+
+Short name: `cfirengc`.
+
+```bash
+kubectl get cfirengc
+```
+
+```
+NAME       BOUND   READY   AGE
+s-amd-co   12      True    24h
+```
+
+## Deletion
+
+The validating webhook and the deletion-guard finalizer (`compute.firebolt.io/clusterfireboltengineclass-deletion-guard`) refuse delete while any Engine has resolved to this catalog object. Engines that override the same name with a namespaced `FireboltEngineClass` do not block the delete. Force-removing the finalizer is the escape hatch.

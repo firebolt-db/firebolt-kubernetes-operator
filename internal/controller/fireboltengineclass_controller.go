@@ -60,6 +60,13 @@ const reasonDeletionBlocked = "DeletionBlocked"
 // from the offending class.
 const reasonOperatorOwnedFieldSet = "OperatorOwnedFieldSet"
 
+// reasonNamespaceResolvedFieldSet is the ClusterFireboltEngineClass
+// Ready=False reason stamped when spec.template carries a
+// namespace-resolved identifier (serviceAccountName, Secret refs, IAM
+// annotations). The engine resolver treats it like
+// OperatorOwnedFieldSet: fail-closed in the render window.
+const reasonNamespaceResolvedFieldSet = "NamespaceResolvedFieldSet"
+
 // reasonAdmissible is the Ready=True reason stamped when spec.template
 // contains no operator-owned paths. Shared by FireboltEngineClass and
 // FireboltEnginePreset so kubectl and tests see one token.

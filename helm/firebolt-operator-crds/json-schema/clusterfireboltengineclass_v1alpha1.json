@@ -1,5 +1,5 @@
 {
-  "description": "FireboltEngine is the Schema for the fireboltengines API.",
+  "description": "ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.\nEngines select it by name through spec.engineClassRef. The operator\nresolves that name to a namespaced FireboltEngineClass if one exists\nin the engine's namespace, otherwise to this cluster object.\n\nThe catalog is SKU-only: instance type, resources, and node setup.\nNamespace-resolved identifiers (ServiceAccount name, Secret refs, IAM\nannotations) belong on FireboltEnginePreset, not here. A namespaced\nFireboltEngineClass of the same name is an explicit override.",
   "properties": {
     "apiVersion": {
       "description": "APIVersion defines the versioned schema of this representation of an object.\nServers should convert recognized schemas to the latest internal value, and\nmay reject unrecognized values.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
@@ -13,244 +13,10 @@
       "type": "object"
     },
     "spec": {
-      "description": "FireboltEngineSpec defines the desired state of a Firebolt engine.\n\nThe CEL rule freezes spec.metadataEndpointOverride once it has been set\n(or unset) at creation time. The field selects the cross-cluster metadata\ntopology the engine's nodes bake into their on-disk configuration; letting\nusers mutate it later would silently force a full blue-green rollout (it\nparticipates in stsMatchesSpec via AnnotationMetadataOverride) and would\nbreak the instanceInfo-drift invariant computeStable relies on to allow\nin-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces\nbyte-identical content only when all ConfigMap inputs are frozen).\nThe wording mirrors the set-once pattern on FireboltInstanceSpec.ID,\nadapted for an optional pointer field via has(): absent-on-create may\nstill transition to set, but any set value may not subsequently be\nchanged or cleared.",
+      "description": "ClusterFireboltEngineClassSpec is the SKU-only catalog payload.\n\nIt carries a pod-template fragment: instance type / family, engine\ncontainer resources, node affinity / tolerations, and init-container\nnode setup. Namespace-resolved identifiers (serviceAccountName,\nSecret refs, IAM annotations) are rejected by the validating webhook\nand by the controller's Ready condition. Storage, rollout, drain-check,\nautoStop, uiSidecar, and customEngineConfig stay on the namespaced\nFireboltEngineClass / FireboltEnginePreset / engine spec.",
       "properties": {
-        "autoStop": {
-          "description": "AutoStop configures automatic stop and wake-up for this engine. When\nomitted or with Enabled=false, spec.replicas is governed entirely by the\nuser. When enabled, the operator owns spec.replicas and drives it between\nIdleReplicas and ActiveReplicas based on idleness, wake-up requests, and\nSchedule windows. It is an activity-gated toggle, not proportional\nautoscaling.",
-          "properties": {
-            "activeReplicas": {
-              "description": "ActiveReplicas is the replica count the engine runs at while active\n(during a Schedule window or following a wake-up). Required when Enabled\nis true.",
-              "format": "int32",
-              "minimum": 1,
-              "type": "integer"
-            },
-            "enabled": {
-              "default": false,
-              "description": "Enabled turns auto-stop on for this engine. Defaults to false.",
-              "type": "boolean"
-            },
-            "idleReplicas": {
-              "default": 0,
-              "description": "IdleReplicas is the replica count the engine scales down to once\nIdleTimeout elapses with no query activity. 0 fully stops the engine.\nDefaults to 0.",
-              "format": "int32",
-              "minimum": 0,
-              "type": "integer"
-            },
-            "idleTimeout": {
-              "default": "30m",
-              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before it scales down to IdleReplicas. Defaults to\n30 minutes.",
-              "type": "string"
-            },
-            "pollInterval": {
-              "default": "1m",
-              "description": "PollInterval is how often the operator scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
-              "type": "string"
-            },
-            "schedule": {
-              "description": "Schedule is an optional list of UTC time windows during which the engine\nis held at ActiveReplicas regardless of observed activity. Useful for\n\"always-on during business hours\" policies.",
-              "items": {
-                "description": "ScheduleWindow is a recurring UTC time window during which the engine is\npinned at ActiveReplicas. End may be less than Start to express a window\nthat crosses midnight (e.g. 22:00-02:00).",
-                "properties": {
-                  "days": {
-                    "description": "Days lists the UTC weekdays the window applies to. Empty means every\nday. The window is anchored to the day on which Start falls; if End\ncrosses midnight the trailing portion still belongs to the listed day.",
-                    "items": {
-                      "description": "ScheduleDay is a UTC weekday code used in ScheduleWindow.Days.",
-                      "enum": [
-                        "Mon",
-                        "Tue",
-                        "Wed",
-                        "Thu",
-                        "Fri",
-                        "Sat",
-                        "Sun"
-                      ],
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "end": {
-                    "description": "End is the window closing time in UTC, formatted \"HH:MM\". An End equal\nto Start is treated as an empty window.",
-                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": "string"
-                  },
-                  "start": {
-                    "description": "Start is the window opening time in UTC, formatted \"HH:MM\".",
-                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "end",
-                  "start"
-                ],
-                "type": "object",
-                "additionalProperties": false
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "activeReplicas",
-            "enabled"
-          ],
-          "type": "object",
-          "x-kubernetes-validations": [
-            {
-              "message": "activeReplicas must be >= idleReplicas",
-              "rule": "self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas : 0)"
-            }
-          ],
-          "additionalProperties": false
-        },
-        "customEngineConfig": {
-          "description": "CustomEngineConfig is a free-form object deep-merged into the rendered\nengine config.yaml at the root. The rendered document follows the\nstructured schema consumed by `firebolt server` (top-level sections:\n`auth`, `engine`, `instance`, `logging`, `schema_version`); keys\nplaced in customEngineConfig at the same paths are merged into the\ncorresponding sections, overriding the operator's defaults (e.g.\n`logging.format`, `logging.level`, `auth.*`). Any additional sections\nunderstood by the engine binary may be set at the root.\n\nThe operator retains authority over identity, routing, and topology\npaths. The following are silently stripped from user input before the\nmerge and cannot be overridden via this field:\n\n  - schema_version\n  - instance.id\n  - instance.type\n  - instance.multi_engine (entire subtree, including metadata_endpoint)\n  - engine.id\n  - engine.nodes\n  - engine.termination_grace_period\n\nChanges to this field trigger a new blue-green generation, since the\nrendered config.yaml content changes.",
-          "type": "object",
-          "x-kubernetes-preserve-unknown-fields": true
-        },
-        "drainCheckEnabled": {
-          "description": "DrainCheckEnabled controls whether the operator checks the query-count\nmetrics on old-generation pods during graceful rollouts. When false, the\noperator skips directly to cleaning after switching traffic, without\nverifying that in-flight queries have completed.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (true). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to true at admission.",
-          "type": "boolean"
-        },
-        "drainCheckInterval": {
-          "description": "DrainCheckInterval controls how often to check if old pods have finished serving queries.\nOnly used when drainCheckEnabled is true.",
-          "type": "string"
-        },
-        "engineClassRef": {
-          "description": "EngineClassRef is the name of a class whose pod template is merged\nunderneath this engine's pod template when the StatefulSet is built.\nThe operator resolves the name namespaced-first: FireboltEngineClass\nin this engine's namespace if present, otherwise\nClusterFireboltEngineClass of the same name. Engine spec fields\ntake precedence over class fields; operator defaults sit beneath\nboth. A namespaced object of the same name is an explicit override\nof the cluster SKU.\n\nMutable: changing the reference (or editing the resolved class's\nspec) triggers a new blue-green generation, just like any other\npod-template-affecting spec change. The change participates in\nstsMatchesSpec via an annotation hash so drift is detected\ndeterministically.\n\nThe validating webhook rejects Create and Update when neither the\nnamespaced nor the cluster object exists, so users see the typo\nimmediately instead of via engine status. Apply ordering matters:\nGitOps tooling must apply the class before any engine that\nreferences it (Argo sync-waves / Flux dependsOn).",
-          "minLength": 1,
-          "type": "string"
-        },
-        "instanceRef": {
-          "description": "InstanceRef is the name of the FireboltInstance in the same namespace\nthat this engine depends on. The engine reconciler will not proceed\nuntil the referenced instance has a populated metadata endpoint and\ninstance ID. This field is immutable after creation.",
-          "minLength": 1,
-          "type": "string",
-          "x-kubernetes-validations": [
-            {
-              "message": "instanceRef is immutable",
-              "rule": "self == oldSelf"
-            }
-          ]
-        },
-        "metadataEndpointOverride": {
-          "description": "MetadataEndpointOverride overrides the metadata endpoint for this engine.\nIf nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster\ntopology-aware routing). Set this for cross-cluster scenarios where the engine\nconnects to a metadata service in a different cluster via private link.\n\nImmutable once set: see the struct-level CEL rule on FireboltEngineSpec.",
-          "type": "string"
-        },
-        "replicas": {
-          "description": "Replicas is the number of engine nodes. Set to 0 to stop the\nengine: the operator tears down the active generation (honoring\nspec.rollout for drain behavior) and leaves the CR in the\nStopped phase. Setting replicas back to a non-zero value resumes\nthe engine via a new blue-green generation.",
-          "format": "int32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "requirePreset": {
-          "description": "RequirePreset, when true, keeps the engine from becoming Ready\nuntil the namespace has a Ready FireboltEnginePreset object\n(named \"firebolt\"; the CRD pins the name so a namespace holds at\nmost one). The default (false / unset) keeps existing engines\nworking in namespaces that have no Preset object. A present but\nunready Preset object always fails closed, even when this field\nis unset.\n\nThe default is applied by the controller, not the CRD, so an unset\nvalue stays empty at admission.",
-          "type": "boolean"
-        },
-        "rollout": {
-          "description": "Rollout strategy for transitions: \"graceful\" waits for drain, \"recreate\"\ndeletes immediately. Resolution is engine-if-set \u2192\nFireboltEngineClass-if-set \u2192 operator default (graceful). The default is\napplied by the controller, not the CRD, so an unset value here falls\nthrough to the referenced class instead of being materialized to\ngraceful at admission.",
-          "enum": [
-            "graceful",
-            "recreate"
-          ],
-          "type": "string"
-        },
-        "storage": {
-          "default": {},
-          "description": "Storage configures the per-pod data volume mounted into each engine\ncontainer. See EngineStorageSpec for the backend choice (emptyDir is\nthe default; persistentVolumeClaim or hostPath are opt-ins). Changes\nto any field \u2014 including switching backends \u2014 force a new blue-green\ngeneration, because the StatefulSet's VolumeClaimTemplates are\nimmutable and a backend swap necessarily reshapes the pod-template\ndata Volume.\n\nNot a Kubernetes pod-template concern: the operator owns the data\nvolume name and the StatefulSet's VolumeClaimTemplates, so this stays\non the spec wrapper rather than under spec.template.spec.volumes.",
-          "properties": {
-            "emptyDir": {
-              "description": "EmptyDir backs the engine's data mount with a pod-scoped emptyDir\nVolume. The mount holds regenerable cache only; authoritative\ndata lives in the metadata service and the managed-table S3\nbucket (see EngineStorageSpec for the full picture), so volume\ncontents being lost on pod restart is normal engine behavior\nrather than a durability regression.",
-              "properties": {
-                "medium": {
-                  "description": "Medium is the storage medium backing the emptyDir. Leave empty\nfor the default node disk; set to \"Memory\" for a tmpfs-backed\nvolume sized against the pod's memory limit.",
-                  "enum": [
-                    "",
-                    "Memory"
-                  ],
-                  "type": "string"
-                },
-                "sizeLimit": {
-                  "anyOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ],
-                  "description": "SizeLimit caps the volume's growth. Optional; nil means\nunbounded (subject to node disk pressure or pod memory limits\nfor Memory medium).",
-                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
-                  "x-kubernetes-int-or-string": true
-                }
-              },
-              "type": "object",
-              "additionalProperties": false
-            },
-            "hostPath": {
-              "description": "HostPath backs the engine's data mount with a directory on the\nnode filesystem. Pods are implicitly node-pinned (the directory only\nexists where it was created); the path must pre-exist on every\nnode the engine pod could be scheduled onto, with permissions\nreadable by the engine web UID. Use to expose instance-store NVMe on\nthe node.",
-              "properties": {
-                "path": {
-                  "description": "Path is the absolute filesystem path on the host node.",
-                  "pattern": "^/.*",
-                  "type": "string"
-                },
-                "type": {
-                  "description": "Type enforces a check on Path before mounting (Directory,\nDirectoryOrCreate, \u2026). See\nhttps://kubernetes.io/docs/concepts/storage/volumes/#hostpath\nfor the full enum. Leave nil to skip the check (kubelet default).",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "type": "object",
-              "additionalProperties": false
-            },
-            "persistentVolumeClaim": {
-              "description": "PersistentVolumeClaim opts the engine into a per-pod\nPersistentVolumeClaim synthesized by the StatefulSet controller\nfrom a VolumeClaimTemplate. Set the field (even to an empty\nstruct) to enable the PVC backend; the kubebuilder defaults\n(1Gi, ReadWriteOnce, cluster-default StorageClass) on\nEnginePersistentVolumeClaimSpec fill in any omitted inner field.\nWhen this field is nil the engine falls back to the default\nemptyDir backend (see the EngineStorageSpec doc above).",
-              "properties": {
-                "accessModes": {
-                  "default": [
-                    "ReadWriteOnce"
-                  ],
-                  "description": "AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the\nper-pod ownership model used by the StatefulSet VolumeClaimTemplate.",
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "size": {
-                  "anyOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ],
-                  "default": "1Gi",
-                  "description": "Size is the requested capacity for each engine pod's PVC. Defaults to 1Gi.",
-                  "pattern": "^(\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\\+|-)?(([0-9]+(\\.[0-9]*)?)|(\\.[0-9]+))))?$",
-                  "x-kubernetes-int-or-string": true
-                },
-                "storageClassName": {
-                  "description": "StorageClassName selects the StorageClass for the PVC. Leave nil to use\nthe cluster default. An empty string disables dynamic provisioning.",
-                  "type": "string"
-                }
-              },
-              "type": "object",
-              "additionalProperties": false
-            }
-          },
-          "type": "object",
-          "x-kubernetes-validations": [
-            {
-              "message": "storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath are mutually exclusive",
-              "rule": "(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir) ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1"
-            }
-          ],
-          "additionalProperties": false
-        },
         "template": {
-          "description": "Template is the pod template the operator merges with its\nown-rendered engine container, data volume, projected ConfigMap,\nprobes, and pod-level securityContext to produce the engine\nStatefulSet's pod spec. Most users set only\ntemplate.spec.containers[name==\"engine\"].image and\n.resources, plus scheduling fields (nodeSelector / tolerations /\naffinity / topologySpreadConstraints / priorityClassName /\npodSecurityContext) and any sidecars / init containers / extra\nvolumes they need.\n\nWhen a FireboltEnginePreset object and/or spec.engineClassRef\nare present, the operator merges\nengine > Preset > class > operator default \u2014 engine wins on\nconflict (whole-struct ownership for pointer fields; list-type\nfields like tolerations / initContainers / sidecars / volumes\nconcatenate lower-layer first).\n\nThe validating webhook rejects user input on paths the operator\nowns end-to-end \u2014 see FireboltEngineClassPodTemplateRules in\noperatorauthority.go for the authoritative allowlist. Notably,\nterminationGracePeriodSeconds is rejected: TGPS is operator-stamped\nfrom an internal default (60s), matching the same rejection on the\nclass template.\n\nChanges to this field trigger a new blue-green generation.",
+          "description": "Template is the SKU pod template merged into engines that resolve\nthis catalog object. See the type-level doc for the SKU-only lock\nand the operator-owned paths the validating webhook rejects.\n\nThe CRD schema for template.metadata is patched post-controller-gen\n(scripts/patch-crd-template-metadata.py, invoked by `make manifests`)\nso labels and annotations survive structural-schema pruning.",
           "properties": {
             "metadata": {
               "description": "Standard object's metadata.\nMore info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata",
@@ -7455,46 +7221,24 @@
           },
           "type": "object",
           "additionalProperties": false
-        },
-        "uiSidecar": {
-          "description": "UISidecar enables a built-in UI sidecar (an operator-owned nginx\ncontainer named \"engine-web\" serving the Firebolt Engine Web UI, pointed at\nthis engine on localhost) in every pod of this engine. It exposes\ncontainer port 9100 (\"web-ui\"); the per-engine headless Service resolves\nto pod IPs, so the UI is reachable at <pod-ip>:9100 without listing an\nextra Service port. The \"engine-web\" container name is reserved: a\nuser-supplied container or init container with that name is rejected.\n\nResolution is engine-if-set \u2192 FireboltEngineClass-if-set \u2192 operator\ndefault (false). The default is applied by the controller, not the CRD,\nso an unset value here falls through to the referenced class instead of\nbeing materialized to false at admission.\n\nToggling this changes the pod template and therefore triggers a new\nblue-green generation.",
-          "type": "boolean"
         }
       },
       "required": [
-        "instanceRef",
-        "replicas"
+        "template"
       ],
       "type": "object",
-      "x-kubernetes-validations": [
-        {
-          "message": "spec.metadataEndpointOverride is immutable once set",
-          "rule": "!has(oldSelf.metadataEndpointOverride) || (has(self.metadataEndpointOverride) && self.metadataEndpointOverride == oldSelf.metadataEndpointOverride)"
-        }
-      ],
       "additionalProperties": false
     },
     "status": {
-      "description": "FireboltEngineStatus defines the observed state of a Firebolt engine.",
+      "description": "ClusterFireboltEngineClassStatus is the observed state of a\nClusterFireboltEngineClass.",
       "properties": {
-        "activeGeneration": {
-          "description": "ActiveGeneration is the generation currently serving traffic.",
+        "boundEngines": {
+          "description": "BoundEngines counts FireboltEngines in any namespace that resolved\nspec.engineClassRef to this cluster object: the engine names this\nobject and no FireboltEngineClass of the same name exists in the\nengine's namespace. The deletion webhook and the reconciler's\ndeletion-guard finalizer re-list live rather than trusting this\ncached value.",
+          "format": "int32",
           "type": "integer"
         },
-        "appliedPresetHash": {
-          "description": "AppliedPresetHash is the content hash of the Preset spec\nstamped on the serving StatefulSet\n(firebolt.io/engine-preset-hash). It trails a live Preset\nedit until the generation that carries the new hash is\npromoted. Empty when AppliedPresetName is empty.",
-          "type": "string"
-        },
-        "appliedPresetName": {
-          "description": "AppliedPresetName is the FireboltEnginePreset object last\napplied to the serving generation (status.activeGeneration).\nEmpty when that generation was rendered without a Preset, or\nwhen no generation is serving yet.",
-          "type": "string"
-        },
-        "autoStopReason": {
-          "description": "AutoStopReason is a short token describing the most recent auto-stop\ndecision: \"Idle\", \"ScheduleActive\", \"ActivityObserved\", \"ScrapeFailed\",\n\"Disabled\", \"Stopped\", \"Initializing\", \"WakeRequested\".",
-          "type": "string"
-        },
         "conditions": {
-          "description": "Conditions represent the latest available observations of the engine's state.",
+          "description": "Conditions surface the catalog object's high-level state.",
           "items": {
             "description": "Condition contains details for one aspect of the current state of this API Resource.",
             "properties": {
@@ -7549,63 +7293,12 @@
           },
           "type": "array"
         },
-        "currentGeneration": {
-          "description": "CurrentGeneration is the latest generation number created.",
-          "type": "integer"
-        },
-        "drainingGeneration": {
-          "description": "DrainingGeneration is the generation being drained, if any.",
-          "type": "integer"
-        },
-        "lastActivityTime": {
-          "description": "LastActivityTime is the timestamp of the most recent auto-stop\nobservation that recorded in-flight or suspended queries. The engine\nscales down once now() - LastActivityTime exceeds\nspec.autoStop.idleTimeout. Cleared when auto-stop is disabled.",
-          "format": "date-time",
-          "type": "string"
-        },
-        "lastReconciled": {
-          "description": "LastReconciled is the timestamp of the last reconciliation.",
-          "format": "date-time",
-          "type": "string"
-        },
-        "lastScaledAt": {
-          "description": "LastScaledAt is the timestamp of the most recent auto-stop-driven\nmutation of spec.replicas. Distinguishes auto-stop scale events from\nuser edits in audit trails.",
-          "format": "date-time",
-          "type": "string"
-        },
-        "observedAuthHash": {
-          "description": "ObservedAuthHash is the auth content-hash (see the internal\nauthHash function) that this engine's current, stable generation\nwas last confirmed to match \u2014 copied from the running\nStatefulSet's own drift-detection annotation once a reconcile finds\nno drift. Empty when auth is disabled or no generation has\nstabilized yet.\n\nThis exists so the instance controller can tell, for its own\nsigning-key rotation state machine, whether every engine in an\nInstance has actually rolled onto a given signing-keys set \u2014\nwithout the instance controller needing to read engine\nStatefulSets directly or recompute engine-side rendering rules\nitself. It is intentionally the same hash already used to decide\nwhether an engine needs a new generation (see stsMatchesSpec /\nannotationsMatchSpec), just surfaced here as this engine's own\nobserved value of it.",
-          "type": "string"
-        },
-        "observedEngineServingCertFP": {
-          "description": "ObservedEngineServingCertFP is the fingerprint of the serving-certificate\ntls.crt the current stable generation was last confirmed on, recorded once\na reconcile finds the generation stable. ObservedEngineServingCertGen\nrecords which generation that fingerprint belongs to. computeStable treats a\nchanged fingerprint as an in-place re-issuance \u2014 and rolls a fresh\ngeneration so running pods stop serving the stale leaf \u2014 ONLY when the\nrecorded generation equals the current one. Every new generation issues its\nown certificate (a fresh key), so its fingerprint legitimately differs from\nthe prior generation's; without the generation guard, an ordinary\nspec-driven roll would look like a re-issuance and roll forever. A\ncoordinated re-issuance roll cuts over through the #4 trust-bundle gate.\nEmpty/zero when engine TLS is disabled or no generation has stabilized yet;\nfirst observation (empty fingerprint) records without rolling. tls.crt is a\npublic certificate.",
-          "type": "string"
-        },
-        "observedEngineServingCertGen": {
-          "description": "ObservedEngineServingCertGen is the generation ObservedEngineServingCertFP\nwas observed at \u2014 see that field. Zero when unset.",
-          "type": "integer"
-        },
-        "observedEngineTLSHash": {
-          "description": "ObservedEngineTLSHash is the engine-TLS content-hash (see the internal\ntlsHash function) that this engine's current, stable generation was last\nconfirmed to match \u2014 copied from the running StatefulSet's own\ndrift-detection annotation once a reconcile finds no drift. Empty when\nengine TLS is disabled or no generation has stabilized yet.\n\nThe instance controller reads this across the engine fleet to decide\nwhen the gateway may switch its upstream protocol: it re-encrypts to\nengines only once every engine has rolled onto a TLS-serving generation\n(this hash non-empty and matching), and keeps re-encrypting until every\nengine has drained back to plaintext (this hash empty everywhere). Same\nhash used to decide whether an engine needs a new generation (see\nstsMatchesSpec / annotationsMatchSpec), surfaced here as this engine's\nown observed value.",
-          "type": "string"
-        },
         "observedGeneration": {
-          "description": "ObservedGeneration is the metadata.generation that was last fully reconciled to stable.",
+          "description": "ObservedGeneration is the metadata.generation last reconciled.",
           "format": "int64",
-          "type": "integer"
-        },
-        "phase": {
-          "description": "Phase is the current lifecycle phase of the engine.",
-          "type": "string"
-        },
-        "readyReplicas": {
-          "description": "ReadyReplicas is how many pods of activeGeneration are running and\npassing their readiness probe. It is observed, not desired: it counts\nwhat serves traffic right now, so it trails spec.replicas while a\ngeneration comes up and reads 0 for a stopped engine or one whose first\ngeneration has not cut over yet.\n\nDuring a blue-green rollout it stays with the generation that is still\nserving and steps to the new one at cutover, so a roll does not show up\nhere as capacity briefly dropping away. Pods of a generation that is\ncoming up or draining are not counted.\nDeliberately serialized even at zero, unlike most optional status\nfields: zero is a real observation here (stopped, or nothing serving\nyet) and must stay distinguishable from the field being absent, which\nmeans an operator too old to report it at all. With omitempty a client\nreading the field cannot tell those apart. currentGeneration and\nactiveGeneration serialize zero for the same reason.",
           "type": "integer"
         }
       },
-      "required": [
-        "activeGeneration",
-        "currentGeneration"
-      ],
       "type": "object",
       "additionalProperties": false
     }

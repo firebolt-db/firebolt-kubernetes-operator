@@ -7,14 +7,15 @@ A Kubernetes operator that manages Firebolt infrastructure: metadata services, a
 
 ## Overview
 
-The operator manages four custom resources:
+The operator manages five custom resources:
 
 - **FireboltInstance** provisions the shared infrastructure that engines depend on: PostgreSQL, the metadata service, and an Envoy gateway proxy.
 - **FireboltEngine** deploys stateful compute nodes. Each engine references a `FireboltInstance` and cannot operate without one.
-- **FireboltEngineClass** *(optional, namespaced)* holds a reusable pod-template fragment that multiple engines in the same namespace can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image. Namespaced (not cluster-scoped) because the template carries namespace-resolved identifiers like ServiceAccount names and Secret/PVC volume references.
+- **FireboltEngineClass** *(optional, namespaced)* holds a reusable pod-template fragment that multiple engines in the same namespace can share via `spec.engineClassRef` — service account / IAM binding, scheduling, sidecars, and the engine container image.
+- **ClusterFireboltEngineClass** *(optional, cluster-scoped)* is a SKU catalog of the same name: instance type, resources, affinity/tolerations, and optional engine image. It does not carry ServiceAccount names, Secret refs, IAM annotations, storage, or rollout/autoStop. `spec.engineClassRef` resolves namespaced-first: a `FireboltEngineClass` in the engine's namespace wins over a cluster object of the same name.
 - **FireboltEnginePreset** *(optional, namespaced)* is an ambient overlay merged under every engine in the namespace (service account, storage, credential env, `customEngineConfig`). Engines do not reference it by name. The object must be named `firebolt` (a CEL rule on the CRD pins the name), so a namespace holds at most one.
 
-When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the referenced `FireboltEngineClass` triggers the same blue-green flow on every consumer engine.
+When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the resolved `FireboltEngineClass` or `ClusterFireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
 ## Documentation
 For more detailed information checkout our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstart)

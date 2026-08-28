@@ -205,6 +205,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 
 	crds := []string{
+		"compute.firebolt.io_clusterfireboltengineclasses.yaml",
 		"compute.firebolt.io_fireboltengineclasses.yaml",
 		"compute.firebolt.io_fireboltenginepresets.yaml",
 		"compute.firebolt.io_fireboltengines.yaml",
@@ -467,18 +468,23 @@ func ensureMinK8sVersion(cs *kubernetes.Clientset, minMajor, minMinor int) {
 // FireboltEngine.
 func cleanupStaleResources(ctx context.Context) {
 	patchNoFinalizers := []byte(`{"metadata":{"finalizers":null}}`)
-	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses", "fireboltenginepresets"} {
-		args := []string{"get", kind, "-n", testNamespace, "-o", "jsonpath={.items[*].metadata.name}"}
+	stripFinalizers := func(kind string, namespaced bool) {
+		args := []string{"get", kind, "-o", "jsonpath={.items[*].metadata.name}"}
+		if namespaced {
+			args = append(args, "-n", testNamespace)
+		}
 		if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
 			args = append([]string{"--context", "kind-" + kindCluster}, args...)
 		}
 		out, err := exec.Command("kubectl", args...).CombinedOutput()
 		if err != nil {
-			continue
+			return
 		}
-		names := strings.Fields(strings.TrimSpace(string(out)))
-		for _, name := range names {
-			patchArgs := []string{"patch", kind, name, "-n", testNamespace, "--type=merge", "-p", string(patchNoFinalizers)}
+		for _, name := range strings.Fields(strings.TrimSpace(string(out))) {
+			patchArgs := []string{"patch", kind, name, "--type=merge", "-p", string(patchNoFinalizers)}
+			if namespaced {
+				patchArgs = append(patchArgs, "-n", testNamespace)
+			}
 			if kindCluster := os.Getenv("KIND_CLUSTER"); kindCluster != "" {
 				patchArgs = append([]string{"--context", "kind-" + kindCluster}, patchArgs...)
 			}
@@ -489,6 +495,10 @@ func cleanupStaleResources(ctx context.Context) {
 			}
 		}
 	}
+	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses", "fireboltenginepresets"} {
+		stripFinalizers(kind, true)
+	}
+	stripFinalizers("clusterfireboltengineclasses", false)
 
 	err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
