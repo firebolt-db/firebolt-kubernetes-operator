@@ -36,10 +36,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -165,14 +167,21 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Teardown runs before any spec.id work: reconcileDelete sweeps owned
+	// objects by the LabelInstance label, never by spec.id, so minting or
+	// canonicalizing the id on a terminating instance buys nothing. Worse,
+	// ensureInstanceID's error is fatal to the pass, so an admission
+	// rejection of the case-only Update would keep reconcileDelete — and
+	// therefore finalizer removal — from ever running, wedging the instance
+	// in Terminating.
+	if !instance.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, r.reconcileDelete(ctx, instance)
+	}
+
 	if requeue, err := r.ensureInstanceID(ctx, instance); err != nil {
 		return ctrl.Result{}, err
 	} else if requeue {
 		return ctrl.Result{Requeue: true}, nil
-	}
-
-	if !instance.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, r.reconcileDelete(ctx, instance)
 	}
 
 	// Record metrics on every return path beyond this point so that error
@@ -939,6 +948,13 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 		Watches(
 			&computev1alpha1.FireboltEngine{},
 			handler.EnqueueRequestsFromMapFunc(enqueueInstanceFromEngine),
+			// Spec changes only. FireboltEngineReconciler.updateStatus
+			// stamps Status.LastReconciled on every status write, so an
+			// unfiltered watch would enqueue a full Instance reconcile —
+			// metadata and gateway render, PVC list, status write — on
+			// every engine reconcile in the namespace. The gate only
+			// cares about the engine's image pin, which lives in spec.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		Named(name).
 		Complete(r)
@@ -994,7 +1010,7 @@ func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
 	return requests
 }
 
-// enqueueInstanceFromEngine maps a FireboltEngine event to its
+// enqueueInstanceFromEngine maps a FireboltEngine spec change to its
 // spec.instanceRef so an engine image pin change re-runs the
 // instance-id canonicalize gate.
 func enqueueInstanceFromEngine(_ context.Context, obj client.Object) []reconcile.Request {

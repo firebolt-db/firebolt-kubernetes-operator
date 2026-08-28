@@ -26,6 +26,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,6 +38,7 @@ const (
 	reasonInstanceIDCanonical    = "Canonical"
 	reasonInstanceIDBelowFloor   = "ImageBelowFloor"
 	reasonInstanceIDResolveError = "ImageResolveFailed"
+	reasonInstanceIDRejected     = "UpdateRejected"
 )
 
 var releaseStyleTag = regexp.MustCompile(
@@ -77,14 +79,27 @@ func (r *FireboltInstanceReconciler) canonicalizeInstanceID(
 ) (rewritten bool, err error) {
 	id := instance.Spec.ID
 	if !isUppercaseCrockfordULID(id) {
-		if _, parseErr := ulid.Parse(id); parseErr == nil {
-			setInstanceCondition(instance,
-				computev1alpha1.InstanceConditionInstanceIDCanonical, metav1.ConditionTrue,
-				reasonInstanceIDCanonical, "spec.id is a lowercase Crockford ULID")
+		// Nothing for this gate to do: either a lowercase Crockford ULID
+		// (already canonical) or a user-supplied id the operator never
+		// minted and must not rewrite. Record True for both so the
+		// condition matches its documented contract instead of being
+		// absent on every non-ULID instance.
+		message := "spec.id is not a Crockford ULID; nothing to canonicalize"
+		if _, parseErr := ulid.ParseStrict(id); parseErr == nil {
+			message = "spec.id is a lowercase Crockford ULID"
 		}
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionInstanceIDCanonical, metav1.ConditionTrue,
+			reasonInstanceIDCanonical, message)
 		return false, nil
 	}
 	if computev1alpha1.CanonicalInstanceIDImageFloor == "" {
+		// Floor unpublished: uppercase is the encoding current images
+		// consume, so there is no gate result to report. Drop any
+		// condition a floor-published build left behind, otherwise a
+		// rollback strands a stale ImageBelowFloor forever.
+		apimeta.RemoveStatusCondition(&instance.Status.Conditions,
+			computev1alpha1.InstanceConditionInstanceIDCanonical)
 		return false, nil
 	}
 
@@ -107,16 +122,40 @@ func (r *FireboltInstanceReconciler) canonicalizeInstanceID(
 		return false, nil
 	}
 
-	instance.Spec.ID = strings.ToLower(id)
-	logf.FromContext(ctx).Info("Canonicalized instance ID to lowercase", "id", instance.Spec.ID)
+	lowered := strings.ToLower(id)
+	instance.Spec.ID = lowered
+	logf.FromContext(ctx).Info("Canonicalized instance ID to lowercase", "id", lowered)
 	if err := r.Update(ctx, instance); err != nil {
-		return false, err
+		// A deterministic admission rejection — a stale CRD whose CEL rule
+		// still forbids case-only updates, or a cluster policy engine that
+		// refuses spec mutations — rejects this Update on every pass.
+		// Returning it would abort Reconcile before metadata and gateway,
+		// stalling an otherwise healthy instance forever; same reasoning as
+		// the ImageResolveFailed branch above. Restore the in-memory id so
+		// the rest of the pass renders against the value that is actually
+		// persisted, and surface the rejection as a condition. Transient
+		// errors (Conflict, timeouts) still return so the request retries.
+		if !errors.IsInvalid(err) && !errors.IsForbidden(err) {
+			return false, err
+		}
+		instance.Spec.ID = id
+		setInstanceCondition(instance,
+			computev1alpha1.InstanceConditionInstanceIDCanonical, metav1.ConditionFalse,
+			reasonInstanceIDRejected,
+			fmt.Sprintf("spec.id could not be canonicalized to %q: %v", lowered, err))
+		return false, nil
 	}
 	return true, nil
 }
 
+// isUppercaseCrockfordULID reports whether id is a ULID the operator
+// minted in the uppercase encoding. ParseStrict, not Parse: Parse checks
+// only the 26-byte length and the leading-character overflow, so it
+// accepts any 26-character string. spec.id carries no CRD pattern, so a
+// customer account id of that length ("0Customer-Account-ID-12345")
+// would otherwise be classified as a ULID and silently lowercased.
 func isUppercaseCrockfordULID(id string) bool {
-	if _, err := ulid.Parse(id); err != nil {
+	if _, err := ulid.ParseStrict(id); err != nil {
 		return false
 	}
 	return id != strings.ToLower(id)
@@ -127,10 +166,7 @@ func (r *FireboltInstanceReconciler) canonicalImagesReady(
 ) (bool, string, error) {
 	metaImage := resolvedMetadataImage(instance)
 	if !imageMeetsCanonicalFloor(metaImage) {
-		return false, fmt.Sprintf(
-			"spec.id is an uppercase Crockford ULID; metadata image %q is older than the canonicalize floor %q — bump metadata and every bound engine image to that tag (or unset the pins) before the id is lowercased",
-			metaImage, computev1alpha1.CanonicalInstanceIDImageFloor,
-		), nil
+		return false, belowFloorMessage("metadata", metaImage), nil
 	}
 
 	var engines computev1alpha1.FireboltEngineList
@@ -147,13 +183,27 @@ func (r *FireboltInstanceReconciler) canonicalImagesReady(
 			return false, "", err
 		}
 		if !imageMeetsCanonicalFloor(image) {
-			return false, fmt.Sprintf(
-				"spec.id is an uppercase Crockford ULID; engine %q image %q is older than the canonicalize floor %q — bump metadata and every bound engine image to that tag (or unset the pins) before the id is lowercased",
-				eng.Name, image, computev1alpha1.CanonicalInstanceIDImageFloor,
-			), nil
+			return false, belowFloorMessage(fmt.Sprintf("engine %q", eng.Name), image), nil
 		}
 	}
 	return true, "", nil
+}
+
+// belowFloorMessage explains why image does not meet the canonicalize
+// floor. A digest-pinned reference carries no tag to compare, so it can
+// never clear the floor until it is repinned — telling the user to "bump
+// to that tag" would send them looking for a tag that is not there.
+func belowFloorMessage(subject, image string) string {
+	if containerImageDefaultTag(image) == "" {
+		return fmt.Sprintf(
+			"spec.id is an uppercase Crockford ULID; %s image %q is pinned by digest, so its version cannot be compared against the canonicalize floor %q — repin it by tag at or above the floor (or unset the pin) before the id is lowercased",
+			subject, image, computev1alpha1.CanonicalInstanceIDImageFloor,
+		)
+	}
+	return fmt.Sprintf(
+		"spec.id is an uppercase Crockford ULID; %s image %q is older than the canonicalize floor %q — bump metadata and every bound engine image to that tag (or unset the pins) before the id is lowercased",
+		subject, image, computev1alpha1.CanonicalInstanceIDImageFloor,
+	)
 }
 
 func resolvedMetadataImage(instance *computev1alpha1.FireboltInstance) string {
@@ -180,17 +230,16 @@ func (r *FireboltInstanceReconciler) resolvedBoundEngineImage(
 		classInfo = newFireboltEngineClassInfo(class)
 	}
 
-	preset := &computev1alpha1.FireboltEnginePreset{}
-	presetKey := client.ObjectKey{Namespace: engine.Namespace, Name: computev1alpha1.FireboltEnginePresetDefaultName}
-	if err := r.Get(ctx, presetKey, preset); err != nil {
-		if !errors.IsNotFound(err) {
-			return "", fmt.Errorf("getting FireboltEnginePreset for engine %q: %w", engine.Name, err)
-		}
-		preset = nil
-	}
-	var presetInfo *FireboltEnginePresetInfo
-	if preset != nil {
-		presetInfo = newFireboltEnginePresetInfo(preset)
+	// Resolve the Preset through the same fail-closed path the engine
+	// reconciler uses, not a bare Get: a Preset it refuses
+	// (Ready=False/OperatorOwnedFieldSet, or a live spec.template still
+	// carrying operator-owned paths) must not supply the image this gate
+	// decides on, or the gate passes on an image the engine will never
+	// run. The error surfaces as ImageResolveFailed and blocks the
+	// rewrite.
+	presetInfo, err := resolveFireboltEnginePresetInfo(ctx, r.Client, engine)
+	if err != nil {
+		return "", fmt.Errorf("resolving preset for engine %q: %w", engine.Name, err)
 	}
 	classInfo = overlayPresetOnClass(presetInfo, classInfo)
 	image, _ := effectiveEngineImage(&engine.Spec, classInfo)
@@ -208,7 +257,13 @@ func imageMeetsCanonicalFloor(image string) bool {
 	if tag == computev1alpha1.CanonicalInstanceIDImageFloor {
 		return true
 	}
-	if tag == "dev" || tag == "latest" {
+	// "dev" is the dev-variant alias of the current build, so it counts as
+	// at-or-above the floor. "latest" deliberately does not: it is not
+	// published for engine or metadata, and containerImageDefaultTag
+	// defaults every untagged reference to it — accepting it would let an
+	// untagged pin of an arbitrarily old image clear the gate, which is
+	// the exact skew the floor exists to prevent.
+	if tag == "dev" {
 		return true
 	}
 	return releaseTagAtLeast(tag, computev1alpha1.CanonicalInstanceIDImageFloor)

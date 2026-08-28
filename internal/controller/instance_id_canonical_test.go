@@ -21,13 +21,18 @@ import (
 	"strings"
 	"testing"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/oklog/ulid/v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	fireboltmetrics "github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -75,6 +80,54 @@ func TestImageMeetsCanonicalFloor(t *testing.T) {
 	}
 	if imageMeetsCanonicalFloor("oci.example/engine:release-5.0.0-pre.0.20260822175432.75d37cc26c66") {
 		t.Error("older release tag must not meet the floor")
+	}
+	// "latest" is not published for engine or metadata, and an untagged
+	// reference defaults to it — both must fail closed, or an arbitrarily
+	// old image clears the gate.
+	if imageMeetsCanonicalFloor("oci.example/engine:latest") {
+		t.Error("latest tag must not meet the floor")
+	}
+	if imageMeetsCanonicalFloor("oci.example/engine") {
+		t.Error("untagged image must not meet the floor")
+	}
+	// A digest pin carries no tag to compare against the floor.
+	if imageMeetsCanonicalFloor("oci.example/engine@sha256:" + strings.Repeat("a", 64)) {
+		t.Error("digest-pinned image must not meet the floor")
+	}
+}
+
+func TestBelowFloorMessageNamesDigestPin(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = "release-5.1.0-pre.0.20260828000000.deadbeef"
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	digest := "oci.example/engine@sha256:" + strings.Repeat("a", 64)
+	if msg := belowFloorMessage("metadata", digest); !strings.Contains(msg, "pinned by digest") {
+		t.Errorf("digest-pin message = %q, want it to name the digest pin", msg)
+	}
+	if msg := belowFloorMessage("metadata", "oci.example/engine:release-1.0.0"); strings.Contains(msg, "pinned by digest") {
+		t.Errorf("tagged message = %q, want the bump-the-tag wording", msg)
+	}
+}
+
+// TestIsUppercaseCrockfordULID_RejectsNonCrockford pins the ParseStrict
+// requirement: ulid.Parse checks only the 26-byte length, and spec.id has
+// no CRD pattern, so a same-length user-supplied id must not be treated
+// as a ULID and lowercased.
+func TestIsUppercaseCrockfordULID_RejectsNonCrockford(t *testing.T) {
+	for _, id := range []string{
+		"0Customer-Account-ID-12345", // 26 chars, not base32
+		"1234567890ABCDEFGHIJKLMNOP", // 26 chars, contains I, L, O, U
+	} {
+		if len(id) != 26 {
+			t.Fatalf("fixture %q is %d chars, want 26 to exercise the length path", id, len(id))
+		}
+		if isUppercaseCrockfordULID(id) {
+			t.Errorf("isUppercaseCrockfordULID(%q) = true, want false", id)
+		}
+	}
+	if !isUppercaseCrockfordULID(testUppercaseULID) {
+		t.Errorf("isUppercaseCrockfordULID(%q) = false, want true", testUppercaseULID)
 	}
 }
 
@@ -216,6 +269,212 @@ func TestInstanceReconcile_LeavesUppercaseULIDWhenBoundEngineBelowFloor(t *testi
 	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical)
 	if cond == nil || cond.Reason != reasonInstanceIDBelowFloor {
 		t.Fatalf("InstanceIDCanonical = %+v, want Reason %q", cond, reasonInstanceIDBelowFloor)
+	}
+}
+
+// rejectIDRewrite fails any FireboltInstance Update that changes spec.id away
+// from want, standing in for a stale CRD whose CEL rule still forbids
+// case-only updates or a policy engine that refuses spec mutations. Updates
+// that leave spec.id alone (finalizer add/remove) pass through.
+func rejectIDRewrite(want string) interceptor.Funcs {
+	return interceptor.Funcs{
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if inst, ok := obj.(*computev1alpha1.FireboltInstance); ok && inst.Spec.ID != want {
+				return apierrors.NewInvalid(
+					schema.GroupKind{Group: computev1alpha1.GroupVersion.Group, Kind: "FireboltInstance"},
+					inst.Name,
+					field.ErrorList{field.Invalid(
+						field.NewPath("spec", "id"), inst.Spec.ID,
+						"spec.id is immutable once set")},
+				)
+			}
+			return c.Update(ctx, obj, opts...)
+		},
+	}
+}
+
+func TestInstanceReconcile_SurfacesConditionWhenIDUpdateRejected(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "fi",
+			Namespace:  "default",
+			Finalizers: []string{instanceFinalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltInstanceSpec{ID: testUppercaseULID},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		WithInterceptorFuncs(rejectIDRewrite(testUppercaseULID)).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	key := client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}
+	// A rejected canonicalize must not abort the pass: returning the error
+	// would stall metadata and gateway on an otherwise healthy instance.
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), key, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ID != testUppercaseULID {
+		t.Errorf("spec.id = %q, want unchanged %q", updated.Spec.ID, testUppercaseULID)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical)
+	if cond == nil {
+		t.Fatal("InstanceIDCanonical condition missing")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("InstanceIDCanonical.Status = %s, want False", cond.Status)
+	}
+	if cond.Reason != reasonInstanceIDRejected {
+		t.Errorf("InstanceIDCanonical.Reason = %q, want %q", cond.Reason, reasonInstanceIDRejected)
+	}
+}
+
+func TestInstanceReconcile_DeletesWithoutCanonicalizingID(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	// reconcileDelete sweeps Certificates; without the kind registered the
+	// fake client fails the sweep for a reason unrelated to this test.
+	if err := certmanagerv1.AddToScheme(sch); err != nil {
+		t.Fatalf("certmanagerv1.AddToScheme: %v", err)
+	}
+	now := metav1.Now()
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "fi",
+			Namespace:         "default",
+			Finalizers:        []string{instanceFinalizerName},
+			DeletionTimestamp: &now,
+			Generation:        1,
+		},
+		Spec: computev1alpha1.FireboltInstanceSpec{ID: testUppercaseULID},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		WithInterceptorFuncs(rejectIDRewrite(testUppercaseULID)).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	key := client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}
+	// Teardown must not depend on the id rewrite succeeding — reconcileDelete
+	// sweeps by the LabelInstance label, never by spec.id.
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if err := cli.Get(context.Background(), key, &computev1alpha1.FireboltInstance{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Get after delete = %v, want NotFound (finalizer should have been removed)", err)
+	}
+}
+
+func TestInstanceReconcile_DoesNotRewriteSameLengthCustomID(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	// Exactly 26 characters, so only ParseStrict's character validation
+	// keeps it out of the canonicalize path.
+	const customID = "0Customer-Account-ID-12345"
+
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.ID = customID
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	key := client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), key, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ID != customID {
+		t.Errorf("spec.id = %q, want custom id left unchanged", updated.Spec.ID)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical)
+	if cond == nil {
+		t.Fatal("InstanceIDCanonical condition missing")
+	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("InstanceIDCanonical.Status = %s, want True for a non-ULID id", cond.Status)
+	}
+}
+
+// TestInstanceReconcile_ClearsCanonicalConditionWhenFloorEmpty covers the
+// operator rollback: a build with no floor compiled in must not leave the
+// previous build's ImageBelowFloor standing forever.
+func TestInstanceReconcile_ClearsCanonicalConditionWhenFloorEmpty(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = ""
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.ID = testUppercaseULID
+	inst.Status.Conditions = append(inst.Status.Conditions, metav1.Condition{
+		Type:               computev1alpha1.InstanceConditionInstanceIDCanonical,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonInstanceIDBelowFloor,
+		Message:            "left behind by a floor-published build",
+		LastTransitionTime: metav1.Now(),
+	})
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	key := client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), key, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ID != testUppercaseULID {
+		t.Errorf("spec.id = %q, want unchanged %q", updated.Spec.ID, testUppercaseULID)
+	}
+	if cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical); cond != nil {
+		t.Errorf("InstanceIDCanonical = %s/%s, want the stale condition removed with no floor", cond.Status, cond.Reason)
 	}
 }
 

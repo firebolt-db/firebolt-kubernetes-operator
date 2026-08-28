@@ -105,11 +105,16 @@ const (
 
 	// InstanceConditionInstanceIDCanonical reports whether spec.id is the
 	// lowercase encoding the engine consumes as the metadata account ID.
-	// True when spec.id is already lowercase (or is not a ULID). False
-	// with reason ImageBelowFloor when spec.id is an uppercase Crockford
-	// ULID and a resolved engine or metadata image is older than the
-	// operator's canonicalize floor — the controller leaves the field
-	// and rendered config unchanged until both images meet the floor.
+	// True with reason Canonical when spec.id is already a lowercase
+	// Crockford ULID, or is not a Crockford ULID at all (a user-supplied
+	// id this gate never rewrites). False with reason ImageBelowFloor
+	// when spec.id is an uppercase Crockford ULID and a resolved engine
+	// or metadata image is older than the operator's canonicalize floor,
+	// ImageResolveFailed when a bound engine image cannot be resolved, or
+	// UpdateRejected when the case-only Update is refused at admission —
+	// the controller leaves the field and rendered config unchanged in
+	// every False case. Absent while the operator has no canonicalize
+	// floor compiled in, since no gate result applies.
 	// Deliberately NOT rolled up into InstanceConditionReady: an
 	// uppercase id on an older image pin is still a working Instance.
 	InstanceConditionInstanceIDCanonical = "InstanceIDCanonical"
