@@ -498,7 +498,6 @@ func cleanupStaleResources(ctx context.Context) {
 	for _, kind := range []string{"fireboltinstances", "fireboltengines", "fireboltengineclasses", "fireboltenginepresets"} {
 		stripFinalizers(kind, true)
 	}
-	stripFinalizers("clusterfireboltengineclasses", false)
 
 	err := k8sClient.CoreV1().Namespaces().Delete(ctx, testNamespace, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
