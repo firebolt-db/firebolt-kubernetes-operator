@@ -540,16 +540,23 @@ func verifyImageInRegistry(registryEndpoint, image string) error {
 func registryRepoPathAndTag(image string) (string, string) {
 	tag := "latest"
 	repo := image
+	// Strip a digest suffix first. load-e2e-images.sh publishes digested
+	// refs under name:tag (`docker tag` cannot target @sha256), so the
+	// registry HEAD below looks up the tag. Splitting on the last colon
+	// without this would treat the digest hex as the tag.
+	if at := strings.LastIndex(repo, "@"); at >= 0 {
+		repo = repo[:at]
+	}
 	// Split off the tag at the LAST colon so a host:port prefix like
 	// "localhost:5001/foo:tag" parses correctly. We use the last "/" to
 	// decide whether the colon belongs to a host:port (no "/" after it
 	// means no path component, i.e. host:port) — but in practice this
 	// helper is fed bare references like "ghcr.io/firebolt-db/engine:dev",
-	// "postgres:16-alpine", or "envoyproxy/envoy:v1.37.2" where the last
-	// colon is always the tag separator.
-	if idx := strings.LastIndex(image, ":"); idx > strings.LastIndex(image, "/") {
-		repo = image[:idx]
-		tag = image[idx+1:]
+	// "postgres:16.15-alpine@sha256:…", or "envoyproxy/envoy:v1.37.2"
+	// where the last colon after digest-stripping is the tag separator.
+	if idx := strings.LastIndex(repo, ":"); idx > strings.LastIndex(repo, "/") {
+		tag = repo[idx+1:]
+		repo = repo[:idx]
 	}
 
 	firstSeg := repo

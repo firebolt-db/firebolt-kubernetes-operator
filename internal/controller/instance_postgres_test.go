@@ -27,7 +27,7 @@ import (
 )
 
 // Lock in the SecurityContext hardening on the internal PostgreSQL
-// pod template. The official postgres:16-alpine image runs
+// pod template. The official alpine postgres image runs
 // fine as the built-in non-root postgres user (UID 70) with a read-only
 // root filesystem, provided /var/run/postgresql and /tmp are backed by
 // writable emptyDir mounts. These tests are the regression guard against
@@ -104,6 +104,22 @@ func TestBuildPostgresStatefulSetContainerSecurityContext(t *testing.T) {
 	}
 	if len(csc.Capabilities.Add) != 0 {
 		t.Errorf("Capabilities.Add: got %v, want empty", csc.Capabilities.Add)
+	}
+}
+
+// TestBuildPostgresStatefulSetUsesPinnedImage locks the rendered
+// container to the compiled PostgresImage default (a tag@digest pin).
+func TestBuildPostgresStatefulSetUsesPinnedImage(t *testing.T) {
+	sts := buildPostgresStatefulSet(mkPostgresInstance())
+	if got, want := len(sts.Spec.Template.Spec.Containers), 1; got != want {
+		t.Fatalf("containers: got %d, want %d", got, want)
+	}
+	c := sts.Spec.Template.Spec.Containers[0]
+	if c.Image != PostgresImage {
+		t.Errorf("image = %q, want compiled PostgresImage %q", c.Image, PostgresImage)
+	}
+	if c.ImagePullPolicy != corev1.PullIfNotPresent {
+		t.Errorf("imagePullPolicy = %q, want %q for a non-latest pin", c.ImagePullPolicy, corev1.PullIfNotPresent)
 	}
 }
 
