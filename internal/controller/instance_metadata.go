@@ -247,9 +247,9 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 }
 
 // metadataConfigHash preserves the config-only rollout hash for internal
-// PostgreSQL. For external PostgreSQL it hashes the config and both credential
-// values together, so credential changes roll the metadata pod without exposing
-// either value or a per-value digest in the pod annotation.
+// PostgreSQL. For external PostgreSQL it also hashes the referenced Secret's
+// resource version, so credential changes roll the metadata pod without hashing
+// credential bytes into a non-Secret object.
 func (r *FireboltInstanceReconciler) metadataConfigHash(
 	ctx context.Context,
 	instance *computev1alpha1.FireboltInstance,
@@ -266,10 +266,9 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 			instance.Namespace, name, err)
 	}
 	return aggregateContentHash(
-		[]byte("metadata-config-and-postgres-credentials-v1"),
+		[]byte("metadata-config-and-postgres-secret-version-v1"),
 		[]byte(configYAML),
-		secret.Data["username"],
-		secret.Data["password"],
+		[]byte(secret.ResourceVersion),
 	), nil
 }
 

@@ -99,7 +99,7 @@ func TestMetadataConfigHashInternalPostgresUsesConfigOnly(t *testing.T) {
 	}
 }
 
-func TestMetadataConfigHashExternalPostgresUsesCredentialContent(t *testing.T) {
+func TestMetadataConfigHashExternalPostgresUsesSecretResourceVersion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -122,12 +122,12 @@ func TestMetadataConfigHashExternalPostgresUsesCredentialContent(t *testing.T) {
 		return hash
 	}
 
-	secret := func(username, password string) *corev1.Secret {
+	secret := func(resourceVersion, username, password string) *corev1.Secret {
 		return &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            "external-creds",
 				Namespace:       instance.Namespace,
-				ResourceVersion: "10",
+				ResourceVersion: resourceVersion,
 			},
 			Data: map[string][]byte{
 				"username": []byte(username),
@@ -136,21 +136,17 @@ func TestMetadataConfigHashExternalPostgresUsesCredentialContent(t *testing.T) {
 			},
 		}
 	}
-	base := secret("metadata-user", "password-one")
+	base := secret("10", "metadata-user", "password-one")
 	baseHash := hashForSecret(base)
 
-	sameCredentials := secret("metadata-user", "password-one")
-	sameCredentials.ResourceVersion = "11"
+	sameCredentials := secret("11", "metadata-user", "password-one")
 	sameCredentials.Annotations = map[string]string{"synchronizer.example/version": "2"}
-	sameCredentials.Data["database"] = []byte("also-ignored")
-	if got := hashForSecret(sameCredentials); got != baseHash {
-		t.Fatalf("metadata-only Secret update changed config hash: got %q, want %q", got, baseHash)
+	if got := hashForSecret(sameCredentials); got == baseHash {
+		t.Fatalf("Secret resource-version change did not change metadata config hash: %q", got)
 	}
-	if got := hashForSecret(secret("metadata-user-2", "password-one")); got == baseHash {
-		t.Fatalf("username change did not change metadata config hash: %q", got)
-	}
-	if got := hashForSecret(secret("metadata-user", "password-two")); got == baseHash {
-		t.Fatalf("password change did not change metadata config hash: %q", got)
+	differentCredentialsSameVersion := secret("10", "metadata-user-2", "password-two")
+	if got := hashForSecret(differentCredentialsSameVersion); got != baseHash {
+		t.Fatalf("credential bytes entered metadata config hash: got %q, want %q", got, baseHash)
 	}
 	for _, credential := range []string{"metadata-user", "password-one"} {
 		if strings.Contains(baseHash, credential) || baseHash == contentHash(credential) {
