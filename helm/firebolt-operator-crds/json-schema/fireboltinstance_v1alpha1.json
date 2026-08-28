@@ -7543,12 +7543,12 @@
           "additionalProperties": false
         },
         "id": {
-          "description": "ID is a stable unique identifier for this instance, used as the metadata\naccount ID. If empty on creation, a ULID is generated automatically by\nthe defaulting webhook. Once set, this field is immutable.\n\nThe CEL rule allows the one-time \"\" -> <ulid> transition because when\nthe mutating webhook is disabled (local dev, kind, some E2E setups),\nthe controller Reconcile has a fallback that generates an ID and\nUpdates the CR. A plain `self == oldSelf` would reject that Update at\nadmission time and leave the instance permanently stuck without an ID.\nOnce ID is non-empty, subsequent Updates are still blocked from\nchanging it.",
+          "description": "ID is a stable unique identifier for this instance, used as the metadata\naccount ID. If empty on creation, a lowercase Crockford ULID is generated\nautomatically by the defaulting webhook (or the controller fallback\nwhen webhooks are disabled). Once set, this field is immutable except\nfor a case-only rewrite: the controller lowercases an existing\nuppercase Crockford ULID after engine and metadata images meet the\ncanonicalize floor.\n\nThe CEL rule allows the one-time \"\" -> <ulid> transition because when\nthe mutating webhook is disabled (local dev, kind, some E2E setups),\nthe controller Reconcile has a fallback that generates an ID and\nUpdates the CR. A plain `self == oldSelf` would reject that Update at\nadmission time and leave the instance permanently stuck without an ID.\nA case-only change (`self.lowerAscii() == oldSelf.lowerAscii()`) is\nalso allowed so the controller can persist the lowercase encoding\nwithout opening the field to any other edit.",
           "type": "string",
           "x-kubernetes-validations": [
             {
-              "message": "spec.id is immutable once set",
-              "rule": "oldSelf == '' || self == oldSelf"
+              "message": "spec.id is immutable once set except for case",
+              "rule": "oldSelf == '' || self == oldSelf || self.lowerAscii() == oldSelf.lowerAscii()"
             }
           ]
         },

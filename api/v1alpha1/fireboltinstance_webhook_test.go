@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oklog/ulid/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +47,12 @@ func TestDefaulter_GeneratesULID(t *testing.T) {
 	if len(inst.Spec.ID) != 26 {
 		t.Errorf("Default: expected 26-char ULID, got %d chars: %q", len(inst.Spec.ID), inst.Spec.ID)
 	}
+	if inst.Spec.ID != strings.ToLower(inst.Spec.ID) {
+		t.Errorf("Default: minted spec.id %q is not lowercase", inst.Spec.ID)
+	}
+	if _, err := ulid.Parse(inst.Spec.ID); err != nil {
+		t.Errorf("Default: minted spec.id %q is not a ULID: %v", inst.Spec.ID, err)
+	}
 }
 
 func TestDefaulter_PreservesExistingID(t *testing.T) {
@@ -66,11 +73,10 @@ func TestDefaulter_PreservesExistingID(t *testing.T) {
 	}
 }
 
-// spec.id immutability is enforced by CEL
-// (XValidation rule="oldSelf == '' || self == oldSelf") on the CRD, not by
-// the webhook. No webhook-level test is needed; the rule explicitly allows
-// the one-time empty->value transition used by the controller fallback
-// when the mutating webhook is disabled.
+// spec.id immutability is enforced by CEL on the CRD, not by the
+// webhook. The rule allows the one-time empty->value transition used
+// by the controller fallback and a case-only rewrite of an existing
+// Crockford ULID. See instance_id_cel_test.go.
 
 func TestValidateUpdate_AllowsSameID(t *testing.T) {
 	v := &FireboltInstanceCustomValidator{}

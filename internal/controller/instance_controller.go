@@ -18,13 +18,11 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
 	stderrors "errors"
 	"fmt"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	"github.com/oklog/ulid/v2"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -166,15 +165,9 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Fallback for when the mutating webhook is disabled (local dev, E2E).
-	// In production the webhook sets spec.id atomically at admission time and
-	// enforces immutability; this branch never fires in that case.
-	if instance.Spec.ID == "" {
-		instance.Spec.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
-		log.Info("Generated instance ID", "id", instance.Spec.ID)
-		if err := r.Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
+	if requeue, err := r.ensureInstanceID(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	} else if requeue {
 		return ctrl.Result{Requeue: true}, nil
 	}
 
@@ -943,6 +936,10 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
+		Watches(
+			&computev1alpha1.FireboltEngine{},
+			handler.EnqueueRequestsFromMapFunc(enqueueInstanceFromEngine),
+		).
 		Named(name).
 		Complete(r)
 }
@@ -995,4 +992,17 @@ func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
 		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(instance)})
 	}
 	return requests
+}
+
+// enqueueInstanceFromEngine maps a FireboltEngine event to its
+// spec.instanceRef so an engine image pin change re-runs the
+// instance-id canonicalize gate.
+func enqueueInstanceFromEngine(_ context.Context, obj client.Object) []reconcile.Request {
+	eng, ok := obj.(*computev1alpha1.FireboltEngine)
+	if !ok || eng.Spec.InstanceRef == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: eng.Namespace},
+	}}
 }

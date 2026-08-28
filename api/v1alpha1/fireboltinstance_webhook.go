@@ -18,14 +18,12 @@ package v1alpha1
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/oklog/ulid/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -59,10 +57,11 @@ func SetupFireboltInstanceWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 // Default sets default values for a FireboltInstance. If spec.id is empty, a
-// new ULID is generated so every instance has a stable unique identifier.
+// new lowercase ULID is generated so every instance has a stable unique
+// identifier.
 func (d *FireboltInstanceDefaulter) Default(_ context.Context, inst *FireboltInstance) error {
 	if inst.Spec.ID == "" {
-		inst.Spec.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
+		inst.Spec.ID = MintInstanceID()
 	}
 	return nil
 }
@@ -77,10 +76,12 @@ func (v *FireboltInstanceCustomValidator) ValidateUpdate(
 	_ context.Context, oldInst, newInst *FireboltInstance,
 ) (admission.Warnings, error) {
 	// spec.id immutability is enforced by CEL on the CRD itself
-	// (XValidation rule="oldSelf == '' || self == oldSelf"), so it works
-	// even when webhooks are disabled. The empty->value transition is
-	// explicitly allowed so the controller fallback can generate and
-	// persist an ID when the defaulting webhook is not active.
+	// (empty-to-value, identical value, or case-only change), so it
+	// works even when webhooks are disabled. The empty->value
+	// transition lets the controller fallback persist a minted ID when
+	// the defaulting webhook is not active. The case-only transition
+	// lets the controller rewrite an existing uppercase Crockford ULID
+	// to lowercase once engine and metadata images meet the floor.
 	//
 	// Signing algorithm/size immutability is primarily enforced at the API
 	// server by CEL transition rules (see fireboltinstance_types.go:

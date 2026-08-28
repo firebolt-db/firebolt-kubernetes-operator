@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oklog/ulid/v2"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,12 +36,12 @@ import (
 // TestInstanceReconcile_GeneratesULIDWhenSpecIDEmpty pins the
 // controller-side fallback for the mutating defaulter webhook: when
 // admission is bypassed and a FireboltInstance lands with spec.id
-// empty, the first reconcile must mint a ULID and Update the CR so
-// every consumer of inst.Spec.ID gets a stable identifier from this
-// point on. The CRD's CEL transition rule specifically permits the
-// one-shot empty-to-ULID write. The controller returns Requeue=true
-// after the Update so the rest of the reconcile runs against the
-// persisted CR.
+// empty, the first reconcile must mint a lowercase Crockford ULID and
+// Update the CR so every consumer of inst.Spec.ID gets a stable
+// identifier from this point on. The CRD's CEL transition rule
+// specifically permits the one-shot empty-to-ULID write. The
+// controller returns Requeue=true after the Update so the rest of the
+// reconcile runs against the persisted CR.
 func TestInstanceReconcile_GeneratesULIDWhenSpecIDEmpty(t *testing.T) {
 	sch := instanceTemplateTestScheme(t)
 	inst := &computev1alpha1.FireboltInstance{
@@ -85,6 +86,12 @@ func TestInstanceReconcile_GeneratesULIDWhenSpecIDEmpty(t *testing.T) {
 	// webhook's TestDefaulter_GeneratesULID assertion.
 	if len(updated.Spec.ID) != 26 {
 		t.Errorf("spec.id length = %d, want 26 (ULID): %q", len(updated.Spec.ID), updated.Spec.ID)
+	}
+	if updated.Spec.ID != strings.ToLower(updated.Spec.ID) {
+		t.Errorf("minted spec.id %q is not lowercase", updated.Spec.ID)
+	}
+	if _, err := ulid.Parse(updated.Spec.ID); err != nil {
+		t.Errorf("minted spec.id %q is not a ULID: %v", updated.Spec.ID, err)
 	}
 }
 

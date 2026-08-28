@@ -102,6 +102,17 @@ const (
 	// listener would still be serving plaintext during provisioning. Distinct
 	// from InstanceConditionGatewayReady (the Deployment's own rollout health).
 	InstanceConditionGatewayTLSReady = "GatewayTLSReady"
+
+	// InstanceConditionInstanceIDCanonical reports whether spec.id is the
+	// lowercase encoding the engine consumes as the metadata account ID.
+	// True when spec.id is already lowercase (or is not a ULID). False
+	// with reason ImageBelowFloor when spec.id is an uppercase Crockford
+	// ULID and a resolved engine or metadata image is older than the
+	// operator's canonicalize floor — the controller leaves the field
+	// and rendered config unchanged until both images meet the floor.
+	// Deliberately NOT rolled up into InstanceConditionReady: an
+	// uppercase id on an older image pin is still a working Instance.
+	InstanceConditionInstanceIDCanonical = "InstanceIDCanonical"
 )
 
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
@@ -841,18 +852,23 @@ const (
 // FireboltInstanceSpec defines the desired state of a Firebolt Instance.
 type FireboltInstanceSpec struct {
 	// ID is a stable unique identifier for this instance, used as the metadata
-	// account ID. If empty on creation, a ULID is generated automatically by
-	// the defaulting webhook. Once set, this field is immutable.
+	// account ID. If empty on creation, a lowercase Crockford ULID is generated
+	// automatically by the defaulting webhook (or the controller fallback
+	// when webhooks are disabled). Once set, this field is immutable except
+	// for a case-only rewrite: the controller lowercases an existing
+	// uppercase Crockford ULID after engine and metadata images meet the
+	// canonicalize floor.
 	//
 	// The CEL rule allows the one-time "" -> <ulid> transition because when
 	// the mutating webhook is disabled (local dev, kind, some E2E setups),
 	// the controller Reconcile has a fallback that generates an ID and
 	// Updates the CR. A plain `self == oldSelf` would reject that Update at
 	// admission time and leave the instance permanently stuck without an ID.
-	// Once ID is non-empty, subsequent Updates are still blocked from
-	// changing it.
+	// A case-only change (`self.lowerAscii() == oldSelf.lowerAscii()`) is
+	// also allowed so the controller can persist the lowercase encoding
+	// without opening the field to any other edit.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf",message="spec.id is immutable once set"
+	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf || self.lowerAscii() == oldSelf.lowerAscii()",message="spec.id is immutable once set except for case"
 	ID string `json:"id,omitempty"`
 
 	// MetadataNG is experimental and selects the next-generation metadata

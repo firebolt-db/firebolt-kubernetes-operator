@@ -22,7 +22,6 @@ package e2e
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,7 +36,6 @@ import (
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	"github.com/oklog/ulid/v2"
 	. "github.com/onsi/ginkgo/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -2225,7 +2223,7 @@ func createInstanceWithMutate(ctx context.Context, name, metadataImage, metadata
 			Namespace: testNamespace,
 		},
 		Spec: computev1alpha1.FireboltInstanceSpec{
-			ID:               ulid.MustNew(ulid.Now(), rand.Reader).String(),
+			ID:               computev1alpha1.MintInstanceID(),
 			MetricScrapeMode: scrapeMode,
 			Metadata: computev1alpha1.MetadataSpec{
 				Replicas: &replicas,
