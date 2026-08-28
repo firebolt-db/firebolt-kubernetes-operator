@@ -56,9 +56,9 @@ func SetupFireboltInstanceWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// Default sets default values for a FireboltInstance. If spec.id is empty, a
-// new lowercase ULID is generated so every instance has a stable unique
-// identifier.
+// Default sets default values for a FireboltInstance. If spec.id is empty,
+// MintInstanceID generates a Crockford ULID so every instance has a
+// stable unique identifier.
 func (d *FireboltInstanceDefaulter) Default(_ context.Context, inst *FireboltInstance) error {
 	if inst.Spec.ID == "" {
 		inst.Spec.ID = MintInstanceID()

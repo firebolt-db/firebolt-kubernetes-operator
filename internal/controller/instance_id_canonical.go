@@ -39,12 +39,6 @@ const (
 	reasonInstanceIDResolveError = "ImageResolveFailed"
 )
 
-// canonicalInstanceIDImageFloor is the engine and metadata tag at which
-// lowercase FireboltInstance.spec.id is required. Empty means the floor
-// is not published: new ids are minted lowercase, existing CRs are left
-// unchanged so an older image pin cannot receive lowercase YAML.
-var canonicalInstanceIDImageFloor string
-
 var releaseStyleTag = regexp.MustCompile(
 	`^(release|debug)-(\d+)\.(\d+)\.(\d+)(?:-pre\.(\d+)\.(\d+)\.[0-9a-fA-F]+)?$`,
 )
@@ -56,7 +50,7 @@ type parsedReleaseTag struct {
 	timestamp           int64
 }
 
-// ensureInstanceID mints a lowercase ULID when spec.id is empty (webhook
+// ensureInstanceID mints a Crockford ULID when spec.id is empty (webhook
 // fallback) and lowercases an existing uppercase Crockford ULID once
 // images meet the canonicalize floor. Returns requeue=true after a spec
 // Update so Reconcile reloads the persisted CR.
@@ -76,7 +70,7 @@ func (r *FireboltInstanceReconciler) ensureInstanceID(
 
 // canonicalizeInstanceID lowercases an existing uppercase Crockford ULID
 // on spec.id once every resolved metadata and bound-engine image meets
-// canonicalInstanceIDImageFloor. Returns rewritten=true after a spec
+// CanonicalInstanceIDImageFloor. Returns rewritten=true after a spec
 // Update so the caller requeues against the persisted CR.
 func (r *FireboltInstanceReconciler) canonicalizeInstanceID(
 	ctx context.Context, instance *computev1alpha1.FireboltInstance,
@@ -90,16 +84,21 @@ func (r *FireboltInstanceReconciler) canonicalizeInstanceID(
 		}
 		return false, nil
 	}
-	if canonicalInstanceIDImageFloor == "" {
+	if computev1alpha1.CanonicalInstanceIDImageFloor == "" {
 		return false, nil
 	}
 
 	ready, message, err := r.canonicalImagesReady(ctx, instance)
 	if err != nil {
+		// Same continue-reconcile shape as ImageBelowFloor: persist
+		// the condition on the in-memory object and do not return the
+		// error. Returning it would skip metadata, gateway, and
+		// reconcileDelete, so a dangling EngineClassRef would stall
+		// the Instance — including finalizer removal.
 		setInstanceCondition(instance,
 			computev1alpha1.InstanceConditionInstanceIDCanonical, metav1.ConditionFalse,
 			reasonInstanceIDResolveError, err.Error())
-		return false, err
+		return false, nil
 	}
 	if !ready {
 		setInstanceCondition(instance,
@@ -130,7 +129,7 @@ func (r *FireboltInstanceReconciler) canonicalImagesReady(
 	if !imageMeetsCanonicalFloor(metaImage) {
 		return false, fmt.Sprintf(
 			"spec.id is an uppercase Crockford ULID; metadata image %q is older than the canonicalize floor %q — bump metadata and every bound engine image to that tag (or unset the pins) before the id is lowercased",
-			metaImage, canonicalInstanceIDImageFloor,
+			metaImage, computev1alpha1.CanonicalInstanceIDImageFloor,
 		), nil
 	}
 
@@ -150,7 +149,7 @@ func (r *FireboltInstanceReconciler) canonicalImagesReady(
 		if !imageMeetsCanonicalFloor(image) {
 			return false, fmt.Sprintf(
 				"spec.id is an uppercase Crockford ULID; engine %q image %q is older than the canonicalize floor %q — bump metadata and every bound engine image to that tag (or unset the pins) before the id is lowercased",
-				eng.Name, image, canonicalInstanceIDImageFloor,
+				eng.Name, image, computev1alpha1.CanonicalInstanceIDImageFloor,
 			), nil
 		}
 	}
@@ -199,20 +198,20 @@ func (r *FireboltInstanceReconciler) resolvedBoundEngineImage(
 }
 
 func imageMeetsCanonicalFloor(image string) bool {
-	if canonicalInstanceIDImageFloor == "" {
+	if computev1alpha1.CanonicalInstanceIDImageFloor == "" {
 		return false
 	}
 	tag := containerImageDefaultTag(image)
 	if tag == "" {
 		return false
 	}
-	if tag == canonicalInstanceIDImageFloor {
+	if tag == computev1alpha1.CanonicalInstanceIDImageFloor {
 		return true
 	}
 	if tag == "dev" || tag == "latest" {
 		return true
 	}
-	return releaseTagAtLeast(tag, canonicalInstanceIDImageFloor)
+	return releaseTagAtLeast(tag, computev1alpha1.CanonicalInstanceIDImageFloor)
 }
 
 func parseReleaseStyleTag(tag string) (parsedReleaseTag, bool) {

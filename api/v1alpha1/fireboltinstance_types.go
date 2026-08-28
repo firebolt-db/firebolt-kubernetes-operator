@@ -852,12 +852,13 @@ const (
 // FireboltInstanceSpec defines the desired state of a Firebolt Instance.
 type FireboltInstanceSpec struct {
 	// ID is a stable unique identifier for this instance, used as the metadata
-	// account ID. If empty on creation, a lowercase Crockford ULID is generated
+	// account ID. If empty on creation, a Crockford ULID is generated
 	// automatically by the defaulting webhook (or the controller fallback
-	// when webhooks are disabled). Once set, this field is immutable except
-	// for a case-only rewrite: the controller lowercases an existing
-	// uppercase Crockford ULID after engine and metadata images meet the
-	// canonicalize floor.
+	// when webhooks are disabled). The minted encoding is uppercase while
+	// CanonicalInstanceIDImageFloor is empty and lowercase once that floor
+	// is set. Once written, this field is immutable except for a case-only
+	// rewrite: the controller lowercases an existing uppercase Crockford
+	// ULID after engine and metadata images meet the canonicalize floor.
 	//
 	// The CEL rule allows the one-time "" -> <ulid> transition because when
 	// the mutating webhook is disabled (local dev, kind, some E2E setups),

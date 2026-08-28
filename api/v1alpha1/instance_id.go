@@ -23,10 +23,24 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// MintInstanceID returns a new 26-character Crockford-base32 ULID encoded
-// in lowercase. The mutating webhook and the controller fallback both
-// call this so an admission-bypassed create still persists the same
-// encoding the engine consumes as the metadata account ID.
+// CanonicalInstanceIDImageFloor is the engine and metadata tag at which
+// lowercase FireboltInstance.spec.id is required. Empty means the floor
+// is not published: MintInstanceID returns the uppercase Crockford
+// encoding current images consume, and the controller leaves existing
+// CRs unchanged.
+var CanonicalInstanceIDImageFloor string
+
+// MintInstanceID returns a new 26-character Crockford-base32 ULID. While
+// CanonicalInstanceIDImageFloor is empty it returns the uppercase
+// encoding current engine and metadata images consume as the account
+// ID. Once the floor is set it returns lowercase, matching the
+// encoding those images require. The mutating webhook and the
+// controller fallback both call this so an admission-bypassed create
+// still persists the same encoding.
 func MintInstanceID() string {
-	return strings.ToLower(ulid.MustNew(ulid.Now(), rand.Reader).String())
+	id := ulid.MustNew(ulid.Now(), rand.Reader).String()
+	if CanonicalInstanceIDImageFloor == "" {
+		return id
+	}
+	return strings.ToLower(id)
 }

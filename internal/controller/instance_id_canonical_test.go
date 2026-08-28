@@ -59,18 +59,18 @@ func TestReleaseTagAtLeast(t *testing.T) {
 }
 
 func TestImageMeetsCanonicalFloor(t *testing.T) {
-	orig := canonicalInstanceIDImageFloor
-	t.Cleanup(func() { canonicalInstanceIDImageFloor = orig })
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
 	if imageMeetsCanonicalFloor("oci.example/engine:" + DefaultEngineTag) {
 		t.Fatal("empty floor must not treat any image as meeting it")
 	}
 
-	canonicalInstanceIDImageFloor = "release-5.1.0-pre.0.20260828000000.deadbeef"
+	computev1alpha1.CanonicalInstanceIDImageFloor = "release-5.1.0-pre.0.20260828000000.deadbeef"
 	if !imageMeetsCanonicalFloor("oci.example/engine:dev") {
 		t.Error("dev tag should meet the floor")
 	}
-	if !imageMeetsCanonicalFloor("oci.example/engine:" + canonicalInstanceIDImageFloor) {
+	if !imageMeetsCanonicalFloor("oci.example/engine:" + computev1alpha1.CanonicalInstanceIDImageFloor) {
 		t.Error("exact floor tag should meet the floor")
 	}
 	if imageMeetsCanonicalFloor("oci.example/engine:release-5.0.0-pre.0.20260822175432.75d37cc26c66") {
@@ -79,9 +79,9 @@ func TestImageMeetsCanonicalFloor(t *testing.T) {
 }
 
 func TestInstanceReconcile_CanonicalizesUppercaseULIDWhenImagesMeetFloor(t *testing.T) {
-	orig := canonicalInstanceIDImageFloor
-	canonicalInstanceIDImageFloor = DefaultEngineTag
-	t.Cleanup(func() { canonicalInstanceIDImageFloor = orig })
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
 	if _, err := ulid.Parse(testUppercaseULID); err != nil {
 		t.Fatalf("fixture is not a ULID: %v", err)
@@ -126,9 +126,9 @@ func TestInstanceReconcile_CanonicalizesUppercaseULIDWhenImagesMeetFloor(t *test
 }
 
 func TestInstanceReconcile_LeavesUppercaseULIDWhenImageBelowFloor(t *testing.T) {
-	orig := canonicalInstanceIDImageFloor
-	canonicalInstanceIDImageFloor = "release-9.0.0-pre.0.20990101000000.deadbeef"
-	t.Cleanup(func() { canonicalInstanceIDImageFloor = orig })
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = "release-9.0.0-pre.0.20990101000000.deadbeef"
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
 	sch := instanceTemplateTestScheme(t)
 	inst := readyInstanceWithTemplates()
@@ -171,9 +171,9 @@ func TestInstanceReconcile_LeavesUppercaseULIDWhenImageBelowFloor(t *testing.T) 
 }
 
 func TestInstanceReconcile_LeavesUppercaseULIDWhenBoundEngineBelowFloor(t *testing.T) {
-	orig := canonicalInstanceIDImageFloor
-	canonicalInstanceIDImageFloor = DefaultEngineTag
-	t.Cleanup(func() { canonicalInstanceIDImageFloor = orig })
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
 	sch := instanceTemplateTestScheme(t)
 	inst := readyInstanceWithTemplates()
@@ -219,10 +219,58 @@ func TestInstanceReconcile_LeavesUppercaseULIDWhenBoundEngineBelowFloor(t *testi
 	}
 }
 
+func TestInstanceReconcile_ContinuesWhenBoundEngineClassMissing(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.ID = testUppercaseULID
+	eng := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    inst.Name,
+			EngineClassRef: ptr("missing-class"),
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst, eng).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}}); err != nil {
+		t.Fatalf("Reconcile: %v, want nil so a dangling class ref cannot stall the instance", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ID != testUppercaseULID {
+		t.Errorf("spec.id = %q, want unchanged uppercase while the bound engine class is missing", updated.Spec.ID)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical)
+	if cond == nil {
+		t.Fatal("InstanceIDCanonical condition missing")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("InstanceIDCanonical.Status = %s, want False", cond.Status)
+	}
+	if cond.Reason != reasonInstanceIDResolveError {
+		t.Errorf("InstanceIDCanonical.Reason = %q, want %q", cond.Reason, reasonInstanceIDResolveError)
+	}
+}
+
 func TestInstanceReconcile_DoesNotRewriteCustomID(t *testing.T) {
-	orig := canonicalInstanceIDImageFloor
-	canonicalInstanceIDImageFloor = DefaultEngineTag
-	t.Cleanup(func() { canonicalInstanceIDImageFloor = orig })
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
 
 	sch := instanceTemplateTestScheme(t)
 	inst := readyInstanceWithTemplates()
