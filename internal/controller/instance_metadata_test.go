@@ -21,9 +21,11 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/yaml"
@@ -97,7 +99,7 @@ func TestMetadataConfigHashInternalPostgresUsesConfigOnly(t *testing.T) {
 	}
 }
 
-func TestMetadataConfigHashExternalPostgresIncludesCredentialsSecretVersion(t *testing.T) {
+func TestMetadataConfigHashExternalPostgresUsesCredentialContent(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -108,11 +110,8 @@ func TestMetadataConfigHashExternalPostgresIncludesCredentialsSecretVersion(t *t
 		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
 	}
 	configYAML := buildMetadataConfigYAML(instance)
-	hashForVersion := func(version string) string {
+	hashForSecret := func(secret *corev1.Secret) string {
 		t.Helper()
-		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
-			Name: "external-creds", Namespace: instance.Namespace, ResourceVersion: version,
-		}}
 		reconciler := &FireboltInstanceReconciler{
 			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build(),
 		}
@@ -123,8 +122,87 @@ func TestMetadataConfigHashExternalPostgresIncludesCredentialsSecretVersion(t *t
 		return hash
 	}
 
-	if before, after := hashForVersion("10"), hashForVersion("11"); before == after {
-		t.Fatalf("metadata config hash did not change across credentials Secret rotation: %q", before)
+	secret := func(username, password string) *corev1.Secret {
+		return &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "external-creds",
+				Namespace:       instance.Namespace,
+				ResourceVersion: "10",
+			},
+			Data: map[string][]byte{
+				"username": []byte(username),
+				"password": []byte(password),
+				"database": []byte("ignored"),
+			},
+		}
+	}
+	base := secret("metadata-user", "password-one")
+	baseHash := hashForSecret(base)
+
+	sameCredentials := secret("metadata-user", "password-one")
+	sameCredentials.ResourceVersion = "11"
+	sameCredentials.Annotations = map[string]string{"synchronizer.example/version": "2"}
+	sameCredentials.Data["database"] = []byte("also-ignored")
+	if got := hashForSecret(sameCredentials); got != baseHash {
+		t.Fatalf("metadata-only Secret update changed config hash: got %q, want %q", got, baseHash)
+	}
+	if got := hashForSecret(secret("metadata-user-2", "password-one")); got == baseHash {
+		t.Fatalf("username change did not change metadata config hash: %q", got)
+	}
+	if got := hashForSecret(secret("metadata-user", "password-two")); got == baseHash {
+		t.Fatalf("password change did not change metadata config hash: %q", got)
+	}
+	for _, credential := range []string{"metadata-user", "password-one"} {
+		if strings.Contains(baseHash, credential) || baseHash == contentHash(credential) {
+			t.Fatalf("metadata config hash exposes an individual credential: %q", baseHash)
+		}
+	}
+}
+
+func TestEnsureMetadataDeploymentAppliesComputedConfigHash(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := computev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	instance := mkMetadataInstance()
+	instance.UID = types.UID("instance-uid")
+	instance.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host: "postgres.example.com", Database: "metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "external-creds"},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-creds", Namespace: instance.Namespace},
+		Data: map[string][]byte{
+			"username": []byte("metadata-user"),
+			"password": []byte("metadata-password"),
+		},
+	}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(instance, secret).Build()
+	reconciler := &FireboltInstanceReconciler{Client: client, Scheme: scheme}
+	configYAML := buildMetadataConfigYAML(instance)
+	want, err := reconciler.metadataConfigHash(context.Background(), instance, configYAML)
+	if err != nil {
+		t.Fatalf("metadataConfigHash: %v", err)
+	}
+
+	if err := reconciler.ensureMetadataDeployment(context.Background(), instance, configYAML); err != nil {
+		t.Fatalf("ensureMetadataDeployment: %v", err)
+	}
+	applied := &appsv1.Deployment{}
+	if err := client.Get(context.Background(), types.NamespacedName{
+		Namespace: instance.Namespace,
+		Name:      instance.Name + SuffixMetadataService,
+	}, applied); err != nil {
+		t.Fatalf("get applied metadata Deployment: %v", err)
+	}
+	if got := applied.Spec.Template.Annotations[AnnotationConfigHash]; got != want {
+		t.Fatalf("applied metadata config hash = %q, want %q", got, want)
+	}
+	if got := len(applied.Spec.Template.Annotations); got != 1 {
+		t.Fatalf("applied metadata Deployment has %d annotations, want one aggregate hash", got)
 	}
 }
 

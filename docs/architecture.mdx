@@ -44,10 +44,11 @@ mounts the referenced Secret directly; credential bytes are not copied into the
 Instance or ConfigMap.
 
 The Instance controller watches credential Secrets that its Instances reference.
-It folds the Secret `resourceVersion` into the Metadata Service pod-template
-hash, so an in-place password rotation rolls the single metadata pod even though
-the Secret name and rendered configuration remain unchanged. The hash never
-contains credential bytes.
+It folds the Secret's `username` and `password` content into one aggregate
+Metadata Service pod-template hash, so a credential change rolls the single
+metadata pod even though the Secret name and rendered configuration remain
+unchanged. Secret metadata-only updates do not change the hash. The annotation
+contains neither credential bytes nor separate per-value digests.
 
 ## Query traffic
 

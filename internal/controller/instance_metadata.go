@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -246,13 +247,9 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 }
 
 // metadataConfigHash preserves the config-only rollout hash for internal
-// PostgreSQL. For external PostgreSQL it also includes the referenced
-// credentials Secret's ResourceVersion so an in-place password rotation rolls
-// the metadata pod. Pensieve reads the credential files at process start; the
-// rendered YAML and Secret name do not change when a Secret synchronization
-// controller refreshes the same object. ResourceVersion, not credential bytes,
-// is sufficient to detect every write without moving secret material into a
-// pod annotation.
+// PostgreSQL. For external PostgreSQL it hashes the config and both credential
+// values together, so credential changes roll the metadata pod without exposing
+// either value or a per-value digest in the pod annotation.
 func (r *FireboltInstanceReconciler) metadataConfigHash(
 	ctx context.Context,
 	instance *computev1alpha1.FireboltInstance,
@@ -268,7 +265,12 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 		return "", fmt.Errorf("reading metadata credentials Secret %s/%s for rollout hash: %w",
 			instance.Namespace, name, err)
 	}
-	return contentHash(configYAML + "\x00" + name + "=" + secret.ResourceVersion), nil
+	return aggregateContentHash(
+		[]byte("metadata-config-and-postgres-credentials-v1"),
+		[]byte(configYAML),
+		secret.Data["username"],
+		secret.Data["password"],
+	), nil
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
@@ -554,6 +556,18 @@ func (r *FireboltInstanceReconciler) ensureMetadataService(ctx context.Context, 
 // as a pod-template annotation to trigger rollouts on config changes.
 func contentHash(content string) string {
 	h := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(h[:])[:16]
+}
+
+// aggregateContentHash length-prefixes its inputs before hashing them so byte
+// boundaries cannot collide. Only the final aggregate digest is returned.
+func aggregateContentHash(parts ...[]byte) string {
+	var content []byte
+	for _, part := range parts {
+		content = binary.BigEndian.AppendUint64(content, uint64(len(part)))
+		content = append(content, part...)
+	}
+	h := sha256.Sum256(content)
 	return hex.EncodeToString(h[:])[:16]
 }
 
