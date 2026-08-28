@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/config/images"
@@ -587,5 +588,104 @@ func TestEnqueueInstanceFromEngine(t *testing.T) {
 	})
 	if len(reqs) != 1 || reqs[0].Name != "fi" || reqs[0].Namespace != "ns" {
 		t.Errorf("enqueue = %v, want instance fi/ns", reqs)
+	}
+}
+
+// boundEngine is an engine fixture for the canonicalize-gate watch
+// tests: namespace ns, bound to instanceRef, optionally through a class.
+func boundEngine(name, instanceRef, classRef string) *computev1alpha1.FireboltEngine {
+	eng := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns"},
+		Spec:       computev1alpha1.FireboltEngineSpec{InstanceRef: instanceRef},
+	}
+	if classRef != "" {
+		eng.Spec.EngineClassRef = ptr(classRef)
+	}
+	return eng
+}
+
+func requestNames(reqs []reconcile.Request) map[string]struct{} {
+	got := make(map[string]struct{}, len(reqs))
+	for _, req := range reqs {
+		got[req.Namespace+"/"+req.Name] = struct{}{}
+	}
+	return got
+}
+
+// TestEnqueueInstancesFromEngineClass pins the class arm of the
+// canonicalize-gate watch. A bound engine's resolved image often comes
+// from its FireboltEngineClass, and a class bump changes no engine's
+// generation, so without this mapping an instance would keep an
+// uppercase spec.id until an unrelated Instance event.
+func TestEnqueueInstancesFromEngineClass(t *testing.T) {
+	sch := instanceTemplateTestScheme(t)
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(
+			boundEngine("eng-a", "fi", "big"),
+			// Second engine on the same instance and class: one request.
+			boundEngine("eng-b", "fi", "big"),
+			boundEngine("eng-c", "other", "small"),
+			boundEngine("eng-d", "unbound-class", ""),
+			// Bound to the class but to no instance: nothing to gate.
+			boundEngine("eng-e", "", "big"),
+		).
+		Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch, MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{}}
+
+	reqs := r.enqueueInstancesFromEngineClass(context.Background(), &computev1alpha1.FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "big", Namespace: "ns"},
+	})
+	got := requestNames(reqs)
+	if len(reqs) != 1 || len(got) != 1 {
+		t.Fatalf("enqueue = %v, want exactly one request for ns/fi", reqs)
+	}
+	if _, ok := got["ns/fi"]; !ok {
+		t.Errorf("enqueue = %v, want ns/fi", reqs)
+	}
+
+	if reqs := r.enqueueInstancesFromEngineClass(context.Background(), &computev1alpha1.FireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "unreferenced", Namespace: "ns"},
+	}); len(reqs) != 0 {
+		t.Errorf("enqueue for unreferenced class = %v, want none", reqs)
+	}
+}
+
+// TestEnqueueInstancesFromEnginePreset pins the preset arm. The Preset
+// is ambient — every engine in the namespace overlays it — so a preset
+// image bump moves bound engine images without touching any engine
+// generation. Only the default-named Preset is resolved by the gate.
+func TestEnqueueInstancesFromEnginePreset(t *testing.T) {
+	sch := instanceTemplateTestScheme(t)
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(
+			boundEngine("eng-a", "fi", "big"),
+			boundEngine("eng-b", "fi", ""),
+			boundEngine("eng-c", "other", ""),
+			boundEngine("eng-d", "", ""),
+		).
+		Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch, MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{}}
+
+	reqs := r.enqueueInstancesFromEnginePreset(context.Background(), &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName, Namespace: "ns"},
+	})
+	got := requestNames(reqs)
+	if len(reqs) != 2 || len(got) != 2 {
+		t.Fatalf("enqueue = %v, want one request each for ns/fi and ns/other", reqs)
+	}
+	for _, want := range []string{"ns/fi", "ns/other"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("enqueue = %v, want %s", reqs, want)
+		}
+	}
+
+	// A differently named Preset is never resolved, so it cannot change
+	// the gate's answer.
+	if reqs := r.enqueueInstancesFromEnginePreset(context.Background(), &computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: "not-the-default", Namespace: "ns"},
+	}); len(reqs) != 0 {
+		t.Errorf("enqueue for non-default preset = %v, want none", reqs)
 	}
 }

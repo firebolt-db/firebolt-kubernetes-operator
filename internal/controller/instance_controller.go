@@ -956,6 +956,26 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 			// cares about the engine's image pin, which lives in spec.
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
+		Watches(
+			&computev1alpha1.FireboltEngineClass{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromEngineClass),
+			// A bound engine's image is as often the class's as its own
+			// (effectiveEngineImage falls back to the class), and a class
+			// bump changes no engine's generation — without this watch the
+			// gate would not re-run until some unrelated Instance event.
+			// Spec-only for the same reason as the engine watch; the class
+			// image pin lives in spec.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&computev1alpha1.FireboltEnginePreset{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromEnginePreset),
+			// Deliberately unfiltered: resolveFireboltEnginePresetInfo is
+			// fail-closed on the Preset's Ready condition, so a status-only
+			// flip out of OperatorOwnedFieldSet changes the gate's answer
+			// just as a spec image bump does. The Preset is a per-namespace
+			// singleton, so the extra events are bounded.
+		).
 		Named(name).
 		Complete(r)
 }
@@ -1006,6 +1026,68 @@ func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
 			continue
 		}
 		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(instance)})
+	}
+	return requests
+}
+
+// enqueueInstancesFromEngineClass maps a FireboltEngineClass spec change
+// to every instance that has an engine bound to that class, so a class
+// image bump re-runs the instance-id canonicalize gate. A class bump
+// leaves engine generations untouched, so the FireboltEngine watch
+// above never sees it.
+func (r *FireboltInstanceReconciler) enqueueInstancesFromEngineClass(
+	ctx context.Context, obj client.Object,
+) []reconcile.Request {
+	return r.instancesWithBoundEngines(ctx, obj.GetNamespace(), func(eng *computev1alpha1.FireboltEngine) bool {
+		ref := eng.Spec.EngineClassRef
+		return ref != nil && *ref == obj.GetName()
+	})
+}
+
+// enqueueInstancesFromEnginePreset maps a FireboltEnginePreset event to
+// every instance with a bound engine in that namespace. The Preset is
+// ambient — every engine overlays it — so it can move any bound engine's
+// image without touching a single engine generation. Only the
+// default-named Preset is resolved (resolveFireboltEnginePresetInfo Gets
+// it by name), so any other one cannot change the gate's answer.
+func (r *FireboltInstanceReconciler) enqueueInstancesFromEnginePreset(
+	ctx context.Context, obj client.Object,
+) []reconcile.Request {
+	if obj.GetName() != computev1alpha1.FireboltEnginePresetDefaultName {
+		return nil
+	}
+	return r.instancesWithBoundEngines(ctx, obj.GetNamespace(), func(*computev1alpha1.FireboltEngine) bool {
+		return true
+	})
+}
+
+// instancesWithBoundEngines returns one request per distinct
+// spec.instanceRef among the namespace's engines that match. Engines
+// bound to the same instance collapse into a single request; an engine
+// with no instanceRef is not part of any instance's gate.
+func (r *FireboltInstanceReconciler) instancesWithBoundEngines(
+	ctx context.Context, namespace string, match func(*computev1alpha1.FireboltEngine) bool,
+) []reconcile.Request {
+	engines := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engines, client.InNamespace(namespace)); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for the instance ID canonicalize watch",
+			"namespace", namespace)
+		return nil
+	}
+	seen := make(map[string]struct{}, len(engines.Items))
+	var requests []reconcile.Request
+	for i := range engines.Items {
+		eng := &engines.Items[i]
+		if eng.Spec.InstanceRef == "" || !match(eng) {
+			continue
+		}
+		if _, dup := seen[eng.Spec.InstanceRef]; dup {
+			continue
+		}
+		seen[eng.Spec.InstanceRef] = struct{}{}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: namespace},
+		})
 	}
 	return requests
 }
