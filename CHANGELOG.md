@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.1...firebolt-operator-v0.10.2) (2026-08-28)
+
+
+### Bug Fixes
+
+* restart metadata after external credential updates ([#183](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/183)) ([#183](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/183)) ([73c1d33](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/73c1d3388c6cd55c739e7d7971c8fce2691c89f7))
+
 ## [0.10.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.0...firebolt-operator-v0.10.1) (2026-08-28)
 
 
