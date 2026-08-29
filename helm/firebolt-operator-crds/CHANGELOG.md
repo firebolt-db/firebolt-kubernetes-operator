@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.5.0...firebolt-operator-crds-chart-0.6.0) (2026-08-29)
+
+
+### Features
+
+* **api:** mint lowercase FireboltInstance spec.id and allow case-only updates (FB-3516) ([#187](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/187)) ([96310be](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96310beb7be2952d6b276c2384df1fa5e9188548))
+
 ## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.4.0...firebolt-operator-crds-chart-0.5.0) (2026-08-25)
 
 
