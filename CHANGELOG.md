@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.2...firebolt-operator-v0.11.0) (2026-08-29)
+
+
+### Features
+
+* **api:** mint lowercase FireboltInstance spec.id and allow case-only updates (FB-3516) ([#187](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/187)) ([96310be](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96310beb7be2952d6b276c2384df1fa5e9188548))
+
 ## [0.10.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.1...firebolt-operator-v0.10.2) (2026-08-28)
 
 
