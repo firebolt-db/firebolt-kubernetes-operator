@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **Upgrade this chart before firebolt-operator-chart 0.9.0 / firebolt-operator 0.11.0.** That operator patches existing `FireboltInstance.spec.id` values to lowercase; against the 0.5.0 CRD the case-only Update is rejected at admission, the engine then receives an uppercase `instance.id`, and packdb `release-5.0.0-pre.0.20260828194119.d0f954993097` rejects that at config parse — **the instance will not start.**
+* **Upgrade to this chart version before you roll out firebolt-operator-chart 0.9.0 / firebolt-operator 0.11.0.** That operator patches existing `FireboltInstance.spec.id` values to lowercase. Against the 0.5.0 CRD the case-only update is rejected at admission, which means **the instance will not start.**
 * `FireboltInstance.spec.id` may now change **case only** (`self.lowerAscii() == oldSelf.lowerAscii()`). Every other edit to the field remains forbidden.
 
 
