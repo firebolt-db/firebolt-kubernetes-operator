@@ -18,7 +18,8 @@ The implementation should share validation functions between webhook and control
 
 | Input or operation | Admission behavior | Controller behavior |
 | --- | --- | --- |
-| Empty `FireboltInstance.spec.id` | Mutating webhook generates a ULID | First reconcile generates the ULID and updates the CR |
+| Empty `FireboltInstance.spec.id` | Mutating webhook generates a Crockford ULID (`MintInstanceID`: lowercase, or uppercase on a build whose canonicalize floor is empty) | First reconcile generates the same encoding and updates the CR |
+| Uppercase Crockford `FireboltInstance.spec.id` | CEL allows a case-only Update | Controller lowercases the field once metadata and every bound engine image meet the canonicalize floor; otherwise leaves the CR unchanged and reports `InstanceIDCanonical=False/ImageBelowFloor` |
 | Instance authentication | `ValidateAuth` rejects invalid combinations | `ensureAuth` re-runs `ValidateAuth` and reports `AuthReady=False/AuthSpecInvalid` |
 | Instance TLS | `ValidateTLS` rejects invalid listener, CA, CRL, and protected-Secret combinations | Engine and gateway TLS reconcilers re-run `ValidateTLS` and report `TLSSpecInvalid` |
 | External PostgreSQL Secret reference | Webhook rejects an empty name; CEL fixes replicas at one | Metadata preflight reports `PostgresSecretPreflightFailed` when the Secret input is unusable |
@@ -29,7 +30,7 @@ The implementation should share validation functions between webhook and control
 | Engine pod template | Shared rules reject owned paths | `validateEngineTemplates` reports `TemplateRejected` and skips StatefulSet rendering |
 | Engine-container resource bounds | Engine webhook applies configured maximums | Reconciler uses the same `EngineResourceBounds` value and reports `ResourceBoundsExceeded` |
 
-The Instance ID transition also has a CEL rule that allows exactly the controller's empty-to-generated update and prevents subsequent mutation. Webhook plus controller alone cannot close the race between two writers changing an immutable identity field.
+The Instance ID transition has a CEL rule that allows the controller's empty-to-generated update and a case-only rewrite, and prevents any other mutation. Webhook plus controller alone cannot close the race between two writers changing an immutable identity field.
 
 ## Shared validation sources
 

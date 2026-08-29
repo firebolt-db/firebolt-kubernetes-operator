@@ -1561,9 +1561,18 @@ const (
 // allowed through so a freshly created Preset object does not
 // deadlock engines.
 func (r *FireboltEngineReconciler) resolveFireboltEnginePresetInfo(ctx context.Context, engine *computev1alpha1.FireboltEngine) (*FireboltEnginePresetInfo, error) {
+	return resolveFireboltEnginePresetInfo(ctx, r.Client, engine)
+}
+
+// resolveFireboltEnginePresetInfo is the reader-only body of the method
+// above, so callers outside this reconciler — the FireboltInstance
+// spec.id canonicalize gate, which must decide on the same image the
+// engine will actually run — resolve a Preset under identical
+// fail-closed rules instead of a bare Get.
+func resolveFireboltEnginePresetInfo(ctx context.Context, c client.Reader, engine *computev1alpha1.FireboltEngine) (*FireboltEnginePresetInfo, error) {
 	d := &computev1alpha1.FireboltEnginePreset{}
 	key := client.ObjectKey{Namespace: engine.Namespace, Name: computev1alpha1.FireboltEnginePresetDefaultName}
-	if err := r.Get(ctx, key, d); err != nil {
+	if err := c.Get(ctx, key, d); err != nil {
 		if errors.IsNotFound(err) {
 			if engine.Spec.RequirePreset != nil && *engine.Spec.RequirePreset {
 				return nil, fmt.Errorf("%w: namespace %q has no FireboltEnginePreset", errFireboltEnginePresetRequired, engine.Namespace)

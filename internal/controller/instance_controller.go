@@ -18,13 +18,11 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
 	stderrors "errors"
 	"fmt"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	"github.com/oklog/ulid/v2"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,10 +36,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
@@ -166,20 +167,21 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Fallback for when the mutating webhook is disabled (local dev, E2E).
-	// In production the webhook sets spec.id atomically at admission time and
-	// enforces immutability; this branch never fires in that case.
-	if instance.Spec.ID == "" {
-		instance.Spec.ID = ulid.MustNew(ulid.Now(), rand.Reader).String()
-		log.Info("Generated instance ID", "id", instance.Spec.ID)
-		if err := r.Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
+	// Teardown runs before any spec.id work: reconcileDelete sweeps owned
+	// objects by the LabelInstance label, never by spec.id, so minting or
+	// canonicalizing the id on a terminating instance buys nothing. Worse,
+	// ensureInstanceID's error is fatal to the pass, so an admission
+	// rejection of the case-only Update would keep reconcileDelete — and
+	// therefore finalizer removal — from ever running, wedging the instance
+	// in Terminating.
 	if !instance.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.reconcileDelete(ctx, instance)
+	}
+
+	if requeue, err := r.ensureInstanceID(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	} else if requeue {
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Record metrics on every return path beyond this point so that error
@@ -943,6 +945,37 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
 		Owns(&policyv1.PodDisruptionBudget{}).
+		Watches(
+			&computev1alpha1.FireboltEngine{},
+			handler.EnqueueRequestsFromMapFunc(enqueueInstanceFromEngine),
+			// Spec changes only. FireboltEngineReconciler.updateStatus
+			// stamps Status.LastReconciled on every status write, so an
+			// unfiltered watch would enqueue a full Instance reconcile —
+			// metadata and gateway render, PVC list, status write — on
+			// every engine reconcile in the namespace. The gate only
+			// cares about the engine's image pin, which lives in spec.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&computev1alpha1.FireboltEngineClass{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromEngineClass),
+			// A bound engine's image is as often the class's as its own
+			// (effectiveEngineImage falls back to the class), and a class
+			// bump changes no engine's generation — without this watch the
+			// gate would not re-run until some unrelated Instance event.
+			// Spec-only for the same reason as the engine watch; the class
+			// image pin lives in spec.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
+			&computev1alpha1.FireboltEnginePreset{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromEnginePreset),
+			// Deliberately unfiltered: resolveFireboltEnginePresetInfo is
+			// fail-closed on the Preset's Ready condition, so a status-only
+			// flip out of OperatorOwnedFieldSet changes the gate's answer
+			// just as a spec image bump does. The Preset is a per-namespace
+			// singleton, so the extra events are bounded.
+		).
 		Named(name).
 		Complete(r)
 }
@@ -995,4 +1028,79 @@ func (r *FireboltInstanceReconciler) mapMetadataCredentialsSecretToInstances(
 		requests = append(requests, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(instance)})
 	}
 	return requests
+}
+
+// enqueueInstancesFromEngineClass maps a FireboltEngineClass spec change
+// to every instance that has an engine bound to that class, so a class
+// image bump re-runs the instance-id canonicalize gate. A class bump
+// leaves engine generations untouched, so the FireboltEngine watch
+// above never sees it.
+func (r *FireboltInstanceReconciler) enqueueInstancesFromEngineClass(
+	ctx context.Context, obj client.Object,
+) []reconcile.Request {
+	return r.instancesWithBoundEngines(ctx, obj.GetNamespace(), func(eng *computev1alpha1.FireboltEngine) bool {
+		ref := eng.Spec.EngineClassRef
+		return ref != nil && *ref == obj.GetName()
+	})
+}
+
+// enqueueInstancesFromEnginePreset maps a FireboltEnginePreset event to
+// every instance with a bound engine in that namespace. The Preset is
+// ambient — every engine overlays it — so it can move any bound engine's
+// image without touching a single engine generation. Only the
+// default-named Preset is resolved (resolveFireboltEnginePresetInfo Gets
+// it by name), so any other one cannot change the gate's answer.
+func (r *FireboltInstanceReconciler) enqueueInstancesFromEnginePreset(
+	ctx context.Context, obj client.Object,
+) []reconcile.Request {
+	if obj.GetName() != computev1alpha1.FireboltEnginePresetDefaultName {
+		return nil
+	}
+	return r.instancesWithBoundEngines(ctx, obj.GetNamespace(), func(*computev1alpha1.FireboltEngine) bool {
+		return true
+	})
+}
+
+// instancesWithBoundEngines returns one request per distinct
+// spec.instanceRef among the namespace's engines that match. Engines
+// bound to the same instance collapse into a single request; an engine
+// with no instanceRef is not part of any instance's gate.
+func (r *FireboltInstanceReconciler) instancesWithBoundEngines(
+	ctx context.Context, namespace string, match func(*computev1alpha1.FireboltEngine) bool,
+) []reconcile.Request {
+	engines := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engines, client.InNamespace(namespace)); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for the instance ID canonicalize watch",
+			"namespace", namespace)
+		return nil
+	}
+	seen := make(map[string]struct{}, len(engines.Items))
+	var requests []reconcile.Request
+	for i := range engines.Items {
+		eng := &engines.Items[i]
+		if eng.Spec.InstanceRef == "" || !match(eng) {
+			continue
+		}
+		if _, dup := seen[eng.Spec.InstanceRef]; dup {
+			continue
+		}
+		seen[eng.Spec.InstanceRef] = struct{}{}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: namespace},
+		})
+	}
+	return requests
+}
+
+// enqueueInstanceFromEngine maps a FireboltEngine spec change to its
+// spec.instanceRef so an engine image pin change re-runs the
+// instance-id canonicalize gate.
+func enqueueInstanceFromEngine(_ context.Context, obj client.Object) []reconcile.Request {
+	eng, ok := obj.(*computev1alpha1.FireboltEngine)
+	if !ok || eng.Spec.InstanceRef == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: eng.Namespace},
+	}}
 }

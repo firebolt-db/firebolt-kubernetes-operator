@@ -9008,20 +9008,26 @@ spec:
               id:
                 description: |-
                   ID is a stable unique identifier for this instance, used as the metadata
-                  account ID. If empty on creation, a ULID is generated automatically by
-                  the defaulting webhook. Once set, this field is immutable.
+                  account ID. If empty on creation, a lowercase Crockford ULID is
+                  generated automatically by the defaulting webhook (or the controller
+                  fallback when webhooks are disabled); the encoding is uppercase only
+                  on a build whose CanonicalInstanceIDImageFloor is empty. Once written,
+                  this field is immutable except for a case-only rewrite: the controller
+                  lowercases an existing uppercase Crockford ULID after engine and
+                  metadata images meet the canonicalize floor.
 
                   The CEL rule allows the one-time "" -> <ulid> transition because when
                   the mutating webhook is disabled (local dev, kind, some E2E setups),
                   the controller Reconcile has a fallback that generates an ID and
                   Updates the CR. A plain `self == oldSelf` would reject that Update at
                   admission time and leave the instance permanently stuck without an ID.
-                  Once ID is non-empty, subsequent Updates are still blocked from
-                  changing it.
+                  A case-only change (`self.lowerAscii() == oldSelf.lowerAscii()`) is
+                  also allowed so the controller can persist the lowercase encoding
+                  without opening the field to any other edit.
                 type: string
                 x-kubernetes-validations:
-                - message: spec.id is immutable once set
-                  rule: oldSelf == '' || self == oldSelf
+                - message: spec.id is immutable once set except for case
+                  rule: oldSelf == '' || self == oldSelf || self.lowerAscii() == oldSelf.lowerAscii()
               metadata:
                 description: Metadata configures the metadata service.
                 properties:
