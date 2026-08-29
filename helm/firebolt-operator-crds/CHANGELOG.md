@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.5.0...firebolt-operator-crds-chart-0.6.0) (2026-08-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **Upgrade to this chart version before you roll out firebolt-operator-chart 0.9.0 / firebolt-operator 0.11.0.** That operator patches existing `FireboltInstance.spec.id` values to lowercase. Against the 0.5.0 CRD the case-only update is rejected at admission, which means **the instance will not start.**
+* `FireboltInstance.spec.id` may now change **case only** (`self.lowerAscii() == oldSelf.lowerAscii()`). Every other edit to the field remains forbidden.
+
+
+### Features
+
+* **api:** mint lowercase FireboltInstance spec.id and allow case-only updates (FB-3516) ([#187](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/187)) ([96310be](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96310beb7be2952d6b276c2384df1fa5e9188548))
+
 ## [0.5.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.4.0...firebolt-operator-crds-chart-0.5.0) (2026-08-25)
 
 
