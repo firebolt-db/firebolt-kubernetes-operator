@@ -2,6 +2,26 @@
 
 appVersion: v0.1.1
 
+## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.8.2...firebolt-operator-chart-0.9.0) (2026-08-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **Upgrade the CRDs to firebolt-operator-crds 0.6.0 before you roll out this chart.** If you install CRDs from the `firebolt-operator-crds` chart, `helm upgrade` it first. If you rely on this chart's bundled `crds/` directory, Helm never upgrades CRDs from there, so you have to apply the updated `fireboltinstances.yaml` yourself.
+* The operator in this chart (appVersion v0.11.0) patches existing `FireboltInstance.spec.id` values to lowercase. Against an older CRD that update is rejected at admission, the engine still receives an uppercase `instance.id`, and it will not start. Recovery is to upgrade the CRDs, or to roll this chart back.
+* Requires engine **and** metadata image `release-5.0.0-pre.0.20260828194119.d0f954993097` or newer. That is this chart's default.
+* New and canonicalized instance ids are lowercase Crockford ULIDs.
+* If you pin engine or metadata images in your values, bump **both** pins in the same change. While either resolved image is below that floor the operator leaves `spec.id` as it is and reports `InstanceIDCanonical=False`.
+
+### Features
+
+* **api:** mint lowercase FireboltInstance spec.id and allow case-only updates (FB-3516) ([#187](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/187)) ([96310be](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96310beb7be2952d6b276c2384df1fa5e9188548))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.11.0 ([04b74a3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/04b74a387eb57133cf68a219d4955943ee25c263))
+
 ## [0.8.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.8.1...firebolt-operator-chart-0.8.2) (2026-08-28)
 
 
