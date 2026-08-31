@@ -93,13 +93,16 @@ var operatorOwnedEngineEnvKeys = []string{
 	EngineAwsEC2MetadataClientEnabledEnvKey,
 }
 
-// MetadataPostgresUsernameEnvKey and MetadataPostgresPasswordEnvKey are
-// the env vars the operator injects on the metadata container to point
-// dedicated-pensieve at its Postgres credentials Secret. User-supplied
-// templates may not redefine these names; the validator rejects them.
+// MetadataPostgresUsernameEnvKey, MetadataPostgresPasswordEnvKey,
+// MetadataPostgresSSLModeEnvKey, and MetadataPostgresSSLRootCertEnvKey are
+// the environment variables the operator may inject on the metadata container
+// for its PostgreSQL connection. User-supplied templates may not redefine
+// these names; the validator rejects them.
 const (
-	MetadataPostgresUsernameEnvKey = "POSTGRES_USERNAME_FILE"
-	MetadataPostgresPasswordEnvKey = "POSTGRES_PASSWORD_FILE" //nolint:gosec // legit:ignore-secrets — env-var name, not a credential
+	MetadataPostgresUsernameEnvKey    = "POSTGRES_USERNAME_FILE"
+	MetadataPostgresPasswordEnvKey    = "POSTGRES_PASSWORD_FILE" //nolint:gosec // legit:ignore-secrets — env-var name, not a credential
+	MetadataPostgresSSLModeEnvKey     = "PGSSLMODE"
+	MetadataPostgresSSLRootCertEnvKey = "PGSSLROOTCERT"
 )
 
 // operatorOwnedMetadataEnvKeys is the set of env names the operator
@@ -107,6 +110,8 @@ const (
 var operatorOwnedMetadataEnvKeys = []string{
 	MetadataPostgresUsernameEnvKey,
 	MetadataPostgresPasswordEnvKey,
+	MetadataPostgresSSLModeEnvKey,
+	MetadataPostgresSSLRootCertEnvKey,
 }
 
 // Operator-rendered volume names on each component's primary
@@ -185,6 +190,10 @@ const (
 	// dedicated-pensieve Postgres username/password. Mounted at
 	// /secrets/postgres on the metadata container.
 	MetadataPostgresCredsVolumeName = "postgres-creds" //nolint:gosec // volume name, not a credential
+	// MetadataPostgresCAVolumeName carries only the CA key selected by
+	// spec.metadata.postgres.tls.caSecretRef. Mounted read-only on the
+	// metadata container.
+	MetadataPostgresCAVolumeName = "postgres-ca"
 	// MetadataTmpVolumeName is the writable /tmp emptyDir the metadata
 	// container needs alongside ReadOnlyRootFilesystem=true.
 	MetadataTmpVolumeName = "tmp"
@@ -268,6 +277,7 @@ var operatorOwnedGatewaySecretVolumeNames = []string{
 var operatorOwnedMetadataVolumeNames = []string{
 	MetadataConfigVolumeName,
 	MetadataPostgresCredsVolumeName,
+	MetadataPostgresCAVolumeName,
 	MetadataTmpVolumeName,
 }
 
@@ -276,6 +286,7 @@ var operatorOwnedMetadataVolumeNames = []string{
 // Additional containers may not mount these.
 var operatorOwnedMetadataSecretVolumeNames = []string{
 	MetadataPostgresCredsVolumeName,
+	MetadataPostgresCAVolumeName,
 }
 
 // EngineConfigOwnedSection enumerates one operator-owned section of the
@@ -486,8 +497,8 @@ var GatewayPodTemplateRules = PodTemplateRules{
 
 // MetadataPodTemplateRules is the ruleset for FireboltInstance.spec.metadata.template.
 // The Pensieve container is operator-rendered (command, ports, probes,
-// the POSTGRES_USERNAME_FILE/POSTGRES_PASSWORD_FILE env vars, the
-// config / postgres-creds / tmp volume mounts, securityContext), so
+// the PostgreSQL credential and TLS environment variables, the
+// config / postgres-creds / postgres-ca / tmp volume mounts, securityContext), so
 // only image and resources are user-settable on the primary container.
 // Sidecars and additional init containers pass through, same shape as
 // the gateway.
@@ -983,6 +994,9 @@ func InstanceOperatorSecretNames(inst *FireboltInstance) []string {
 	}
 	if inst.Spec.Metadata.Postgres != nil {
 		add(inst.Spec.Metadata.Postgres.CredentialsSecretRef.Name)
+		if inst.Spec.Metadata.Postgres.TLS != nil {
+			add(inst.Spec.Metadata.Postgres.TLS.CASecretRef.Name)
+		}
 	}
 	return names
 }

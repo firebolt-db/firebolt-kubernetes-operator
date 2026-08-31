@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -36,8 +37,10 @@ import (
 )
 
 const (
-	metadataCredsMount  = "/secrets/postgres" //nolint:gosec // mount path, not a credential
-	metadataConfigMount = "/configs"
+	metadataCredsMount         = "/secrets/postgres" //nolint:gosec // mount path, not a credential
+	metadataPostgresCAMount    = "/secrets/postgres-ca"
+	metadataPostgresCAFileName = "ca.crt"
+	metadataConfigMount        = "/configs"
 )
 
 // ensureMetadataResources creates or updates the ConfigMap, Deployment, and
@@ -247,9 +250,10 @@ func (r *FireboltInstanceReconciler) ensureMetadataDeployment(ctx context.Contex
 }
 
 // metadataConfigHash preserves the config-only rollout hash for internal
-// PostgreSQL. For external PostgreSQL it also hashes the referenced Secret's
-// resource version, so credential changes roll the metadata pod without hashing
-// credential bytes into a non-Secret object.
+// PostgreSQL. For external PostgreSQL it also includes the referenced
+// credentials and CA Secret ResourceVersions, when applicable, so an in-place
+// rotation rolls the metadata pod. ResourceVersion, not Secret bytes, detects
+// every write without moving Secret material into a pod annotation.
 func (r *FireboltInstanceReconciler) metadataConfigHash(
 	ctx context.Context,
 	instance *computev1alpha1.FireboltInstance,
@@ -260,16 +264,51 @@ func (r *FireboltInstanceReconciler) metadataConfigHash(
 	}
 
 	name := instance.Spec.Metadata.Postgres.CredentialsSecretRef.Name
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: instance.Namespace, Name: name}, secret); err != nil {
+	credentialsVersion, err := secretResourceVersion(ctx, r.Client, instance.Namespace, name)
+	if err != nil {
 		return "", fmt.Errorf("reading metadata credentials Secret %s/%s for rollout hash: %w",
 			instance.Namespace, name, err)
 	}
-	return aggregateContentHash(
-		[]byte("metadata-config-and-postgres-secret-version-v1"),
+	hashParts := [][]byte{
+		[]byte("metadata-config-and-postgres-secret-versions-v1"),
 		[]byte(configYAML),
-		[]byte(secret.ResourceVersion),
-	), nil
+		[]byte(name),
+		[]byte(credentialsVersion),
+	}
+
+	tls := instance.Spec.Metadata.Postgres.TLS
+	if tls != nil {
+		caName := tls.CASecretRef.Name
+		caKey := tls.CASecretRef.Key
+		if _, err := checkSecretKeyPresent(
+			ctx,
+			r.Client,
+			instance.Namespace,
+			caName,
+			caKey,
+			"external postgres CA Secret",
+		); err != nil {
+			return "", fmt.Errorf("reading metadata postgres CA for rollout hash: %w", err)
+		}
+		caVersion, err := secretResourceVersion(ctx, r.Client, instance.Namespace, caName)
+		if err != nil {
+			return "", fmt.Errorf("reading metadata postgres CA version for rollout hash: %w", err)
+		}
+		hashParts = append(hashParts, []byte(caName), []byte(caKey), []byte(caVersion))
+	}
+	return aggregateContentHash(hashParts...), nil
+}
+
+// secretResourceVersion requests only object metadata. Keeping Secret data out
+// of this rollout-hash path makes the non-sensitive input boundary explicit.
+func secretResourceVersion(ctx context.Context, cli client.Client, namespace, name string) (string, error) {
+	metadata := &metav1.PartialObjectMetadata{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+	}
+	if err := cli.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, metadata); err != nil {
+		return "", err
+	}
+	return metadata.ResourceVersion, nil
 }
 
 // buildMetadataDeployment returns the desired Deployment object for the
@@ -403,6 +442,23 @@ func effectiveMetadataPodTemplate(
 			{Name: computev1alpha1.MetadataTmpVolumeName, MountPath: "/tmp"},
 		},
 	}
+	if tls := instance.Spec.Metadata.Postgres; tls != nil && tls.TLS != nil {
+		pensieve.Env = append(pensieve.Env,
+			corev1.EnvVar{
+				Name:  computev1alpha1.MetadataPostgresSSLModeEnvKey,
+				Value: string(computev1alpha1.PostgresTLSModeVerifyFull),
+			},
+			corev1.EnvVar{
+				Name:  computev1alpha1.MetadataPostgresSSLRootCertEnvKey,
+				Value: metadataPostgresCAMount + "/" + metadataPostgresCAFileName,
+			},
+		)
+		pensieve.VolumeMounts = append(pensieve.VolumeMounts, corev1.VolumeMount{
+			Name:      computev1alpha1.MetadataPostgresCAVolumeName,
+			MountPath: metadataPostgresCAMount,
+			ReadOnly:  true,
+		})
+	}
 	if userPrimary != nil && computev1alpha1.HasContainerResources(userPrimary.Resources) {
 		pensieve.Resources = *userPrimary.Resources.DeepCopy()
 	}
@@ -427,11 +483,26 @@ func effectiveMetadataPodTemplate(
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
 	}
+	if pg := instance.Spec.Metadata.Postgres; pg != nil && pg.TLS != nil {
+		operatorVolumes = append(operatorVolumes, corev1.Volume{
+			Name: computev1alpha1.MetadataPostgresCAVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: pg.TLS.CASecretRef.Name,
+					Items: []corev1.KeyToPath{{
+						Key:  pg.TLS.CASecretRef.Key,
+						Path: metadataPostgresCAFileName,
+					}},
+				},
+			},
+		})
+	}
 
 	containers := append([]corev1.Container{pensieve}, userSidecars...)
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
 		computev1alpha1.MetadataConfigVolumeName,
 		computev1alpha1.MetadataPostgresCredsVolumeName,
+		computev1alpha1.MetadataPostgresCAVolumeName,
 		computev1alpha1.MetadataTmpVolumeName,
 	)
 

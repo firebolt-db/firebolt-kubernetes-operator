@@ -120,6 +120,34 @@ const (
 	InstanceConditionInstanceIDCanonical = "InstanceIDCanonical"
 )
 
+// PostgresTLSMode is the libpq TLS verification mode used for an external
+// PostgreSQL connection.
+// +kubebuilder:validation:Enum=verify-full
+type PostgresTLSMode string
+
+const (
+	// PostgresTLSModeVerifyFull verifies both the server certificate chain and
+	// the requested host name.
+	PostgresTLSModeVerifyFull PostgresTLSMode = "verify-full"
+)
+
+// PostgresTLSSpec configures verified TLS for an external PostgreSQL connection.
+// +kubebuilder:validation:XValidation:rule="size(self.caSecretRef.name) > 0",message="caSecretRef.name must be set"
+// +kubebuilder:validation:XValidation:rule="size(self.caSecretRef.key) > 0",message="caSecretRef.key must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.caSecretRef.optional) || !self.caSecretRef.optional",message="caSecretRef.optional cannot be true"
+type PostgresTLSSpec struct {
+	// Mode is the libpq server verification mode. Only verify-full is
+	// supported.
+	// +kubebuilder:default=verify-full
+	// +optional
+	Mode PostgresTLSMode `json:"mode,omitempty"`
+
+	// CASecretRef selects the CA certificate used to verify the PostgreSQL
+	// server. The Secret is resolved in the FireboltInstance namespace, and
+	// only the selected key is mounted into the Metadata container.
+	CASecretRef corev1.SecretKeySelector `json:"caSecretRef"`
+}
+
 // PostgresSpec configures an external PostgreSQL connection for the metadata service.
 //
 // The string fields below are interpolated into the XML config the operator
@@ -165,6 +193,11 @@ type PostgresSpec struct {
 
 	// CredentialsSecretRef references a Secret containing "username" and "password" keys.
 	CredentialsSecretRef corev1.LocalObjectReference `json:"credentialsSecretRef"`
+
+	// TLS enables verified TLS for the external PostgreSQL connection. When
+	// omitted, the operator does not set libpq TLS environment variables.
+	// +optional
+	TLS *PostgresTLSSpec `json:"tls,omitempty"`
 }
 
 // MetadataSpec configures the metadata service.
@@ -175,8 +208,9 @@ type PostgresSpec struct {
 // The FireboltInstance validating webhook rejects any input on that
 // template that lands at a path the operator owns end-to-end: the
 // dedicated-pensieve container's command / ports / probes / reserved
-// env keys (POSTGRES_USERNAME_FILE / POSTGRES_PASSWORD_FILE) /
-// reserved volume mounts (config / postgres-creds / tmp), and the
+// env keys (POSTGRES_USERNAME_FILE / POSTGRES_PASSWORD_FILE /
+// PGSSLMODE / PGSSLROOTCERT) / reserved volume mounts
+// (config / postgres-creds / postgres-ca / tmp), and the
 // pod-level terminationGracePeriodSeconds / subdomain / hostname /
 // restartPolicy / activeDeadlineSeconds. See the
 // MetadataPodTemplateRules ruleset in operatorauthority.go for the

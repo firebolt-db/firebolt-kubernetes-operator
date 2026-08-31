@@ -160,6 +160,13 @@ func TestInstanceOperatorSecretNames(t *testing.T) {
 					LocalObjectReference: corev1.LocalObjectReference{Name: "admin-pw"}, Key: "password",
 				}},
 			}},
+			Metadata: MetadataSpec{Postgres: &PostgresSpec{
+				CredentialsSecretRef: corev1.LocalObjectReference{Name: "postgres-creds"},
+				TLS: &PostgresTLSSpec{CASecretRef: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-ca"},
+					Key:                  "ca.pem",
+				}},
+			}},
 		},
 		Status: FireboltInstanceStatus{
 			Auth: &AuthStatus{SigningKeys: []SigningKeyStatus{
@@ -170,7 +177,14 @@ func TestInstanceOperatorSecretNames(t *testing.T) {
 		},
 	}
 	got := InstanceOperatorSecretNames(inst)
-	want := []string{"admin-pw", "inst-auth-signing", "inst-auth-signing-key-2", "inst-engine-tls"}
+	want := []string{
+		"admin-pw",
+		"inst-auth-signing",
+		"inst-auth-signing-key-2",
+		"inst-engine-tls",
+		"postgres-creds",
+		"postgres-ca",
+	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("InstanceOperatorSecretNames = %v, want %v", got, want)
 	}

@@ -43,12 +43,17 @@ host, port, database, and schema into the Metadata Service configuration and
 mounts the referenced Secret directly; credential bytes are not copied into the
 Instance or ConfigMap.
 
-The Instance controller watches credential Secrets that its Instances reference.
-It folds the Secret's `resourceVersion` into the Metadata Service pod-template
-hash, so a credential change rolls the single metadata pod even though the
-Secret name and rendered configuration remain unchanged. This may also roll the
-pod after a metadata-only Secret update, but keeps credential bytes and their
-digests out of non-Secret objects.
+The optional `spec.metadata.postgres.tls` block requires libpq `verify-full`
+certificate and hostname verification. The Firebolt Operator projects only the
+selected key from a same-namespace CA Secret into the Metadata container and
+sets `PGSSLMODE` and `PGSSLROOTCERT`; sidecars cannot mount the operator-owned CA
+volume.
+
+The Instance controller watches referenced credential and CA Secrets. It folds
+their `resourceVersion` values into the Metadata Service pod-template hash, so
+an in-place credential or CA rotation rolls the single metadata pod even though
+the Secret names and rendered configuration remain unchanged. The hash never
+contains Secret bytes.
 
 ## Query traffic
 

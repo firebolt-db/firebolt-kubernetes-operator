@@ -63,6 +63,9 @@ func (d *FireboltInstanceDefaulter) Default(_ context.Context, inst *FireboltIns
 	if inst.Spec.ID == "" {
 		inst.Spec.ID = MintInstanceID()
 	}
+	if pg := inst.Spec.Metadata.Postgres; pg != nil && pg.TLS != nil && pg.TLS.Mode == "" {
+		pg.TLS.Mode = PostgresTLSModeVerifyFull
+	}
 	return nil
 }
 
@@ -218,9 +221,7 @@ func validateSpec(inst *FireboltInstance) field.ErrorList {
 		&GatewayPodTemplateRules,
 	)...)
 
-	if err := validateExternalPostgres(inst); err != nil {
-		errs = append(errs, err)
-	}
+	errs = append(errs, ValidateExternalPostgres(inst)...)
 
 	errs = append(errs, ValidateAuth(inst)...)
 	errs = append(errs, ValidateTLS(inst)...)
@@ -932,25 +933,59 @@ func validatePreferredAuthorizationServer(auth *AuthSpec, path *field.Path) fiel
 		fmt.Sprintf("must be %q or the name of a configured spec.auth.oidc.providers[] entry", localAuthServerName))}
 }
 
-// validateExternalPostgres enforces that any user configuring an external
-// PostgreSQL also provides a non-empty Secret reference for credentials.
-// Without this check the metadata Deployment is still scheduled; kubelet
-// then fails to mount a Secret volume with an empty name and the pod sits
-// in ContainerCreating with only a kubelet event explaining why, which is
-// invisible from the FireboltInstance CR. Catching it at admission time
-// keeps the error close to the offending apply.
-func validateExternalPostgres(inst *FireboltInstance) *field.Error {
+// ValidateExternalPostgres enforces the external PostgreSQL Secret references
+// and the provider-neutral verified-TLS contract. It is exported so the
+// controller can apply the same checks when the validating webhook is disabled.
+func ValidateExternalPostgres(inst *FireboltInstance) field.ErrorList {
 	pg := inst.Spec.Metadata.Postgres
 	if pg == nil {
 		return nil
 	}
+	base := field.NewPath("spec", "metadata", "postgres")
+	var errs field.ErrorList
 	if pg.CredentialsSecretRef.Name == "" {
-		return field.Required(
-			field.NewPath("spec", "metadata", "postgres", "credentialsSecretRef", "name"),
+		errs = append(errs, field.Required(
+			base.Child("credentialsSecretRef", "name"),
 			"must be set when spec.metadata.postgres is configured",
-		)
+		))
 	}
-	return nil
+	if pg.TLS == nil {
+		return errs
+	}
+
+	tlsPath := base.Child("tls")
+	if pg.TLS.Mode != "" && pg.TLS.Mode != PostgresTLSModeVerifyFull {
+		errs = append(errs, field.NotSupported(
+			tlsPath.Child("mode"),
+			pg.TLS.Mode,
+			[]string{string(PostgresTLSModeVerifyFull)},
+		))
+	}
+	if pg.TLS.CASecretRef.Name == "" {
+		errs = append(errs, field.Required(
+			tlsPath.Child("caSecretRef", "name"),
+			"must be set when spec.metadata.postgres.tls is configured",
+		))
+	}
+	if pg.TLS.CASecretRef.Key == "" {
+		errs = append(errs, field.Required(
+			tlsPath.Child("caSecretRef", "key"),
+			"must be set when spec.metadata.postgres.tls is configured",
+		))
+	}
+	if pg.TLS.CASecretRef.Optional != nil && *pg.TLS.CASecretRef.Optional {
+		errs = append(errs, field.Forbidden(
+			tlsPath.Child("caSecretRef", "optional"),
+			"cannot be true because verified TLS requires the selected CA key",
+		))
+	}
+	if pg.TLS.CASecretRef.Name != "" && instanceProtectedSecretPredicate(inst)(pg.TLS.CASecretRef.Name) {
+		errs = append(errs, field.Forbidden(
+			tlsPath.Child("caSecretRef", "name"),
+			"must not reference a Secret provisioned by the operator",
+		))
+	}
+	return errs
 }
 
 func validateMetadataReplicas(inst *FireboltInstance) *field.Error {
