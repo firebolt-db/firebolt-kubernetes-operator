@@ -60,6 +60,11 @@ WAKE_QUERY_TIMEOUT="${WAKE_QUERY_TIMEOUT:-240}"
 # bring it back.
 STOP_WAIT_SECONDS="${STOP_WAIT_SECONDS:-180}"
 WAKE_WAIT_SECONDS="${WAKE_WAIT_SECONDS:-240}"
+# Scaling the FireboltEngine to zero only records the desired state. Pod
+# termination and EndpointSlice reconciliation finish asynchronously, so give
+# the data plane its own bounded convergence window before testing the parked
+# engine contract.
+ENDPOINT_WAIT_SECONDS="${ENDPOINT_WAIT_SECONDS:-60}"
 
 # How many health probes to send at the parked engine, how long the probe
 # pod may take to schedule and finish them, and how long the engine must
@@ -199,11 +204,24 @@ fi
 # resolve. That is precisely why Envoy cannot ride this out on its own and
 # why the agent has to hold the request.
 echo "Confirming the stopped engine has no endpoints..."
-endpoints=$(kubectl get endpointslice -n "$NAMESPACE" \
-  -l "kubernetes.io/service-name=${ENGINE_NAME}-service" \
-  -o jsonpath='{range .items[*]}{.endpoints[*].addresses[*]}{" "}{end}' 2>/dev/null || echo "")
+deadline=$(( SECONDS + ENDPOINT_WAIT_SECONDS ))
+endpoints="<not read>"
+while (( SECONDS < deadline )); do
+  if current_endpoints=$(kubectl get endpointslice -n "$NAMESPACE" \
+    -l "kubernetes.io/service-name=${ENGINE_NAME}-service" \
+    -o jsonpath='{range .items[*]}{.endpoints[*].addresses[*]}{" "}{end}' 2>/dev/null); then
+    endpoints="$current_endpoints"
+    if [[ -z "${endpoints// /}" ]]; then
+      break
+    fi
+  else
+    endpoints="<EndpointSlice read failed>"
+  fi
+  sleep 1
+done
 if [[ -n "${endpoints// /}" ]]; then
-  echo "Stopped engine still has endpoints: ${endpoints}"
+  echo "Timed out after ${ENDPOINT_WAIT_SECONDS}s waiting for stopped-engine endpoints to disappear; last result: ${endpoints}"
+  dump_namespace_debug "$NAMESPACE"
   exit 1
 fi
 echo "No endpoints, as expected"
