@@ -38,9 +38,41 @@ var clusterClassIAMAnnotationKeys = []string{
 const clusterClassSKUOnlyDetail = "ClusterFireboltEngineClass is SKU-only; " +
 	"namespace-resolved identifiers belong on FireboltEnginePreset"
 
-// ValidateClusterEngineClassSKUOnly rejects namespace-resolved identifiers
-// on a ClusterFireboltEngineClass template: serviceAccountName, Secret
-// refs (volumes, env, envFrom, imagePullSecrets), and IAM annotations.
+// clusterClassNamespacedRefDetail explains the ConfigMap and PVC
+// rejections. These are not identity, so FireboltEnginePreset is not the
+// only place they can go — but they are still names a cluster-scoped
+// catalog cannot resolve. The catalog has no namespace of its own, so a
+// bare ConfigMap or claim name binds to whatever happens to exist in each
+// consumer's namespace: the same object renders differently per namespace,
+// or wedges the pod on a missing reference the catalog author cannot see.
+const clusterClassNamespacedRefDetail = "ClusterFireboltEngineClass is SKU-only; " +
+	"a cluster-scoped catalog cannot reference a namespaced object that may not exist in a " +
+	"consumer's namespace — move it to the namespaced FireboltEngineClass or FireboltEnginePreset"
+
+// ValidateClusterEngineClassSKUOnly rejects every namespaced reference a
+// ClusterFireboltEngineClass template could carry:
+//
+//   - serviceAccountName and imagePullSecrets;
+//   - IAM annotations;
+//   - Secret refs (volumes, projected sources, env, envFrom);
+//   - ConfigMap refs (volumes, projected sources, env, envFrom);
+//   - persistentVolumeClaim volumes;
+//   - resourceClaims, and the container resources.claims that consume them.
+//
+// This is the enforcement half of the namespaced/cluster split — the
+// namespaced FireboltEngineClass exists precisely because its template
+// may name ServiceAccounts, Secrets, ConfigMaps, and claims; the cluster
+// catalog carries SKU shape only.
+//
+// The set above is complete against the render surface rather than against
+// all of PodTemplateSpec. overlayPresetPodSpec merges a class template into
+// the engine pod field by field, through its own explicit allowlist, so a
+// namespaced reference in a PodSpec field that allowlist does not name can
+// never reach a pod: `serviceAccount` (the deprecated serviceAccountName
+// alias) and `ephemeralContainers` both sit in the CRD schema, are both
+// namespace-bound, and are both inert for exactly that reason. Adding a
+// field to overlayPresetPodSpec is therefore what obliges a new check here.
+//
 // Operator-owned paths are rejected separately by
 // ValidateOperatorOwnedPodTemplate.
 func ValidateClusterEngineClassSKUOnly(template *corev1.PodTemplateSpec, base *field.Path) field.ErrorList {
@@ -60,6 +92,11 @@ func ValidateClusterEngineClassSKUOnly(template *corev1.PodTemplateSpec, base *f
 			specPath.Child("imagePullSecrets"),
 			clusterClassSKUOnlyDetail+": imagePullSecrets"))
 	}
+	for i := range template.Spec.ResourceClaims {
+		errs = append(errs, field.Forbidden(
+			specPath.Child("resourceClaims").Index(i),
+			clusterClassNamespacedRefDetail+": "+podResourceClaimRefKind(&template.Spec.ResourceClaims[i])))
+	}
 
 	annPath := base.Child("metadata", "annotations")
 	for _, key := range clusterClassIAMAnnotationKeys {
@@ -72,21 +109,25 @@ func ValidateClusterEngineClassSKUOnly(template *corev1.PodTemplateSpec, base *f
 
 	for i := range template.Spec.Volumes {
 		vol := &template.Spec.Volumes[i]
+		volPath := specPath.Child("volumes").Index(i)
 		if refs := VolumeSecretRefs(vol); len(refs) > 0 {
 			errs = append(errs, field.Forbidden(
-				specPath.Child("volumes").Index(i),
-				clusterClassSKUOnlyDetail+": Secret volume"))
+				volPath, clusterClassSKUOnlyDetail+": Secret volume"))
+		}
+		if kind := namespacedVolumeRefKind(vol); kind != "" {
+			errs = append(errs, field.Forbidden(
+				volPath, clusterClassNamespacedRefDetail+": "+kind))
 		}
 	}
 
-	errs = append(errs, forbidContainerSecretRefs(
+	errs = append(errs, forbidContainerNamespacedRefs(
 		template.Spec.Containers, specPath.Child("containers"))...)
-	errs = append(errs, forbidContainerSecretRefs(
+	errs = append(errs, forbidContainerNamespacedRefs(
 		template.Spec.InitContainers, specPath.Child("initContainers"))...)
 	return errs
 }
 
-func forbidContainerSecretRefs(containers []corev1.Container, base *field.Path) field.ErrorList {
+func forbidContainerNamespacedRefs(containers []corev1.Container, base *field.Path) field.ErrorList {
 	var errs field.ErrorList
 	for i := range containers {
 		if refs := ContainerSecretRefs(&containers[i]); len(refs) > 0 {
@@ -94,6 +135,79 @@ func forbidContainerSecretRefs(containers []corev1.Container, base *field.Path) 
 				base.Index(i),
 				clusterClassSKUOnlyDetail+": Secret env"))
 		}
+		if refs := containerConfigMapRefs(&containers[i]); len(refs) > 0 {
+			errs = append(errs, field.Forbidden(
+				base.Index(i),
+				clusterClassNamespacedRefDetail+": ConfigMap env"))
+		}
+		if len(containers[i].Resources.Claims) > 0 {
+			// A container claim is satisfiable only by a pod-level
+			// resourceClaims entry, which the catalog cannot carry, so
+			// leaving this one to the pod-level check would surface as a
+			// rejected StatefulSet rather than a named field.
+			errs = append(errs, field.Forbidden(
+				base.Index(i).Child("resources", "claims"),
+				clusterClassNamespacedRefDetail+": resources.claims"))
+		}
 	}
 	return errs
+}
+
+// podResourceClaimRefKind names which namespaced DRA object the claim
+// entry binds. Exactly one of the two is set on a valid entry; an entry
+// with neither is already invalid, and is reported as a claim either way
+// so the rejection never depends on well-formedness.
+func podResourceClaimRefKind(claim *corev1.PodResourceClaim) string {
+	if claim.ResourceClaimTemplateName != nil && *claim.ResourceClaimTemplateName != "" {
+		return "resourceClaimTemplateName"
+	}
+	return "resourceClaimName"
+}
+
+// namespacedVolumeRefKind names the namespaced object v binds by name,
+// beyond the Secret sources VolumeSecretRefs already covers, or "" when
+// the source needs no namespaced object. VolumeSource is a union, so at
+// most one of these can be set — except a projected volume, which can
+// carry both a Secret and a ConfigMap source; the Secret half is the
+// caller's other check, so this half reports the ConfigMap.
+//
+// An `ephemeral` volume is deliberately absent. Its claim template
+// creates a new PVC in the consumer's own namespace rather than binding
+// an existing one, and names only a cluster-scoped StorageClass, so it
+// resolves identically in every namespace. `downwardAPI` and `emptyDir`
+// are namespace-independent for the same reason.
+func namespacedVolumeRefKind(v *corev1.Volume) string {
+	if v.ConfigMap != nil {
+		return "ConfigMap volume"
+	}
+	if v.PersistentVolumeClaim != nil {
+		return "persistentVolumeClaim volume"
+	}
+	if v.Projected != nil {
+		for i := range v.Projected.Sources {
+			if v.Projected.Sources[i].ConfigMap != nil {
+				return "projected ConfigMap volume"
+			}
+		}
+	}
+	return ""
+}
+
+// containerConfigMapRefs returns every ConfigMap name c pulls into its
+// environment, through either a single-key env reference or a
+// whole-ConfigMap envFrom. It mirrors ContainerSecretRefs for the
+// non-Secret half of the namespace-resolved env surface.
+func containerConfigMapRefs(c *corev1.Container) []string {
+	var out []string
+	for i := range c.Env {
+		if vf := c.Env[i].ValueFrom; vf != nil && vf.ConfigMapKeyRef != nil && vf.ConfigMapKeyRef.Name != "" {
+			out = append(out, vf.ConfigMapKeyRef.Name)
+		}
+	}
+	for i := range c.EnvFrom {
+		if ref := c.EnvFrom[i].ConfigMapRef; ref != nil && ref.Name != "" {
+			out = append(out, ref.Name)
+		}
+	}
+	return out
 }

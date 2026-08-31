@@ -49,6 +49,52 @@ func TestValidateClusterEngineClassSKUOnly_AcceptsSKUTemplate(t *testing.T) {
 	}
 }
 
+// TestValidateClusterEngineClassSKUOnly_AcceptsNamespaceIndependentVolumes
+// pins the other edge of the ConfigMap/PVC rejection: a volume source is
+// forbidden because it binds an object the catalog author cannot see in the
+// consumer's namespace, not because it is storage. emptyDir and downwardAPI
+// name nothing, and an ephemeral claim template creates a fresh PVC in the
+// consumer's own namespace from a cluster-scoped StorageClass, so all three
+// resolve identically wherever the catalog is consumed.
+func TestValidateClusterEngineClassSKUOnly_AcceptsNamespaceIndependentVolumes(t *testing.T) {
+	tmpl := validSKUTemplate()
+	storageClass := "gp3"
+	tmpl.Spec.Volumes = []corev1.Volume{
+		{
+			Name:         "scratch",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		},
+		{
+			Name: "podinfo",
+			VolumeSource: corev1.VolumeSource{
+				DownwardAPI: &corev1.DownwardAPIVolumeSource{
+					Items: []corev1.DownwardAPIVolumeFile{{
+						Path:     "labels",
+						FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.labels"},
+					}},
+				},
+			},
+		},
+		{
+			Name: "ephemeral-data",
+			VolumeSource: corev1.VolumeSource{
+				Ephemeral: &corev1.EphemeralVolumeSource{
+					VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+						Spec: corev1.PersistentVolumeClaimSpec{
+							StorageClassName: &storageClass,
+							AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+						},
+					},
+				},
+			},
+		},
+	}
+	errs := ValidateClusterEngineClassSKUOnly(tmpl, field.NewPath("spec", "template"))
+	if len(errs) != 0 {
+		t.Fatalf("namespace-independent volumes rejected: %v", errs.ToAggregate())
+	}
+}
+
 func TestValidateClusterEngineClassSKUOnly_RejectsNamespaceIdentifiers(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -102,6 +148,131 @@ func TestValidateClusterEngineClassSKUOnly_RejectsNamespaceIdentifiers(t *testin
 				}}
 			},
 			wantField: "containers",
+		},
+		{
+			name: "ConfigMap volume",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Volumes = []corev1.Volume{{
+					Name: "engine-tuning",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+						},
+					},
+				}}
+			},
+			wantField: "volumes",
+		},
+		{
+			name: "projected ConfigMap volume",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Volumes = []corev1.Volume{{
+					Name: "engine-tuning",
+					VolumeSource: corev1.VolumeSource{
+						Projected: &corev1.ProjectedVolumeSource{
+							Sources: []corev1.VolumeProjection{{
+								ConfigMap: &corev1.ConfigMapProjection{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+								},
+							}},
+						},
+					},
+				}}
+			},
+			wantField: "volumes",
+		},
+		{
+			name: "persistentVolumeClaim volume",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Volumes = []corev1.Volume{{
+					Name: "scratch",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "scratch-claim",
+						},
+					},
+				}}
+			},
+			wantField: "volumes",
+		},
+		{
+			name: "ConfigMap env",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Containers[0].Env = []corev1.EnvVar{{
+					Name: "TUNING",
+					ValueFrom: &corev1.EnvVarSource{
+						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+							Key:                  "level",
+						},
+					},
+				}}
+			},
+			wantField: "containers",
+		},
+		{
+			name: "ConfigMap envFrom",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+					},
+				}}
+			},
+			wantField: "containers",
+		},
+		{
+			name: "init container ConfigMap env",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.InitContainers = []corev1.Container{{
+					Name: "node-setup",
+					EnvFrom: []corev1.EnvFromSource{{
+						ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+						},
+					}},
+				}}
+			},
+			wantField: "initContainers",
+		},
+		{
+			name: "resourceClaims naming a ResourceClaim",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				name := "shared-gpu"
+				tmpl.Spec.ResourceClaims = []corev1.PodResourceClaim{{
+					Name:              "gpu",
+					ResourceClaimName: &name,
+				}}
+			},
+			wantField: "resourceClaims",
+		},
+		{
+			name: "resourceClaims naming a ResourceClaimTemplate",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				name := "gpu-template"
+				tmpl.Spec.ResourceClaims = []corev1.PodResourceClaim{{
+					Name:                      "gpu",
+					ResourceClaimTemplateName: &name,
+				}}
+			},
+			wantField: "resourceClaimTemplateName",
+		},
+		{
+			name: "engine container resources.claims",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Containers[0].Resources.Claims = []corev1.ResourceClaim{{Name: "gpu"}}
+			},
+			wantField: "resources.claims",
+		},
+		{
+			name: "init container resources.claims",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.InitContainers = []corev1.Container{{
+					Name:      "node-setup",
+					Resources: corev1.ResourceRequirements{Claims: []corev1.ResourceClaim{{Name: "gpu"}}},
+				}}
+			},
+			wantField: "initContainers",
 		},
 	}
 	for _, tc := range tests {

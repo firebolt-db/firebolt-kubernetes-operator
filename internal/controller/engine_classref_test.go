@@ -277,6 +277,89 @@ func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
 			t.Error("info = nil, want the cluster class so a mid-rollout drain can still read it")
 		}
 	})
+
+	// The chart ships webhooks off by default, so a catalog object carrying a
+	// namespaced reference can reach the API server unvalidated. The resolver's
+	// live-spec check is the backstop for the ConfigMap and PVC paths just as
+	// it is for serviceAccountName: they would otherwise merge into every
+	// consumer pod and bind to whatever exists in that namespace.
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*computev1alpha1.ClusterFireboltEngineClass)
+		wantInErr string
+	}{
+		{
+			name: "live ConfigMap volume on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Volumes = []corev1.Volume{{
+					Name: "tuning",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+						},
+					},
+				}}
+			},
+			wantInErr: "volumes",
+		},
+		{
+			name: "live persistentVolumeClaim volume on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Volumes = []corev1.Volume{{
+					Name: "scratch",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "scratch-claim",
+						},
+					},
+				}}
+			},
+			wantInErr: "volumes",
+		},
+		{
+			name: "live ConfigMap env on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+					},
+				}}
+			},
+			wantInErr: "containers",
+		},
+		{
+			// effectivePodResourceClaims copies class claims straight into
+			// the rendered pod, so an unvalidated catalog claim would bind
+			// whatever ResourceClaim shares that name in each tenant.
+			name: "live resourceClaims on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				name := "shared-gpu"
+				cc.Spec.Template.Spec.ResourceClaims = []corev1.PodResourceClaim{{
+					Name:              "gpu",
+					ResourceClaimName: &name,
+				}}
+			},
+			wantInErr: "resourceClaims",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cc := clusterClassOnlyFixture()
+			tc.mutate(cc)
+			cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(cc).Build()
+			r := engineRefTestReconciler(cli, sch)
+			eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+			_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+			if err == nil {
+				t.Fatal("expected unready error, got nil")
+			}
+			if !stderrors.Is(err, errFireboltEngineClassUnready) {
+				t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("error %q does not name %q", err.Error(), tc.wantInErr)
+			}
+		})
+	}
 }
 
 // TestFireboltEngineClassToEngines_NamespaceScoped pins down the watch handler:

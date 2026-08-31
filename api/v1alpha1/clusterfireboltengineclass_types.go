@@ -25,11 +25,15 @@ import (
 //
 // It carries a pod-template fragment: instance type / family, engine
 // container resources, node affinity / tolerations, and init-container
-// node setup. Namespace-resolved identifiers (serviceAccountName,
-// Secret refs, IAM annotations) are rejected by the validating webhook
-// and by the engine resolver's live-spec check. Storage, rollout,
-// drain-check, autoStop, uiSidecar, and customEngineConfig stay on the
-// namespaced FireboltEngineClass / FireboltEnginePreset / engine spec.
+// node setup. Namespaced references — serviceAccountName, Secret refs,
+// IAM annotations, ConfigMap refs, persistentVolumeClaim volumes, and
+// resourceClaims —
+// are rejected by the validating webhook and by the engine resolver's
+// live-spec check: a cluster-scoped object has no namespace, so such a
+// name would bind to whatever happens to exist in each consumer's.
+// Storage, rollout, drain-check, autoStop, uiSidecar, and
+// customEngineConfig stay on the namespaced FireboltEngineClass /
+// FireboltEnginePreset / engine spec.
 type ClusterFireboltEngineClassSpec struct {
 	// Template is the SKU pod template merged into engines that resolve
 	// this catalog object. See the type-level doc for the SKU-only lock
@@ -51,8 +55,10 @@ type ClusterFireboltEngineClassSpec struct {
 // in the engine's namespace, otherwise to this cluster object.
 //
 // The catalog is SKU-only: instance type, resources, and node setup.
-// Namespace-resolved identifiers (ServiceAccount name, Secret refs, IAM
-// annotations) belong on FireboltEnginePreset, not here. A namespaced
+// Namespaced references belong on the namespaced FireboltEngineClass or
+// FireboltEnginePreset, not here: ServiceAccount name, Secret refs, and
+// IAM annotations for identity, ConfigMap refs, claim volumes, and
+// resourceClaims for data, storage, and devices. A namespaced
 // FireboltEngineClass of the same name is an explicit override.
 //
 // The operator does not reconcile this object: it is authored by
