@@ -37,6 +37,7 @@ The validating webhook and the Engine resolver reject every namespaced reference
 | Secret volumes and Secret env | No | Credential material is namespaced. |
 | ConfigMap volumes and ConfigMap env | No | The name would resolve per consuming namespace. Put shared engine settings on `customEngineConfig`, or the ConfigMap ref on the namespaced class or Preset. |
 | `persistentVolumeClaim` volumes | No | A claim exists in one namespace. `emptyDir`, `downwardAPI`, and `ephemeral` claim templates stay allowed, because they name nothing namespaced. |
+| `dataSource` or `dataSourceRef` on an `ephemeral` claim template | No | Both seed the new claim from a claim or snapshot resolved in the consuming namespace, and `dataSourceRef` can name one in a third namespace. Every other claim-template field (`storageClassName`, `volumeAttributesClassName`, `volumeName`) names a cluster-scoped object and stays allowed. |
 | `spec.template.spec.resourceClaims` | No | `resourceClaimName` and `resourceClaimTemplateName` both name a namespaced dynamic-resource-allocation object. |
 | `resources.claims` on any container | No | A container claim can only be satisfied by a `spec.template.spec.resourceClaims` entry, which the catalog cannot carry. |
 

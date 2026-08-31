@@ -26,8 +26,8 @@ import (
 // It carries a pod-template fragment: instance type / family, engine
 // container resources, node affinity / tolerations, and init-container
 // node setup. Namespaced references — serviceAccountName, Secret refs,
-// IAM annotations, ConfigMap refs, persistentVolumeClaim volumes, and
-// resourceClaims —
+// IAM annotations, ConfigMap refs, persistentVolumeClaim volumes,
+// ephemeral claim data sources, and resourceClaims —
 // are rejected by the validating webhook and by the engine resolver's
 // live-spec check: a cluster-scoped object has no namespace, so such a
 // name would bind to whatever happens to exist in each consumer's.

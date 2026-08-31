@@ -56,6 +56,10 @@ func TestValidateClusterEngineClassSKUOnly_AcceptsSKUTemplate(t *testing.T) {
 // name nothing, and an ephemeral claim template creates a fresh PVC in the
 // consumer's own namespace from a cluster-scoped StorageClass, so all three
 // resolve identically wherever the catalog is consumed.
+//
+// The claim template here deliberately carries neither dataSource nor
+// dataSourceRef. Those two are the seam where an ephemeral volume stops
+// being namespace-independent, and the rejection cases cover them.
 func TestValidateClusterEngineClassSKUOnly_AcceptsNamespaceIndependentVolumes(t *testing.T) {
 	tmpl := validSKUTemplate()
 	storageClass := "gp3"
@@ -256,6 +260,56 @@ func TestValidateClusterEngineClassSKUOnly_RejectsNamespaceIdentifiers(t *testin
 				}}
 			},
 			wantField: "resourceClaimTemplateName",
+		},
+		{
+			// A claim template is allowed because it creates a fresh claim
+			// in the consuming namespace, but dataSource seeds that claim
+			// from a PVC or VolumeSnapshot resolved in whatever namespace
+			// the engine lands in.
+			name: "ephemeral claim template dataSource",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				tmpl.Spec.Volumes = []corev1.Volume{{
+					Name: "seeded",
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
+									DataSource: &corev1.TypedLocalObjectReference{
+										Kind: "VolumeSnapshot",
+										Name: "golden-data",
+									},
+								},
+							},
+						},
+					},
+				}}
+			},
+			wantField: "dataSource",
+		},
+		{
+			// dataSourceRef additionally carries an optional Namespace, so
+			// it can name an object in a third namespace entirely.
+			name: "ephemeral claim template cross-namespace dataSourceRef",
+			mutate: func(tmpl *corev1.PodTemplateSpec) {
+				ns := "another-tenant"
+				tmpl.Spec.Volumes = []corev1.Volume{{
+					Name: "seeded",
+					VolumeSource: corev1.VolumeSource{
+						Ephemeral: &corev1.EphemeralVolumeSource{
+							VolumeClaimTemplate: &corev1.PersistentVolumeClaimTemplate{
+								Spec: corev1.PersistentVolumeClaimSpec{
+									DataSourceRef: &corev1.TypedObjectReference{
+										Kind:      "PersistentVolumeClaim",
+										Name:      "golden-data",
+										Namespace: &ns,
+									},
+								},
+							},
+						},
+					},
+				}}
+			},
+			wantField: "dataSourceRef",
 		},
 		{
 			name: "engine container resources.claims",

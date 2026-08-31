@@ -56,7 +56,8 @@ const clusterClassNamespacedRefDetail = "ClusterFireboltEngineClass is SKU-only;
 //   - IAM annotations;
 //   - Secret refs (volumes, projected sources, env, envFrom);
 //   - ConfigMap refs (volumes, projected sources, env, envFrom);
-//   - persistentVolumeClaim volumes;
+//   - persistentVolumeClaim volumes, and the dataSource / dataSourceRef of
+//     an otherwise-allowed ephemeral claim template;
 //   - resourceClaims, and the container resources.claims that consume them.
 //
 // This is the enforcement half of the namespaced/cluster split — the
@@ -114,10 +115,7 @@ func ValidateClusterEngineClassSKUOnly(template *corev1.PodTemplateSpec, base *f
 			errs = append(errs, field.Forbidden(
 				volPath, clusterClassSKUOnlyDetail+": Secret volume"))
 		}
-		if kind := namespacedVolumeRefKind(vol); kind != "" {
-			errs = append(errs, field.Forbidden(
-				volPath, clusterClassNamespacedRefDetail+": "+kind))
-		}
+		errs = append(errs, forbidNamespacedVolumeRefs(vol, volPath)...)
 	}
 
 	errs = append(errs, forbidContainerNamespacedRefs(
@@ -164,33 +162,58 @@ func podResourceClaimRefKind(claim *corev1.PodResourceClaim) string {
 	return "resourceClaimName"
 }
 
-// namespacedVolumeRefKind names the namespaced object v binds by name,
-// beyond the Secret sources VolumeSecretRefs already covers, or "" when
-// the source needs no namespaced object. VolumeSource is a union, so at
-// most one of these can be set — except a projected volume, which can
-// carry both a Secret and a ConfigMap source; the Secret half is the
-// caller's other check, so this half reports the ConfigMap.
+// forbidNamespacedVolumeRefs rejects the namespaced objects volume v
+// binds by name, beyond the Secret sources VolumeSecretRefs already
+// covers. VolumeSource is a union, so at most one branch applies —
+// except a projected volume, which can carry both a Secret and a
+// ConfigMap source; the Secret half is the caller's other check, so this
+// half reports the ConfigMap.
 //
-// An `ephemeral` volume is deliberately absent. Its claim template
-// creates a new PVC in the consumer's own namespace rather than binding
-// an existing one, and names only a cluster-scoped StorageClass, so it
-// resolves identically in every namespace. `downwardAPI` and `emptyDir`
-// are namespace-independent for the same reason.
-func namespacedVolumeRefKind(v *corev1.Volume) string {
-	if v.ConfigMap != nil {
-		return "ConfigMap volume"
+// `emptyDir` and `downwardAPI` name nothing and are always allowed.
+//
+// `ephemeral` is allowed too, but only as far as its claim template
+// really is namespace-independent. The template creates a fresh claim in
+// the consumer's own namespace instead of binding an existing one, and
+// storageClassName / volumeAttributesClassName / volumeName all name
+// cluster-scoped objects. dataSource and dataSourceRef are the exception:
+// they name a PVC or VolumeSnapshot resolved in the consuming namespace
+// (dataSourceRef can even name one in a third namespace), so a catalog
+// carrying either would seed every tenant's engine from whatever object
+// happened to share that name — the exact per-namespace binding this
+// function exists to prevent.
+func forbidNamespacedVolumeRefs(v *corev1.Volume, volPath *field.Path) field.ErrorList {
+	forbid := func(p *field.Path, kind string) *field.Error {
+		return field.Forbidden(p, clusterClassNamespacedRefDetail+": "+kind)
 	}
-	if v.PersistentVolumeClaim != nil {
-		return "persistentVolumeClaim volume"
-	}
-	if v.Projected != nil {
+	switch {
+	case v.ConfigMap != nil:
+		return field.ErrorList{forbid(volPath.Child("configMap"), "ConfigMap volume")}
+	case v.PersistentVolumeClaim != nil:
+		return field.ErrorList{forbid(
+			volPath.Child("persistentVolumeClaim"), "persistentVolumeClaim volume")}
+	case v.Projected != nil:
 		for i := range v.Projected.Sources {
 			if v.Projected.Sources[i].ConfigMap != nil {
-				return "projected ConfigMap volume"
+				return field.ErrorList{forbid(
+					volPath.Child("projected", "sources").Index(i).Child("configMap"),
+					"projected ConfigMap volume")}
 			}
 		}
+	case v.Ephemeral != nil && v.Ephemeral.VolumeClaimTemplate != nil:
+		claimPath := volPath.Child("ephemeral", "volumeClaimTemplate", "spec")
+		claim := &v.Ephemeral.VolumeClaimTemplate.Spec
+		var errs field.ErrorList
+		if claim.DataSource != nil {
+			errs = append(errs, forbid(
+				claimPath.Child("dataSource"), "ephemeral claim dataSource"))
+		}
+		if claim.DataSourceRef != nil {
+			errs = append(errs, forbid(
+				claimPath.Child("dataSourceRef"), "ephemeral claim dataSourceRef"))
+		}
+		return errs
 	}
-	return ""
+	return nil
 }
 
 // containerConfigMapRefs returns every ConfigMap name c pulls into its
