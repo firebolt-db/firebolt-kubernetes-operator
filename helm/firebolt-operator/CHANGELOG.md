@@ -2,6 +2,13 @@
 
 appVersion: v0.1.1
 
+## [0.10.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.9.0...firebolt-operator-chart-0.10.0) (2026-08-31)
+
+
+### Features
+
+* verify external postgres server identity ([#183](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/183)) ([#184](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/184)) ([128bfaa](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/128bfaaeb115a303138ac78f8eb823d830ff22c5))
+
 ## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.8.2...firebolt-operator-chart-0.9.0) (2026-08-29)
 
 
