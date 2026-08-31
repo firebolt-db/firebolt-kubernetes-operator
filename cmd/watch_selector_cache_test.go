@@ -45,7 +45,13 @@ import (
 //  3. --namespaces composes: the selector keeps filtering inside the
 //     enumerated namespaces while other namespaces disappear entirely;
 //  4. Secrets stay cached unfiltered, even when they carry the excluded
-//     label — only the five Firebolt CRD types are selector-scoped.
+//     label — only the four namespaced Firebolt CRD types are
+//     selector-scoped;
+//  5. the cluster-scoped ClusterFireboltEngineClass catalog stays cached
+//     unfiltered too, even carrying the excluded label. The FireboltEngine
+//     validator resolves the class live through mgr.GetAPIReader, so a
+//     selector-scoped catalog would admit engines whose class the
+//     reconciler's cached Get can never see.
 func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 	testEnv := &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
@@ -103,6 +109,16 @@ func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "stamped-secret", Namespace: "watchsel-a", Labels: stamp},
 			StringData: map[string]string{"k": "v"},
 		},
+		&computev1alpha1.ClusterFireboltEngineClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "watchsel-stamped-sku", Labels: stamp},
+			Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{Name: "engine", Image: "engine:test"}},
+					},
+				},
+			},
+		},
 	)
 	for _, obj := range fixtures {
 		if err := kcli.Create(ctx, obj); err != nil {
@@ -151,6 +167,27 @@ func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 		return names
 	}
 
+	// assertClusterSKUVisible pins that the shared cluster-scoped SKU
+	// catalog is reachable through the scoped cache even though the fixture
+	// carries the label the selector excludes. This is the cache half of
+	// the contract the FireboltEngine validator relies on: it resolves
+	// engineClassRef live, so any class it can admit against the reconciler
+	// must also be able to resolve.
+	assertClusterSKUVisible := func(t *testing.T, c cache.Cache) {
+		t.Helper()
+		var sku computev1alpha1.ClusterFireboltEngineClass
+		if err := c.Get(ctx, client.ObjectKey{Name: "watchsel-stamped-sku"}, &sku); err != nil {
+			t.Errorf("Get(watchsel-stamped-sku) = %v, want success: the shared cluster SKU catalog is never selector-scoped", err)
+		}
+		var list computev1alpha1.ClusterFireboltEngineClassList
+		if err := c.List(ctx, &list); err != nil {
+			t.Fatalf("listing ClusterFireboltEngineClass from cache: %v", err)
+		}
+		if len(list.Items) != 1 || list.Items[0].Name != "watchsel-stamped-sku" {
+			t.Errorf("cached cluster SKU catalog = %v, want just watchsel-stamped-sku", list.Items)
+		}
+	}
+
 	t.Run("selector filters Firebolt CRs cluster-wide", func(t *testing.T) {
 		c := startScopedCache(t, nil)
 		names := engineNames(t, c)
@@ -169,6 +206,7 @@ func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 		if err := c.Get(ctx, client.ObjectKey{Name: "stamped-secret", Namespace: "watchsel-a"}, &sec); err != nil {
 			t.Errorf("Get(stamped-secret) = %v, want success (Secrets are never selector-scoped)", err)
 		}
+		assertClusterSKUVisible(t, c)
 	})
 
 	t.Run("selector composes with namespaces", func(t *testing.T) {
@@ -187,6 +225,7 @@ func TestScopeManagerCache_LiveCacheBehavior(t *testing.T) {
 		if err := c.Get(ctx, client.ObjectKey{Name: "stamped-secret", Namespace: "watchsel-a"}, &sec); err != nil {
 			t.Errorf("Get(stamped-secret) = %v, want success (Secrets are never selector-scoped)", err)
 		}
+		assertClusterSKUVisible(t, c)
 	})
 }
 

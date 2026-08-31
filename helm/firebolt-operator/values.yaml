@@ -189,12 +189,16 @@ healthProbeBindAddress: ":8081"
 watchNamespaces: []
 
 # -- Label selector restricting which FireboltEngine, FireboltInstance,
-# FireboltEngineClass, FireboltEnginePreset, and ClusterFireboltEngineClass
+# FireboltEngineClass, and FireboltEnginePreset
 # objects the operator caches and reconciles.
 # Empty (the default) applies no restriction. Non-empty is passed as
-# `--watch-label-selector=<selector>` and applies only to the five
-# Firebolt CRD types — child objects and third-party Secrets are cached
-# unfiltered, so they never need the label. Lets a cluster-wide install
+# `--watch-label-selector=<selector>` and applies only to those four
+# namespaced Firebolt CRD types — child objects and third-party Secrets
+# are cached unfiltered, so they never need the label, and so is the
+# cluster-scoped `ClusterFireboltEngineClass` SKU catalog: it is shared
+# by every install in the cluster and the FireboltEngine webhook
+# resolves it live, so filtering it would admit engines whose class the
+# operator could never see. Lets a cluster-wide install
 # ignore CRs owned by namespace-scoped installs, e.g.
 # `"!example.com/managed"`. CRs that reference each other (an engine
 # and the instance or engine class it points at) must land on the same

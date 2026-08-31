@@ -131,11 +131,12 @@ func main() {
 			"manager cache to those namespaces and requires per-namespace Role+RoleBinding pairs in each.")
 	flag.StringVar(&watchLabelSelectorArg, "watch-label-selector", "",
 		"Label selector restricting which FireboltEngine, FireboltInstance, "+
-			"FireboltEngineClass, FireboltEnginePreset, and ClusterFireboltEngineClass "+
-			"objects this operator caches and reconciles. Empty applies no restriction. The selector "+
-			"applies only to the five Firebolt CRD types; child objects and third-party Secrets "+
-			"(e.g. cert-manager's) are cached unfiltered, so they never need the label. Lets a "+
-			"cluster-wide install ignore CRs owned by namespace-scoped installs, "+
+			"FireboltEngineClass, and FireboltEnginePreset objects this operator caches and "+
+			"reconciles. Empty applies no restriction. The selector applies only to those four "+
+			"namespaced Firebolt CRD types; child objects and third-party Secrets "+
+			"(e.g. cert-manager's) are cached unfiltered, so they never need the label, and so is "+
+			"the cluster-scoped ClusterFireboltEngineClass catalog, which is shared by every "+
+			"install. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, "+
 			"e.g. '!example.com/managed'. CRs that reference each other (an engine and its "+
 			"instance or engine class) must land on the same side of the selector: label whole "+
 			"stacks, never individual CRs.")
@@ -473,6 +474,17 @@ func parseNamespaces(s string) []string {
 // so a cache-wide selector would silently hide those objects and wedge
 // every reconcile behind not-found errors.
 //
+// ClusterFireboltEngineClass is deliberately not in ByObject either.
+// The cluster-scoped SKU catalog is not an adoptable CR: no controller
+// reconciles it, and one object is meant to serve every install in the
+// cluster, which it cannot do if each install demands its own label on
+// it. Filtering it would also split admission from reconcile — the
+// FireboltEngine validator resolves the class through mgr.GetAPIReader
+// (live, unfiltered), so an engine naming an unlabeled shared SKU would
+// be admitted and then never render, the reconciler's cached Get
+// returning NotFound forever. Leaving the type out keeps both paths
+// reading the same catalog.
+//
 // The selector partitions adoption between installs, and the deployment
 // contract is that CRs referencing each other (an engine and the
 // instance or engine class it points at) are labeled as a unit, never
@@ -496,11 +508,10 @@ func scopeManagerCache(mgrOpts *ctrl.Options, watchNamespaces []string, watchSel
 	}
 	if watchSelector != nil {
 		mgrOpts.Cache.ByObject = map[client.Object]cache.ByObject{
-			&computev1alpha1.FireboltEngine{}:             {Label: watchSelector},
-			&computev1alpha1.FireboltInstance{}:           {Label: watchSelector},
-			&computev1alpha1.FireboltEngineClass{}:        {Label: watchSelector},
-			&computev1alpha1.FireboltEnginePreset{}:       {Label: watchSelector},
-			&computev1alpha1.ClusterFireboltEngineClass{}: {Label: watchSelector},
+			&computev1alpha1.FireboltEngine{}:       {Label: watchSelector},
+			&computev1alpha1.FireboltInstance{}:     {Label: watchSelector},
+			&computev1alpha1.FireboltEngineClass{}:  {Label: watchSelector},
+			&computev1alpha1.FireboltEnginePreset{}: {Label: watchSelector},
 		}
 		setupLog.Info("manager cache restricted to Firebolt CRs matching label selector", "selector", watchSelector.String())
 	}
