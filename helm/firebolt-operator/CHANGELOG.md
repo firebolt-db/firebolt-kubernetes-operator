@@ -2,6 +2,18 @@
 
 appVersion: v0.1.1
 
+## [0.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.10.0...firebolt-operator-chart-0.11.0) (2026-09-01)
+
+
+### Features
+
+* **api:** add ClusterFireboltEngineClass and namespaced-first engineClassRef (FB-3522) ([#188](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/188)) ([f56fc56](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f56fc5652ab9f1334df520fc23ed989f1ad4c338))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.12.0 ([886b0bc](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/886b0bc43cfb2a50616f6149be61e6267cd44e52))
+
 ## [0.10.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.9.0...firebolt-operator-chart-0.10.0) (2026-08-31)
 
 
