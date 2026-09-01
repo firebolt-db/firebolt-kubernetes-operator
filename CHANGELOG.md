@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.11.0...firebolt-operator-v0.12.0) (2026-09-01)
+
+
+### Features
+
+* **api:** add ClusterFireboltEngineClass and namespaced-first engineClassRef (FB-3522) ([#188](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/188)) ([f56fc56](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f56fc5652ab9f1334df520fc23ed989f1ad4c338))
+* verify external postgres server identity ([#183](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/183)) ([#184](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/184)) ([128bfaa](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/128bfaaeb115a303138ac78f8eb823d830ff22c5))
+
+
+### Dependencies
+
+* **deps:** bump golang from 1.26.6 to 1.27.0 ([#203](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/203)) ([fb44622](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fb446220882cdf6217335266808436c94a07be96))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260830212212.426f0e955f24 ([1fef24f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1fef24fe565b7412a5498db4c3c1d5dfc83585d8))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260831081410.a005be0f9030 ([#204](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/204)) ([34284c2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/34284c22a43dc3ec0776ee67f0e81a7b27dff549))
+* **deps:** bump the kubernetes group with 4 updates ([#202](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/202)) ([e1f609a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e1f609a02f557a7ff7b697355d40ca89c03ed022))
+
 ## [0.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.2...firebolt-operator-v0.11.0) (2026-08-29)
 
 
