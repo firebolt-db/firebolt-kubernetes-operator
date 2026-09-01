@@ -2638,7 +2638,9 @@ func (r *GatewayBackgroundQueryRunner) Start(ctx context.Context) {
 }
 
 func (r *GatewayBackgroundQueryRunner) runQuery(ctx context.Context) {
-	output, err := RunQueryViaGateway(ctx, r.podName, r.instanceName, r.engineName, r.query)
+	output, err := retryGatewayQueryOnDNSFailure(ctx, func(ctx context.Context) (string, error) {
+		return RunQueryViaGateway(ctx, r.podName, r.instanceName, r.engineName, r.query)
+	})
 	if err != nil {
 		r.recordFailure("query_error", err.Error())
 		return
@@ -2656,6 +2658,53 @@ func (r *GatewayBackgroundQueryRunner) runQuery(ctx context.Context) {
 	}
 
 	r.successCount.Add(1)
+}
+
+const (
+	gatewayDNSQueryAttempts = 3
+	gatewayDNSRetryDelay    = 100 * time.Millisecond
+)
+
+// retryGatewayQueryOnDNSFailure keeps transient Kind/CoreDNS load out of the
+// zero-downtime signal. The gateway Service name is stable for the lifetime of
+// a test, so failing to resolve that name says nothing about an engine cutover.
+// Keep this allowlist narrow: connection and HTTP failures reached the data
+// plane and must remain immediate test failures.
+func retryGatewayQueryOnDNSFailure(ctx context.Context, query func(context.Context) (string, error)) (string, error) {
+	var (
+		output string
+		err    error
+	)
+	for attempt := 1; attempt <= gatewayDNSQueryAttempts; attempt++ {
+		output, err = query(ctx)
+		if err == nil || !isGatewayDNSResolutionFailure(err) || attempt == gatewayDNSQueryAttempts {
+			return output, err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		timer := time.NewTimer(gatewayDNSRetryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	return output, err
+}
+
+func isGatewayDNSResolutionFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := strings.ToLower(err.Error())
+	return strings.Contains(detail, "could not resolve host") ||
+		strings.Contains(detail, "resolving timed out")
 }
 
 func (r *GatewayBackgroundQueryRunner) recordFailure(category, detail string) {
