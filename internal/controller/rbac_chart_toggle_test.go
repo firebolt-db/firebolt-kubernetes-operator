@@ -16,10 +16,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -117,6 +119,9 @@ func TestChartRBACToggle_ClusterWideDefault(t *testing.T) {
 	if got := count(ms, "ClusterRole", "firebolt-operator-apiserver-proxy"); len(got) != 0 {
 		t.Errorf("rbac.apiserverProxyGrant off must not render apiserver-proxy ClusterRole; got %d", len(got))
 	}
+	if got := count(ms, "ClusterRole", "firebolt-operator-cluster-resources"); len(got) != 0 {
+		t.Errorf("cluster-wide mode must not render the namespaced-install cluster-resources ClusterRole; got %d", len(got))
+	}
 }
 
 func TestChartRBACToggle_Namespaced(t *testing.T) {
@@ -137,6 +142,58 @@ func TestChartRBACToggle_Namespaced(t *testing.T) {
 	if len(bindings) != 2 {
 		t.Errorf("RoleBinding firebolt-operator-manager across tenant-a,tenant-b: want 2, got %d", len(bindings))
 	}
+	if got := count(ms, "ClusterRole", "firebolt-operator-cluster-resources"); len(got) != 1 {
+		t.Errorf("namespaced mode must render cluster-resources ClusterRole; got %d", len(got))
+	}
+	if got := count(ms, "ClusterRoleBinding", "firebolt-operator-cluster-resources"); len(got) != 1 {
+		t.Errorf("namespaced mode must render cluster-resources ClusterRoleBinding; got %d", len(got))
+	}
+
+	role := namespacedClusterResourcesRole(t)
+	if len(role.Rules) != 1 {
+		t.Fatalf("cluster-resources rules = %d, want 1 (catalog get/list/watch only)", len(role.Rules))
+	}
+	rule := role.Rules[0]
+	if got := rule.Resources; len(got) != 1 || got[0] != "clusterfireboltengineclasses" {
+		t.Errorf("resources = %v, want [clusterfireboltengineclasses]", got)
+	}
+	wantVerbs := []string{"get", "list", "watch"}
+	gotVerbs := append([]string{}, rule.Verbs...)
+	slices.Sort(gotVerbs)
+	if !slices.Equal(gotVerbs, wantVerbs) {
+		t.Errorf("verbs = %v, want %v (no patch/update; catalog is read-only in namespaced installs)", gotVerbs, wantVerbs)
+	}
+}
+
+func namespacedClusterResourcesRole(t *testing.T) rbacv1.ClusterRole {
+	t.Helper()
+	_, thisFile, _, _ := runtime.Caller(0)
+	chartDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "helm", "firebolt-operator")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "helm", "template", "firebolt-operator", chartDir,
+		"--set", "watchNamespaces={tenant-a}")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("helm template: %v\nstderr: %s", err, stderr.String())
+	}
+	for _, doc := range strings.Split(stdout.String(), "\n---\n") {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		var role rbacv1.ClusterRole
+		if err := yaml.Unmarshal([]byte(doc), &role); err != nil {
+			continue
+		}
+		if role.Kind == "ClusterRole" && role.Name == "firebolt-operator-cluster-resources" {
+			return role
+		}
+	}
+	t.Fatal("cluster-resources ClusterRole not rendered")
+	return rbacv1.ClusterRole{}
 }
 
 func TestChartRBACToggle_ApiserverProxyClusterWide(t *testing.T) {

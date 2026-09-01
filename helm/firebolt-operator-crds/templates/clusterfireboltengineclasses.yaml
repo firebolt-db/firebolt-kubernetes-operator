@@ -4,38 +4,43 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: fireboltengines.compute.firebolt.io
+  name: clusterfireboltengineclasses.compute.firebolt.io
 spec:
   group: compute.firebolt.io
   names:
-    kind: FireboltEngine
-    listKind: FireboltEngineList
-    plural: fireboltengines
+    kind: ClusterFireboltEngineClass
+    listKind: ClusterFireboltEngineClassList
+    plural: clusterfireboltengineclasses
     shortNames:
-    - fireng
-    singular: fireboltengine
-  scope: Namespaced
+    - cfirengc
+    singular: clusterfireboltengineclass
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.replicas
-      name: Replicas
-      type: integer
-    - jsonPath: .status.phase
-      name: Phase
-      type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
-      type: string
-    - jsonPath: .status.activeGeneration
-      name: Generation
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: FireboltEngine is the Schema for the fireboltengines API.
+        description: |-
+          ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.
+          Engines select it by name through spec.engineClassRef. The operator
+          resolves that name to a namespaced FireboltEngineClass if one exists
+          in the engine's namespace, otherwise to this cluster object.
+
+          The catalog is SKU-only: instance type, resources, and node setup.
+          Namespaced references belong on the namespaced FireboltEngineClass or
+          FireboltEnginePreset, not here: ServiceAccount name, Secret refs, and
+          IAM annotations for identity, ConfigMap refs, claim volumes, and
+          resourceClaims for data, storage, and devices. A namespaced
+          FireboltEngineClass of the same name is an explicit override.
+
+          The operator does not reconcile this object: it is authored by
+          cluster admins or a cell manager, and consumed read-only by engine
+          reconcilers. Deleting it does not tear down running pods; engines
+          that still name it emit EngineClassNotFound and keep the last
+          applied StatefulSet.
         properties:
           apiVersion:
             description: |-
@@ -56,377 +61,29 @@ spec:
             type: object
           spec:
             description: |-
-              FireboltEngineSpec defines the desired state of a Firebolt engine.
+              ClusterFireboltEngineClassSpec is the SKU-only catalog payload.
 
-              The CEL rule freezes spec.metadataEndpointOverride once it has been set
-              (or unset) at creation time. The field selects the cross-cluster metadata
-              topology the engine's nodes bake into their on-disk configuration; letting
-              users mutate it later would silently force a full blue-green rollout (it
-              participates in stsMatchesSpec via AnnotationMetadataOverride) and would
-              break the instanceInfo-drift invariant computeStable relies on to allow
-              in-place recovery of a deleted ConfigMap (rebuild-at-same-gen produces
-              byte-identical content only when all ConfigMap inputs are frozen).
-              The wording mirrors the set-once pattern on FireboltInstanceSpec.ID,
-              adapted for an optional pointer field via has(): absent-on-create may
-              still transition to set, but any set value may not subsequently be
-              changed or cleared.
+              It carries a pod-template fragment: instance type / family, engine
+              container resources, node affinity / tolerations, and init-container
+              node setup. Namespaced references — serviceAccountName, Secret refs,
+              IAM annotations, ConfigMap refs, persistentVolumeClaim volumes,
+              ephemeral claim data sources, and resourceClaims —
+              are rejected by the validating webhook and by the engine resolver's
+              live-spec check: a cluster-scoped object has no namespace, so such a
+              name would bind to whatever happens to exist in each consumer's.
+              Storage, rollout, drain-check, autoStop, uiSidecar, and
+              customEngineConfig stay on the namespaced FireboltEngineClass /
+              FireboltEnginePreset / engine spec.
             properties:
-              autoStop:
-                description: |-
-                  AutoStop configures automatic stop and wake-up for this engine. When
-                  omitted or with Enabled=false, spec.replicas is governed entirely by the
-                  user. When enabled, the operator owns spec.replicas and drives it between
-                  IdleReplicas and ActiveReplicas based on idleness, wake-up requests, and
-                  Schedule windows. It is an activity-gated toggle, not proportional
-                  autoscaling.
-                properties:
-                  activeReplicas:
-                    description: |-
-                      ActiveReplicas is the replica count the engine runs at while active
-                      (during a Schedule window or following a wake-up). Required when Enabled
-                      is true.
-                    format: int32
-                    minimum: 1
-                    type: integer
-                  enabled:
-                    default: false
-                    description: Enabled turns auto-stop on for this engine. Defaults
-                      to false.
-                    type: boolean
-                  idleReplicas:
-                    default: 0
-                    description: |-
-                      IdleReplicas is the replica count the engine scales down to once
-                      IdleTimeout elapses with no query activity. 0 fully stops the engine.
-                      Defaults to 0.
-                    format: int32
-                    minimum: 0
-                    type: integer
-                  idleTimeout:
-                    default: 30m
-                    description: |-
-                      IdleTimeout is how long the engine must observe zero in-flight and
-                      suspended queries before it scales down to IdleReplicas. Defaults to
-                      30 minutes.
-                    type: string
-                  pollInterval:
-                    default: 1m
-                    description: |-
-                      PollInterval is how often the operator scrapes engine metrics to
-                      re-evaluate idleness. Defaults to 1 minute.
-                    type: string
-                  schedule:
-                    description: |-
-                      Schedule is an optional list of UTC time windows during which the engine
-                      is held at ActiveReplicas regardless of observed activity. Useful for
-                      "always-on during business hours" policies.
-                    items:
-                      description: |-
-                        ScheduleWindow is a recurring UTC time window during which the engine is
-                        pinned at ActiveReplicas. End may be less than Start to express a window
-                        that crosses midnight (e.g. 22:00-02:00).
-                      properties:
-                        days:
-                          description: |-
-                            Days lists the UTC weekdays the window applies to. Empty means every
-                            day. The window is anchored to the day on which Start falls; if End
-                            crosses midnight the trailing portion still belongs to the listed day.
-                          items:
-                            description: ScheduleDay is a UTC weekday code used in
-                              ScheduleWindow.Days.
-                            enum:
-                            - Mon
-                            - Tue
-                            - Wed
-                            - Thu
-                            - Fri
-                            - Sat
-                            - Sun
-                            type: string
-                          type: array
-                        end:
-                          description: |-
-                            End is the window closing time in UTC, formatted "HH:MM". An End equal
-                            to Start is treated as an empty window.
-                          pattern: ^([01]\d|2[0-3]):[0-5]\d$
-                          type: string
-                        start:
-                          description: Start is the window opening time in UTC, formatted
-                            "HH:MM".
-                          pattern: ^([01]\d|2[0-3]):[0-5]\d$
-                          type: string
-                      required:
-                      - end
-                      - start
-                      type: object
-                    type: array
-                required:
-                - activeReplicas
-                - enabled
-                type: object
-                x-kubernetes-validations:
-                - message: activeReplicas must be >= idleReplicas
-                  rule: 'self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas
-                    : 0)'
-              customEngineConfig:
-                description: |-
-                  CustomEngineConfig is a free-form object deep-merged into the rendered
-                  engine config.yaml at the root. The rendered document follows the
-                  structured schema consumed by `firebolt server` (top-level sections:
-                  `auth`, `engine`, `instance`, `logging`, `schema_version`); keys
-                  placed in customEngineConfig at the same paths are merged into the
-                  corresponding sections, overriding the operator's defaults (e.g.
-                  `logging.format`, `logging.level`, `auth.*`). Any additional sections
-                  understood by the engine binary may be set at the root.
-
-                  The operator retains authority over identity, routing, and topology
-                  paths. The following are silently stripped from user input before the
-                  merge and cannot be overridden via this field:
-
-                    - schema_version
-                    - instance.id
-                    - instance.type
-                    - instance.multi_engine (entire subtree, including metadata_endpoint)
-                    - engine.id
-                    - engine.nodes
-                    - engine.termination_grace_period
-
-                  Changes to this field trigger a new blue-green generation, since the
-                  rendered config.yaml content changes.
-                type: object
-                x-kubernetes-preserve-unknown-fields: true
-              drainCheckEnabled:
-                description: |-
-                  DrainCheckEnabled controls whether the operator checks the query-count
-                  metrics on old-generation pods during graceful rollouts. When false, the
-                  operator skips directly to cleaning after switching traffic, without
-                  verifying that in-flight queries have completed.
-
-                  Resolution is engine-if-set → FireboltEngineClass-if-set → operator
-                  default (true). The default is applied by the controller, not the CRD,
-                  so an unset value here falls through to the referenced class instead of
-                  being materialized to true at admission.
-                type: boolean
-              drainCheckInterval:
-                description: |-
-                  DrainCheckInterval controls how often to check if old pods have finished serving queries.
-                  Only used when drainCheckEnabled is true.
-                type: string
-              engineClassRef:
-                description: |-
-                  EngineClassRef is the name of a class whose pod template is merged
-                  underneath this engine's pod template when the StatefulSet is built.
-                  The operator resolves the name namespaced-first: FireboltEngineClass
-                  in this engine's namespace if present, otherwise
-                  ClusterFireboltEngineClass of the same name. Engine spec fields
-                  take precedence over class fields; operator defaults sit beneath
-                  both. A namespaced object of the same name is an explicit override
-                  of the cluster SKU.
-
-                  Mutable: changing the reference (or editing the resolved class's
-                  spec) triggers a new blue-green generation, just like any other
-                  pod-template-affecting spec change. The change participates in
-                  stsMatchesSpec via an annotation hash so drift is detected
-                  deterministically.
-
-                  The validating webhook rejects Create and Update when neither the
-                  namespaced nor the cluster object exists, so users see the typo
-                  immediately instead of via engine status. Apply ordering matters:
-                  GitOps tooling must apply the class before any engine that
-                  references it (Argo sync-waves / Flux dependsOn).
-                minLength: 1
-                type: string
-              instanceRef:
-                description: |-
-                  InstanceRef is the name of the FireboltInstance in the same namespace
-                  that this engine depends on. The engine reconciler will not proceed
-                  until the referenced instance has a populated metadata endpoint and
-                  instance ID. This field is immutable after creation.
-                minLength: 1
-                type: string
-                x-kubernetes-validations:
-                - message: instanceRef is immutable
-                  rule: self == oldSelf
-              metadataEndpointOverride:
-                description: |-
-                  MetadataEndpointOverride overrides the metadata endpoint for this engine.
-                  If nil, the engine uses Instance.status.metadataEndpoint (with intra-cluster
-                  topology-aware routing). Set this for cross-cluster scenarios where the engine
-                  connects to a metadata service in a different cluster via private link.
-
-                  Immutable once set: see the struct-level CEL rule on FireboltEngineSpec.
-                type: string
-              replicas:
-                description: |-
-                  Replicas is the number of engine nodes. Set to 0 to stop the
-                  engine: the operator tears down the active generation (honoring
-                  spec.rollout for drain behavior) and leaves the CR in the
-                  Stopped phase. Setting replicas back to a non-zero value resumes
-                  the engine via a new blue-green generation.
-                format: int32
-                minimum: 0
-                type: integer
-              requirePreset:
-                description: |-
-                  RequirePreset, when true, keeps the engine from becoming Ready
-                  until the namespace has a Ready FireboltEnginePreset object
-                  (named "firebolt"; the CRD pins the name so a namespace holds at
-                  most one). The default (false / unset) keeps existing engines
-                  working in namespaces that have no Preset object. A present but
-                  unready Preset object always fails closed, even when this field
-                  is unset.
-
-                  The default is applied by the controller, not the CRD, so an unset
-                  value stays empty at admission.
-                type: boolean
-              rollout:
-                description: |-
-                  Rollout strategy for transitions: "graceful" waits for drain, "recreate"
-                  deletes immediately. Resolution is engine-if-set →
-                  FireboltEngineClass-if-set → operator default (graceful). The default is
-                  applied by the controller, not the CRD, so an unset value here falls
-                  through to the referenced class instead of being materialized to
-                  graceful at admission.
-                enum:
-                - graceful
-                - recreate
-                type: string
-              storage:
-                default: {}
-                description: |-
-                  Storage configures the per-pod data volume mounted into each engine
-                  container. See EngineStorageSpec for the backend choice (emptyDir is
-                  the default; persistentVolumeClaim or hostPath are opt-ins). Changes
-                  to any field — including switching backends — force a new blue-green
-                  generation, because the StatefulSet's VolumeClaimTemplates are
-                  immutable and a backend swap necessarily reshapes the pod-template
-                  data Volume.
-
-                  Not a Kubernetes pod-template concern: the operator owns the data
-                  volume name and the StatefulSet's VolumeClaimTemplates, so this stays
-                  on the spec wrapper rather than under spec.template.spec.volumes.
-                properties:
-                  emptyDir:
-                    description: |-
-                      EmptyDir backs the engine's data mount with a pod-scoped emptyDir
-                      Volume. The mount holds regenerable cache only; authoritative
-                      data lives in the metadata service and the managed-table S3
-                      bucket (see EngineStorageSpec for the full picture), so volume
-                      contents being lost on pod restart is normal engine behavior
-                      rather than a durability regression.
-                    properties:
-                      medium:
-                        description: |-
-                          Medium is the storage medium backing the emptyDir. Leave empty
-                          for the default node disk; set to "Memory" for a tmpfs-backed
-                          volume sized against the pod's memory limit.
-                        enum:
-                        - ""
-                        - Memory
-                        type: string
-                      sizeLimit:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        description: |-
-                          SizeLimit caps the volume's growth. Optional; nil means
-                          unbounded (subject to node disk pressure or pod memory limits
-                          for Memory medium).
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                    type: object
-                  hostPath:
-                    description: |-
-                      HostPath backs the engine's data mount with a directory on the
-                      node filesystem. Pods are implicitly node-pinned (the directory only
-                      exists where it was created); the path must pre-exist on every
-                      node the engine pod could be scheduled onto, with permissions
-                      readable by the engine web UID. Use to expose instance-store NVMe on
-                      the node.
-                    properties:
-                      path:
-                        description: Path is the absolute filesystem path on the host
-                          node.
-                        pattern: ^/.*
-                        type: string
-                      type:
-                        description: |-
-                          Type enforces a check on Path before mounting (Directory,
-                          DirectoryOrCreate, …). See
-                          https://kubernetes.io/docs/concepts/storage/volumes/#hostpath
-                          for the full enum. Leave nil to skip the check (kubelet default).
-                        type: string
-                    required:
-                    - path
-                    type: object
-                  persistentVolumeClaim:
-                    description: |-
-                      PersistentVolumeClaim opts the engine into a per-pod
-                      PersistentVolumeClaim synthesized by the StatefulSet controller
-                      from a VolumeClaimTemplate. Set the field (even to an empty
-                      struct) to enable the PVC backend; the kubebuilder defaults
-                      (1Gi, ReadWriteOnce, cluster-default StorageClass) on
-                      EnginePersistentVolumeClaimSpec fill in any omitted inner field.
-                      When this field is nil the engine falls back to the default
-                      emptyDir backend (see the EngineStorageSpec doc above).
-                    properties:
-                      accessModes:
-                        default:
-                        - ReadWriteOnce
-                        description: |-
-                          AccessModes for the PVC. Defaults to [ReadWriteOnce], which matches the
-                          per-pod ownership model used by the StatefulSet VolumeClaimTemplate.
-                        items:
-                          type: string
-                        type: array
-                      size:
-                        anyOf:
-                        - type: integer
-                        - type: string
-                        default: 1Gi
-                        description: Size is the requested capacity for each engine
-                          pod's PVC. Defaults to 1Gi.
-                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                        x-kubernetes-int-or-string: true
-                      storageClassName:
-                        description: |-
-                          StorageClassName selects the StorageClass for the PVC. Leave nil to use
-                          the cluster default. An empty string disables dynamic provisioning.
-                        type: string
-                    type: object
-                type: object
-                x-kubernetes-validations:
-                - message: storage.persistentVolumeClaim, storage.emptyDir, and storage.hostPath
-                    are mutually exclusive
-                  rule: '(has(self.persistentVolumeClaim) ? 1 : 0) + (has(self.emptyDir)
-                    ? 1 : 0) + (has(self.hostPath) ? 1 : 0) <= 1'
               template:
                 description: |-
-                  Template is the pod template the operator merges with its
-                  own-rendered engine container, data volume, projected ConfigMap,
-                  probes, and pod-level securityContext to produce the engine
-                  StatefulSet's pod spec. Most users set only
-                  template.spec.containers[name=="engine"].image and
-                  .resources, plus scheduling fields (nodeSelector / tolerations /
-                  affinity / topologySpreadConstraints / priorityClassName /
-                  podSecurityContext) and any sidecars / init containers / extra
-                  volumes they need.
+                  Template is the SKU pod template merged into engines that resolve
+                  this catalog object. See the type-level doc for the SKU-only lock
+                  and the operator-owned paths the validating webhook rejects.
 
-                  When a FireboltEnginePreset object and/or spec.engineClassRef
-                  are present, the operator merges
-                  engine > Preset > class > operator default — engine wins on
-                  conflict (whole-struct ownership for pointer fields; list-type
-                  fields like tolerations / initContainers / sidecars / volumes
-                  concatenate lower-layer first).
-
-                  The validating webhook rejects user input on paths the operator
-                  owns end-to-end — see FireboltEngineClassPodTemplateRules in
-                  operatorauthority.go for the authoritative allowlist. Notably,
-                  terminationGracePeriodSeconds is rejected: TGPS is operator-stamped
-                  from an internal default (60s), matching the same rejection on the
-                  class template.
-
-                  Changes to this field trigger a new blue-green generation.
+                  The CRD schema for template.metadata is patched post-controller-gen
+                  (scripts/patch-crd-template-metadata.py, invoked by `make manifests`)
+                  so labels and annotations survive structural-schema pruning.
                 properties:
                   metadata:
                     type: object
@@ -4209,236 +3866,10 @@ spec:
                         x-kubernetes-list-type: map
                     type: object
                 type: object
-              uiSidecar:
-                description: |-
-                  UISidecar enables a built-in UI sidecar (an operator-owned nginx
-                  container named "engine-web" serving the Firebolt Engine Web UI, pointed at
-                  this engine on localhost) in every pod of this engine. It exposes
-                  container port 9100 ("web-ui"); the per-engine headless Service resolves
-                  to pod IPs, so the UI is reachable at <pod-ip>:9100 without listing an
-                  extra Service port. The "engine-web" container name is reserved: a
-                  user-supplied container or init container with that name is rejected.
-
-                  Resolution is engine-if-set → FireboltEngineClass-if-set → operator
-                  default (false). The default is applied by the controller, not the CRD,
-                  so an unset value here falls through to the referenced class instead of
-                  being materialized to false at admission.
-
-                  Toggling this changes the pod template and therefore triggers a new
-                  blue-green generation.
-                type: boolean
             required:
-            - instanceRef
-            - replicas
-            type: object
-            x-kubernetes-validations:
-            - message: spec.metadataEndpointOverride is immutable once set
-              rule: '!has(oldSelf.metadataEndpointOverride) || (has(self.metadataEndpointOverride)
-                && self.metadataEndpointOverride == oldSelf.metadataEndpointOverride)'
-          status:
-            description: FireboltEngineStatus defines the observed state of a Firebolt
-              engine.
-            properties:
-              activeGeneration:
-                description: ActiveGeneration is the generation currently serving
-                  traffic.
-                type: integer
-              appliedPresetHash:
-                description: |-
-                  AppliedPresetHash is the content hash of the Preset spec
-                  stamped on the serving StatefulSet
-                  (firebolt.io/engine-preset-hash). It trails a live Preset
-                  edit until the generation that carries the new hash is
-                  promoted. Empty when AppliedPresetName is empty.
-                type: string
-              appliedPresetName:
-                description: |-
-                  AppliedPresetName is the FireboltEnginePreset object last
-                  applied to the serving generation (status.activeGeneration).
-                  Empty when that generation was rendered without a Preset, or
-                  when no generation is serving yet.
-                type: string
-              autoStopReason:
-                description: |-
-                  AutoStopReason is a short token describing the most recent auto-stop
-                  decision: "Idle", "ScheduleActive", "ActivityObserved", "ScrapeFailed",
-                  "Disabled", "Stopped", "Initializing", "WakeRequested".
-                type: string
-              conditions:
-                description: Conditions represent the latest available observations
-                  of the engine's state.
-                items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
-                  properties:
-                    lastTransitionTime:
-                      description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
-                      format: date-time
-                      type: string
-                    message:
-                      description: |-
-                        message is a human readable message indicating details about the transition.
-                        This may be an empty string.
-                      maxLength: 32768
-                      type: string
-                    observedGeneration:
-                      description: |-
-                        observedGeneration represents the .metadata.generation that the condition was set based upon.
-                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
-                        with respect to the current state of the instance.
-                      format: int64
-                      minimum: 0
-                      type: integer
-                    reason:
-                      description: |-
-                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
-                        Producers of specific condition types may define expected values and meanings for this field,
-                        and whether the values are considered a guaranteed API.
-                        The value should be a CamelCase string.
-                        This field may not be empty.
-                      maxLength: 1024
-                      minLength: 1
-                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
-                      type: string
-                    status:
-                      description: status of the condition, one of True, False, Unknown.
-                      enum:
-                      - "True"
-                      - "False"
-                      - Unknown
-                      type: string
-                    type:
-                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                      maxLength: 316
-                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
-                      type: string
-                  required:
-                  - lastTransitionTime
-                  - message
-                  - reason
-                  - status
-                  - type
-                  type: object
-                type: array
-              currentGeneration:
-                description: CurrentGeneration is the latest generation number created.
-                type: integer
-              drainingGeneration:
-                description: DrainingGeneration is the generation being drained, if
-                  any.
-                type: integer
-              lastActivityTime:
-                description: |-
-                  LastActivityTime is the timestamp of the most recent auto-stop
-                  observation that recorded in-flight or suspended queries. The engine
-                  scales down once now() - LastActivityTime exceeds
-                  spec.autoStop.idleTimeout. Cleared when auto-stop is disabled.
-                format: date-time
-                type: string
-              lastReconciled:
-                description: LastReconciled is the timestamp of the last reconciliation.
-                format: date-time
-                type: string
-              lastScaledAt:
-                description: |-
-                  LastScaledAt is the timestamp of the most recent auto-stop-driven
-                  mutation of spec.replicas. Distinguishes auto-stop scale events from
-                  user edits in audit trails.
-                format: date-time
-                type: string
-              observedAuthHash:
-                description: |-
-                  ObservedAuthHash is the auth content-hash (see the internal
-                  authHash function) that this engine's current, stable generation
-                  was last confirmed to match — copied from the running
-                  StatefulSet's own drift-detection annotation once a reconcile finds
-                  no drift. Empty when auth is disabled or no generation has
-                  stabilized yet.
-
-                  This exists so the instance controller can tell, for its own
-                  signing-key rotation state machine, whether every engine in an
-                  Instance has actually rolled onto a given signing-keys set —
-                  without the instance controller needing to read engine
-                  StatefulSets directly or recompute engine-side rendering rules
-                  itself. It is intentionally the same hash already used to decide
-                  whether an engine needs a new generation (see stsMatchesSpec /
-                  annotationsMatchSpec), just surfaced here as this engine's own
-                  observed value of it.
-                type: string
-              observedEngineServingCertFP:
-                description: |-
-                  ObservedEngineServingCertFP is the fingerprint of the serving-certificate
-                  tls.crt the current stable generation was last confirmed on, recorded once
-                  a reconcile finds the generation stable. ObservedEngineServingCertGen
-                  records which generation that fingerprint belongs to. computeStable treats a
-                  changed fingerprint as an in-place re-issuance — and rolls a fresh
-                  generation so running pods stop serving the stale leaf — ONLY when the
-                  recorded generation equals the current one. Every new generation issues its
-                  own certificate (a fresh key), so its fingerprint legitimately differs from
-                  the prior generation's; without the generation guard, an ordinary
-                  spec-driven roll would look like a re-issuance and roll forever. A
-                  coordinated re-issuance roll cuts over through the #4 trust-bundle gate.
-                  Empty/zero when engine TLS is disabled or no generation has stabilized yet;
-                  first observation (empty fingerprint) records without rolling. tls.crt is a
-                  public certificate.
-                type: string
-              observedEngineServingCertGen:
-                description: |-
-                  ObservedEngineServingCertGen is the generation ObservedEngineServingCertFP
-                  was observed at — see that field. Zero when unset.
-                type: integer
-              observedEngineTLSHash:
-                description: |-
-                  ObservedEngineTLSHash is the engine-TLS content-hash (see the internal
-                  tlsHash function) that this engine's current, stable generation was last
-                  confirmed to match — copied from the running StatefulSet's own
-                  drift-detection annotation once a reconcile finds no drift. Empty when
-                  engine TLS is disabled or no generation has stabilized yet.
-
-                  The instance controller reads this across the engine fleet to decide
-                  when the gateway may switch its upstream protocol: it re-encrypts to
-                  engines only once every engine has rolled onto a TLS-serving generation
-                  (this hash non-empty and matching), and keeps re-encrypting until every
-                  engine has drained back to plaintext (this hash empty everywhere). Same
-                  hash used to decide whether an engine needs a new generation (see
-                  stsMatchesSpec / annotationsMatchSpec), surfaced here as this engine's
-                  own observed value.
-                type: string
-              observedGeneration:
-                description: ObservedGeneration is the metadata.generation that was
-                  last fully reconciled to stable.
-                format: int64
-                type: integer
-              phase:
-                description: Phase is the current lifecycle phase of the engine.
-                type: string
-              readyReplicas:
-                description: |-
-                  ReadyReplicas is how many pods of activeGeneration are running and
-                  passing their readiness probe. It is observed, not desired: it counts
-                  what serves traffic right now, so it trails spec.replicas while a
-                  generation comes up and reads 0 for a stopped engine or one whose first
-                  generation has not cut over yet.
-
-                  During a blue-green rollout it stays with the generation that is still
-                  serving and steps to the new one at cutover, so a roll does not show up
-                  here as capacity briefly dropping away. Pods of a generation that is
-                  coming up or draining are not counted.
-                  Deliberately serialized even at zero, unlike most optional status
-                  fields: zero is a real observation here (stopped, or nothing serving
-                  yet) and must stay distinguishable from the field being absent, which
-                  means an operator too old to report it at all. With omitempty a client
-                  reading the field cannot tell those apart. currentGeneration and
-                  activeGeneration serialize zero for the same reason.
-                type: integer
-            required:
-            - activeGeneration
-            - currentGeneration
+            - template
             type: object
         type: object
     served: true
     storage: true
-    subresources:
-      status: {}
+    subresources: {}

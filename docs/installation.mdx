@@ -123,10 +123,12 @@ AKS does not expose `LimitMEMLOCK` through its supported node configuration, so 
 
 ## Install the CRDs
 
-The Firebolt Operator comes with three CustomResourceDefinitions:
+The Firebolt Operator comes with five CustomResourceDefinitions:
 - `FireboltInstance`
 - `FireboltEngine`
 - `FireboltEngineClass`
+- `ClusterFireboltEngineClass`
+- `FireboltEnginePreset`
 
 We provide two ways to install the CRDs. Either via a separate CRD chart or via the
 Firebolt Operator chart `crds/` directory. If you would like to learn more about the
@@ -184,11 +186,12 @@ helm upgrade --skip-crds --install firebolt-operator \
 ```
 
 The chart then renders a `Role` plus `RoleBinding` in each listed
-namespace (carrying the same rule set the `ClusterRole` would have)
-and starts the manager with `--namespaces=tenant-a,tenant-b` so its
-cache only spans those namespaces. The Firebolt Operator's blast
-radius is bounded to that list; CRs created in other namespaces are
-silently ignored.
+namespace for namespaced resources, plus a `ClusterRole` granting
+`get/list/watch` on `ClusterFireboltEngineClass` so engines can resolve
+the shared SKU catalog. The manager starts with
+`--namespaces=tenant-a,tenant-b` so its cache only spans those
+namespaces. The Firebolt Operator's blast radius is bounded to that
+list; CRs created in other namespaces are silently ignored.
 
 To onboard a new tenant namespace, add it to `watchNamespaces` and
 re-run `helm upgrade`. The new `Role` and `RoleBinding` land in the
@@ -257,7 +260,7 @@ the manager uses when you run it directly. The Helm chart default is what the
 |------|----------------|--------------------|-------------|
 | `--version` | `false` | Not set | Print the version and exit. |
 | `--namespaces` | `""` | Derived from `watchNamespaces` (omitted when empty) | Comma-separated list of namespaces to watch. Empty watches every namespace (cluster-wide install, requires the chart's `ClusterRole`). A non-empty list confines the manager cache to those namespaces and pairs with per-namespace `Role` and `RoleBinding` from the chart. |
-| `--watch-label-selector` | `""` | Derived from `watchLabelSelector` (omitted when empty) | Label selector restricting which `FireboltEngine`, `FireboltInstance`, `FireboltEngineClass`, and `FireboltEnginePreset` objects the operator caches and reconciles. Empty applies no restriction. Applies only to the four Firebolt CRD types; child objects and third-party Secrets are cached unfiltered, so they never need the label. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, e.g. `!example.com/managed`. CRs that reference each other (an engine and the instance or engine class it points at) must land on the same side of the selector: label whole stacks, never individual CRs. |
+| `--watch-label-selector` | `""` | Derived from `watchLabelSelector` (omitted when empty) | Label selector restricting which `FireboltEngine`, `FireboltInstance`, `FireboltEngineClass`, `FireboltEnginePreset`, and `ClusterFireboltEngineClass` objects the operator caches and reconciles. Empty applies no restriction. Applies only to the five Firebolt CRD types; child objects and third-party Secrets are cached unfiltered, so they never need the label. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, e.g. `!example.com/managed`. CRs that reference each other (an engine and the instance or engine class it points at) must land on the same side of the selector: label whole stacks, never individual CRs. |
 | `--metrics-bind-address` | `0` | `:8443` | Address for the metrics endpoint. Use `0` to disable metrics. |
 | `--metrics-secure` | `true` | `true` | Serve metrics over HTTPS with Kubernetes authentication and authorization. |
 | `--metrics-cert-path` | `""` | Not set | Directory that contains the metrics server certificate. |

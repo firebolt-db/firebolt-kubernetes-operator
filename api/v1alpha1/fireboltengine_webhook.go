@@ -118,13 +118,14 @@ func (b *EngineResourceBounds) validateResourceList(path *field.Path, list corev
 // FireboltEngineCustomValidator validates FireboltEngine resources at
 // admission time. It performs two checks:
 //
-//  1. spec.engineClassRef, when set, points to a FireboltEngineClass that
-//     exists in the engine's own namespace — the reference is hard-rejected
-//     so users see a typo (or a class-applied-in-the-wrong-namespace mistake)
-//     immediately at apply time rather than via engine status. Apply
-//     ordering matters: a FireboltEngineClass must exist in the same namespace
-//     before any FireboltEngine that references it (GitOps tooling such as
-//     Argo CD sync-waves or Flux dependsOn handles this in practice).
+//  1. spec.engineClassRef, when set, resolves namespaced-first: a
+//     FireboltEngineClass in the engine's own namespace if present,
+//     otherwise a ClusterFireboltEngineClass of the same name. The
+//     reference is hard-rejected when neither object exists so users
+//     see a typo immediately at apply time rather than via engine
+//     status. Apply ordering matters: the resolved class must exist
+//     before any FireboltEngine that references it (GitOps tooling
+//     such as Argo CD sync-waves or Flux dependsOn handles this).
 //
 //  2. The effective engine-container resources sit at or below the
 //     operator-configured ceiling in ResourceBounds, resolved with the
@@ -267,12 +268,13 @@ func (v *FireboltEngineCustomValidator) validateTemplate(eng *FireboltEngine) fi
 	)
 }
 
-// resolveEngineClass loads the FireboltEngineClass referenced by
-// spec.engineClassRef from the engine's own namespace (FireboltEngineClass
-// is namespaced; the lookup matches how Kubernetes will resolve the
-// reference at reconcile time). It returns the loaded class on success
-// or a non-nil ErrorList on failure (NotFound for typos / wrong-
-// namespace; InternalError for transient API problems). A nil ref is
+// resolveEngineClass loads the class referenced by spec.engineClassRef
+// namespaced-first: FireboltEngineClass in the engine's namespace if
+// present, otherwise ClusterFireboltEngineClass of the same name. A
+// cluster hit is returned as a FireboltEngineClass carrying only the
+// SKU template so validateResources can keep its existing shape. It
+// returns a non-nil ErrorList on failure (NotFound when both scopes
+// are empty; InternalError for transient API problems). A nil ref is
 // allowed and returns (nil, nil) — the engine falls back to operator
 // defaults.
 //
@@ -291,10 +293,20 @@ func (v *FireboltEngineCustomValidator) resolveEngineClass(
 	class := &FireboltEngineClass{}
 	key := client.ObjectKey{Name: *eng.Spec.EngineClassRef, Namespace: eng.Namespace}
 	if err := v.Reader.Get(ctx, key, class); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
+		if !apierrors.IsNotFound(err) {
+			return nil, field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up FireboltEngineClass: %w", err))}
 		}
-		return nil, field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up FireboltEngineClass: %w", err))}
+		cc := &ClusterFireboltEngineClass{}
+		if cerr := v.Reader.Get(ctx, client.ObjectKey{Name: *eng.Spec.EngineClassRef}, cc); cerr != nil {
+			if apierrors.IsNotFound(cerr) {
+				return nil, field.ErrorList{field.NotFound(classPath, *eng.Spec.EngineClassRef)}
+			}
+			return nil, field.ErrorList{field.InternalError(classPath, fmt.Errorf("looking up ClusterFireboltEngineClass: %w", cerr))}
+		}
+		return &FireboltEngineClass{
+			ObjectMeta: cc.ObjectMeta,
+			Spec:       FireboltEngineClassSpec{Template: cc.Spec.Template},
+		}, nil
 	}
 	return class, nil
 }

@@ -130,11 +130,13 @@ func main() {
 			"(cluster-wide install, requires the chart's ClusterRole). A non-empty list confines the "+
 			"manager cache to those namespaces and requires per-namespace Role+RoleBinding pairs in each.")
 	flag.StringVar(&watchLabelSelectorArg, "watch-label-selector", "",
-		"Label selector restricting which FireboltEngine, FireboltInstance, FireboltEngineClass, and FireboltEnginePreset "+
-			"objects this operator caches and reconciles. Empty applies no restriction. The selector "+
-			"applies only to the four Firebolt CRD types; child objects and third-party Secrets "+
-			"(e.g. cert-manager's) are cached unfiltered, so they never need the label. Lets a "+
-			"cluster-wide install ignore CRs owned by namespace-scoped installs, "+
+		"Label selector restricting which FireboltEngine, FireboltInstance, "+
+			"FireboltEngineClass, and FireboltEnginePreset objects this operator caches and "+
+			"reconciles. Empty applies no restriction. The selector applies only to those four "+
+			"namespaced Firebolt CRD types; child objects and third-party Secrets "+
+			"(e.g. cert-manager's) are cached unfiltered, so they never need the label, and so is "+
+			"the cluster-scoped ClusterFireboltEngineClass catalog, which is shared by every "+
+			"install. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, "+
 			"e.g. '!example.com/managed'. CRs that reference each other (an engine and its "+
 			"instance or engine class) must land on the same side of the selector: label whole "+
 			"stacks, never individual CRs.")
@@ -345,20 +347,8 @@ func main() {
 		os.Exit(1)
 	}
 	if enableWebhooks {
-		if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltInstance")
-			os.Exit(1)
-		}
-		if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngineClass")
-			os.Exit(1)
-		}
-		if err := computev1alpha1.SetupFireboltEnginePresetWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEnginePreset")
-			os.Exit(1)
-		}
-		if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, &engineBounds); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "FireboltEngine")
+		if err := setupAdmissionWebhooks(mgr, &engineBounds); err != nil {
+			setupLog.Error(err, "unable to create webhooks")
 			os.Exit(1)
 		}
 	}
@@ -484,6 +474,17 @@ func parseNamespaces(s string) []string {
 // so a cache-wide selector would silently hide those objects and wedge
 // every reconcile behind not-found errors.
 //
+// ClusterFireboltEngineClass is deliberately not in ByObject either.
+// The cluster-scoped SKU catalog is not an adoptable CR: no controller
+// reconciles it, and one object is meant to serve every install in the
+// cluster, which it cannot do if each install demands its own label on
+// it. Filtering it would also split admission from reconcile — the
+// FireboltEngine validator resolves the class through mgr.GetAPIReader
+// (live, unfiltered), so an engine naming an unlabeled shared SKU would
+// be admitted and then never render, the reconciler's cached Get
+// returning NotFound forever. Leaving the type out keeps both paths
+// reading the same catalog.
+//
 // The selector partitions adoption between installs, and the deployment
 // contract is that CRs referencing each other (an engine and the
 // instance or engine class it points at) are labeled as a unit, never
@@ -530,4 +531,26 @@ func parseWatchLabelSelector(s string) (labels.Selector, error) {
 		return nil, fmt.Errorf("--watch-label-selector=%q: %w", s, err)
 	}
 	return sel, nil
+}
+
+// setupAdmissionWebhooks registers every validating webhook. Extracted
+// from main so adding a CRD does not push main past the cyclomatic
+// complexity cap.
+func setupAdmissionWebhooks(mgr ctrl.Manager, engineBounds *computev1alpha1.EngineResourceBounds) error {
+	if err := computev1alpha1.SetupFireboltInstanceWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("webhook FireboltInstance: %w", err)
+	}
+	if err := computev1alpha1.SetupFireboltEngineClassWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("webhook FireboltEngineClass: %w", err)
+	}
+	if err := computev1alpha1.SetupFireboltEnginePresetWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("webhook FireboltEnginePreset: %w", err)
+	}
+	if err := computev1alpha1.SetupClusterFireboltEngineClassWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("webhook ClusterFireboltEngineClass: %w", err)
+	}
+	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, engineBounds); err != nil {
+		return fmt.Errorf("webhook FireboltEngine: %w", err)
+	}
+	return nil
 }

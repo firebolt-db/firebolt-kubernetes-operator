@@ -26,10 +26,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -145,6 +147,221 @@ func TestResolveFireboltEngineClassInfo_NamespacedLookup(t *testing.T) {
 	})
 }
 
+func clusterClassOnlyFixture() *computev1alpha1.ClusterFireboltEngineClass {
+	return &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "s-amd-co"},
+		Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{"node.kubernetes.io/instance-type": "c6id.2xlarge"},
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("6120m")},
+						},
+					}},
+				},
+			},
+		},
+	}
+}
+
+// TestResolveFireboltEngineClassInfo_ClusterFallback pins namespaced-first
+// resolve: a ClusterFireboltEngineClass of the same name is used only when
+// no FireboltEngineClass exists in the engine namespace. Same-name objects
+// in both scopes are allowed; the namespaced object is the override.
+func TestResolveFireboltEngineClassInfo_ClusterFallback(t *testing.T) {
+	sch := classRefTestScheme(t)
+
+	t.Run("cluster-only resolve", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			clusterClassOnlyFixture(),
+		).Build()
+		r := engineRefTestReconciler(cli, sch)
+		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+		if err != nil {
+			t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
+		}
+		if info == nil {
+			t.Fatal("info = nil, want cluster catalog")
+		}
+		if info.Name != "s-amd-co" {
+			t.Errorf("info.Name = %q, want s-amd-co", info.Name)
+		}
+		if info.Hash == "" {
+			t.Error("info.Hash empty, want a content hash so a catalog edit rolls")
+		}
+		if info.Template == nil || info.Template.Spec.NodeSelector["node.kubernetes.io/instance-type"] != "c6id.2xlarge" {
+			t.Errorf("info.Template missing cluster SKU nodeSelector, got %+v", info.Template)
+		}
+		if info.Template.Spec.ServiceAccountName != "" {
+			t.Error("cluster catalog must not carry serviceAccountName")
+		}
+	})
+
+	t.Run("namespaced class in another namespace does not override", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			classOnlyFixture("s-amd-co", "ns-b"),
+			clusterClassOnlyFixture(),
+		).Build()
+		r := engineRefTestReconciler(cli, sch)
+		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+		if err != nil {
+			t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
+		}
+		if info.Template == nil || info.Template.Spec.NodeSelector["node.kubernetes.io/instance-type"] != "c6id.2xlarge" {
+			t.Errorf("want cluster SKU; namespaced class in ns-b must not satisfy ns-a, got %+v", info.Template)
+		}
+	})
+
+	t.Run("namespaced same-name wins over cluster", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+			classOnlyFixture("s-amd-co", "ns-a"),
+			clusterClassOnlyFixture(),
+		).Build()
+		r := engineRefTestReconciler(cli, sch)
+		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+		if err != nil {
+			t.Fatalf("resolveFireboltEngineClassInfo: %v", err)
+		}
+		if info == nil {
+			t.Fatal("info = nil")
+		}
+		if info.Template == nil || info.Template.Spec.ServiceAccountName != "s-amd-co-sa" {
+			t.Errorf("want namespaced override SA s-amd-co-sa, got %+v", info.Template)
+		}
+		if info.Template.Spec.NodeSelector["node.kubernetes.io/instance-type"] != "" {
+			t.Error("namespaced class won; cluster SKU nodeSelector must not leak through")
+		}
+	})
+
+	t.Run("both absent is not found", func(t *testing.T) {
+		cli := fake.NewClientBuilder().WithScheme(sch).Build()
+		r := engineRefTestReconciler(cli, sch)
+		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+		_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+		if err == nil {
+			t.Fatal("expected error when both scopes are empty")
+		}
+		if !stderrors.Is(err, errFireboltEngineClassNotFound) {
+			t.Errorf("error %q does not wrap errFireboltEngineClassNotFound", err.Error())
+		}
+		if !strings.Contains(err.Error(), "FireboltEngineClass ns-a/s-amd-co") {
+			t.Errorf("error %q does not name the namespaced lookup", err.Error())
+		}
+		if !strings.Contains(err.Error(), "ClusterFireboltEngineClass s-amd-co") {
+			t.Errorf("error %q does not name the catalog lookup", err.Error())
+		}
+	})
+
+	t.Run("live serviceAccountName on catalog is gated", func(t *testing.T) {
+		cc := clusterClassOnlyFixture()
+		cc.Spec.Template.Spec.ServiceAccountName = "tenant-sa"
+		cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(cc).Build()
+		r := engineRefTestReconciler(cli, sch)
+		eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+		info, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+		if err == nil {
+			t.Fatal("expected unready error for catalog serviceAccountName")
+		}
+		if !stderrors.Is(err, errFireboltEngineClassUnready) {
+			t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
+		}
+		if !strings.Contains(err.Error(), "serviceAccountName") {
+			t.Errorf("error %q does not name serviceAccountName", err.Error())
+		}
+		if info == nil {
+			t.Error("info = nil, want the cluster class so a mid-rollout drain can still read it")
+		}
+	})
+
+	// The chart ships webhooks off by default, so a catalog object carrying a
+	// namespaced reference can reach the API server unvalidated. The resolver's
+	// live-spec check is the backstop for the ConfigMap and PVC paths just as
+	// it is for serviceAccountName: they would otherwise merge into every
+	// consumer pod and bind to whatever exists in that namespace.
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*computev1alpha1.ClusterFireboltEngineClass)
+		wantInErr string
+	}{
+		{
+			name: "live ConfigMap volume on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Volumes = []corev1.Volume{{
+					Name: "tuning",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+						},
+					},
+				}}
+			},
+			wantInErr: "volumes",
+		},
+		{
+			name: "live persistentVolumeClaim volume on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Volumes = []corev1.Volume{{
+					Name: "scratch",
+					VolumeSource: corev1.VolumeSource{
+						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "scratch-claim",
+						},
+					},
+				}}
+			},
+			wantInErr: "volumes",
+		},
+		{
+			name: "live ConfigMap env on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				cc.Spec.Template.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{
+					ConfigMapRef: &corev1.ConfigMapEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "tuning"},
+					},
+				}}
+			},
+			wantInErr: "containers",
+		},
+		{
+			// effectivePodResourceClaims copies class claims straight into
+			// the rendered pod, so an unvalidated catalog claim would bind
+			// whatever ResourceClaim shares that name in each tenant.
+			name: "live resourceClaims on catalog is gated",
+			mutate: func(cc *computev1alpha1.ClusterFireboltEngineClass) {
+				name := "shared-gpu"
+				cc.Spec.Template.Spec.ResourceClaims = []corev1.PodResourceClaim{{
+					Name:              "gpu",
+					ResourceClaimName: &name,
+				}}
+			},
+			wantInErr: "resourceClaims",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cc := clusterClassOnlyFixture()
+			tc.mutate(cc)
+			cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(cc).Build()
+			r := engineRefTestReconciler(cli, sch)
+			eng := engineRefingClassFixture("e", "ns-a", "s-amd-co")
+			_, err := r.resolveFireboltEngineClassInfo(context.Background(), eng)
+			if err == nil {
+				t.Fatal("expected unready error, got nil")
+			}
+			if !stderrors.Is(err, errFireboltEngineClassUnready) {
+				t.Errorf("error %q does not wrap errFireboltEngineClassUnready", err.Error())
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("error %q does not name %q", err.Error(), tc.wantInErr)
+			}
+		})
+	}
+}
+
 // TestFireboltEngineClassToEngines_NamespaceScoped pins down the watch handler:
 // a class event in namespace X enqueues only engines in namespace X
 // that reference the class by name. Cross-namespace engines with
@@ -182,6 +399,23 @@ func TestFireboltEngineClassToEngines_NamespaceScoped(t *testing.T) {
 	want := []string{"a", "b"}
 	if len(gotNames) != len(want) || gotNames[0] != want[0] || gotNames[1] != want[1] {
 		t.Errorf("enqueued engines = %v, want %v (cross-namespace engine e must be filtered out)", gotNames, want)
+	}
+}
+
+func TestClusterEngineClassToEngines_AllNamespaces(t *testing.T) {
+	sch := classRefTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).WithObjects(
+		engineRefingClassFixture("a", "ns-a", "s-amd-co"),
+		engineRefingClassFixture("b", "ns-b", "s-amd-co"),
+		engineRefingClassFixture("c", "ns-a", "other"),
+	).Build()
+	r := engineRefTestReconciler(cli, sch)
+
+	got := r.clusterEngineClassToEngines(context.Background(), &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "s-amd-co"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("enqueued = %d, want 2 (every namespace that names the catalog)", len(got))
 	}
 }
 
@@ -399,6 +633,85 @@ func TestEngineReconcile_UnreadyClassSurfacesCondition(t *testing.T) {
 			names = append(names, stsList.Items[i].Name)
 		}
 		t.Errorf("StatefulSets = %v, want none (gate must short-circuit before applyEngineState)", names)
+	}
+}
+
+// TestEngineReconcile_MissingClassEmitsEvent pins the user-facing
+// signal when spec.engineClassRef matches nothing in either scope:
+// a Warning Event on the engine naming both lookups, no Ready
+// condition rewrite, and the error still bubbles for backoff.
+func TestEngineReconcile_MissingClassEmitsEvent(t *testing.T) {
+	sch := classRefTestScheme(t)
+	const (
+		ns       = "ns-a"
+		instName = "parent-instance"
+		engName  = "engine-missing-class"
+		classRef = "s-amd-co"
+	)
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: instName, Namespace: ns},
+		Spec:       computev1alpha1.FireboltInstanceSpec{ID: "01H000000000000000000DUMMY"},
+		Status: computev1alpha1.FireboltInstanceStatus{
+			MetadataEndpoint: "metadata.ns-a.svc.cluster.local:50051",
+		},
+	}
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       engName,
+			Namespace:  ns,
+			Finalizers: []string{finalizerName},
+			Generation: 1,
+		},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    instName,
+			EngineClassRef: func() *string { s := classRef; return &s }(),
+			Replicas:       1,
+		},
+		Status: computev1alpha1.FireboltEngineStatus{
+			Phase: computev1alpha1.PhaseCreating,
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, engine).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+	rec := events.NewFakeRecorder(8)
+	r := &FireboltEngineReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
+		EventRecorder:   rec,
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+	}); err == nil {
+		t.Fatal("Reconcile: expected missing-class error for backoff")
+	} else if !stderrors.Is(err, errFireboltEngineClassNotFound) {
+		t.Fatalf("Reconcile: %v, want errFireboltEngineClassNotFound", err)
+	}
+
+	evs := drainEvents(rec)
+	if len(evs) != 1 {
+		t.Fatalf("events = %v, want exactly one Warning", evs)
+	}
+	ev := evs[0]
+	if !strings.Contains(ev, "Warning") || !strings.Contains(ev, eventReasonEngineClassNotFound) {
+		t.Errorf("Event %q does not look like Warning/%s", ev, eventReasonEngineClassNotFound)
+	}
+	if !strings.Contains(ev, "FireboltEngineClass ns-a/s-amd-co") {
+		t.Errorf("Event %q does not name the namespaced lookup", ev)
+	}
+	if !strings.Contains(ev, "ClusterFireboltEngineClass s-amd-co") {
+		t.Errorf("Event %q does not name the catalog lookup", ev)
+	}
+
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	if cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady); cond != nil {
+		t.Errorf("Ready = %+v, want no condition rewrite on missing class", cond)
 	}
 }
 

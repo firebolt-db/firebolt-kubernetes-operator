@@ -9,8 +9,10 @@ needs the SAME rule set in two shapes:
   - cluster-wide install (`watchNamespaces=[]`): one `ClusterRole` +
     one `ClusterRoleBinding`.
   - namespaced install (`watchNamespaces=[ns1, ns2, …]`): one `Role`
-    plus one `RoleBinding` in each listed namespace. Same rules, just
-    a namespaced envelope.
+    plus one `RoleBinding` in each listed namespace for namespaced
+    resources, plus a ClusterRole for cluster-scoped CRs
+    (ClusterFireboltEngineClass get/list/watch). Engine reconcilers
+    consume the catalog read-only; they do not write it.
 
 Both shapes live in a single generated template
 `helm/firebolt-operator/templates/manager-rbac.yaml`. The chart toggle
@@ -43,7 +45,8 @@ be overwritten on the next `make manifests`.
 
 Empty `watchNamespaces` renders a cluster-wide ClusterRole +
 ClusterRoleBinding. A non-empty list renders a Role + RoleBinding in
-each listed namespace with the same rule set.
+each listed namespace for namespaced resources, plus a ClusterRole
+for cluster-scoped CRs (ClusterFireboltEngineClass get/list/watch).
 */ -}}
 {{- if .Values.rbac.create -}}
 {{- if empty .Values.watchNamespaces }}
@@ -125,11 +128,76 @@ subjects:
     name: {{ include "firebolt-operator.serviceAccountName" $ }}
     namespace: {{ $.Release.Namespace }}
 {{- end }}
+"""
+
+
+CLUSTER_SCOPED_NS_HEADER = """\
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-cluster-resources
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+"""
+
+
+CLUSTER_SCOPED_NS_BINDING = """\
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "firebolt-operator.fullname" . }}-cluster-resources
+  labels:
+    {{- include "firebolt-operator.labels" . | nindent 4 }}
+  {{- with .Values.extraAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "firebolt-operator.fullname" . }}-cluster-resources
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "firebolt-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}
 """
 
 
 FOOTER = "{{- end }}\n"
+
+# Cluster-scoped CRDs cannot be granted by a Role. Resource names that
+# start with these prefixes always land in a ClusterRole.
+CLUSTER_SCOPED_PREFIXES = ("clusterfireboltengineclasses",)
+
+
+def is_cluster_scoped(resource: str) -> bool:
+    return any(resource == p or resource.startswith(p + "/") for p in CLUSTER_SCOPED_PREFIXES)
+
+
+def split_rules(rules: list[dict]) -> tuple[list[dict], list[dict]]:
+    cluster: list[dict] = []
+    namespaced: list[dict] = []
+    for rule in rules:
+        resources = list(rule.get("resources") or [])
+        cres = [r for r in resources if is_cluster_scoped(r)]
+        nres = [r for r in resources if not is_cluster_scoped(r)]
+        if cres:
+            cr = dict(rule)
+            cr["resources"] = cres
+            cluster.append(cr)
+        if nres:
+            nr = dict(rule)
+            nr["resources"] = nres
+            namespaced.append(nr)
+    return cluster, namespaced
 
 
 def _quote_apigroup(group: str) -> str:
@@ -173,15 +241,21 @@ def main() -> int:
         print(f"error: {SRC} is not a ClusterRole document", file=sys.stderr)
         return 1
     rules = canonical.get("rules") or []
-    rules_body = render_rules(rules)
+    cluster_rules, namespaced_rules = split_rules(rules)
+    all_rules_body = render_rules(rules)
+    namespaced_rules_body = render_rules(namespaced_rules)
+    cluster_ns_rules_body = render_rules(cluster_rules)
 
     rendered = (
         HEADER
-        + rules_body
+        + all_rules_body
         + CLUSTER_BINDING
         + NS_LOOP_HEADER
-        + rules_body
+        + namespaced_rules_body
         + NS_BINDING
+        + CLUSTER_SCOPED_NS_HEADER
+        + cluster_ns_rules_body
+        + CLUSTER_SCOPED_NS_BINDING
         + FOOTER
     )
     DST.parent.mkdir(parents=True, exist_ok=True)

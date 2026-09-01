@@ -1,0 +1,59 @@
+---
+title: ClusterFireboltEngineClass CRD reference
+description: Spec and SKU-only template fields for ClusterFireboltEngineClass.
+sidebarTitle: ClusterFireboltEngineClass CRD reference
+---
+
+## Spec reference
+
+`ClusterFireboltEngineClass` is a cluster-scoped SKU catalog. Engines select it by name through `spec.engineClassRef`. The Firebolt Operator resolves that name namespaced-first: a [`FireboltEngineClass`](./fireboltengineclass-crd-reference) in the Engine's namespace if present, otherwise this cluster object.
+
+The catalog carries only `spec.template`. Namespaced references (ServiceAccount name, Secret refs, IAM annotations, ConfigMap refs, `persistentVolumeClaim` volumes, resource claims) and non-template Engine settings (`storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, `autoStop`, `uiSidecar`) stay on [`FireboltEnginePreset`](./fireboltenginepreset-crd-reference), [`FireboltEngineClass`](./fireboltengineclass-crd-reference), or the Engine spec.
+
+The operator does not reconcile this object. Cluster admins or a cell manager author it; Engine reconcilers consume it read-only.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `spec.template` | **Yes** | – | [`PodTemplateSpec`](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-template-v1/) merged under each Engine that resolves this catalog object. See [SKU-only fields](#sku-only-fields) and [EngineClass configuration inheritance](../engineclass/configuration-inheritance). |
+
+A catalog edit to `spec.template` reshapes the rendered engine pod, so it rolls a new blue-green generation on every Engine that resolved to this object.
+
+## SKU-only fields
+
+The validating webhook and the Engine resolver reject every namespaced reference on `spec.template`. A cluster-scoped object has no namespace of its own, so such a name would bind to whatever happens to exist in each consuming namespace, and the same catalog entry would render differently per namespace, or not at all:
+
+| Path | Allowed | Notes |
+|---|---|---|
+| `spec.template.spec.nodeSelector` | Yes | Instance type / family. |
+| `spec.template.spec.tolerations` | Yes | Node taints for the SKU pool. |
+| `spec.template.spec.affinity` | Yes | SKU placement. |
+| `spec.template.spec.initContainers` | Yes | Node setup. Secret and ConfigMap env, and Secret, ConfigMap, and claim volumes, are rejected. |
+| `spec.template.spec.containers[name=="engine"].image` | Yes | Optional default engine image. |
+| `spec.template.spec.containers[name=="engine"].resources` | Yes | SKU resource requests and limits. |
+| `spec.template.spec.serviceAccountName` | No | Belongs on FireboltEnginePreset. |
+| `spec.template.spec.imagePullSecrets` | No | Namespace-resolved Secret names. |
+| `spec.template.metadata.annotations[iam.amazonaws.com/role]` | No | kube2iam / kiam identity. |
+| `spec.template.metadata.annotations[eks.amazonaws.com/role-arn]` | No | IRSA identity. |
+| Secret volumes and Secret env | No | Credential material is namespaced. |
+| ConfigMap volumes and ConfigMap env | No | The name would resolve per consuming namespace. Put shared engine settings on `customEngineConfig`, or the ConfigMap ref on the namespaced class or Preset. |
+| `persistentVolumeClaim` volumes | No | A claim exists in one namespace. `emptyDir`, `downwardAPI`, and `ephemeral` claim templates stay allowed, because they name nothing namespaced. |
+| `dataSource` or `dataSourceRef` on an `ephemeral` claim template | No | Both seed the new claim from a claim or snapshot resolved in the consuming namespace, and `dataSourceRef` can name one in a third namespace. Every other claim-template field (`storageClassName`, `volumeAttributesClassName`, `volumeName`) names a cluster-scoped object and stays allowed. |
+| `spec.template.spec.resourceClaims` | No | `resourceClaimName` and `resourceClaimTemplateName` both name a namespaced dynamic-resource-allocation object. |
+| `resources.claims` on any container | No | A container claim can only be satisfied by a `spec.template.spec.resourceClaims` entry, which the catalog cannot carry. |
+
+Firebolt Operator-owned paths on the template are the same as [`FireboltEngineClass.spec.template`](./fireboltengineclass-crd-reference#firebolt-operator-owned-fields-on-class-templates).
+
+Short name: `cfirengc`.
+
+```bash
+kubectl get cfirengc
+```
+
+```
+NAME       AGE
+s-amd-co   24h
+```
+
+## Deletion
+
+Catalog delete is allowed. Engines that still name the object emit a Warning `EngineClassNotFound` Event, keep the last applied pods, and retry until the SKU is restored or `spec.engineClassRef` is cleared or overridden by a namespaced `FireboltEngineClass` of the same name.

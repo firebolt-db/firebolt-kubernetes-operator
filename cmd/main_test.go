@@ -150,9 +150,12 @@ func TestParseWatchLabelSelector_NegatedExistence(t *testing.T) {
 // TestScopeManagerCache_ComposesNamespacesAndSelector locks in that
 // --namespaces and --watch-label-selector land in the same cache.Options:
 // DefaultNamespaces carries the namespace scope while ByObject carries
-// the selector for exactly the four Firebolt CRD types (controller-runtime
-// defaults ByObject entries with nil Namespaces from DefaultNamespaces,
-// so neither setting clobbers the other).
+// the selector for exactly the four namespaced Firebolt CRD types
+// (controller-runtime defaults ByObject entries with nil Namespaces from
+// DefaultNamespaces, so neither setting clobbers the other). The
+// cluster-scoped ClusterFireboltEngineClass catalog stays out: it is
+// shared across installs and read live by the FireboltEngine validator,
+// so filtering it would admit engines the reconciler could not resolve.
 func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 	sel, err := parseWatchLabelSelector("!example.com/managed")
 	if err != nil {
@@ -170,7 +173,7 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 		}
 	}
 	if len(opts.Cache.ByObject) != 4 {
-		t.Fatalf("ByObject has %d entries, want the 4 Firebolt CRD types", len(opts.Cache.ByObject))
+		t.Fatalf("ByObject has %d entries, want the 4 namespaced Firebolt CRD types", len(opts.Cache.ByObject))
 	}
 	seen := make(map[string]bool, 4)
 	stamped := labels.Set{"example.com/managed": "proj-a"}
@@ -184,6 +187,8 @@ func TestScopeManagerCache_ComposesNamespacesAndSelector(t *testing.T) {
 			seen["FireboltEngineClass"] = true
 		case *computev1alpha1.FireboltEnginePreset:
 			seen["FireboltEnginePreset"] = true
+		case *computev1alpha1.ClusterFireboltEngineClass:
+			t.Error("ClusterFireboltEngineClass is selector-scoped; the shared cluster catalog must stay unfiltered")
 		default:
 			t.Errorf("unexpected ByObject key type %T", key)
 		}

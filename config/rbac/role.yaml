@@ -74,6 +74,14 @@ rules:
 - apiGroups:
   - compute.firebolt.io
   resources:
+  - clusterfireboltengineclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - compute.firebolt.io
+  resources:
   - fireboltengineclasses
   - fireboltenginepresets
   verbs:

@@ -6,9 +6,9 @@ sidebarTitle: Overview
 
 ## Overview
 
-`FireboltEngineClass` is an optional namespaced resource that holds reusable FireboltEngine settings: a pod-template fragment plus defaults for `storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and `autoStop`. Engines in the same namespace reference it through `spec.engineClassRef` so scheduling, identity, sidecars, engine image, storage, engine config, and rollout and auto-stop policy stay consistent without duplicating YAML on every engine.
+`FireboltEngineClass` is an optional namespaced resource that holds reusable FireboltEngine settings: a pod-template fragment plus defaults for `storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, and `autoStop`. Engines reference a class by name through `spec.engineClassRef`. The Firebolt Operator resolves that name namespaced-first: a `FireboltEngineClass` in the Engine's namespace if present, otherwise a [`ClusterFireboltEngineClass`](../crd-reference/clusterfireboltengineclass-crd-reference) of the same name. A namespaced object of the same name is an explicit override of the cluster SKU.
 
-Each inherited field resolves the engine value first, then the class value, then the Firebolt Operator's default. An engine that sets a field owns it. The class fills it in otherwise.
+Each inherited field resolves the engine value first, then the namespace `FireboltEnginePreset` value, then the resolved class value, then the Firebolt Operator's default. An engine that sets a field owns it. The class fills it in otherwise.
 
 Multiple classes can exist per namespace. The Engine picks one by name, and using a class is optional. See [EngineClass configuration inheritance](./configuration-inheritance) for template precedence, per-Engine overrides, deletion, and rollout behavior.
 
@@ -56,7 +56,7 @@ kubectl apply --server-side -f firebolt-engine-class.yaml
 
 ### Create a FireboltEngine
 
-The `FireboltEngine` can reference a `FireboltEngineClass` through `spec.engineClassRef`.
+The `FireboltEngine` can reference a namespaced `FireboltEngineClass` or a cluster `ClusterFireboltEngineClass` through `spec.engineClassRef`.
 
 ```yaml
 apiVersion: compute.firebolt.io/v1alpha1

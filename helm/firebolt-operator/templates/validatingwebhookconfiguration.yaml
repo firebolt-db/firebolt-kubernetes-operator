@@ -61,6 +61,31 @@ webhooks:
     matchPolicy: Equivalent
     timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
     admissionReviewVersions: ["v1"]
+  - name: vclusterfireboltengineclass.compute.firebolt.io
+    clientConfig:
+      service:
+        namespace: {{ .Release.Namespace }}
+        name: {{ include "firebolt-operator.fullname" . }}-webhook
+        path: /validate-compute-firebolt-io-v1alpha1-clusterfireboltengineclass
+        port: {{ .Values.webhook.port }}
+      {{- with .Values.webhook.caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}
+    # CREATE and UPDATE reject operator-owned paths and namespace-resolved
+    # identifiers. DELETE is omitted: the catalog is shared and plane-owned;
+    # engines that still name a deleted SKU emit EngineClassNotFound and
+    # keep the last applied pods.
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["compute.firebolt.io"]
+        apiVersions: ["v1alpha1"]
+        resources: ["clusterfireboltengineclasses"]
+        scope: "Cluster"
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.validatingWebhookConfiguration.failurePolicy }}
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.validatingWebhookConfiguration.timeoutSeconds }}
+    admissionReviewVersions: ["v1"]
   - name: vfireboltenginepreset.compute.firebolt.io
     clientConfig:
       service:
@@ -99,9 +124,10 @@ webhooks:
       {{- with .Values.webhook.caBundle }}
       caBundle: {{ . | quote }}
       {{- end }}
-    # Validates that spec.engineClassRef, when set, references an existing
-    # FireboltEngineClass. Hard-reject so users see typos immediately at apply
-    # time instead of via engine status.
+    # Validates that spec.engineClassRef, when set, resolves namespaced-
+    # first: a FireboltEngineClass in the engine's namespace, otherwise a
+    # ClusterFireboltEngineClass of the same name. Hard-reject so users
+    # see typos immediately at apply time instead of via engine status.
     rules:
       - operations: ["CREATE", "UPDATE"]
         apiGroups: ["compute.firebolt.io"]

@@ -73,6 +73,17 @@ var _ = Describe("CRD pod-template containers-optional contract", func() {
 		})).To(Succeed(), hint)
 	})
 
+	It("admits a ClusterFireboltEngineClass whose spec.template has no containers", func() {
+		Expect(tryCreate(&computev1alpha1.ClusterFireboltEngineClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "tmpl-nocont-" + utilrand.String(6)},
+			Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{NodeSelector: map[string]string{"pool": "engine"}},
+				},
+			},
+		})).To(Succeed(), hint)
+	})
+
 	It("admits a FireboltEngineClass whose spec.template has no containers", func() {
 		Expect(tryCreate(&computev1alpha1.FireboltEngineClass{
 			ObjectMeta: metav1.ObjectMeta{Name: "tmpl-nocont-" + utilrand.String(6), Namespace: ns},

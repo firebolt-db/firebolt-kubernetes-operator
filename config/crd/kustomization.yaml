@@ -1,4 +1,6 @@
 resources:
 - bases/compute.firebolt.io_fireboltengines.yaml
 - bases/compute.firebolt.io_fireboltinstances.yaml
+- bases/compute.firebolt.io_fireboltengineclasses.yaml
 - bases/compute.firebolt.io_fireboltenginepresets.yaml
+- bases/compute.firebolt.io_clusterfireboltengineclasses.yaml

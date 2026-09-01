@@ -1,0 +1,40 @@
+# A ClusterFireboltEngineClass is a cluster-scoped SKU catalog entry.
+# Engines select it by name through spec.engineClassRef. The operator
+# resolves that name namespaced-first: a FireboltEngineClass in the
+# engine's namespace if present, otherwise this cluster object.
+#
+# The catalog is SKU-only: instance type, resources, node placement,
+# and an optional engine image. Namespace-resolved identifiers
+# (serviceAccountName, Secret refs, IAM annotations) and non-template
+# settings (storage, rollout, autoStop, uiSidecar, customEngineConfig)
+# belong on FireboltEnginePreset, FireboltEngineClass, or the engine spec.
+apiVersion: compute.firebolt.io/v1alpha1
+kind: ClusterFireboltEngineClass
+metadata:
+  name: s-amd-co
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node.kubernetes.io/instance-type: c6id.2xlarge
+      containers:
+        - name: engine
+          resources:
+            requests:
+              cpu: "6120m"
+              memory: 12Gi
+            limits:
+              memory: 12Gi
+---
+# An engine that inherits the cluster SKU. Storage and identity come
+# from the engine spec (or from FireboltEnginePreset / a namespaced
+# FireboltEngineClass of the same name).
+apiVersion: compute.firebolt.io/v1alpha1
+kind: FireboltEngine
+metadata:
+  name: analytics
+  namespace: firebolt
+spec:
+  instanceRef: firebolt
+  engineClassRef: s-amd-co
+  replicas: 3

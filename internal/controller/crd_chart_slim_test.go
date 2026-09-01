@@ -50,6 +50,10 @@ var crdChartCopies = map[string][]string{
 		"firebolt-operator-crds/templates/fireboltenginepresets.yaml",
 		"firebolt-operator/crds/fireboltenginepresets.yaml",
 	},
+	"compute.firebolt.io_clusterfireboltengineclasses.yaml": {
+		"firebolt-operator-crds/templates/clusterfireboltengineclasses.yaml",
+		"firebolt-operator/crds/clusterfireboltengineclasses.yaml",
+	},
 }
 
 func loadCRDMap(t *testing.T, path string) map[string]any {

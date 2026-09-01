@@ -26,10 +26,11 @@ import (
 
 const (
 	// kubectl resource names (CRD plurals/singulars the API server accepts).
-	resourceEngine       = "fireboltengine"
-	resourceInstance     = "fireboltinstance"
-	resourceEngineClass  = "fireboltengineclass"
-	resourceEnginePreset = "fireboltenginepresets"
+	resourceEngine             = "fireboltengine"
+	resourceInstance           = "fireboltinstance"
+	resourceEngineClass        = "fireboltengineclass"
+	resourceClusterEngineClass = "clusterfireboltengineclass"
+	resourceEnginePreset       = "fireboltenginepresets"
 
 	// engineContainerName is the operator-owned primary container whose image
 	// the engine's spec.template overrides.
@@ -304,21 +305,28 @@ func engineTemplate(spec *EngineSpec) *corev1.PodTemplateSpec {
 	}
 }
 
-// EngineClassProvidesStorage reports whether the named FireboltEngineClass
-// carries object-storage config (customEngineConfig.storage.managed_table_bucket_name). A
-// referencing engine that sets no --bucket inherits the class's config, so this
-// lets `engine create` tell whether the effective config will actually have a
-// bucket rather than only checking that some class was named.
+// EngineClassProvidesStorage reports whether the named class carries
+// object-storage config (customEngineConfig.storage.managed_table_bucket_name).
+// Resolution is namespaced-first: FireboltEngineClass in this namespace,
+// otherwise ClusterFireboltEngineClass of the same name. The cluster
+// catalog is SKU-only and never carries storage, so a cluster hit is
+// false. A referencing engine that sets no --bucket inherits the
+// namespaced class's config, so this lets `engine create` tell whether
+// the effective config will actually have a bucket rather than only
+// checking that some class was named.
 func (c *Client) EngineClassProvidesStorage(ctx context.Context, name string) (bool, error) {
 	out, err := c.kubectl.getNamed(c.namespace, resourceEngineClass, name).Capture(ctx)
-	if err != nil {
-		return false, err
+	if err == nil {
+		var class v1alpha1.FireboltEngineClass
+		if err := json.Unmarshal([]byte(out), &class); err != nil {
+			return false, fmt.Errorf("parsing FireboltEngineClass %q: %w", name, err)
+		}
+		return customConfigHasBucket(class.Spec.CustomEngineConfig), nil
 	}
-	var class v1alpha1.FireboltEngineClass
-	if err := json.Unmarshal([]byte(out), &class); err != nil {
-		return false, fmt.Errorf("parsing FireboltEngineClass %q: %w", name, err)
+	if _, clusterErr := c.kubectl.getNamed("", resourceClusterEngineClass, name).Capture(ctx); clusterErr == nil {
+		return false, nil
 	}
-	return customConfigHasBucket(class.Spec.CustomEngineConfig), nil
+	return false, err
 }
 
 // EnginePresetProvidesStorage reports whether the single

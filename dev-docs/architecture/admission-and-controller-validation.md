@@ -25,8 +25,10 @@ The implementation should share validation functions between webhook and control
 | External PostgreSQL Secret reference | Webhook rejects an empty name; CEL fixes replicas at one | Metadata preflight reports `PostgresSecretPreflightFailed` when the Secret input is unusable |
 | Instance gateway or metadata pod template | Shared operator-authority rules reject owned paths | `validateInstanceTemplates` reports `TemplateRejected` and skips the offending component |
 | EngineClass pod template | Shared rules reject owned paths | EngineClass readiness reports `OperatorOwnedFieldSet`; consuming Engines refuse to render from that class |
+| ClusterFireboltEngineClass SKU-only / owned paths | Webhook rejects | Engine resolver re-validates the live spec and refuses to render (`FireboltEngineClassUnready`) |
 | EngineClass deletion while referenced | Delete webhook rejects the request | Finalizer holds deletion and reports `DeletionBlocked` with the bound-Engine count |
-| Missing EngineClass reference | Engine webhook rejects the write | Engine resolution returns a not-found error and retries with backoff |
+| ClusterFireboltEngineClass deletion | Delete is allowed | Engines emit Warning `EngineClassNotFound` and keep the last applied StatefulSet |
+| Missing EngineClass reference | Engine webhook rejects the write | Engine resolution emits Warning `EngineClassNotFound` and retries with backoff |
 | Engine pod template | Shared rules reject owned paths | `validateEngineTemplates` reports `TemplateRejected` and skips StatefulSet rendering |
 | Engine-container resource bounds | Engine webhook applies configured maximums | Reconciler uses the same `EngineResourceBounds` value and reports `ResourceBoundsExceeded` |
 
@@ -40,6 +42,7 @@ The Instance ID transition has a CEL rule that allows the controller's empty-to-
 | FireboltInstance webhook, auth, and TLS validation | [`api/v1alpha1/fireboltinstance_webhook.go`](../../api/v1alpha1/fireboltinstance_webhook.go) |
 | FireboltEngine webhook and resource bounds | [`api/v1alpha1/fireboltengine_webhook.go`](../../api/v1alpha1/fireboltengine_webhook.go) |
 | FireboltEngineClass webhook | [`api/v1alpha1/fireboltengineclass_webhook.go`](../../api/v1alpha1/fireboltengineclass_webhook.go) |
+| ClusterFireboltEngineClass webhook | [`api/v1alpha1/clusterfireboltengineclass_webhook.go`](../../api/v1alpha1/clusterfireboltengineclass_webhook.go) |
 | Instance controller fallbacks | [`internal/controller/instance_controller.go`](../../internal/controller/instance_controller.go), [`instance_auth.go`](../../internal/controller/instance_auth.go), and [`instance_tls.go`](../../internal/controller/instance_tls.go) |
 | Engine controller fallbacks | [`internal/controller/engine_controller.go`](../../internal/controller/engine_controller.go) |
 | EngineClass readiness and deletion guard | [`internal/controller/fireboltengineclass_controller.go`](../../internal/controller/fireboltengineclass_controller.go) |
@@ -69,7 +72,7 @@ Admission errors use Kubernetes field paths so clients can reject the write befo
 3. include the invalid field path in the message;
 4. requeue so correcting the CR recovers without manual cleanup.
 
-Not every fallback uses a dedicated condition. A missing EngineClass is treated as a binary dependency error and follows controller backoff; an invalid or explicitly unready class has a surfaced Ready condition because the user needs the class-side reason.
+Not every fallback uses a dedicated condition. A missing EngineClass emits a Warning `EngineClassNotFound` Event and follows controller backoff; an invalid or explicitly unready class has a surfaced Ready condition because the user needs the class-side reason.
 
 ## Adding or changing an invariant
 

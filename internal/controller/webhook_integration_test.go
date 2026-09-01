@@ -29,8 +29,10 @@ limitations under the License.
 // What this exercises that nothing else does today: the wire
 // behavior of every webhook the helm chart installs — defaulter
 // fills in spec.id over the network, FireboltEngineClass validation rejects
-// operator-owned-field writes over the network, and the deletion
-// guard refuses DELETE while a bound engine exists over the network.
+// operator-owned-field writes over the network, the namespaced class
+// deletion guard refuses DELETE while a bound engine exists, and
+// ClusterFireboltEngineClass DELETE is admitted while engines still
+// name the SKU.
 // Regressions in cert wiring, the rendered Service / WebhookConfig
 // paths, or the validator setup would otherwise only surface at
 // install time in a customer cluster.
@@ -52,6 +54,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimepkg "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -174,6 +177,9 @@ func setupWebhookSuite() error {
 	if err := computev1alpha1.SetupFireboltEngineWebhookWithManager(mgr, nil); err != nil {
 		return fmt.Errorf("setup FireboltEngine webhook: %w", err)
 	}
+	if err := computev1alpha1.SetupClusterFireboltEngineClassWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setup ClusterFireboltEngineClass webhook: %w", err)
+	}
 
 	mgrCtx, cancel := context.WithCancel(context.Background())
 	suite.mgrCancel = cancel
@@ -223,6 +229,7 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 	sideEffectsNone := admissionregistrationv1.SideEffectClassNone
 	matchPolicyEquivalent := admissionregistrationv1.Equivalent
 	scopeNamespaced := admissionregistrationv1.NamespacedScope
+	scopeCluster := admissionregistrationv1.ClusterScope
 	timeout := int32(10)
 
 	mutating := &admissionregistrationv1.MutatingWebhookConfiguration{
@@ -305,6 +312,33 @@ func buildWebhookConfigs() (*admissionregistrationv1.MutatingWebhookConfiguratio
 						APIVersions: []string{"v1alpha1"},
 						Resources:   []string{"fireboltengineclasses"},
 						Scope:       &scopeNamespaced,
+					},
+				}},
+				FailurePolicy:           &failPolicyFail,
+				SideEffects:             &sideEffectsNone,
+				MatchPolicy:             &matchPolicyEquivalent,
+				TimeoutSeconds:          &timeout,
+				AdmissionReviewVersions: []string{"v1"},
+			},
+			{
+				Name: "vclusterfireboltengineclass.compute.firebolt.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{
+						Namespace: "default",
+						Name:      "webhook-service",
+						Path:      utilptr.To("/validate-compute-firebolt-io-v1alpha1-clusterfireboltengineclass"),
+					},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{
+					Operations: []admissionregistrationv1.OperationType{
+						admissionregistrationv1.Create,
+						admissionregistrationv1.Update,
+					},
+					Rule: admissionregistrationv1.Rule{
+						APIGroups:   []string{"compute.firebolt.io"},
+						APIVersions: []string{"v1alpha1"},
+						Resources:   []string{"clusterfireboltengineclasses"},
+						Scope:       &scopeCluster,
 					},
 				}},
 				FailurePolicy:           &failPolicyFail,
@@ -588,6 +622,61 @@ func TestWebhook_FireboltEngineClass_RefusesDeleteWhileBound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "FireboltEngine") {
 		t.Errorf("Delete error %q does not mention the bound engine(s)", err.Error())
+	}
+}
+
+// TestWebhook_ClusterFireboltEngineClass_AllowsDeleteWhileEnginesExist
+// pins the catalog delete contract over the wire: DELETE is not in
+// the webhook rules, and a cluster SKU can be removed while engines
+// still name it. The unit test on ValidateDelete cannot see a DELETE
+// operation being re-added to the helm chart / this registration.
+func TestWebhook_ClusterFireboltEngineClass_AllowsDeleteWhileEnginesExist(t *testing.T) {
+	requireWebhookSuite(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cc := &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "sku-delete-allowed"},
+		Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{"node.kubernetes.io/instance-type": "c6id.2xlarge"},
+					Containers: []corev1.Container{{
+						Name: computev1alpha1.EngineContainerName,
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+						},
+					}},
+				},
+			},
+		},
+	}
+	if err := suite.cli.Create(ctx, cc); err != nil {
+		t.Fatalf("Create cluster class: %v", err)
+	}
+
+	engine := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "catalog-binder", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    "any-instance",
+			Replicas:       1,
+			EngineClassRef: utilptr.To(cc.Name),
+		},
+	}
+	if err := suite.cli.Create(ctx, engine); err != nil {
+		_ = suite.cli.Delete(ctx, cc)
+		t.Fatalf("Create engine (binding required for the catalog-delete assertion): %v", err)
+	}
+	t.Cleanup(func() {
+		_ = suite.cli.Delete(context.Background(), engine)
+		_ = waitForNotFound(context.Background(), suite.cli,
+			client.ObjectKey{Name: engine.Name, Namespace: engine.Namespace},
+			&computev1alpha1.FireboltEngine{}, 5*time.Second)
+		_ = suite.cli.Delete(context.Background(), cc)
+	})
+
+	if err := suite.cli.Delete(ctx, cc); err != nil {
+		t.Fatalf("Delete cluster class: expected admission to allow delete while engines still name the SKU, got %v", err)
 	}
 }
 

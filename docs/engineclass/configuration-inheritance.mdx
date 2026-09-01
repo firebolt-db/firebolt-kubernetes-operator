@@ -4,16 +4,18 @@ description: Share Engine settings while allowing per-Engine overrides.
 sidebarTitle: Configuration inheritance
 ---
 
-A `FireboltEngineClass` provides reusable defaults to Engines in the same namespace. Set `FireboltEngine.spec.engineClassRef` to the class name.
+Set `FireboltEngine.spec.engineClassRef` to a class name. The Firebolt Operator resolves that name namespaced-first: a `FireboltEngineClass` in the Engine's namespace if present, otherwise a `ClusterFireboltEngineClass` of the same name. Same name in both scopes is allowed; the namespaced object is the override and wins wholesale.
 
 Values resolve in this order:
 
 1. The Engine value
 2. The namespace `FireboltEnginePreset` value, when one object exists
-3. The referenced EngineClass value
+3. The resolved class value (`FireboltEngineClass`, else `ClusterFireboltEngineClass`)
 4. The Firebolt Operator default
 
-An EngineClass is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims.
+`FireboltEngineClass` is namespaced because its pod template can reference namespaced resources such as ServiceAccounts, Secrets, ConfigMaps, and persistent volume claims. `ClusterFireboltEngineClass` is SKU-only: instance type, resources, affinity/tolerations, init containers, and an optional engine image. It does not carry ServiceAccount names, Secret refs, IAM annotations, ConfigMap refs, `persistentVolumeClaim` volumes, resource claims, storage, rollout, drain-check, autoStop, or `uiSidecar`. Those stay on the namespaced class, Preset, or Engine spec.
+
+A cluster-scoped object has no namespace of its own, so any of those references would bind to whatever happens to exist in each consuming namespace. The same catalog entry would then render differently per namespace, or not at all. The admission webhook and the Engine reconciler both reject them. Volume sources that name nothing, such as `emptyDir` and `downwardAPI`, stay allowed, as do `ephemeral` claim templates, which create a fresh claim in the consuming namespace from a cluster-scoped StorageClass. An `ephemeral` claim template must not set `dataSource` or `dataSourceRef`: those seed the new claim from a claim or snapshot resolved in the consuming namespace, which is the per-namespace binding the rule exists to prevent.
 
 ## Pod template precedence
 
@@ -108,3 +110,5 @@ kubectl get firengc production -n firebolt
 Class deletion remains blocked while Engines in the same namespace reference it. Remove or replace `spec.engineClassRef` on every bound Engine, wait for those updates to reconcile, then delete the class.
 
 If deletion is blocked, `status.conditions[type=Ready]` reports reason `DeletionBlocked` and `status.boundEngines` shows the current consumer count.
+
+`ClusterFireboltEngineClass` delete is not blocked. Engines that still name the SKU emit a Warning `EngineClassNotFound` Event and keep running the last applied pods until the catalog object is restored or `spec.engineClassRef` is changed.
