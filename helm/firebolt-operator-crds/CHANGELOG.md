@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.6.0...firebolt-operator-crds-chart-0.7.0) (2026-09-01)
+
+
+### Features
+
+* **api:** add ClusterFireboltEngineClass and namespaced-first engineClassRef (FB-3522) ([#188](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/188)) ([f56fc56](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f56fc5652ab9f1334df520fc23ed989f1ad4c338))
+* verify external postgres server identity ([#183](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/183)) ([#184](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/184)) ([128bfaa](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/128bfaaeb115a303138ac78f8eb823d830ff22c5))
+
 ## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.5.0...firebolt-operator-crds-chart-0.6.0) (2026-08-29)
 
 
