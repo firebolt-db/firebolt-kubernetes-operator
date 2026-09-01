@@ -79,9 +79,9 @@ When adding a wait, reuse an existing helper or timeout constant if it describes
 
 ## Zero-downtime assertions
 
-A zero-downtime test must gather enough requests to make a zero-failure assertion meaningful. Start the background runner before the transition, require a minimum success count, and fail on every observed query error.
+A zero-downtime test must gather enough requests to make a zero-failure assertion meaningful. Start the background runner before the transition, require a minimum success count, and fail on every observed data-plane query error. The runner retries only explicit client-pod failures to resolve the stable Gateway Service name, with a bounded attempt count; those requests never reached the Gateway and measure Kind/CoreDNS availability rather than the Operator's routing contract. Exhausted DNS retries still fail the test.
 
-Do not accept transient failures as expected rollout behavior. The routing contract is layered specifically so blue-green transitions do not leak a 5xx to requests within its supported request-size and gateway-entry constraints.
+Do not accept transient HTTP failures, connection errors, or generic request timeouts as expected rollout behavior. The routing contract is layered specifically so blue-green transitions do not leak a 5xx to requests within its supported request-size and gateway-entry constraints.
 
 ## Crash-recovery coverage
 
