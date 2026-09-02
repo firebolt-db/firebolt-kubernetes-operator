@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -519,18 +520,23 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 	got := buildMetadataConfigYAML(inst)
 
 	for _, want := range []string{
-		`default_account_id: "acc-1"`,
+		"host: 0.0.0.0",
+		fmt.Sprintf("port: %d", MetadataServicePort),
 		`host: "inst-metadata-pg.ns-1.svc.cluster.local"`,
 		`port: 5432`,
 		`database: "firebolt_metadata"`,
-		`schema: "public"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in metadata-ng config; got:\n%s", want, got)
 		}
 	}
 
+	// metadata-ng rejects any key it does not act on, so none of the legacy
+	// service's keys may appear — not even ones the legacy template renders
+	// from the CR (`default_account_id`, `schema`).
 	for _, legacyOnly := range []string{
+		"default_account_id",
+		"schema",
 		"server_threads",
 		"log_level",
 		"keepalive",
@@ -546,8 +552,53 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(got), &root); err != nil {
 		t.Fatalf("metadata-ng config must be valid YAML: %v\n%s", err, got)
 	}
+	if len(root) != 1 {
+		t.Fatalf("metadata-ng config must have exactly one root key; got %v", root)
+	}
+	if _, ok := root["pensieve_duck"]; !ok {
+		t.Fatalf("metadata-ng config missing pensieve_duck root: %v", root)
+	}
+	if _, ok := root["pensieve_lite"]; ok {
+		t.Fatalf("metadata-ng config must not carry the legacy pensieve_lite root: %v", root)
+	}
+
+	// A custom external schema is a legacy-service concept; it must not leak
+	// into the metadata-ng document even when the CR sets one, while the
+	// endpoint itself still must.
+	external := mkMetadataInstance()
+	external.Spec.MetadataNG = true
+	external.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "pg.example.com",
+		Database:             "fb",
+		Schema:               "firebolt_metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "creds"},
+	}
+	got = buildMetadataConfigYAML(external)
+	if strings.Contains(got, "schema") || strings.Contains(got, "firebolt_metadata") {
+		t.Errorf("external schema must not be rendered for metadata-ng; got:\n%s", got)
+	}
+	if !strings.Contains(got, `host: "pg.example.com"`) || !strings.Contains(got, `database: "fb"`) {
+		t.Errorf("external endpoint must still be rendered for metadata-ng; got:\n%s", got)
+	}
+}
+
+func TestBuildMetadataConfigYAML_LegacyKeepsPensieveLiteRoot(t *testing.T) {
+	got := buildMetadataConfigYAML(mkMetadataInstance())
+
+	var root map[string]any
+	if err := yaml.Unmarshal([]byte(got), &root); err != nil {
+		t.Fatalf("legacy config must be valid YAML: %v\n%s", err, got)
+	}
 	if _, ok := root["pensieve_lite"]; !ok {
-		t.Fatalf("metadata-ng config missing pensieve_lite root: %v", root)
+		t.Fatalf("legacy config missing pensieve_lite root: %v", root)
+	}
+	if _, ok := root["pensieve_duck"]; ok {
+		t.Fatalf("legacy config must not carry the pensieve_duck root: %v", root)
+	}
+	for _, want := range []string{`default_account_id: "acc-1"`, `schema: "public"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in legacy config; got:\n%s", want, got)
+		}
 	}
 }
 

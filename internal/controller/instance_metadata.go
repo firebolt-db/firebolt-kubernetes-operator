@@ -83,7 +83,8 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
 	pgDatabase := PostgresDBName
 	// Internal Postgres is bootstrapped with the default "public" schema and is
 	// not user-configurable; only the external-postgres path honors a custom
-	// schema below.
+	// schema below. The schema is rendered for the legacy service only — see
+	// the metadata-ng note further down.
 	pgSchema := PostgresDefaultSchema
 
 	if instance.Spec.Metadata.Postgres != nil {
@@ -108,14 +109,14 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
 	// configuration. The CRD also applies a Pattern admission check on
 	// host/database/schema as defense-in-depth.
 	//
-	// Both metadata service generations load a YAML map rooted at pensieve_lite.
-	// metadata-ng intentionally omits legacy-only keepalive, garbage-collection,
-	// thread-count, and logging settings. The metadata-ng service either does not
-	// implement them or already uses the equivalent behavior, and warns when the
-	// legacy settings are present.
+	// The two metadata service generations read different documents. metadata-ng
+	// reads a map rooted at pensieve_duck carrying only the keys it acts on — the
+	// listen address and the PostgreSQL endpoint — and rejects any other key at
+	// startup. It does not read `default_account_id` or `postgresql.schema`: the
+	// service is isolated by the configured PostgreSQL database and lays its
+	// catalog out across its own schemas inside it.
 	if instance.Spec.MetadataNG {
-		return fmt.Sprintf(`pensieve_lite:
-  default_account_id: %s
+		return fmt.Sprintf(`pensieve_duck:
   host: 0.0.0.0
   port: %d
   metadata_storage:
@@ -123,14 +124,11 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
       host: %s
       port: %d
       database: %s
-      schema: %s
 `,
-			yamlString(instance.Spec.ID), MetadataServicePort,
-			yamlString(pgHost), pgPort, yamlString(pgDatabase), yamlString(pgSchema))
+			MetadataServicePort, yamlString(pgHost), pgPort, yamlString(pgDatabase))
 	}
 
-	// The legacy metadata image loads YAML config since FB-2743; the document
-	// root must be a YAML map (a scalar/sequence root is rejected).
+	// The legacy metadata service reads a map rooted at pensieve_lite.
 	return fmt.Sprintf(`pensieve_lite:
   default_account_id: %s
   host: 0.0.0.0

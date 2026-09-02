@@ -7598,7 +7598,7 @@
                 },
                 "schema": {
                   "default": "public",
-                  "description": "Schema is the PostgreSQL schema used by the metadata service.\nDefaults to \"public\". Allowed characters are letters, digits, \"_\",\n\".\", and \"-\". XML metacharacters are rejected at admission time to\nprevent injection into the rendered metadata config.",
+                  "description": "Schema is the PostgreSQL schema used by the legacy metadata service.\nDefaults to \"public\". Allowed characters are letters, digits, \"_\",\n\".\", and \"-\". XML metacharacters are rejected at admission time to\nprevent injection into the rendered metadata config.\nNot rendered when spec.metadataNG is true: that service lays its\ncatalog out across its own schemas inside the configured database.",
                   "maxLength": 63,
                   "minLength": 1,
                   "pattern": "^[A-Za-z0-9_.\\-]+$",
