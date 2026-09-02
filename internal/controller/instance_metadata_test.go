@@ -519,18 +519,22 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 	got := buildMetadataConfigYAML(inst)
 
 	for _, want := range []string{
-		`default_account_id: "acc-1"`,
 		`host: "inst-metadata-pg.ns-1.svc.cluster.local"`,
 		`port: 5432`,
 		`database: "firebolt_metadata"`,
-		`schema: "public"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in metadata-ng config; got:\n%s", want, got)
 		}
 	}
 
+	// Every key here is one the metadata-ng service accepts but does not act
+	// on, and warns about at startup when present. `default_account_id` and
+	// `schema` are the two the legacy template still renders for the legacy
+	// service; the rest are legacy-only tuning knobs.
 	for _, legacyOnly := range []string{
+		"default_account_id",
+		"schema",
 		"server_threads",
 		"log_level",
 		"keepalive",
@@ -548,6 +552,25 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 	}
 	if _, ok := root["pensieve_lite"]; !ok {
 		t.Fatalf("metadata-ng config missing pensieve_lite root: %v", root)
+	}
+
+	// A custom external schema is a legacy-service concept; the metadata-ng
+	// service has nothing to map it onto, so it must not leak into the
+	// rendered document even when the CR sets one.
+	external := mkMetadataInstance()
+	external.Spec.MetadataNG = true
+	external.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
+		Host:                 "pg.example.com",
+		Database:             "fb",
+		Schema:               "firebolt_metadata",
+		CredentialsSecretRef: corev1.LocalObjectReference{Name: "creds"},
+	}
+	got = buildMetadataConfigYAML(external)
+	if strings.Contains(got, "schema") || strings.Contains(got, "firebolt_metadata") {
+		t.Errorf("external schema must not be rendered for metadata-ng; got:\n%s", got)
+	}
+	if !strings.Contains(got, `host: "pg.example.com"`) || !strings.Contains(got, `database: "fb"`) {
+		t.Errorf("external endpoint must still be rendered for metadata-ng; got:\n%s", got)
 	}
 }
 
