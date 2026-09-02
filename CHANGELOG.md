@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.12.0...firebolt-operator-v0.13.0) (2026-09-02)
+
+
+### Features
+
+* **controller:** render a pensieve_duck config document for metadata-ng (FB-3701) ([c718e8a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c718e8ae8a0712225f03a222ee79a127fcb54597))
+
 ## [0.12.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.11.0...firebolt-operator-v0.12.0) (2026-09-01)
 
 
