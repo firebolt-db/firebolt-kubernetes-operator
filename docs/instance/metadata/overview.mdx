@@ -10,7 +10,7 @@ The metadata service stores and serves engine metadata. It uses PostgreSQL as th
 
 **Experimental:** `spec.metadataNG: true` selects metadata-ng configuration and UID/GID, but does not select the metadata image. Legacy behavior remains the default.
 
-The metadata-ng configuration carries only the keys that service acts on: the listen address and the PostgreSQL `host`, `port`, and `database`. `spec.id` and `spec.metadata.postgres.schema` are not rendered for it — the service is isolated by the configured database and lays its catalog out across its own schemas inside it — so a custom `schema` has no effect with `metadataNG: true`.
+With `metadataNG: true`, `spec.metadata.postgres.schema` is not rendered: the service manages its own schemas inside the configured database.
 
 ## External PostgreSQL TLS
 

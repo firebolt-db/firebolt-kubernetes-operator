@@ -83,8 +83,7 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
 	pgDatabase := PostgresDBName
 	// Internal Postgres is bootstrapped with the default "public" schema and is
 	// not user-configurable; only the external-postgres path honors a custom
-	// schema below. The schema is rendered for the legacy service only — see
-	// the metadata-ng note further down.
+	// schema below. Legacy service only; metadata-ng does not render it.
 	pgSchema := PostgresDefaultSchema
 
 	if instance.Spec.Metadata.Postgres != nil {
@@ -110,15 +109,10 @@ func buildMetadataConfigYAML(instance *computev1alpha1.FireboltInstance) string 
 	// host/database/schema as defense-in-depth.
 	//
 	// Both metadata service generations load a YAML map rooted at pensieve_lite.
-	// metadata-ng renders only the keys that service acts on: the listen
-	// address and the PostgreSQL endpoint. It intentionally omits the
-	// legacy-only keepalive, garbage-collection, thread-count, and logging
-	// settings, and also `default_account_id` and `postgresql.schema`: the
-	// service is isolated by the configured PostgreSQL database (the engine
-	// supplies its instance identity on each request) and lays its catalog
-	// out across its own fixed schemas inside that database, so neither key
-	// has anything to map onto. Every omitted key is one the service would
-	// otherwise warn about at startup as accepted-but-ignored.
+	// metadata-ng renders only the keys it acts on. It omits the legacy-only
+	// keepalive, garbage-collection, thread-count and logging settings, and
+	// default_account_id and postgresql.schema (it is isolated by database and
+	// manages its own schemas). It warns at startup about any of them.
 	if instance.Spec.MetadataNG {
 		return fmt.Sprintf(`pensieve_lite:
   host: 0.0.0.0

@@ -528,10 +528,7 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 		}
 	}
 
-	// Every key here is one the metadata-ng service accepts but does not act
-	// on, and warns about at startup when present. `default_account_id` and
-	// `schema` are the two the legacy template still renders for the legacy
-	// service; the rest are legacy-only tuning knobs.
+	// Keys the metadata-ng service ignores and warns about when present.
 	for _, legacyOnly := range []string{
 		"default_account_id",
 		"schema",
@@ -554,9 +551,7 @@ func TestBuildMetadataConfigYAML_MetadataNG(t *testing.T) {
 		t.Fatalf("metadata-ng config missing pensieve_lite root: %v", root)
 	}
 
-	// A custom external schema is a legacy-service concept; the metadata-ng
-	// service has nothing to map it onto, so it must not leak into the
-	// rendered document even when the CR sets one.
+	// A custom external schema must not leak into the metadata-ng document.
 	external := mkMetadataInstance()
 	external.Spec.MetadataNG = true
 	external.Spec.Metadata.Postgres = &computev1alpha1.PostgresSpec{
