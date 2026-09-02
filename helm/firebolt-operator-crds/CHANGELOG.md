@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.7.0...firebolt-operator-crds-chart-0.8.0) (2026-09-02)
+
+
+### Features
+
+* **controller:** render a pensieve_duck config document for metadata-ng (FB-3701) ([c718e8a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c718e8ae8a0712225f03a222ee79a127fcb54597))
+
 ## [0.7.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.6.0...firebolt-operator-crds-chart-0.7.0) (2026-09-01)
 
 
