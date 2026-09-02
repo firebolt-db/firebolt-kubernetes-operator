@@ -441,14 +441,18 @@ spec:
                                 roles based on a claim their token carries.
                               properties:
                                 claim:
-                                  description: Claim is the token claim whose value
-                                    is looked up in Map.
+                                  description: |-
+                                    Claim is the token claim whose value is looked up in Map. Defaults
+                                    to packdb's own default ("role") when empty.
                                   minLength: 1
                                   type: string
                                 map:
                                   description: |-
-                                    Map lists the claim-value-to-role entries. Claim values must be
-                                    unique across entries.
+                                    Map lists the claim-value-to-role entries. A claim value may appear
+                                    at most once: packdb refuses a value naming two roles rather than
+                                    guess an order to apply them in. Declared as a keyed list so the
+                                    API server enforces that itself, which the validating webhook —
+                                    disabled in the shipped chart — cannot be relied on to do.
                                   items:
                                     description: |-
                                       RoleMappingEntrySpec maps one value of a token claim to one Firebolt
@@ -472,8 +476,10 @@ spec:
                                     type: object
                                   minItems: 1
                                   type: array
+                                  x-kubernetes-list-map-keys:
+                                  - value
+                                  x-kubernetes-list-type: map
                               required:
-                              - claim
                               - map
                               type: object
                             target:

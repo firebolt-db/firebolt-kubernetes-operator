@@ -692,3 +692,42 @@ func TestBuildConfigMap_OIDCRoleMappingRendersAsSequence(t *testing.T) {
 		}
 	}
 }
+
+// An omitted claim renders no claim key at all, so the engine applies its own
+// default rather than receiving an empty string it rejects.
+func TestBuildConfigMap_OIDCRoleMappingOmitsUnsetClaim(t *testing.T) {
+	p := twoHopProvider()
+	p.RoleMapping.Claim = ""
+	provider := renderSoleProvider(t, p)
+
+	roleMapping := nestedMap(t, provider, "role_mapping")
+	if _, present := roleMapping["claim"]; present {
+		t.Errorf("role_mapping.claim present despite an empty claim: %v", roleMapping["claim"])
+	}
+	if entries, ok := roleMapping["map"].([]interface{}); !ok || len(entries) != 1 {
+		t.Errorf("role_mapping.map = %v, want the entries to survive", roleMapping["map"])
+	}
+}
+
+// A flat discoveryURL alongside an exchange is the two-hop shape without an
+// auth-method pin. The engine resolves the trusted issuer as
+// exchange-else-target-else-flat, so it must not gain an invented target.
+func TestBuildConfigMap_OIDCFlatProviderWithExchange(t *testing.T) {
+	provider := renderSoleProvider(t, computev1alpha1.OIDCProviderSpec{
+		Name:            "firehq",
+		DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
+		Exchange:        &computev1alpha1.OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
+		UsernameMapping: "{{ sub }}",
+	})
+
+	if provider["discovery_url"] != "https://idp.example.com/.well-known/openid-configuration" {
+		t.Errorf("providers[0].discovery_url = %v", provider["discovery_url"])
+	}
+	if _, present := provider["target"]; present {
+		t.Errorf("providers[0].target invented for a flat provider: %v", provider["target"])
+	}
+	exchange := nestedMap(t, provider, "exchange")
+	if exchange["discovery_url"] != "https://exchange.example.com/.well-known/oauth-authorization-server" {
+		t.Errorf("providers[0].exchange.discovery_url = %v", exchange["discovery_url"])
+	}
+}

@@ -662,13 +662,20 @@ type RoleMappingEntrySpec struct {
 // Map is a list rather than a string-keyed object because packdb's
 // configuration framework has no map-entry type.
 type RoleMappingSpec struct {
-	// Claim is the token claim whose value is looked up in Map.
+	// Claim is the token claim whose value is looked up in Map. Defaults
+	// to packdb's own default ("role") when empty.
 	// +kubebuilder:validation:MinLength=1
-	Claim string `json:"claim"`
+	// +optional
+	Claim string `json:"claim,omitempty"`
 
-	// Map lists the claim-value-to-role entries. Claim values must be
-	// unique across entries.
+	// Map lists the claim-value-to-role entries. A claim value may appear
+	// at most once: packdb refuses a value naming two roles rather than
+	// guess an order to apply them in. Declared as a keyed list so the
+	// API server enforces that itself, which the validating webhook —
+	// disabled in the shipped chart — cannot be relied on to do.
 	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=value
 	Map []RoleMappingEntrySpec `json:"map"`
 }
 

@@ -1219,25 +1219,6 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "roleMapping listing a claim value twice is rejected",
-			auth: &AuthSpec{
-				Enabled: true,
-				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
-				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{func() OIDCProviderSpec {
-					p := validTwoHopProvider()
-					p.RoleMapping = &RoleMappingSpec{
-						Claim: "role",
-						Map: []RoleMappingEntrySpec{
-							{Value: "admin", Role: "account_admin"},
-							{Value: "admin", Role: "reader"},
-						},
-					}
-					return p
-				}()}},
-			},
-			wantError: true,
-		},
-		{
 			name: "duplicate oidc provider names are rejected " +
 				"(packdb's IssuerRegistry::registerRemote throws on the second registration)",
 			auth: &AuthSpec{

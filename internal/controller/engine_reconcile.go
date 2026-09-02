@@ -1080,7 +1080,9 @@ func renderRoleMapping(rm *computev1alpha1.RoleMappingSpec) map[string]interface
 	for i, e := range rm.Map {
 		entries[i] = map[string]interface{}{"value": e.Value, "role": e.Role}
 	}
-	return map[string]interface{}{"claim": rm.Claim, "map": entries}
+	out := map[string]interface{}{"map": entries}
+	setIfNonEmpty(out, "claim", rm.Claim)
+	return out
 }
 
 // renderLocalJWT renders instance.auth.local.jwt from LocalAuthSpec's

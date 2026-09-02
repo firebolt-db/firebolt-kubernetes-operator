@@ -537,7 +537,6 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 		errs = append(errs, validateUsernameMapping(
 			p.UsernameMapping, providerPath.Child("usernameMapping"), len(oidc.Providers), adminName)...)
 		errs = append(errs, validateProviderServers(p, providerPath)...)
-		errs = append(errs, validateRoleMapping(p.RoleMapping, providerPath.Child("roleMapping"))...)
 		if p.JWKS != nil {
 			if err := validateDurationField(providerPath.Child("jwks", "cacheTTL"), p.JWKS.CacheTTL); err != nil {
 				errs = append(errs, err)
@@ -579,24 +578,6 @@ func validateProviderServers(p *OIDCProviderSpec, base *field.Path) field.ErrorL
 			"a provider must name the server clients authenticate at, as either discoveryURL or target")}
 	}
 	return nil
-}
-
-// validateRoleMapping rejects a claim value listed twice. The table is a
-// list, so the CRD cannot express uniqueness across its items, and a value
-// resolving to two roles has no defined winner.
-func validateRoleMapping(rm *RoleMappingSpec, base *field.Path) field.ErrorList {
-	if rm == nil {
-		return nil
-	}
-	var errs field.ErrorList
-	seen := make(map[string]struct{}, len(rm.Map))
-	for i, e := range rm.Map {
-		if _, dup := seen[e.Value]; dup {
-			errs = append(errs, field.Duplicate(base.Child("map").Index(i).Child("value"), e.Value))
-		}
-		seen[e.Value] = struct{}{}
-	}
-	return errs
 }
 
 // parsePackdbDuration parses a duration string using the grammar packdb's
