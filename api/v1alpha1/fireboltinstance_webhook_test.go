@@ -770,6 +770,21 @@ func validAdminSpec() AdminSpec {
 	}
 }
 
+// validTwoHopProvider returns a provider that names its target and exchange
+// servers apart, so individual test cases below only override the one field
+// under test.
+func validTwoHopProvider() OIDCProviderSpec {
+	return OIDCProviderSpec{
+		Name: "firehq",
+		Target: &OIDCTargetSpec{
+			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
+			TokenEndpointAuthMethod: "client_secret_post",
+		},
+		Exchange:        &OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
+		UsernameMapping: "{{ sub }}",
+	}
+}
+
 // validSigningKeys returns a SigningKeyPolicy whose cert-manager key leaves
 // Algorithm/Size empty, so validation treats them as the CRD defaults
 // (ECDSA / P-384) — compatible with the default (empty-string)
@@ -1148,6 +1163,77 @@ func TestValidateAuth(t *testing.T) {
 						Discovery: &OIDCDiscoverySpec{RefreshInterval: "-1h"},
 					},
 				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "two-hop provider naming target and exchange is accepted",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC:    &OIDCAuthSpec{Providers: []OIDCProviderSpec{validTwoHopProvider()}},
+			},
+			wantError: false,
+		},
+		{
+			name: "flat discoveryURL alongside exchange is accepted " +
+				"(packdb resolves the trusted issuer as exchange-else-target-else-flat)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
+					Name:            "firehq",
+					DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
+					Exchange:        &OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
+					UsernameMapping: "{{ sub }}",
+				}}},
+			},
+			wantError: false,
+		},
+		{
+			name: "provider setting both discoveryURL and target is rejected " +
+				"(packdb's AuthConfig::Validate refuses to start on it)",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
+					Name:            "firehq",
+					DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
+					Target:          &OIDCTargetSpec{DiscoveryURL: "https://idp.example.com/.well-known/openid-configuration"},
+					UsernameMapping: "{{ sub }}",
+				}}},
+			},
+			wantError: true,
+		},
+		{
+			name: "provider naming no server at all is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
+					Name:            "firehq",
+					Exchange:        &OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
+					UsernameMapping: "{{ sub }}",
+				}}},
+			},
+			wantError: true,
+		},
+		{
+			name: "roleMapping listing a claim value twice is rejected",
+			auth: &AuthSpec{
+				Enabled: true,
+				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
+				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{func() OIDCProviderSpec {
+					p := validTwoHopProvider()
+					p.RoleMapping = &RoleMappingSpec{
+						Claim: "role",
+						Map: []RoleMappingEntrySpec{
+							{Value: "admin", Role: "account_admin"},
+							{Value: "admin", Role: "reader"},
+						},
+					}
+					return p
+				}()}},
 			},
 			wantError: true,
 		},

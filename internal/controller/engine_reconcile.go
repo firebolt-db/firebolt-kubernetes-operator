@@ -1024,14 +1024,27 @@ func renderSigningKeys(keys []computev1alpha1.SigningKeyStatus) []map[string]int
 // rules this also follows).
 func renderOIDCConfig(oidc *computev1alpha1.OIDCAuthSpec) map[string]interface{} {
 	providers := make([]map[string]interface{}, len(oidc.Providers))
-	for i, p := range oidc.Providers {
+	for i := range oidc.Providers {
+		p := &oidc.Providers[i]
 		provider := map[string]interface{}{
 			"name":             p.Name,
-			"discovery_url":    p.DiscoveryURL,
 			"username_mapping": p.UsernameMapping,
 		}
+		setIfNonEmpty(provider, "discovery_url", p.DiscoveryURL)
 		setIfNonEmpty(provider, "title", p.Title)
 		setIfNonEmpty(provider, "audience", p.Audience)
+
+		if p.Target != nil {
+			target := map[string]interface{}{"discovery_url": p.Target.DiscoveryURL}
+			setIfNonEmpty(target, "token_endpoint_auth_method", p.Target.TokenEndpointAuthMethod)
+			provider["target"] = target
+		}
+		if p.Exchange != nil {
+			provider["exchange"] = map[string]interface{}{"discovery_url": p.Exchange.DiscoveryURL}
+		}
+		if p.RoleMapping != nil {
+			provider["role_mapping"] = renderRoleMapping(p.RoleMapping)
+		}
 
 		if p.JITProvisioning != nil {
 			jit := map[string]interface{}{"enabled": p.JITProvisioning.Enabled}
@@ -1057,6 +1070,17 @@ func renderOIDCConfig(oidc *computev1alpha1.OIDCAuthSpec) map[string]interface{}
 		oidcConfig["jwt"] = jwt
 	}
 	return oidcConfig
+}
+
+// renderRoleMapping renders a provider's role_mapping block. The map is a
+// list of single-entry objects, not a string-keyed object, because packdb's
+// configuration framework has no map-entry type.
+func renderRoleMapping(rm *computev1alpha1.RoleMappingSpec) map[string]interface{} {
+	entries := make([]map[string]interface{}, len(rm.Map))
+	for i, e := range rm.Map {
+		entries[i] = map[string]interface{}{"value": e.Value, "role": e.Role}
+	}
+	return map[string]interface{}{"claim": rm.Claim, "map": entries}
 }
 
 // renderLocalJWT renders instance.auth.local.jwt from LocalAuthSpec's

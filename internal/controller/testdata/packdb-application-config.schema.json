@@ -11,39 +11,43 @@
           "description": "How long, in milliseconds, a decrypted data-source credential is cached in memory.",
           "type": "integer"
         },
-        "enabled": {
-          "default": false,
-          "description": "Encrypt external data-source credentials with KMS before storing them in the metadata service.",
-          "type": "boolean"
-        },
         "kms_arn": {
           "default": "",
           "description": "ARN of the KMS key used to encrypt data-source credentials.",
           "type": "string"
         },
-        "local_kms_access_key": {
-          "default": "",
-          "description": "Access key for the local KMS service. Required when 'use_local_kms' is true.",
-          "type": "string"
+        "local_kms": {
+          "additionalProperties": false,
+          "description": "Connection settings for the local KMS service. Required when 'mode' is 'local_kms'.",
+          "properties": {
+            "access_key": {
+              "description": "Access key for the local KMS service.",
+              "type": "string"
+            },
+            "endpoint": {
+              "description": "Endpoint URL of the local KMS service.",
+              "type": "string"
+            },
+            "secret_key": {
+              "description": "Secret key for the local KMS service.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "access_key",
+            "endpoint",
+            "secret_key"
+          ],
+          "type": "object"
         },
-        "local_kms_endpoint": {
-          "default": "",
-          "description": "Endpoint URL of the local KMS service. Required when 'use_local_kms' is true.",
-          "type": "string"
-        },
-        "local_kms_secret_key": {
-          "default": "",
-          "description": "Secret key for the local KMS service. Required when 'use_local_kms' is true.",
+        "mode": {
+          "default": "plaintext",
+          "description": "How external data-source credentials are protected before they are stored in the metadata service: 'plaintext', 'aws_kms' or 'local_kms'.",
           "type": "string"
         },
         "skip_s3_access_check": {
           "default": false,
           "description": "Skip validating S3 access when creating an external location or table. Useful when credentials are placeholders.",
-          "type": "boolean"
-        },
-        "use_local_kms": {
-          "default": false,
-          "description": "Use a local KMS-compatible endpoint (e.g. localstack) instead of AWS KMS. Intended for self-deployed and test environments.",
           "type": "boolean"
         }
       },
@@ -155,6 +159,9 @@
             "enabled": {
               "type": "boolean"
             },
+            "fb_catalog_enabled": {
+              "type": "boolean"
+            },
             "max_tablet_bytes": {
               "type": "string"
             },
@@ -168,6 +175,12 @@
               "type": "integer"
             },
             "num_workers_per_node": {
+              "type": "integer"
+            },
+            "periodic_check_interval_s": {
+              "type": "integer"
+            },
+            "periodic_scan_min_reschedule_interval_s": {
               "type": "integer"
             },
             "run_on_first_dml": {
@@ -235,10 +248,6 @@
           "default": 12,
           "type": "integer"
         },
-        "query_cache_memory_fraction": {
-          "default": 0.2,
-          "type": "number"
-        },
         "multi_cluster": {
           "additionalProperties": false,
           "properties": {
@@ -298,6 +307,10 @@
           },
           "type": "array"
         },
+        "query_cache_memory_fraction": {
+          "default": 0.2,
+          "type": "number"
+        },
         "termination_grace_period": {
           "default": "1m",
           "type": "string"
@@ -331,6 +344,30 @@
               "default": 3,
               "type": "integer"
             },
+            "parallelism_adaptive_ema_alpha": {
+              "default": 0.3,
+              "type": "number"
+            },
+            "parallelism_fair_share_k": {
+              "default": 1.5,
+              "type": "number"
+            },
+            "parallelism_floor": {
+              "default": 4,
+              "type": "integer"
+            },
+            "parallelism_policy": {
+              "default": "none",
+              "type": "string"
+            },
+            "parallelism_soft_ceiling": {
+              "default": 0,
+              "type": "integer"
+            },
+            "parallelism_static_cap": {
+              "default": 16,
+              "type": "integer"
+            },
             "reduce_required_memory_after_seconds_at_front_of_queue": {
               "default": 10,
               "type": "integer"
@@ -350,6 +387,10 @@
           },
           "type": "object"
         },
+        "admission_controller_reserve_internal_query_lane": {
+          "default": true,
+          "type": "boolean"
+        },
         "ai_mutations_mode": {
           "default": "reevaluate",
           "type": "string"
@@ -358,9 +399,29 @@
           "default": true,
           "type": "boolean"
         },
+        "buffer_manager_block_size": {
+          "default": "2MiB",
+          "description": "Block size used when fetching data through the external scan buffer manager.",
+          "type": "string"
+        },
         "enable_distributed_shuffle": {
           "default": true,
           "type": "boolean"
+        },
+        "fetcher_max_thread_count": {
+          "default": 1024,
+          "description": "Maximum number of threads in the fetcher thread pool. Threads above 'fetcher_min_thread_count' start only when queued reads need them.",
+          "type": "integer"
+        },
+        "fetcher_min_thread_count": {
+          "default": 128,
+          "description": "Minimum number of threads in the fetcher thread pool, and the number started at startup. Must not be above 'fetcher_max_thread_count'. An equal minimum and maximum give a fixed thread pool.",
+          "type": "integer"
+        },
+        "fetcher_threads_per_vcpu": {
+          "default": 8,
+          "description": "Threads per usable vCPU in the fetcher thread pool, which reads scan data from object storage and local files. The product, clamped to ['fetcher_min_thread_count', 'fetcher_max_thread_count'], is the ceiling the pool may grow to. 0 pins the ceiling to the minimum.",
+          "type": "integer"
         },
         "hybrid_headers_format_version": {
           "default": 3,
@@ -372,6 +433,10 @@
         },
         "hybrid_headers_primary_index_compression_method": {
           "default": "BROTLI",
+          "type": "string"
+        },
+        "io_uring": {
+          "default": "fail_on_first_use",
           "type": "string"
         },
         "max_threads": {
@@ -539,8 +604,22 @@
                         "type": "object"
                       },
                       "discovery_url": {
-                        "description": "OpenID Connect Discovery endpoint URL",
+                        "description": "OpenID Connect Discovery endpoint URL. Sugar for `target.discovery_url`; set exactly one of `discovery_url` or `target`.",
                         "type": "string"
+                      },
+                      "exchange": {
+                        "additionalProperties": false,
+                        "description": "RFC 8693 token-exchange server whose issuer the Engine trusts. When omitted the provider is single-hop and the Engine trusts the target directly.",
+                        "properties": {
+                          "discovery_url": {
+                            "description": "RFC 8414 Discovery endpoint URL of the token-exchange server. Its issuer is the provider's trusted issuer.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "discovery_url"
+                        ],
+                        "type": "object"
                       },
                       "jit_provisioning": {
                         "additionalProperties": false,
@@ -577,6 +656,24 @@
                         "description": "Provider name / machine identifier (used in ?authorization_server=<name> and CLI flags)",
                         "type": "string"
                       },
+                      "target": {
+                        "additionalProperties": false,
+                        "description": "The server clients authenticate at. Set exactly one of `discovery_url` or `target`.",
+                        "properties": {
+                          "discovery_url": {
+                            "description": "OpenID Connect / RFC 8414 Discovery endpoint URL of the IdP clients authenticate at",
+                            "type": "string"
+                          },
+                          "token_endpoint_auth_method": {
+                            "description": "Client authentication method pin for the target's token endpoint (e.g. \"client_secret_post\"). Advertised to clients for IdPs whose discovery document omits `token_endpoint_auth_methods_supported`; not interpreted by the Engine.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "discovery_url"
+                        ],
+                        "type": "object"
+                      },
                       "title": {
                         "description": "Human-readable label shown by interactive UIs. Defaults to `name` when omitted.",
                         "type": "string"
@@ -587,7 +684,6 @@
                       }
                     },
                     "required": [
-                      "discovery_url",
                       "name",
                       "username_mapping"
                     ],
@@ -610,8 +706,38 @@
           },
           "type": "object"
         },
+        "disable_startup_health_check": {
+          "default": false,
+          "type": "boolean"
+        },
+        "duck_catalog": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Store engine metadata in a DuckLake catalog served from inside the engine process instead of the co-located metadata service.",
+              "type": "boolean"
+            },
+            "in_memory": {
+              "default": false,
+              "description": "Hold the DuckLake catalog entirely in RAM. Nothing is written to the filesystem and ALL engine metadata is lost when the process exits, so this is for local development, benchmarking and hermetic tests rather than for storing anything you want to keep. This is the default when the catalog is enabled and neither 'pg_url' nor 'sqlite_path' is given; set it explicitly to say so in the config. Single-node use only, and mutually exclusive with 'pg_url' and 'sqlite_path'.",
+              "type": "boolean"
+            },
+            "pg_url": {
+              "default": "",
+              "description": "Connection string of the PostgreSQL database holding the DuckLake catalog, for example 'postgresql://user:password@host:5432/dbname'. Mutually exclusive with 'sqlite_path' and 'in_memory'.",
+              "type": "string"
+            },
+            "sqlite_path": {
+              "default": "",
+              "description": "Path to the SQLite file holding the account-level DuckLake catalog. Each Firebolt database gets a catalog file of its own, in a `<sqlite_path>.databases/` directory beside it. Single-node use only: the files are not shared between engine nodes. Mutually exclusive with 'pg_url' and 'in_memory'.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "id": {
-          "default": "01KP98J0000000000000000000",
+          "default": "01kp98j0000000000000000000",
           "type": "string"
         },
         "multi_engine": {
@@ -627,7 +753,7 @@
           "type": "object"
         },
         "organization_id": {
-          "default": "01KP98J0000000000000000001",
+          "default": "01kp98j0000000000000000001",
           "type": "string"
         },
         "organization_name": {
@@ -738,6 +864,25 @@
       },
       "type": "object"
     },
+    "python_udf": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_mode": {
+          "default": "disabled",
+          "description": "How the engine isolates the Python interpreter that executes UDF code: `disabled` (default) executes no UDF code at all, `sandboxed` runs each worker in a Docker container of its own, `unsandboxed` runs it as a child process of the engine, where UDF code can do anything the engine's operating system user can.",
+          "type": "string"
+        },
+        "root_dir": {
+          "description": "Directory holding the Python environments, downloaded packages and worker scripts of Python UDFs. Defaults to `udf` under the engine's temporary directory.",
+          "type": "string"
+        },
+        "sockets_dir": {
+          "description": "Directory holding the unix sockets and log files of Python UDF workers. Defaults to `/tmp/fb_udf_socks`. Keep it short: a unix socket path cannot exceed 107 bytes.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "query_log": {
       "additionalProperties": false,
       "properties": {
@@ -762,17 +907,32 @@
           "default": true,
           "type": "boolean"
         },
-        "api_scheme": {
-          "type": "string"
+        "allow_location_encoded_object_keys": {
+          "default": false,
+          "type": "boolean"
         },
         "aws": {
           "additionalProperties": false,
           "properties": {
+            "endpoint": {
+              "type": "string"
+            },
             "intermediary_access_role": {
               "type": "string"
             },
+            "path_style_addressing": {
+              "default": true,
+              "type": "boolean"
+            },
             "region": {
               "type": "string"
+            },
+            "tcp_connections": {
+              "type": "integer"
+            },
+            "verify_ssl": {
+              "default": true,
+              "type": "boolean"
             }
           },
           "type": "object"
@@ -785,19 +945,83 @@
             },
             "storage_account_name": {
               "type": "string"
+            },
+            "use_azurite_emulator": {
+              "default": false,
+              "type": "boolean"
             }
           },
           "type": "object"
-        },
-        "bucket_name": {
-          "type": "string"
         },
         "collect_garbage_limit_per_query": {
           "default": 0,
           "type": "integer"
         },
-        "default_s3_endpoint_override": {
-          "type": "string"
+        "disk_cache": {
+          "additionalProperties": false,
+          "properties": {
+            "adopt_written_tablets": {
+              "default": true,
+              "description": "Adopt the local files of a freshly written tablet into the cache instead of refetching them on first read.",
+              "type": "boolean"
+            },
+            "backend": {
+              "default": "auto",
+              "description": "Disk IO backend: 'auto', 'uring' or 'pread'.",
+              "type": "string"
+            },
+            "backend_inflight_bytes": {
+              "default": "5MiB",
+              "description": "Cap on bytes the disk IO backend keeps in flight.",
+              "type": "string"
+            },
+            "chunk_bytes": {
+              "default": "2MiB",
+              "description": "Granularity at which misses are fetched, cached and evicted, and the size of one object-storage GET.",
+              "type": "string"
+            },
+            "directory": {
+              "default": "",
+              "description": "Absolute path of the cache directory. Defaults to an 'io_disk_cache' subdirectory of the temporary disk.",
+              "type": "string"
+            },
+            "dump_interval": {
+              "default": "10s",
+              "description": "How often the chunk index is persisted to disk.",
+              "type": "string"
+            },
+            "enabled": {
+              "default": true,
+              "description": "Enable the scan disk cache.",
+              "type": "boolean"
+            },
+            "evict_min_age": {
+              "default": "10m",
+              "description": "Entries used more recently than this are not evicted until free space falls below 'free_hard_watermark_ratio'.",
+              "type": "string"
+            },
+            "free_hard_watermark_ratio": {
+              "default": 0.2,
+              "description": "Below this fraction free, evict regardless of age. Must not be above 'free_low_watermark_ratio'.",
+              "type": "number"
+            },
+            "free_high_watermark_ratio": {
+              "default": 0.4,
+              "description": "Evict until the fraction of the cache device that is free is back above this. Must not be below 'free_low_watermark_ratio'.",
+              "type": "number"
+            },
+            "free_low_watermark_ratio": {
+              "default": 0.4,
+              "description": "Start evicting when the fraction of the cache device that is free falls below this, sparing anything used within 'evict_min_age'.",
+              "type": "number"
+            },
+            "pread_threads": {
+              "default": 32,
+              "description": "Thread count of the pread backend.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
         },
         "download_chunk_prefetch_max_threads": {
           "default": 96,
@@ -814,30 +1038,92 @@
         "gcp": {
           "additionalProperties": false,
           "properties": {
+            "allow_engine_identity": {
+              "default": false,
+              "description": "Permit an external `gs://` request that carries no `CREDENTIALS` to authenticate as the engine's own Google identity. When off, such a request is sent unauthenticated: a read reaches publicly readable objects only and a write is refused. Ignored where `intermediary_service_account_id` is set, and never applies to managed-table storage.",
+              "type": "boolean"
+            },
             "intermediary_service_account_id": {
               "type": "string"
             }
           },
           "type": "object"
         },
-        "minio": {
-          "additionalProperties": false,
-          "properties": {
-            "endpoint": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "endpoint"
-          ],
-          "type": "object"
+        "managed_table_bucket_name": {
+          "type": "string"
         },
-        "type": {
+        "managed_table_shared_buckets_count": {
+          "default": 0,
+          "description": "When >0, `managed_table_bucket_name` is the prefix and managed tablets are spread across `<managed_table_bucket_name>-1..N` (deployment-provisioned). `0` (default): single-bucket mode.",
+          "type": "integer"
+        },
+        "managed_table_storage": {
           "default": "s3",
           "type": "string"
         },
+        "persistent_disk": {
+          "additionalProperties": false,
+          "properties": {
+            "backend": {
+              "default": "auto",
+              "description": "Disk IO backend: 'auto', 'uring' or 'pread'.",
+              "type": "string"
+            },
+            "backend_inflight_bytes": {
+              "default": "5MiB",
+              "description": "Cap on bytes the disk IO backend keeps in flight.",
+              "type": "string"
+            },
+            "fsync_on_commit": {
+              "default": false,
+              "description": "Fsync tablet files and directories before acknowledging a local commit.",
+              "type": "boolean"
+            },
+            "pread_threads": {
+              "default": 32,
+              "description": "Thread count of the pread backend.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "tablet_recovery_cache": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "default": true,
+              "description": "Populate the tablet recovery cache from local disk during startup.",
+              "type": "boolean"
+            },
+            "run_gc_on_startup": {
+              "default": true,
+              "description": "Remove outdated on-disk tablets (not referenced by metadata) during Firebolt Core startup.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "upload_max_tries": {
           "type": "integer"
+        },
+        "upload_part_size": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "telemetry": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether the engine sends a once-daily anonymous aggregate usage event containing the engine version, operating system, and architecture. The DO_NOT_TRACK and SCARF_NO_ANALYTICS environment variables also disable it.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "default": "https://telemetry.firebolt.io/engine",
+          "description": "HTTPS endpoint that receives the anonymous usage event.",
+          "type": "string"
         }
       },
       "type": "object"

@@ -571,3 +571,124 @@ func TestResolveInstanceInfo_AuthReadyAndSecretsPresentPopulatesAuth(t *testing.
 		t.Errorf("info.Auth.SigningKeys = %+v, want [{signing-1 test-instance-auth-signing ...}]", info.Auth.SigningKeys)
 	}
 }
+
+// twoHopProvider is the shape a two-hop deployment configures: clients
+// authenticate at target, exchange the result at exchange, and engines
+// validate only what exchange minted.
+func twoHopProvider() computev1alpha1.OIDCProviderSpec {
+	return computev1alpha1.OIDCProviderSpec{
+		Name:  "firehq",
+		Title: "Firebolt",
+		Target: &computev1alpha1.OIDCTargetSpec{
+			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
+			TokenEndpointAuthMethod: "client_secret_post",
+		},
+		Exchange: &computev1alpha1.OIDCExchangeSpec{
+			DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server",
+		},
+		UsernameMapping: "{{ sub }}",
+		RoleMapping: &computev1alpha1.RoleMappingSpec{
+			Claim: "role",
+			Map:   []computev1alpha1.RoleMappingEntrySpec{{Value: "admin", Role: "account_admin"}},
+		},
+	}
+}
+
+func renderSoleProvider(t *testing.T, p computev1alpha1.OIDCProviderSpec) map[string]interface{} {
+	t.Helper()
+	info := testInstanceInfoWithAuth()
+	info.Auth.Spec.OIDC = &computev1alpha1.OIDCAuthSpec{Providers: []computev1alpha1.OIDCProviderSpec{p}}
+
+	root := renderConfigWithInstanceInfo(t, info)
+	oidc := nestedMap(t, nestedMap(t, nestedMap(t, root, "instance"), "auth"), "oidc")
+	providers, ok := oidc["providers"].([]interface{})
+	if !ok || len(providers) != 1 {
+		t.Fatalf("auth.oidc.providers = %v, want a 1-element array", oidc["providers"])
+	}
+	provider, ok := providers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("auth.oidc.providers[0] = %v, want an object", providers[0])
+	}
+	return provider
+}
+
+func TestBuildConfigMap_OIDCTwoHopProviderRendersTargetAndExchange(t *testing.T) {
+	provider := renderSoleProvider(t, twoHopProvider())
+
+	// A two-hop provider names its servers only under target/exchange. A flat
+	// discovery_url alongside them is what packdb refuses to start on.
+	if _, present := provider["discovery_url"]; present {
+		t.Errorf("providers[0].discovery_url present on a target/exchange provider: %v", provider["discovery_url"])
+	}
+
+	target := nestedMap(t, provider, "target")
+	if target["discovery_url"] != "https://idp.example.com/.well-known/openid-configuration" {
+		t.Errorf("providers[0].target.discovery_url = %v", target["discovery_url"])
+	}
+	if target["token_endpoint_auth_method"] != "client_secret_post" {
+		t.Errorf("providers[0].target.token_endpoint_auth_method = %v, want client_secret_post", target["token_endpoint_auth_method"])
+	}
+
+	exchange := nestedMap(t, provider, "exchange")
+	if exchange["discovery_url"] != "https://exchange.example.com/.well-known/oauth-authorization-server" {
+		t.Errorf("providers[0].exchange.discovery_url = %v", exchange["discovery_url"])
+	}
+}
+
+func TestBuildConfigMap_OIDCTargetOmitsUnsetAuthMethod(t *testing.T) {
+	p := twoHopProvider()
+	p.Target.TokenEndpointAuthMethod = ""
+	provider := renderSoleProvider(t, p)
+
+	target := nestedMap(t, provider, "target")
+	if _, present := target["token_endpoint_auth_method"]; present {
+		t.Errorf("target.token_endpoint_auth_method present despite an empty pin: %v", target["token_endpoint_auth_method"])
+	}
+}
+
+// A flat-discoveryURL provider keeps rendering byte-identically to what it
+// rendered before target/exchange existed: no empty target/exchange objects,
+// which packdb would reject as a provider naming two servers.
+func TestBuildConfigMap_OIDCFlatProviderRendersUnchanged(t *testing.T) {
+	provider := renderSoleProvider(t, computev1alpha1.OIDCProviderSpec{
+		Name:            "okta",
+		DiscoveryURL:    "https://okta.example.com/.well-known/openid-configuration",
+		UsernameMapping: "{{ email }}",
+	})
+
+	if provider["discovery_url"] != "https://okta.example.com/.well-known/openid-configuration" {
+		t.Errorf("providers[0].discovery_url = %v", provider["discovery_url"])
+	}
+	for _, key := range []string{"target", "exchange", "role_mapping"} {
+		if _, present := provider[key]; present {
+			t.Errorf("providers[0].%s present on a flat single-hop provider: %v", key, provider[key])
+		}
+	}
+}
+
+// role_mapping's map renders as a sequence of {value, role} objects, not a
+// value-keyed object: packdb's configuration framework has no map-entry type.
+func TestBuildConfigMap_OIDCRoleMappingRendersAsSequence(t *testing.T) {
+	p := twoHopProvider()
+	p.RoleMapping.Map = append(p.RoleMapping.Map, computev1alpha1.RoleMappingEntrySpec{Value: "auditor", Role: "reader"})
+	provider := renderSoleProvider(t, p)
+
+	roleMapping := nestedMap(t, provider, "role_mapping")
+	if roleMapping["claim"] != "role" {
+		t.Errorf("role_mapping.claim = %v, want role", roleMapping["claim"])
+	}
+	entries, ok := roleMapping["map"].([]interface{})
+	if !ok || len(entries) != 2 {
+		t.Fatalf("role_mapping.map = %v, want a 2-element array", roleMapping["map"])
+	}
+	want := []struct{ value, role string }{{"admin", "account_admin"}, {"auditor", "reader"}}
+	for i, w := range want {
+		entry, ok := entries[i].(map[string]interface{})
+		if !ok {
+			t.Fatalf("role_mapping.map[%d] = %v, want an object", i, entries[i])
+		}
+		if entry["value"] != w.value || entry["role"] != w.role {
+			t.Errorf("role_mapping.map[%d] = %v, want {value: %s, role: %s}", i, entry, w.value, w.role)
+		}
+	}
+}
