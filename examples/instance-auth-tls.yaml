@@ -12,8 +12,10 @@
 #      tls.engine. A self-signed-CA ClusterIssuer example is at the bottom.
 #   2. the admin-password Secret referenced below. The operator never
 #      generates the admin password; you supply it.
-#   3. a reachable OIDC provider at the discoveryURL below. The placeholder
-#      here (company.okta.com) will not resolve — replace it with your own.
+#   3. reachable OIDC providers at the discovery URLs below. Every placeholder
+#      here (company.okta.com, idp.example.com, exchange.example.com) will not
+#      resolve — replace them with your own, or drop the providers you do not
+#      need.
 #
 # Signing keys and engine TLS certs are ALWAYS provisioned via cert-manager;
 # only the gateway listener accepts a bring-your-own secretRef.
@@ -79,7 +81,7 @@ spec:
         # default: 1d) so a token signed the instant a key is demoted has
         # fully expired before that key is removed.
         rotationInterval: 720h # 30 days
-        retainDuration: 24h
+        retainDuration: 48h # maxTokenAge (1d) + clockSkewTolerance, plus rollout margin
     oidc:
       providers:
         - name: okta
@@ -89,6 +91,31 @@ spec:
           # provider-unique lets an identity from one provider resolve onto
           # another provider's Firebolt user; admission rejects a bare claim
           # once a second provider is configured.
+          usernameMapping: "{{ iss }}|{{ sub }}"
+          jitProvisioning:
+            enabled: true
+            defaultRoles: [public]
+        # A two-hop provider. Clients authenticate at `target` and exchange the
+        # resulting token (RFC 8693) at `exchange`; Engines trust the exchange's
+        # issuer and reject a target token presented directly. Use this when the
+        # server clients log in at is not the one whose tokens Engines should
+        # accept — a target token carries the target's own audience and no
+        # per-Instance claims, so trusting it directly would let a token minted
+        # for one Instance be replayed against another.
+        #
+        # Requires an Engine build that accepts `target`/`exchange`. Omit
+        # `exchange` and this is an ordinary single-server provider, for which
+        # the flat `discoveryURL` above stays the shape to use.
+        - name: exchange-backed
+          title: Firebolt
+          target:
+            discoveryURL: https://idp.example.com/.well-known/openid-configuration
+            # Pin republished to clients for IdPs whose discovery document omits
+            # token_endpoint_auth_methods_supported, which would otherwise leave
+            # them on the RFC 8414 default. Engines do not interpret it.
+            tokenEndpointAuthMethod: client_secret_post
+          exchange:
+            discoveryURL: https://exchange.example.com/.well-known/oauth-authorization-server
           usernameMapping: "{{ iss }}|{{ sub }}"
           jitProvisioning:
             enabled: true
