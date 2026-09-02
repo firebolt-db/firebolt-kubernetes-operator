@@ -4337,10 +4337,12 @@ spec:
                       schema:
                         default: public
                         description: |-
-                          Schema is the PostgreSQL schema used by the metadata service.
+                          Schema is the PostgreSQL schema used by the legacy metadata service.
                           Defaults to "public". Allowed characters are letters, digits, "_",
                           ".", and "-". XML metacharacters are rejected at admission time to
                           prevent injection into the rendered metadata config.
+                          Not rendered when spec.metadataNG is true: that service lays its
+                          catalog out across its own schemas inside the configured database.
                         maxLength: 63
                         minLength: 1
                         pattern: ^[A-Za-z0-9_.\-]+$

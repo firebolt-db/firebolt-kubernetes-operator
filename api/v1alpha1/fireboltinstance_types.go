@@ -180,10 +180,12 @@ type PostgresSpec struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.\-]+$`
 	Database string `json:"database"`
 
-	// Schema is the PostgreSQL schema used by the metadata service.
+	// Schema is the PostgreSQL schema used by the legacy metadata service.
 	// Defaults to "public". Allowed characters are letters, digits, "_",
 	// ".", and "-". XML metacharacters are rejected at admission time to
 	// prevent injection into the rendered metadata config.
+	// Not rendered when spec.metadataNG is true: that service lays its
+	// catalog out across its own schemas inside the configured database.
 	// +kubebuilder:default=public
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
