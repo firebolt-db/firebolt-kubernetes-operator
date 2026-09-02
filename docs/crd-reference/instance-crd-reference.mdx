@@ -65,8 +65,8 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 | `spec.auth.oidc.providers[].audience` | No | (the Instance resource) | Expected `aud` when the provider mints its own audience rather than honouring the `resource` parameter. |
 | `spec.auth.oidc.providers[].jitProvisioning` | No | disabled | Create users automatically on first login. |
 | `spec.auth.oidc.providers[].roleMapping` | No | - | Give principals membership in existing Firebolt roles from a token claim, on every login. Closed: a claim value with no entry grants nothing. Requires an Engine build that accepts `role_mapping`. |
-| `spec.auth.oidc.providers[].roleMapping.claim` | **Yes** | - | The token claim whose value is looked up in `map`. |
-| `spec.auth.oidc.providers[].roleMapping.map[]` | **Yes** | - | Entries of `{value, role}`. Values must be unique. The role must already exist — a mapping grants membership, never a privilege. |
+| `spec.auth.oidc.providers[].roleMapping.claim` | No | `role` | The token claim whose value is looked up in `map`. |
+| `spec.auth.oidc.providers[].roleMapping.map[]` | **Yes** | - | Entries of `{value, role}`, at least one. Values must be unique; the API server rejects a repeat. The role must already exist — a mapping grants membership, never a privilege. |
 | `spec.auth.preferredAuthorizationServer` | No | - | Which authorization server clients should default to: `_local`, or a configured provider name. Advisory to clients only. |
 | `spec.tls` | No | disabled | Transport encryption. Engine and Gateway TLS are independent and separately opt-in. |
 | `spec.tls.engine` | No | disabled | Terminates TLS on each Engine's query listener. TLS **replaces** plaintext on the same port. |
