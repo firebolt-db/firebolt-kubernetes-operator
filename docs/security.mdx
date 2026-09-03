@@ -154,7 +154,9 @@ so the chart's manager RBAC does not include that verb. Setting
 `rbac.apiserverProxyGrant=true` on the Firebolt Operator chart, which
 renders a dedicated `ClusterRole` (or per-namespace `Role` when
 `watchNamespaces` is set) granting only that one verb. Without the
-toggle, the metric scrape surfaces as a 403 from the apiserver.
+toggle, the metric scrape surfaces as a 403 from the apiserver. Either
+transport caps a single engine `/metrics` body at 1 MiB and fails the
+scrape if the body is larger.
 
 Resource maxima on the engine container's `resources` block (set
 under `FireboltEngine.spec.template.spec.containers[name=="engine"]`
