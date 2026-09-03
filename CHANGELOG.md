@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.13.0...firebolt-operator-v0.13.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* **controller:** cap engine metrics scrape body at 1MiB (FB-2539) ([#214](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/214)) ([26c40b2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/26c40b240ea8c7f28be11407c13e980782c58bf6))
+
 ## [0.13.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.12.0...firebolt-operator-v0.13.0) (2026-09-02)
 
 
