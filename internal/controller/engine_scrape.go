@@ -44,6 +44,14 @@ const MetricScrapeModeDefault = computev1alpha1.MetricScrapeModePodIP
 // sync.Mutex during shutdown is the classic case).
 const scrapeTimeout = 10 * time.Second
 
+// maxMetricsResponseBytes caps a single engine /metrics body. Generous for
+// a multi-thousand-line exposition and bounded against a compromised pod
+// that streams an unbounded HTTP 200. Matching maxDemandResponseBytes keeps
+// the two pod-sourced HTTP reads on the same ceiling. Crossing the cap
+// fails the scrape (drain / autostop fail closed) rather than silently
+// truncating, because the two gauges can sit anywhere in the body.
+const maxMetricsResponseBytes = 1 << 20
+
 // refuseRedirects stops pod-IP scrapers from following Location headers.
 // A compromised or spoofed pod can return a 3xx pointing at cloud metadata
 // or other internal endpoints; chasing it would turn the operator process
@@ -162,7 +170,11 @@ func (s *podIPScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]byte, err
 		return nil, fmt.Errorf("scrape from pod %s returned %s: %s",
 			pod.Name, resp.Status, string(body))
 	}
-	return io.ReadAll(resp.Body)
+	body, err := readCappedMetricsBody(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("scraping metrics from pod %s at %s: %w", pod.Name, url, err)
+	}
+	return body, nil
 }
 
 // apiserverProxyScraper routes the GET through the apiserver pods/proxy
@@ -185,13 +197,23 @@ func (s *apiserverProxyScraper) Scrape(ctx context.Context, pod *corev1.Pod) ([]
 	if s.clientset == nil {
 		return nil, errors.New("clientset not initialized")
 	}
-	return s.clientset.CoreV1().RESTClient().Get().
-		Namespace(pod.Namespace).
-		Resource("pods").
-		Name(fmt.Sprintf("%s:%d", pod.Name, MetricsPort)).
-		SubResource("proxy").
-		Suffix(MetricsPath).
-		DoRaw(ctx)
+	// Streamed and capped rather than DoRaw'd, matching the wake-demand
+	// proxy path. The body comes from a pod anyone with engine-template
+	// write can stand up, so an unbounded read is a memory-pressure lever
+	// on the shared operator process.
+	stream, err := s.clientset.CoreV1().
+		Pods(pod.Namespace).
+		ProxyGet("http", pod.Name, strconv.Itoa(MetricsPort), trimLeadingSlash(MetricsPath), nil).
+		Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("proxy scrape of %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	defer func() { _ = stream.Close() }()
+	body, err := readCappedMetricsBody(stream)
+	if err != nil {
+		return nil, fmt.Errorf("proxy scrape of %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	return body, nil
 }
 
 // unknownModeScraper is the fail-closed branch: every Scrape call errors.
@@ -212,6 +234,20 @@ func (s *unknownModeScraper) Scrape(_ context.Context, _ *corev1.Pod) ([]byte, e
 		return nil, fmt.Errorf("unsupported MetricScrapeMode %q: %s", s.mode, s.reason)
 	}
 	return nil, fmt.Errorf("unknown MetricScrapeMode %q", s.mode)
+}
+
+// readCappedMetricsBody reads at most maxMetricsResponseBytes+1 from r and
+// errors if the body is larger than the cap. The extra byte distinguishes
+// "exactly at the cap" from "truncated an unbounded stream".
+func readCappedMetricsBody(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxMetricsResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxMetricsResponseBytes {
+		return nil, fmt.Errorf("metrics response exceeds %d bytes", maxMetricsResponseBytes)
+	}
+	return data, nil
 }
 
 // trimLeadingSlash drops one leading '/' so MetricsPath joined onto a

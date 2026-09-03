@@ -17,9 +17,11 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +128,88 @@ func TestPodIPScraper_MissingPodIP(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no PodIP") {
 		t.Errorf("error wording: %v", err)
+	}
+}
+
+func TestReadCappedMetricsBody_AtLimit(t *testing.T) {
+	t.Parallel()
+	want := bytes.Repeat([]byte("m"), maxMetricsResponseBytes)
+	got, err := readCappedMetricsBody(bytes.NewReader(want))
+	if err != nil {
+		t.Fatalf("readCappedMetricsBody(limit): %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("body: got %d bytes, want %d", len(got), len(want))
+	}
+}
+
+func TestReadCappedMetricsBody_OverLimit(t *testing.T) {
+	t.Parallel()
+	// Offer more than the cap so a silent truncate would still return
+	// maxMetricsResponseBytes without error. The helper must refuse.
+	src := bytes.Repeat([]byte("m"), maxMetricsResponseBytes+4096)
+	got, err := readCappedMetricsBody(bytes.NewReader(src))
+	if err == nil {
+		t.Fatalf("expected error for oversized body, got %d bytes", len(got))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(maxMetricsResponseBytes)) {
+		t.Errorf("error should name the cap, got %v", err)
+	}
+	if got != nil {
+		t.Errorf("oversized read must not return a body, got %d bytes", len(got))
+	}
+}
+
+func TestPodIPScraper_RejectsOversizedBody(t *testing.T) {
+	t.Parallel()
+	gauges := "firebolt_running_queries 0\nfirebolt_suspended_queries 0\n"
+	// Stream well past the cap; the client must stop and error rather
+	// than buffer the whole response.
+	oversize := gauges + strings.Repeat("# pad\n", (maxMetricsResponseBytes/len("# pad\n"))+8)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, oversize)
+	}))
+	t.Cleanup(server.Close)
+
+	host, _ := hostPortFromURL(t, server.URL)
+	scraper := fixedPortPodIPScraper(strings.TrimPrefix(server.URL, "http://"))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "engine-0", Namespace: "ns"},
+		Status:     corev1.PodStatus{PodIP: host, Phase: corev1.PodRunning},
+	}
+	got, err := scraper.Scrape(context.Background(), pod)
+	if err == nil {
+		t.Fatalf("expected oversized /metrics to fail, got %d bytes", len(got))
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(maxMetricsResponseBytes)) {
+		t.Errorf("error should name the cap, got %v", err)
+	}
+}
+
+func TestPodIPScraper_AcceptsBodyAtCap(t *testing.T) {
+	t.Parallel()
+	gauges := "firebolt_running_queries 0\nfirebolt_suspended_queries 0\n"
+	if len(gauges) > maxMetricsResponseBytes {
+		t.Fatal("gauge preamble longer than cap")
+	}
+	body := gauges + strings.Repeat("x", maxMetricsResponseBytes-len(gauges))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(server.Close)
+
+	host, _ := hostPortFromURL(t, server.URL)
+	scraper := fixedPortPodIPScraper(strings.TrimPrefix(server.URL, "http://"))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "engine-0", Namespace: "ns"},
+		Status:     corev1.PodStatus{PodIP: host, Phase: corev1.PodRunning},
+	}
+	got, err := scraper.Scrape(context.Background(), pod)
+	if err != nil {
+		t.Fatalf("scrape at cap: %v", err)
+	}
+	if string(got) != body {
+		t.Fatalf("body: got %d bytes, want %d", len(got), len(body))
 	}
 }
 
