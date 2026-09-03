@@ -55,10 +55,18 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 | `spec.auth.local.signingKeys.retainDuration` | No | - | How long a demoted key keeps validating tokens, measured from confirmed post-promotion convergence. Required with `rotationInterval`, and must be at least `maxTokenAge + clockSkewTolerance`. |
 | `spec.auth.oidc` | No | - | Trusted OIDC providers whose tokens Engines accept, in addition to local login. |
 | `spec.auth.oidc.providers[].name` | **Yes** | - | Provider identifier, as advertised to clients. |
-| `spec.auth.oidc.providers[].discoveryURL` | **Yes** | - | The provider's OIDC discovery document URL. |
+| `spec.auth.oidc.providers[].discoveryURL` | One of | - | The provider's OIDC discovery document URL. Sugar for `target.discoveryURL`; set this or `target`, never both. |
+| `spec.auth.oidc.providers[].target` | One of | - | The server clients authenticate at, named apart from `exchange`. Set this or `discoveryURL`, never both. |
+| `spec.auth.oidc.providers[].target.discoveryURL` | **Yes** | - | The target's OIDC / RFC 8414 discovery document URL. |
+| `spec.auth.oidc.providers[].target.tokenEndpointAuthMethod` | No | - | Client authentication method Engines republish to clients for the target's token endpoint, e.g. `client_secret_post`. For providers whose discovery document omits `token_endpoint_auth_methods_supported`. Engines do not interpret it. |
+| `spec.auth.oidc.providers[].exchange` | No | (single-hop) | RFC 8693 token-exchange server whose issuer Engines trust. Setting it makes the provider two-hop: clients exchange their target token here, and Engines accept only what this server minted. |
+| `spec.auth.oidc.providers[].exchange.discoveryURL` | **Yes** | - | The exchange's RFC 8414 discovery document URL. |
 | `spec.auth.oidc.providers[].usernameMapping` | **Yes** | - | Template mapping token claims to a Firebolt username, e.g. `{{ email }}`. |
 | `spec.auth.oidc.providers[].audience` | No | (the Instance resource) | Expected `aud` when the provider mints its own audience rather than honouring the `resource` parameter. |
 | `spec.auth.oidc.providers[].jitProvisioning` | No | disabled | Create users automatically on first login. |
+| `spec.auth.oidc.providers[].roleMapping` | No | - | Give principals membership in existing Firebolt roles from a token claim, on every login. Closed: a claim value with no entry grants nothing. Requires an Engine build that accepts `role_mapping`. |
+| `spec.auth.oidc.providers[].roleMapping.claim` | No | `role` | The token claim whose value is looked up in `map`. |
+| `spec.auth.oidc.providers[].roleMapping.map[]` | **Yes** | - | Entries of `{value, role}`, at least one. Values must be unique; the API server rejects a repeat. The role must already exist — a mapping grants membership, never a privilege. |
 | `spec.auth.preferredAuthorizationServer` | No | - | Which authorization server clients should default to: `_local`, or a configured provider name. Advisory to clients only. |
 | `spec.tls` | No | disabled | Transport encryption. Engine and Gateway TLS are independent and separately opt-in. |
 | `spec.tls.engine` | No | disabled | Terminates TLS on each Engine's query listener. TLS **replaces** plaintext on the same port. |

@@ -590,6 +590,95 @@ type OIDCDiscoverySpec struct {
 	RefreshInterval string `json:"refreshInterval,omitempty"`
 }
 
+// OIDCTargetSpec names the authorization server clients authenticate at.
+// It is one half of the two-hop topology OIDCProviderSpec's Exchange
+// completes: a client obtains a token here and exchanges it at Exchange
+// for the token the engine finally validates. The engine never fetches
+// this server's metadata when an Exchange is set, and never accepts a
+// token it minted — advertising its grants would invite a client to skip
+// the exchange and present a token the engine rejects.
+//
+// Deliberately carries no token/device-authorization endpoint override:
+// a host-served endpoint is a credential-redirect vector, so those belong
+// in the client's own out-of-band configuration, never in engine config.
+type OIDCTargetSpec struct {
+	// DiscoveryURL is this server's OpenID Connect / RFC 8414 discovery
+	// endpoint. Must be an https:// URL — packdb requires TLS for every
+	// outbound OIDC fetch except loopback.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^https://.+`
+	DiscoveryURL string `json:"discoveryURL"`
+
+	// TokenEndpointAuthMethod pins the client authentication method for
+	// this server's token endpoint (for example "client_secret_post").
+	// The engine does not interpret it — it only republishes it to
+	// clients, for identity providers whose discovery document omits
+	// token_endpoint_auth_methods_supported and would otherwise leave a
+	// client on the RFC 8414 default. Left as a free-form string rather
+	// than an enum, matching packdb, so a method this operator has never
+	// heard of stays expressible.
+	// +optional
+	TokenEndpointAuthMethod string `json:"tokenEndpointAuthMethod,omitempty"`
+}
+
+// OIDCExchangeSpec names the RFC 8693 token-exchange server whose issuer
+// the engine trusts. Setting it makes a provider two-hop; omitting it
+// leaves the provider single-hop, with the target trusted directly.
+//
+// Its presence is what moves the provider's trusted issuer — the "iss"
+// engines validate against — off the target and onto this server. That
+// is the whole point of the two-field model: a target token carries the
+// target's own audience and no per-instance claims, so trusting it
+// directly would let a token minted for one instance be replayed against
+// another.
+type OIDCExchangeSpec struct {
+	// DiscoveryURL is this server's RFC 8414 discovery endpoint
+	// (typically ending in /.well-known/oauth-authorization-server).
+	// Must be an https:// URL.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^https://.+`
+	DiscoveryURL string `json:"discoveryURL"`
+}
+
+// RoleMappingEntrySpec maps one value of a token claim to one Firebolt
+// role.
+type RoleMappingEntrySpec struct {
+	// Value is the claim value this entry matches.
+	// +kubebuilder:validation:MinLength=1
+	Value string `json:"value"`
+
+	// Role is the Firebolt role a matching principal is given membership
+	// in. The role must already exist — a mapping grants membership, it
+	// does not create the role or any privilege it holds.
+	// +kubebuilder:validation:MinLength=1
+	Role string `json:"role"`
+}
+
+// RoleMappingSpec maps a token claim onto existing Firebolt roles on
+// every login, not only at first provisioning — which is why it sits
+// beside JITProvisioning rather than inside it. The table is closed: a
+// claim value with no entry grants nothing.
+//
+// Map is a list rather than a string-keyed object because packdb's
+// configuration framework has no map-entry type.
+type RoleMappingSpec struct {
+	// Claim is the token claim whose value is looked up in Map. Defaults
+	// to packdb's own default ("role") when empty.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Claim string `json:"claim,omitempty"`
+
+	// Map lists the claim-value-to-role entries. A claim value may appear
+	// at most once: packdb refuses a value naming two roles rather than
+	// guess an order to apply them in. Declared as a keyed list so the
+	// API server enforces that itself, which the validating webhook —
+	// disabled in the shipped chart — cannot be relied on to do.
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=value
+	Map []RoleMappingEntrySpec `json:"map"`
+}
+
 // OIDCProviderSpec configures one trusted OIDC identity provider. packdb
 // validates bearer tokens against this provider's published keys — it is
 // a JWT validator, not an OAuth2 client: there is no client ID/secret,
@@ -597,6 +686,12 @@ type OIDCDiscoverySpec struct {
 // initiates a login. An external client (the Firebolt CLI, a BI tool)
 // performs the OIDC flow itself and presents the resulting access token
 // to the engine as a bearer token.
+//
+// A provider names the server clients authenticate at either as the flat
+// DiscoveryURL below or as Target — exactly one, never both, matching
+// packdb, which refuses to start otherwise. The CEL rule enforces that at
+// the API server so it holds even with the validating webhook disabled.
+// +kubebuilder:validation:XValidation:rule="has(self.discoveryURL) != has(self.target)",message="set exactly one of discoveryURL or target: the flat discoveryURL is sugar for target.discoveryURL"
 type OIDCProviderSpec struct {
 	// Name is this provider's machine identifier, used in the
 	// ?auth=<name> connection parameter and as the authorization server
@@ -616,9 +711,29 @@ type OIDCProviderSpec struct {
 	// (typically ending in /.well-known/openid-configuration). Must be
 	// an https:// URL — packdb requires TLS for every outbound OIDC
 	// fetch except loopback.
+	//
+	// Sugar for a Target carrying only this URL, and the shape every
+	// single-server provider should keep using. Set this or Target, not
+	// both. Combining it with Exchange is legal and makes the provider
+	// two-hop, exactly as Target plus Exchange does.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^https://.+`
-	DiscoveryURL string `json:"discoveryURL"`
+	// +optional
+	DiscoveryURL string `json:"discoveryURL,omitempty"`
+
+	// Target names the server clients authenticate at, when the flat
+	// DiscoveryURL above cannot express the provider — because the
+	// token-endpoint auth method needs pinning, or because Exchange
+	// makes the provider two-hop and the two servers must be named
+	// apart.
+	// +optional
+	Target *OIDCTargetSpec `json:"target,omitempty"`
+
+	// Exchange names the RFC 8693 server whose issuer engines trust,
+	// making this provider two-hop. Omit it for a provider whose tokens
+	// engines accept directly.
+	// +optional
+	Exchange *OIDCExchangeSpec `json:"exchange,omitempty"`
 
 	// Audience is the expected "aud" claim on tokens from this provider.
 	// Defaults to the Instance's canonical issuer URL when empty
@@ -646,6 +761,11 @@ type OIDCProviderSpec struct {
 	// document.
 	// +optional
 	Discovery *OIDCDiscoverySpec `json:"discovery,omitempty"`
+
+	// RoleMapping gives a principal membership in existing Firebolt
+	// roles based on a claim their token carries.
+	// +optional
+	RoleMapping *RoleMappingSpec `json:"roleMapping,omitempty"`
 }
 
 // OIDCAuthSpec configures OpenID Connect bearer-token authentication:

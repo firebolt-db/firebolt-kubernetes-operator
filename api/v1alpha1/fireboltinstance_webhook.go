@@ -503,10 +503,11 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 
 // validateOIDCAuth validates the duration-shaped fields on every configured
 // OIDC provider that the CRD schema leaves as plain, unconstrained strings.
-// Structural shape (non-empty providers, https discovery URL, name not
-// starting with "_", required name/discoveryURL/usernameMapping) is already
-// enforced by kubebuilder markers on OIDCAuthSpec/OIDCProviderSpec; this
-// covers what those markers cannot express.
+// Structural shape (non-empty providers, https discovery URLs, name not
+// starting with "_", required name/usernameMapping, and the
+// discoveryURL-xor-target choice) is already enforced by kubebuilder markers
+// on OIDCAuthSpec/OIDCProviderSpec; this covers what those markers cannot
+// express, plus a friendlier message for the xor.
 func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) field.ErrorList {
 	var errs field.ErrorList
 
@@ -521,7 +522,8 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 	}
 
 	seen := make(map[string]struct{}, len(oidc.Providers))
-	for i, p := range oidc.Providers {
+	for i := range oidc.Providers {
+		p := &oidc.Providers[i]
 		providerPath := base.Child("providers").Index(i)
 		// packdb's IssuerRegistry::registerRemote throws when a second provider
 		// with the same name is registered, which prevents every affected engine
@@ -534,6 +536,7 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 		seen[p.Name] = struct{}{}
 		errs = append(errs, validateUsernameMapping(
 			p.UsernameMapping, providerPath.Child("usernameMapping"), len(oidc.Providers), adminName)...)
+		errs = append(errs, validateProviderServers(p, providerPath)...)
 		if p.JWKS != nil {
 			if err := validateDurationField(providerPath.Child("jwks", "cacheTTL"), p.JWKS.CacheTTL); err != nil {
 				errs = append(errs, err)
@@ -554,6 +557,27 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 	}
 
 	return errs
+}
+
+// validateProviderServers mirrors packdb's AuthConfig::Validate: a provider
+// must name the server clients authenticate at exactly once, as the flat
+// discoveryURL or as target. Setting neither leaves the provider naming no
+// server; setting both is ambiguous. packdb refuses to start on either,
+// taking every engine down with it. The CRD's CEL rule catches this too —
+// this exists so the rejection carries the reason rather than the rule.
+//
+// exchange is deliberately unconstrained here: packdb accepts it alongside
+// either spelling, resolving the trusted issuer as exchange-else-target.
+func validateProviderServers(p *OIDCProviderSpec, base *field.Path) field.ErrorList {
+	switch {
+	case p.DiscoveryURL != "" && p.Target != nil:
+		return field.ErrorList{field.Invalid(base, p.Name,
+			"must not set both discoveryURL and target: the flat discoveryURL is sugar for target.discoveryURL")}
+	case p.DiscoveryURL == "" && p.Target == nil:
+		return field.ErrorList{field.Required(base.Child("target"),
+			"a provider must name the server clients authenticate at, as either discoveryURL or target")}
+	}
+	return nil
 }
 
 // parsePackdbDuration parses a duration string using the grammar packdb's
@@ -923,8 +947,8 @@ func validatePreferredAuthorizationServer(auth *AuthSpec, path *field.Path) fiel
 		return nil
 	}
 	if auth.OIDC != nil {
-		for _, p := range auth.OIDC.Providers {
-			if p.Name == preferred {
+		for i := range auth.OIDC.Providers {
+			if auth.OIDC.Providers[i].Name == preferred {
 				return nil
 			}
 		}

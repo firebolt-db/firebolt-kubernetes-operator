@@ -214,7 +214,7 @@
                 "providers": {
                   "description": "Providers lists the trusted OIDC identity providers. Must be\nnon-empty when OIDC is configured at all \u2014 packdb rejects a\npresent oidc block with an empty providers list.",
                   "items": {
-                    "description": "OIDCProviderSpec configures one trusted OIDC identity provider. packdb\nvalidates bearer tokens against this provider's published keys \u2014 it is\na JWT validator, not an OAuth2 client: there is no client ID/secret,\nredirect URI, or authorization-code flow here, because the engine never\ninitiates a login. An external client (the Firebolt CLI, a BI tool)\nperforms the OIDC flow itself and presents the resulting access token\nto the engine as a bearer token.",
+                    "description": "OIDCProviderSpec configures one trusted OIDC identity provider. packdb\nvalidates bearer tokens against this provider's published keys \u2014 it is\na JWT validator, not an OAuth2 client: there is no client ID/secret,\nredirect URI, or authorization-code flow here, because the engine never\ninitiates a login. An external client (the Firebolt CLI, a BI tool)\nperforms the OIDC flow itself and presents the resulting access token\nto the engine as a bearer token.\n\nA provider names the server clients authenticate at either as the flat\nDiscoveryURL below or as Target \u2014 exactly one, never both, matching\npackdb, which refuses to start otherwise. The CEL rule enforces that at\nthe API server so it holds even with the validating webhook disabled.",
                     "properties": {
                       "audience": {
                         "description": "Audience is the expected \"aud\" claim on tokens from this provider.\nDefaults to the Instance's canonical issuer URL when empty\n(packdb's own default).",
@@ -232,10 +232,26 @@
                         "additionalProperties": false
                       },
                       "discoveryURL": {
-                        "description": "DiscoveryURL is the provider's OpenID Connect discovery endpoint\n(typically ending in /.well-known/openid-configuration). Must be\nan https:// URL \u2014 packdb requires TLS for every outbound OIDC\nfetch except loopback.",
+                        "description": "DiscoveryURL is the provider's OpenID Connect discovery endpoint\n(typically ending in /.well-known/openid-configuration). Must be\nan https:// URL \u2014 packdb requires TLS for every outbound OIDC\nfetch except loopback.\n\nSugar for a Target carrying only this URL, and the shape every\nsingle-server provider should keep using. Set this or Target, not\nboth. Combining it with Exchange is legal and makes the provider\ntwo-hop, exactly as Target plus Exchange does.",
                         "minLength": 1,
                         "pattern": "^https://.+",
                         "type": "string"
+                      },
+                      "exchange": {
+                        "description": "Exchange names the RFC 8693 server whose issuer engines trust,\nmaking this provider two-hop. Omit it for a provider whose tokens\nengines accept directly.",
+                        "properties": {
+                          "discoveryURL": {
+                            "description": "DiscoveryURL is this server's RFC 8414 discovery endpoint\n(typically ending in /.well-known/oauth-authorization-server).\nMust be an https:// URL.",
+                            "minLength": 1,
+                            "pattern": "^https://.+",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "discoveryURL"
+                        ],
+                        "type": "object",
+                        "additionalProperties": false
                       },
                       "jitProvisioning": {
                         "description": "JITProvisioning controls automatic user creation on first login via\nthis provider.",
@@ -273,6 +289,71 @@
                         "pattern": "^[^_].*$",
                         "type": "string"
                       },
+                      "roleMapping": {
+                        "description": "RoleMapping gives a principal membership in existing Firebolt\nroles based on a claim their token carries.",
+                        "properties": {
+                          "claim": {
+                            "description": "Claim is the token claim whose value is looked up in Map. Defaults\nto packdb's own default (\"role\") when empty.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "map": {
+                            "description": "Map lists the claim-value-to-role entries. A claim value may appear\nat most once: packdb refuses a value naming two roles rather than\nguess an order to apply them in. Declared as a keyed list so the\nAPI server enforces that itself, which the validating webhook \u2014\ndisabled in the shipped chart \u2014 cannot be relied on to do.",
+                            "items": {
+                              "description": "RoleMappingEntrySpec maps one value of a token claim to one Firebolt\nrole.",
+                              "properties": {
+                                "role": {
+                                  "description": "Role is the Firebolt role a matching principal is given membership\nin. The role must already exist \u2014 a mapping grants membership, it\ndoes not create the role or any privilege it holds.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "description": "Value is the claim value this entry matches.",
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "role",
+                                "value"
+                              ],
+                              "type": "object",
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "x-kubernetes-list-map-keys": [
+                              "value"
+                            ],
+                            "x-kubernetes-list-type": "map"
+                          }
+                        },
+                        "required": [
+                          "map"
+                        ],
+                        "type": "object",
+                        "additionalProperties": false
+                      },
+                      "target": {
+                        "description": "Target names the server clients authenticate at, when the flat\nDiscoveryURL above cannot express the provider \u2014 because the\ntoken-endpoint auth method needs pinning, or because Exchange\nmakes the provider two-hop and the two servers must be named\napart.",
+                        "properties": {
+                          "discoveryURL": {
+                            "description": "DiscoveryURL is this server's OpenID Connect / RFC 8414 discovery\nendpoint. Must be an https:// URL \u2014 packdb requires TLS for every\noutbound OIDC fetch except loopback.",
+                            "minLength": 1,
+                            "pattern": "^https://.+",
+                            "type": "string"
+                          },
+                          "tokenEndpointAuthMethod": {
+                            "description": "TokenEndpointAuthMethod pins the client authentication method for\nthis server's token endpoint (for example \"client_secret_post\").\nThe engine does not interpret it \u2014 it only republishes it to\nclients, for identity providers whose discovery document omits\ntoken_endpoint_auth_methods_supported and would otherwise leave a\nclient on the RFC 8414 default. Left as a free-form string rather\nthan an enum, matching packdb, so a method this operator has never\nheard of stays expressible.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "discoveryURL"
+                        ],
+                        "type": "object",
+                        "additionalProperties": false
+                      },
                       "title": {
                         "description": "Title is a human-readable label for this provider, shown in UIs.\nDefaults to Name when empty.",
                         "type": "string"
@@ -284,11 +365,16 @@
                       }
                     },
                     "required": [
-                      "discoveryURL",
                       "name",
                       "usernameMapping"
                     ],
                     "type": "object",
+                    "x-kubernetes-validations": [
+                      {
+                        "message": "set exactly one of discoveryURL or target: the flat discoveryURL is sugar for target.discoveryURL",
+                        "rule": "has(self.discoveryURL) != has(self.target)"
+                      }
+                    ],
                     "additionalProperties": false
                   },
                   "minItems": 1,

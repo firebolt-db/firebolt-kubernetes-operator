@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -28,7 +29,7 @@ import (
 
 // testdata/packdb-application-config.schema.json is a point-in-time copy of
 // packdb's src/Core/Application/application-config.schema.json, captured at
-// packdb commit 2127bc79a9dc3238c0a1c04edcc830eca06da596 (2026-07-01). This
+// packdb commit ce2d88d4aad60862b44cfeb232fec5330ad68d21 (2026-09-02). This
 // file is the auth/TLS work's most exhaustive check on rendered auth config: it is
 // additionalProperties:false at every level, so validating buildConfigMap's
 // full output against it catches any unknown/misplaced key — the class of
@@ -259,6 +260,16 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 		},
 	}
 
+	// A two-hop provider, kept separate from the oidc case above because it
+	// exercises the opposite spelling: servers named under target/exchange
+	// with no flat discovery_url. role_mapping is deliberately absent — see
+	// TestRoleMapping_NotYetInVendoredPackdbSchema.
+	twoHopInfo := testInstanceInfoWithAuth()
+	twoHopInfo.Auth.Spec.PreferredAuthorizationServer = "firehq"
+	twoHopInfo.Auth.Spec.OIDC = &computev1alpha1.OIDCAuthSpec{
+		Providers: []computev1alpha1.OIDCProviderSpec{conformanceTwoHopProvider()},
+	}
+
 	authAndTLSInfo := testInstanceInfoWithAuth()
 	authAndTLSInfo.TLS = testInstanceInfoWithTLS().TLS
 
@@ -269,6 +280,7 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 		{name: "disabled", info: testInstanceInfo()},
 		{name: "native", info: testInstanceInfoWithAuth()},
 		{name: "oidc", info: oidcInfo},
+		{name: "oidc-two-hop", info: twoHopInfo},
 		{name: "engine-tls", info: testInstanceInfoWithTLS()},
 		{name: "auth-and-engine-tls", info: authAndTLSInfo},
 	}
@@ -282,6 +294,60 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 				t.Error(v)
 			}
 		})
+	}
+}
+
+// conformanceTwoHopProvider is a two-hop provider with every field the
+// vendored schema knows about set.
+func conformanceTwoHopProvider() computev1alpha1.OIDCProviderSpec {
+	return computev1alpha1.OIDCProviderSpec{
+		Name:  "firehq",
+		Title: "Firebolt",
+		Target: &computev1alpha1.OIDCTargetSpec{
+			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
+			TokenEndpointAuthMethod: "client_secret_post",
+		},
+		Exchange: &computev1alpha1.OIDCExchangeSpec{
+			DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server",
+		},
+		UsernameMapping: "{{ sub }}",
+		JITProvisioning: &computev1alpha1.JITProvisioningSpec{Enabled: true, DefaultRoles: []string{"public"}},
+	}
+}
+
+// TestRoleMapping_NotYetInVendoredPackdbSchema pins a deliberate, known gap:
+// spec.auth.oidc.providers[].roleMapping renders a role_mapping key that the
+// engine does not yet accept, so an instance that sets it against an engine
+// built before that key exists fails to start. The field ships ahead of the
+// engine so the two-hop config a control plane injects is expressible in one
+// piece rather than in two releases.
+//
+// This asserts the gap rather than skipping it: when the key lands in packdb
+// and this schema is re-vendored, this test fails, which is the signal to
+// delete it and fold role_mapping into the conformance cases above.
+func TestRoleMapping_NotYetInVendoredPackdbSchema(t *testing.T) {
+	schema := loadPackdbSchema(t)
+
+	info := testInstanceInfoWithAuth()
+	provider := conformanceTwoHopProvider()
+	provider.RoleMapping = &computev1alpha1.RoleMappingSpec{
+		Claim: "role",
+		Map:   []computev1alpha1.RoleMappingEntrySpec{{Value: "admin", Role: "account_admin"}},
+	}
+	info.Auth.Spec.OIDC = &computev1alpha1.OIDCAuthSpec{
+		Providers: []computev1alpha1.OIDCProviderSpec{provider},
+	}
+
+	var violations []string
+	schema.validate("<root>", renderedConfigDoc(t, info), &violations)
+	if len(violations) == 0 {
+		t.Fatal("vendored packdb schema now accepts role_mapping: fold it into " +
+			"TestBuildConfigMap_ConformsToPackdbSchema and delete this test")
+	}
+	for _, v := range violations {
+		if !strings.Contains(v, "role_mapping") {
+			t.Errorf("unexpected violation unrelated to role_mapping: %s", v)
+		}
 	}
 }
 
