@@ -28,7 +28,11 @@ import (
 
 // testdata/packdb-application-config.schema.json is a point-in-time copy of
 // packdb's src/Core/Application/application-config.schema.json, captured at
-// packdb commit 2127bc79a9dc3238c0a1c04edcc830eca06da596 (2026-07-01). This
+// packdb commit 2127bc79a9dc3238c0a1c04edcc830eca06da596 (2026-07-01), plus
+// storage.gcp.allow_engine_identity, a key buildConfigMap renders that the
+// captured copy predates. The copy is stale in other respects too, so keys are
+// added to it one at a time rather than by recapture, which keeps a diff here
+// scoped to the key it is about. This
 // file is the auth/TLS work's most exhaustive check on rendered auth config: it is
 // additionalProperties:false at every level, so validating buildConfigMap's
 // full output against it catches any unknown/misplaced key — the class of

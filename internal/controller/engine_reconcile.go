@@ -844,6 +844,21 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 		"logging": map[string]interface{}{
 			"format": "json",
 		},
+		// A credential-less external gs:// location authenticates as the engine
+		// pod's own Google identity. The engine refuses that unless a deployment
+		// permits it, because it cannot tell whose identity it runs as. An engine
+		// this operator deploys runs under a ServiceAccount its own operator
+		// created, so the identity is theirs to use, and they should not have to
+		// ask for it. Set only here, so a user's
+		// customEngineConfig.storage.gcp.allow_engine_identity: false still wins in
+		// the merge below. Emitted whatever backs managed tables: the key governs
+		// external locations only, and the engine puts no `gcp` block behind
+		// managed_table_storage.
+		"storage": map[string]interface{}{
+			"gcp": map[string]interface{}{
+				"allow_engine_identity": true,
+			},
+		},
 	}
 	if instanceInfo.TLS != nil {
 		coreConfig["endpoints"] = renderEndpointsConfig()
