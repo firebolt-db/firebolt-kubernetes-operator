@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.13.1...firebolt-operator-v0.14.0) (2026-09-03)
+
+
+### Features
+
+* **api:** two-hop OIDC providers and claim-to-role mapping (FB-3573) ([#213](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/213)) ([9b79ee3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9b79ee3357ddce1b329cba6424f5e95b3f55e236))
+
 ## [0.13.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.13.0...firebolt-operator-v0.13.1) (2026-09-03)
 
 
