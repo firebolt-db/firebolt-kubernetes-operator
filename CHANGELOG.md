@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.14.0...firebolt-operator-v0.14.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **controller:** always pull metadata image when metadataNG is set (FB-3815) ([#220](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/220)) ([dbd7f3a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/dbd7f3a97ff4cf3263dc15a11899b5cc33b0f077))
+
 ## [0.14.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.13.1...firebolt-operator-v0.14.0) (2026-09-03)
 
 

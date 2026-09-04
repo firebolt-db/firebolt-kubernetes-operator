@@ -1,5 +1,5 @@
 {
-  ".": "0.14.0",
+  ".": "0.14.1",
   "helm/firebolt-operator": "0.12.1",
   "helm/firebolt-operator-crds": "0.9.0"
 }
