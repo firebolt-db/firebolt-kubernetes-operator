@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.8.0...firebolt-operator-crds-chart-0.9.0) (2026-09-04)
+
+
+### Features
+
+* **api:** two-hop OIDC providers and claim-to-role mapping (FB-3573) ([#213](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/213)) ([9b79ee3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9b79ee3357ddce1b329cba6424f5e95b3f55e236))
+
 ## [0.8.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.7.0...firebolt-operator-crds-chart-0.8.0) (2026-09-02)
 
 
