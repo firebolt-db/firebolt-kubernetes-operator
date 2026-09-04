@@ -643,6 +643,47 @@ func TestMetadataNGPreservesUserImageAndRollsConfig(t *testing.T) {
 	}
 }
 
+// metadata-ng is typically paired with a floating tag (pd-dev). The exact
+// tag "dev" already defaults to Always; any other tag, including pd-dev,
+// would otherwise land IfNotPresent and pin the node to its first pull.
+func TestMetadataNGDefaultsImagePullPolicyAlways(t *testing.T) {
+	legacy := mkMetadataInstance()
+	legacy.Spec.Metadata.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:  computev1alpha1.MetadataContainerName,
+			Image: "ghcr.io/firebolt-db/metadata:pd-dev",
+		}},
+	}}
+	ng := legacy.DeepCopy()
+	ng.Spec.MetadataNG = true
+
+	legacyDep := buildMetadataDeployment(legacy, buildMetadataConfigYAML(legacy))
+	ngDep := buildMetadataDeployment(ng, buildMetadataConfigYAML(ng))
+
+	if got := legacyDep.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
+		t.Errorf("legacy imagePullPolicy = %q, want %q for a non-dev tag", got, corev1.PullIfNotPresent)
+	}
+	if got := ngDep.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
+		t.Errorf("metadata-ng imagePullPolicy = %q, want %q", got, corev1.PullAlways)
+	}
+}
+
+func TestMetadataNGHonorsExplicitImagePullPolicy(t *testing.T) {
+	inst := mkMetadataInstance()
+	inst.Spec.MetadataNG = true
+	inst.Spec.Metadata.Template = &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		Containers: []corev1.Container{{
+			Name:            computev1alpha1.MetadataContainerName,
+			Image:           "ghcr.io/firebolt-db/metadata:pd-dev",
+			ImagePullPolicy: corev1.PullIfNotPresent,
+		}},
+	}}
+	dep := buildMetadataDeployment(inst, buildMetadataConfigYAML(inst))
+	if got := dep.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
+		t.Errorf("imagePullPolicy = %q, want the user-set %q", got, corev1.PullIfNotPresent)
+	}
+}
+
 // The metadata (pensieve) pod has the same security posture as the
 // internal PostgreSQL and Envoy gateway pods: built-in non-root user,
 // read-only rootfs, all capabilities dropped, RuntimeDefault seccomp, and

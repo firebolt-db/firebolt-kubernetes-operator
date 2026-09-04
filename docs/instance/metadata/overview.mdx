@@ -8,7 +8,7 @@ sidebarTitle: Overview
 
 The metadata service stores and serves engine metadata. It uses PostgreSQL as the backing database. Engines connect to it at startup and during operation so they can read the account and engine state they need to run queries.
 
-**Experimental:** `spec.metadataNG: true` selects metadata-ng configuration and UID/GID, but does not select the metadata image. Legacy behavior remains the default.
+**Experimental:** `spec.metadataNG: true` selects metadata-ng configuration and UID/GID, but does not select the metadata image. When `imagePullPolicy` is unset it also defaults the metadata container to `Always`, so a floating tag such as `pd-dev` is re-pulled instead of pinning a node to its first cached digest. Legacy behavior remains the default.
 
 The two services read different configuration documents. The legacy service reads a `pensieve_lite` document; metadata-ng reads a `pensieve_duck` document carrying only the listen address and the PostgreSQL `host`, `port`, and `database`, and rejects any other key at startup. `spec.id` and `spec.metadata.postgres.schema` are not rendered for metadata-ng: the service is isolated by the configured database and lays its catalog out across its own schemas inside it, so a custom `schema` has no effect with `metadataNG: true`.
 

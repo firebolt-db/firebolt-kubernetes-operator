@@ -382,7 +382,7 @@ func effectiveMetadataPodTemplate(
 	userPrimary, userSidecars := splitUserContainers(userPodSpec.Containers, computev1alpha1.MetadataContainerName)
 
 	image := metadataImageFromUser(userPrimary)
-	pullPolicy := metadataImagePullPolicy(userPrimary, image)
+	pullPolicy := metadataImagePullPolicy(instance, userPrimary, image)
 
 	metadataUID := metadataRunAsUID(instance)
 	configMapName := metadataConfigMapName(instance.Name)
@@ -560,12 +560,17 @@ func metadataImageFromUser(primary *corev1.Container) string {
 }
 
 // metadataImagePullPolicy returns the user-supplied pull policy on the
-// metadata primary container, falling back to the workload default rule for
-// the resolved image (the Kubernetes tag-based default, with "dev" treated
+// metadata primary container. When unset, metadata-ng defaults to Always
+// because that mode is typically paired with a floating tag (pd-dev) that
+// the tag-based rule would cache under IfNotPresent. Legacy metadata
+// keeps the workload default (Kubernetes tag rule, with "dev" treated
 // like ":latest" — see resolveWorkloadImagePullPolicy).
-func metadataImagePullPolicy(primary *corev1.Container, image string) corev1.PullPolicy {
+func metadataImagePullPolicy(instance *computev1alpha1.FireboltInstance, primary *corev1.Container, image string) corev1.PullPolicy {
 	if primary != nil && primary.ImagePullPolicy != "" {
 		return primary.ImagePullPolicy
+	}
+	if instance.Spec.MetadataNG {
+		return corev1.PullAlways
 	}
 	return resolveWorkloadImagePullPolicy(image)
 }
