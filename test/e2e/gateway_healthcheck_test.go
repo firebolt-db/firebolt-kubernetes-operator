@@ -218,6 +218,45 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			)
 		})
 
+		It("should answer /healthz itself whatever query string the request carries", func() {
+			// Envoy's health-check filter matches ":path", which carries the
+			// query string, while every route matcher in front of the gateway
+			// ignores it. A health matcher that accepted only the bare path
+			// would therefore hand "/healthz?..." to the engine-routing chain
+			// behind it, and a request naming an engine there registers wake
+			// demand. The engine name below that does not exist is the
+			// discriminator: routed, it can only fail, so a 200 proves the
+			// health filter answered.
+			assertHealthAnswered := func(pathAndQuery string) {
+				GinkgoHelper()
+				status, body, err := gatewayHealthResponse(clientPod, instanceName, pathAndQuery)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).To(Equal(http.StatusOK),
+					"%s was not answered by the gateway's health filter; response body: %s", pathAndQuery, body)
+			}
+
+			By("Answering the bare health path")
+			assertHealthAnswered("/healthz")
+
+			By("Answering an empty query string")
+			assertHealthAnswered("/healthz?")
+
+			By("Answering an arbitrary query string")
+			assertHealthAnswered("/healthz?x=1")
+
+			By("Answering a query string naming a running engine")
+			assertHealthAnswered("/healthz?engine=" + engineName)
+
+			By("Answering a query string naming an engine that does not exist")
+			assertHealthAnswered("/healthz?engine=absent-engine")
+
+			By("Routing other paths that carry the same query string to the engine")
+			status, body, err := gatewayQueryResponse(clientPod, instanceName, "engine=absent-engine", "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).NotTo(Equal(http.StatusOK),
+				"a query for an absent engine was answered 200, so the health filter is swallowing more than /healthz; response body: %s", body)
+		})
+
 		It("should eject a terminating pod within one health check interval and clear the flag once a replacement is healthy", func() {
 			if !drainEjectionEnabled {
 				Skip("drain ejection requires engine to serve /health/ready on port 3473 " +
@@ -287,22 +326,39 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 // both the HTTP status and body. Unlike execCurlQuery, it deliberately does not
 // use curl --fail because routing-validation tests need to inspect 400 responses.
 func gatewayQueryResponse(clientPod, instanceName, rawQuery, headerEngine string) (int, string, error) {
-	const statusMarker = "\n__HTTP_STATUS__:"
-
-	serviceName := instanceName + controller.SuffixGateway
-	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80/?%s", serviceName, testNamespace, rawQuery)
 	curlArgs := []string{
-		"-sS",
-		"--connect-timeout", "2",
-		"--max-time", "15",
-		"-w", statusMarker + "%{http_code}",
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",
 	}
 	if headerEngine != "" {
 		curlArgs = append(curlArgs, "-H", "X-Firebolt-Engine: "+headerEngine)
 	}
-	curlArgs = append(curlArgs, "-d", LightQuery, url)
+	curlArgs = append(curlArgs, "-d", LightQuery)
+	return gatewayCurl(clientPod, instanceName, "/?"+rawQuery, curlArgs)
+}
+
+// gatewayHealthResponse issues a GET at the gateway's health endpoint,
+// pathAndQuery included verbatim so a caller can probe the query-string
+// shapes the health contract has to cover.
+func gatewayHealthResponse(clientPod, instanceName, pathAndQuery string) (int, string, error) {
+	return gatewayCurl(clientPod, instanceName, pathAndQuery, []string{"-X", "GET"})
+}
+
+// gatewayCurl runs curl inside the client pod against the instance gateway
+// Service and returns the response status and body.
+func gatewayCurl(clientPod, instanceName, pathAndQuery string, extraArgs []string) (int, string, error) {
+	const statusMarker = "\n__HTTP_STATUS__:"
+
+	serviceName := instanceName + controller.SuffixGateway
+	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:80%s", serviceName, testNamespace, pathAndQuery)
+	curlArgs := []string{
+		"-sS",
+		"--connect-timeout", "2",
+		"--max-time", "15",
+		"-w", statusMarker + "%{http_code}",
+	}
+	curlArgs = append(curlArgs, extraArgs...)
+	curlArgs = append(curlArgs, url)
 
 	args := kubectlArgs("exec", clientPod, "-n", testNamespace, "--", "curl")
 	args = append(args, curlArgs...)

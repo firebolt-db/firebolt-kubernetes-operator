@@ -68,6 +68,14 @@ const (
 	gatewayServicePort   int32 = 80
 	gatewayConfigKey           = "envoy.yaml"
 
+	// gatewayHealthPathMatchRegex is what every health_check filter matches
+	// ":path" against. The query string is part of that header, and route
+	// matching everywhere upstream ignores it, so a bare-path match leaves
+	// "/healthz?engine=<name>" to fall through into the Lua wake path, where
+	// it registers wake demand for the engine it names. Envoy matches a
+	// regex against the whole header value.
+	gatewayHealthPathMatchRegex = `^/healthz(\?.*)?$`
+
 	// gatewayWakeAgentHoldPort is the loopback port the wake-agent serves
 	// its hold endpoint on. Bound to 127.0.0.1 inside the pod, so it is
 	// reachable from Envoy and from nothing else.
@@ -766,7 +774,8 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                       headers:
                         - name: ":path"
                           string_match:
-                            exact: "/healthz"
+                            safe_regex:
+                              regex: '`+gatewayHealthPathMatchRegex+`'
                   - name: envoy.filters.http.lua
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
@@ -1021,7 +1030,8 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                       headers:
                         - name: ":path"
                           string_match:
-                            exact: "/healthz"
+                            safe_regex:
+                              regex: '`+gatewayHealthPathMatchRegex+`'
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -1283,7 +1293,8 @@ func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) 
                       headers:
                         - name: ":path"
                           string_match:
-                            exact: "/healthz"
+                            safe_regex:
+                              regex: '`+gatewayHealthPathMatchRegex+`'
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

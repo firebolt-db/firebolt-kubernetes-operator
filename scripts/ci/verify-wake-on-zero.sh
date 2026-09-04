@@ -19,12 +19,12 @@ set -euo pipefail
 # survives.
 #
 # The negative half of the same contract is pinned here too, while the engine
-# is parked: a health probe on the gateway's /healthz is answered by the
-# health-check filter ahead of the wake filter, so it never registers demand
-# and never wakes the engine. Both halves are asserted from outside the pod,
-# against the gateway Service — no filter-config inspection — so a refactor
-# that reorders the filters or moves the health path fails these checks
-# instead of slipping past them.
+# is parked: a health probe on the gateway's /healthz, bare or carrying any
+# query string, is answered by the health-check filter ahead of the wake
+# filter, so it never registers demand and never wakes the engine. Both
+# halves are asserted from outside the pod, against the gateway Service — no
+# filter-config inspection — so a refactor that reorders the filters or moves
+# the health path fails these checks instead of slipping past them.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -66,7 +66,7 @@ WAKE_WAIT_SECONDS="${WAKE_WAIT_SECONDS:-240}"
 # engine contract.
 ENDPOINT_WAIT_SECONDS="${ENDPOINT_WAIT_SECONDS:-60}"
 
-# How many health probes to send at the parked engine, how long the probe
+# How many probe rounds to send at the parked engine, how long the probe
 # pod may take to schedule and finish them, and how long the engine must
 # still be observed at zero after the last probe. The settle window matters:
 # stamped demand turns into a scale-up only after the operator notices it —
@@ -75,6 +75,8 @@ ENDPOINT_WAIT_SECONDS="${ENDPOINT_WAIT_SECONDS:-60}"
 # the engine is watched well past both after the probes finish. An engine
 # still at zero then proves no probe registered demand.
 HEALTH_PROBE_COUNT="${HEALTH_PROBE_COUNT:-10}"
+# Probe shapes per round; keep in step with the curl calls in the probe loop.
+HEALTH_PROBE_SHAPES=7
 HEALTH_PROBE_TIMEOUT="${HEALTH_PROBE_TIMEOUT:-120}"
 HEALTH_SETTLE_SECONDS="${HEALTH_SETTLE_SECONDS:-20}"
 
@@ -234,10 +236,17 @@ echo "No endpoints, as expected"
 # placed ahead of the wake filter, so a probe is served by Envoy itself and
 # never reaches the wake path. Monitoring depends on that ordering: if a
 # refactor moved the health-check filter behind the wake filter, every probe
-# would stamp demand and no parked engine would ever stay parked. Two probe
-# shapes are sent because they fail differently under a reorder — a bare
-# probe would be rejected for its missing engine selector (non-200), and one
-# naming the engine would wake it (scale-up during the hold).
+# would stamp demand and no parked engine would ever stay parked.
+#
+# Envoy's health matcher reads ":path", which includes the query string, while
+# no route matcher in front of the gateway looks at the query at all — so
+# "/healthz?engine=<name>" arrives here as a health request and must be
+# answered as one. Each path shape is therefore probed twice, once plain and
+# once naming the engine in a header, plus one naming it in the query string.
+# The header is what makes the parked-engine assertion bite: the wake filter
+# rejects a request with no engine selector before it reaches the agent, so a
+# shape sent only plain could fall through the health filter without stamping
+# demand, and only its non-200 response would give the regression away.
 health_url="http://${GATEWAY_SVC}.${NAMESPACE}.svc.cluster.local:80/healthz"
 health_probe_pod="healthz-probe-$$"
 
@@ -247,9 +256,13 @@ echo "Probing ${health_url} while the engine is parked (${HEALTH_PROBE_COUNT} ro
   kubectl run "$health_probe_pod" -n "$NAMESPACE" --rm -i --restart=Never \
     --image="${CURL_IMAGE}" --command -- sh -c "
       for i in \$(seq 1 ${HEALTH_PROBE_COUNT}); do
-        curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 '${health_url}'
+        for target in '${health_url}' '${health_url}?' '${health_url}?x=1'; do
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 \"\$target\"
+          curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 \
+            -H 'X-Firebolt-Engine: ${ENGINE_NAME}' \"\$target\"
+        done
         curl -sS -o /dev/null -w '%{http_code}\n' --max-time 5 \
-          -H 'X-Firebolt-Engine: ${ENGINE_NAME}' '${health_url}'
+          '${health_url}?engine=${ENGINE_NAME}'
         sleep 1
       done"
 ) > /tmp/healthz-probe-output 2>&1 &
@@ -354,10 +367,11 @@ require_engine_parked
 
 # Every probe must have been answered 200 by the gateway itself. A 400 means
 # the probe fell through to engine routing (the health-check filter no longer
-# answers ahead of it); a 404 means the health path moved off /healthz.
-# Either way, every external monitor pointed at the gateway breaks with it.
+# answers ahead of it); a 404 means the health path moved off /healthz; a 000
+# means curl gave up while the wake filter held the probe. Either way, every
+# external monitor pointed at the gateway breaks with it.
 health_statuses=$(grep -Eo '^[0-9]{3}$' /tmp/healthz-probe-output || true)
-health_expected=$(( HEALTH_PROBE_COUNT * 2 ))
+health_expected=$(( HEALTH_PROBE_COUNT * HEALTH_PROBE_SHAPES ))
 if [[ -z "${health_statuses}" ]]; then
   health_got=0
 else
