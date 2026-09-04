@@ -1638,3 +1638,175 @@ func TestGatewayEnvoyPreStopDrain(t *testing.T) {
 		t.Errorf("Args = %v, want an immediate zero-time drain so kept-alive connections close as their work finishes", envoy.Args)
 	}
 }
+
+// TestBuildEnvoyConfigYAMLHealthPathIgnoresQueryString pins the gateway's
+// health contract: /healthz is answered by the health-check filter whatever
+// query string it carries, and nothing else is. Envoy matches ":path"
+// including the query, so a matcher that only accepts the bare path lets
+// "/healthz?engine=<name>" past the filter and into the Lua wake path, where
+// it registers wake demand — an unauthenticated caller can then wake parked
+// engines at will. Every health-check filter in the config is checked, so the
+// client listener and the always-present stats listener cannot drift apart.
+func TestBuildEnvoyConfigYAMLHealthPathIgnoresQueryString(t *testing.T) {
+	healthPaths := []string{
+		"/healthz",
+		"/healthz?",
+		"/healthz?x=1",
+		"/healthz?engine=eng",
+		"/healthz?a=1&b=2",
+	}
+	otherPaths := []string{
+		"/",
+		"/?engine=eng",
+		"/query?engine=eng",
+		"/healthzz",
+		"/healthz/",
+		"/healthz/?x=1",
+		"/HEALTHZ",
+		"//healthz",
+		"/healthz%3Fx=1",
+	}
+
+	for _, tc := range []struct {
+		name          string
+		instance      *computev1alpha1.FireboltInstance
+		wantListeners []string
+	}{
+		{
+			name: "client and stats listeners",
+			instance: &computev1alpha1.FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+				Spec: computev1alpha1.FireboltInstanceSpec{
+					Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
+				},
+			},
+			wantListeners: []string{gatewayQueryListenerName, "stats_listener"},
+		},
+		{
+			// Gateway TLS requested but not issued: only the stats listener
+			// is rendered, and its /healthz still carries the liveness probe.
+			name: "fail-closed stats listener",
+			instance: &computev1alpha1.FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+				Spec: computev1alpha1.FireboltInstanceSpec{
+					Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
+					TLS: &computev1alpha1.TLSSpec{
+						Gateway: &computev1alpha1.TLSListenerSpec{Enabled: true},
+					},
+				},
+			},
+			wantListeners: []string{"stats_listener"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var parsed map[string]any
+			if err := yaml.Unmarshal([]byte(buildEnvoyConfigYAML(tc.instance, true)), &parsed); err != nil {
+				t.Fatalf("emitted envoy config is not valid YAML: %v", err)
+			}
+			matchers := healthCheckPathMatchers(t, parsed)
+			var got []string
+			for _, m := range matchers {
+				got = append(got, m.listener)
+			}
+			slices.Sort(got)
+			want := slices.Clone(tc.wantListeners)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Fatalf("listeners carrying a health-check :path matcher = %v, want %v", got, want)
+			}
+			for _, m := range matchers {
+				listener, matcher := m.listener, m.matcher
+				for _, path := range healthPaths {
+					if !stringMatcherAccepts(t, matcher, path) {
+						t.Errorf("%s: health-check filter does not answer %q, so it falls through to engine routing",
+							listener, path)
+					}
+				}
+				for _, path := range otherPaths {
+					if stringMatcherAccepts(t, matcher, path) {
+						t.Errorf("%s: health-check filter answers %q, which is not the health endpoint",
+							listener, path)
+					}
+				}
+			}
+		})
+	}
+}
+
+// healthPathMatcher is one health_check filter's ":path" string_match and the
+// listener it was rendered on.
+type healthPathMatcher struct {
+	listener string
+	matcher  map[string]any
+}
+
+// healthCheckPathMatchers returns the ":path" string_match of every
+// health_check HTTP filter in the emitted config. One entry per filter, so a
+// listener carrying two of them is visible rather than collapsed.
+func healthCheckPathMatchers(t *testing.T, parsed map[string]any) []healthPathMatcher {
+	t.Helper()
+	var matchers []healthPathMatcher
+	listeners := parsed["static_resources"].(map[string]any)["listeners"].([]any)
+	for _, l := range listeners {
+		lm := l.(map[string]any)
+		name, _ := lm["name"].(string)
+		for _, chain := range lm["filter_chains"].([]any) {
+			for _, f := range chain.(map[string]any)["filters"].([]any) {
+				hcm := f.(map[string]any)["typed_config"].(map[string]any)
+				httpFilters, ok := hcm["http_filters"].([]any)
+				if !ok {
+					continue
+				}
+				for _, hf := range httpFilters {
+					hfm := hf.(map[string]any)
+					if hfm["name"] != "envoy.filters.http.health_check" {
+						continue
+					}
+					headers, ok := hfm["typed_config"].(map[string]any)["headers"].([]any)
+					if !ok || len(headers) != 1 {
+						t.Fatalf("listener %s: health_check filter headers = %v, want exactly one matcher",
+							name, hfm["typed_config"].(map[string]any)["headers"])
+					}
+					header := headers[0].(map[string]any)
+					if header["name"] != ":path" {
+						t.Fatalf("listener %s: health_check matches header %v, want \":path\"", name, header["name"])
+					}
+					sm, ok := header["string_match"].(map[string]any)
+					if !ok {
+						t.Fatalf("listener %s: health_check :path string_match missing or wrong type: %T",
+							name, header["string_match"])
+					}
+					matchers = append(matchers, healthPathMatcher{listener: name, matcher: sm})
+				}
+			}
+		}
+	}
+	return matchers
+}
+
+// stringMatcherAccepts evaluates an Envoy StringMatcher against a value, so
+// the health contract is asserted as behavior rather than as config shape.
+// safe_regex is anchored because Envoy matches a regex against the entire
+// input, while Go's MatchString reports a substring hit.
+func stringMatcherAccepts(t *testing.T, matcher map[string]any, value string) bool {
+	t.Helper()
+	if exact, ok := matcher["exact"].(string); ok {
+		return value == exact
+	}
+	if prefix, ok := matcher["prefix"].(string); ok {
+		return strings.HasPrefix(value, prefix)
+	}
+	if re, ok := matcher["safe_regex"].(map[string]any); ok {
+		rx, ok := re["regex"].(string)
+		if !ok {
+			t.Fatalf("safe_regex.regex missing or wrong type: %T", re["regex"])
+		}
+		compiled, err := regexp.Compile(`\A(?:` + rx + `)\z`)
+		if err != nil {
+			t.Fatalf("safe_regex.regex %q does not compile: %v", rx, err)
+		}
+		return compiled.MatchString(value)
+	}
+	t.Fatalf("unsupported string_match %v", keysOf(matcher))
+	return false
+}
