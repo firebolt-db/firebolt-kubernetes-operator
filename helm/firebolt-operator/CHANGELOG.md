@@ -2,6 +2,19 @@
 
 appVersion: v0.1.1
 
+## [0.13.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.12.1...firebolt-operator-chart-0.13.0) (2026-09-04)
+
+
+### Features
+
+* **api:** two-hop OIDC providers and claim-to-role mapping (FB-3573) ([#213](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/213)) ([9b79ee3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9b79ee3357ddce1b329cba6424f5e95b3f55e236))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.14.0 ([ce772ad](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ce772adbe1e4fd281ae318e411135717d62eeddc))
+* **deps:** set chart appVersion to v0.14.1 ([a045460](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a045460621bce07890a6da511df2b5c4757ca988))
+
 ## [0.12.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.12.0...firebolt-operator-chart-0.12.1) (2026-09-03)
 
 
