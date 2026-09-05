@@ -1345,6 +1345,7 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            effectiveServiceAccountName(spec, classInfo),
+					AutomountServiceAccountToken:  effectiveAutomountServiceAccountToken(spec, classInfo),
 					NodeSelector:                  effectiveNodeSelector(spec, classInfo),
 					Tolerations:                   effectiveTolerations(spec, classInfo),
 					Affinity:                      effectiveAffinity(spec, classInfo),
@@ -1563,6 +1564,24 @@ func effectiveServiceAccountName(spec *computev1alpha1.FireboltEngineSpec, class
 		return classInfo.Template.Spec.ServiceAccountName
 	}
 	return ""
+}
+
+// effectiveAutomountServiceAccountToken resolves automountServiceAccountToken
+// on the engine pod. Precedence: engine spec > FireboltEngineClass /
+// Preset template > unset. Unset means the kube default (true); the
+// helper returns nil so buildStatefulSet does not materialize a
+// pointer the apiserver did not store. The same helper is used by
+// buildStatefulSet and stsMatchesSpec.
+func effectiveAutomountServiceAccountToken(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) *bool {
+	if v := engineTemplate(spec).Spec.AutomountServiceAccountToken; v != nil {
+		b := *v
+		return &b
+	}
+	if classInfo != nil && classInfo.Template != nil && classInfo.Template.Spec.AutomountServiceAccountToken != nil {
+		b := *classInfo.Template.Spec.AutomountServiceAccountToken
+		return &b
+	}
+	return nil
 }
 
 // effectiveNodeSelector merges the class template's nodeSelector with the
@@ -3189,6 +3208,21 @@ func stringPtrsEqual(a, b *string) bool {
 // PreemptLowerPriority on read-back via the apiserver in some
 // versions; comparing by value-or-empty keeps stsMatchesSpec from
 // rolling a fresh generation on that no-op default flip.
+func automountServiceAccountTokenEqual(a, b *bool) bool {
+	return automountServiceAccountTokenValue(a) == automountServiceAccountTokenValue(b)
+}
+
+// automountServiceAccountTokenValue is the kubelet default: unset
+// automounts the token. An apiserver or admission round-trip can
+// materialize true for an omitted field; comparing by this value keeps
+// that flip from rolling a generation.
+func automountServiceAccountTokenValue(v *bool) bool {
+	if v == nil {
+		return true
+	}
+	return *v
+}
+
 func preemptionPolicyEqual(a, b *corev1.PreemptionPolicy) bool {
 	av, bv := corev1.PreemptionPolicy(""), corev1.PreemptionPolicy("")
 	if a != nil {
@@ -3409,6 +3443,9 @@ func stsMatchesSpec(sts *appsv1.StatefulSet, spec *computev1alpha1.FireboltEngin
 	}
 
 	if podSpec.ServiceAccountName != effectiveServiceAccountName(spec, classInfo) {
+		return false
+	}
+	if !automountServiceAccountTokenEqual(podSpec.AutomountServiceAccountToken, effectiveAutomountServiceAccountToken(spec, classInfo)) {
 		return false
 	}
 
