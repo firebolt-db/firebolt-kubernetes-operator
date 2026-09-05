@@ -47,6 +47,62 @@ func TestUseDirectEngineRepositoryPreservesUserOverride(t *testing.T) {
 	}
 }
 
+// TestDisableEngineTelemetryInjectsDoNotTrack pins the engine-pod opt-out
+// behavior: DO_NOT_TRACK=1 is stamped only after DisableEngineTelemetry(),
+// injection is skipped when the user already supplies the key (Server-Side
+// Apply rejects duplicate env names, so the user entry must be the only
+// one), and the default rendering stays untouched.
+func TestDisableEngineTelemetryInjectsDoNotTrack(t *testing.T) {
+	t.Cleanup(func() { engineTelemetryDisabled = false })
+
+	findDoNotTrack := func(env []corev1.EnvVar) []int {
+		var idx []int
+		for i, e := range env {
+			if e.Name == EngineDoNotTrackEnvKey {
+				idx = append(idx, i)
+			}
+		}
+		return idx
+	}
+
+	engineTelemetryDisabled = false
+	if got := findDoNotTrack(buildEngineContainerEnv(&computev1alpha1.FireboltEngineSpec{}, nil)); len(got) != 0 {
+		t.Errorf("telemetry enabled: DO_NOT_TRACK unexpectedly injected at %v", got)
+	}
+
+	DisableEngineTelemetry()
+	env := buildEngineContainerEnv(&computev1alpha1.FireboltEngineSpec{}, nil)
+	idx := findDoNotTrack(env)
+	if len(idx) != 1 {
+		t.Fatalf("telemetry disabled: DO_NOT_TRACK occurrences = %d, want 1", len(idx))
+	}
+	if env[idx[0]].Value != "1" {
+		t.Errorf("DO_NOT_TRACK = %q, want %q", env[idx[0]].Value, "1")
+	}
+
+	// A user-supplied DO_NOT_TRACK suppresses the operator's injection:
+	// the rendered env must carry exactly one entry — the user's — or
+	// Server-Side Apply would reject the StatefulSet for a duplicate key.
+	spec := &computev1alpha1.FireboltEngineSpec{
+		Template: &corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: computev1alpha1.EngineContainerName,
+					Env:  []corev1.EnvVar{{Name: EngineDoNotTrackEnvKey, Value: "0"}},
+				}},
+			},
+		},
+	}
+	env = buildEngineContainerEnv(spec, nil)
+	idx = findDoNotTrack(env)
+	if len(idx) != 1 {
+		t.Fatalf("with user override: DO_NOT_TRACK occurrences = %d, want 1 (user entry only)", len(idx))
+	}
+	if got := env[idx[0]].Value; got != "0" {
+		t.Errorf("DO_NOT_TRACK = %q, want user value %q", got, "0")
+	}
+}
+
 // TestResolveImageRef pins the partial-override semantics that make
 // ImageSpec.Repository and ImageSpec.Tag independently optional. Each
 // dimension must fall back to its component default on its own so users

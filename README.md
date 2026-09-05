@@ -70,9 +70,13 @@ Image and chart pulls through `oci.firebolt.io` additionally record the requeste
 
 You can opt out in any of these ways:
 
-- Set `telemetry.enabled=false` in the Helm values. This disables runtime events
-  and switches the default operator and engine repositories to GHCR; custom
-  image repositories remain unchanged.
+- Set `telemetry.enabled=false` in the Helm values. This disables runtime events,
+  switches the default operator and engine repositories to GHCR (custom
+  image repositories remain unchanged), and sets `DO_NOT_TRACK=1` on every
+  deployed engine container so the engines' own usage telemetry is disabled
+  as well. An engine or class template that sets `DO_NOT_TRACK` in its
+  container `env` keeps its value; `envFrom` sources cannot override the
+  injected entry, because Kubernetes gives `env` precedence over `envFrom`.
 - Install the chart from `oci://ghcr.io/firebolt-db/helm-charts` to bypass Scarf
   for the chart download as well. Helm selects the chart repository before it
   reads chart values.
@@ -103,7 +107,7 @@ the manager uses when you run it directly. The Helm chart default is what the
 | `--engine-max-cpu` | `""` | Not set | Maximum allowed CPU request and limit on the engine container (`spec.template.spec.containers[name=engine].resources`). Empty disables the bound. |
 | `--engine-max-memory` | `""` | Not set | Maximum allowed memory request and limit on the engine container. Empty disables the bound. |
 | `--engine-max-ephemeral-storage` | `""` | Not set | Maximum allowed ephemeral-storage request and limit on the engine container. Empty disables the bound. |
-| `--telemetry` | `true` | `true` | Send a once-daily anonymous aggregate usage event. |
+| `--telemetry` | `true` | `true` | Send a once-daily anonymous aggregate usage event. When `false`, the operator also stamps `DO_NOT_TRACK=1` on deployed engine containers and defaults engine pulls to GHCR. |
 | `--telemetry-endpoint` | `https://telemetry.firebolt.io/firebolt-operator` | Same as binary | Scarf Event Collection endpoint for anonymous aggregate usage events. |
 | `--zap-devel` | `false` | Not set | Enable controller-runtime development logging defaults. |
 | `--zap-encoder` | `json` | `json` | Log encoding. Valid values are `json` and `console`. |
