@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.14.1...firebolt-operator-v0.15.0) (2026-09-07)
+
+
+### Features
+
+* **controller:** overlay automountServiceAccountToken from preset and class (FB-3833) ([#224](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/224)) ([c54f0ea](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c54f0ea6f75d24d25f1033169dacda8332a73775))
+
+
+### Dependencies
+
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260907054900.7676b5def2cd ([#225](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/225)) ([c47c9b7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c47c9b7267c080f21ed7c314508aa22338a3e895))
+
 ## [0.14.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.14.0...firebolt-operator-v0.14.1) (2026-09-04)
 
 
