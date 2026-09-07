@@ -51,6 +51,51 @@ func classWith(meta *metav1.ObjectMeta, spec *corev1.PodSpec) *computev1alpha1.F
 	}
 }
 
+func TestEffectiveAutomountServiceAccountToken(t *testing.T) {
+	classOff := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{AutomountServiceAccountToken: ptr(false)}))
+	specOn := testSpec()
+	setSpecTemplatePod(specOn, func(p *corev1.PodSpec) { p.AutomountServiceAccountToken = ptr(true) })
+	specOff := testSpec()
+	setSpecTemplatePod(specOff, func(p *corev1.PodSpec) { p.AutomountServiceAccountToken = ptr(false) })
+
+	tests := []struct {
+		name      string
+		spec      *computev1alpha1.FireboltEngineSpec
+		classInfo *FireboltEngineClassInfo
+		want      *bool
+	}{
+		{"engine wins over class", specOn, classOff, ptr(true)},
+		{"class fills in when engine unset", testSpec(), classOff, ptr(false)},
+		{"unset when neither side sets it", testSpec(), nil, nil},
+		{"engine false is not treated as unset", specOff, nil, ptr(false)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := effectiveAutomountServiceAccountToken(tc.spec, tc.classInfo)
+			if !automountServiceAccountTokenPtrsEqual(got, tc.want) {
+				t.Errorf("effectiveAutomountServiceAccountToken = %v, want %v", formatBoolPtr(got), formatBoolPtr(tc.want))
+			}
+		})
+	}
+}
+
+func automountServiceAccountTokenPtrsEqual(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func formatBoolPtr(v *bool) string {
+	if v == nil {
+		return "<nil>"
+	}
+	if *v {
+		return "true"
+	}
+	return "false"
+}
+
 func TestEffectiveServiceAccountName(t *testing.T) {
 	classWithSA := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{ServiceAccountName: "class-sa"}))
 	specWithSA := testSpec()

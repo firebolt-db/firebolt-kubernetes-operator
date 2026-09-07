@@ -139,6 +139,7 @@ func overlayPresetPodTemplate(fake *computev1alpha1.FireboltEngineSpec, class *F
 
 func overlayPresetPodSpec(spec *corev1.PodSpec, fake *computev1alpha1.FireboltEngineSpec, class *FireboltEngineClassInfo) {
 	spec.ServiceAccountName = effectiveServiceAccountName(fake, class)
+	spec.AutomountServiceAccountToken = effectiveAutomountServiceAccountToken(fake, class)
 	spec.NodeSelector = effectiveNodeSelector(fake, class)
 	spec.Tolerations = effectiveTolerations(fake, class)
 	spec.Affinity = effectiveAffinity(fake, class)

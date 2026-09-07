@@ -1838,6 +1838,41 @@ func TestStsMatchesSpec(t *testing.T) {
 		}
 	})
 
+	t.Run("unset automountServiceAccountToken matches a freshly built STS", func(t *testing.T) {
+		spec := testSpec()
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		if sts.Spec.Template.Spec.AutomountServiceAccountToken != nil {
+			t.Fatalf("AutomountServiceAccountToken = %v, want unset", formatBoolPtr(sts.Spec.Template.Spec.AutomountServiceAccountToken))
+		}
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
+			t.Fatal("stsMatchesSpec() want true when automount is unset on both sides")
+		}
+	})
+
+	t.Run("nil automount does not phantom-drift against kube default true", func(t *testing.T) {
+		spec := testSpec()
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		sts.Spec.Template.Spec.AutomountServiceAccountToken = ptr(true)
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
+			t.Fatal("stsMatchesSpec() want true when the STS materializes kube's default automount=true")
+		}
+	})
+
+	t.Run("explicit automountServiceAccountToken false is stamped and compared", func(t *testing.T) {
+		spec := testSpec()
+		setSpecTemplatePod(spec, func(p *corev1.PodSpec) { p.AutomountServiceAccountToken = ptr(false) })
+		sts := buildStatefulSet(spec, testEngineName, testNamespace, 0, InstanceInfo{}, nil)
+		if sts.Spec.Template.Spec.AutomountServiceAccountToken == nil || *sts.Spec.Template.Spec.AutomountServiceAccountToken {
+			t.Fatalf("AutomountServiceAccountToken = %v, want false", formatBoolPtr(sts.Spec.Template.Spec.AutomountServiceAccountToken))
+		}
+		if !stsMatchesSpec(sts, spec, InstanceInfo{}, nil) {
+			t.Fatal("stsMatchesSpec() want true for matching automount=false")
+		}
+		if stsMatchesSpec(sts, testSpec(), InstanceInfo{}, nil) {
+			t.Fatal("stsMatchesSpec() want false when automount is cleared from spec")
+		}
+	})
+
 	t.Run("pod security context drift triggers mismatch", func(t *testing.T) {
 		sts := makeSTS(testEngineName, 0, 3)
 		// Drop fsGroup to simulate an STS built before the default existed:

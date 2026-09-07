@@ -30,6 +30,7 @@ The validating webhook and the Engine resolver reject every namespaced reference
 | `spec.template.spec.initContainers` | Yes | Node setup. Secret and ConfigMap env, and Secret, ConfigMap, and claim volumes, are rejected. |
 | `spec.template.spec.containers[name=="engine"].image` | Yes | Optional default engine image. |
 | `spec.template.spec.containers[name=="engine"].resources` | Yes | SKU resource requests and limits. |
+| `spec.template.spec.automountServiceAccountToken` | Yes | Not a namespaced identifier. Unset keeps the Kubernetes default (`true`). |
 | `spec.template.spec.serviceAccountName` | No | Belongs on FireboltEnginePreset. |
 | `spec.template.spec.imagePullSecrets` | No | Namespace-resolved Secret names. |
 | `spec.template.metadata.annotations[iam.amazonaws.com/role]` | No | kube2iam / kiam identity. |

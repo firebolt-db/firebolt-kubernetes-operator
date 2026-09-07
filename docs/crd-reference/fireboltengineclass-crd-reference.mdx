@@ -40,6 +40,7 @@ allowlist applies to `FireboltEngine.spec.template`.
 | Path | User-allowed | Notes |
 |---|---|---|
 | `serviceAccountName` | Yes | Engine `spec.template.spec.serviceAccountName` wins. |
+| `automountServiceAccountToken` | Yes | Engine wins when set. Unset keeps the Kubernetes default (`true`). |
 | `nodeSelector` | Yes | Map-merge; engine keys win. |
 | `tolerations` | Yes | Class + engine, concatenated. |
 | `affinity` | Yes | Engine wins if non-nil; no field-merge. |

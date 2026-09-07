@@ -24,6 +24,7 @@ The Engine template overrides Preset, and Preset overrides the class, for confli
 | Field | Resolution |
 |---|---|
 | `serviceAccountName` | Engine, then Preset, then class |
+| `automountServiceAccountToken` | Engine, then Preset, then class. Unset keeps the Kubernetes default (`true`) |
 | `nodeSelector` | Maps merge; Engine keys win over Preset keys, which win over class keys |
 | `tolerations`, `topologySpreadConstraints`, `imagePullSecrets` | Class entries, then Preset entries, then Engine entries |
 | `affinity`, pod `securityContext` | Engine value replaces Preset, which replaces class, when set |

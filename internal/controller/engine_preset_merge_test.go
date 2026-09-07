@@ -79,6 +79,26 @@ func TestOverlayPresetOnClass_EngineWinsThenPresetThenClass(t *testing.T) {
 		t.Errorf("class SA = %q, want class-sa", got)
 	}
 
+	classOff := newFireboltEngineClassInfo(classWith(nil, &corev1.PodSpec{AutomountServiceAccountToken: ptr(false)}))
+	presetOn := newFireboltEnginePresetInfo(&computev1alpha1.FireboltEnginePreset{
+		ObjectMeta: metav1.ObjectMeta{Name: computev1alpha1.FireboltEnginePresetDefaultName},
+		Spec: computev1alpha1.FireboltEnginePresetSpec{
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{AutomountServiceAccountToken: ptr(true)}},
+		},
+	})
+	mergedAutomount := overlayPresetOnClass(presetOn, classOff)
+	engineOff := testSpec()
+	setSpecTemplatePod(engineOff, func(p *corev1.PodSpec) { p.AutomountServiceAccountToken = ptr(false) })
+	if got := effectiveAutomountServiceAccountToken(engineOff, mergedAutomount); got == nil || *got {
+		t.Errorf("engine automount = %v, want false", formatBoolPtr(got))
+	}
+	if got := effectiveAutomountServiceAccountToken(testSpec(), mergedAutomount); got == nil || !*got {
+		t.Errorf("preset automount = %v, want true", formatBoolPtr(got))
+	}
+	if got := effectiveAutomountServiceAccountToken(testSpec(), overlayPresetOnClass(nil, classOff)); got == nil || *got {
+		t.Errorf("class automount = %v, want false", formatBoolPtr(got))
+	}
+
 	sel := effectiveNodeSelector(testSpec(), merged)
 	if sel["pool"] != "preset" || sel["zone"] != "class-zone" || sel["region"] != "defaults-region" {
 		t.Errorf("nodeSelector = %v, want defaults over class with both sides kept", sel)
@@ -323,9 +343,10 @@ func TestOverlayPresetOnClass_EmptyPresetIsRenderInert(t *testing.T) {
 			Annotations: map[string]string{"class-note": "yes"},
 		},
 		&corev1.PodSpec{
-			ServiceAccountName: "class-sa",
-			NodeSelector:       map[string]string{"pool": "class"},
-			Tolerations:        []corev1.Toleration{{Key: "class-taint"}},
+			ServiceAccountName:           "class-sa",
+			AutomountServiceAccountToken: ptr(false),
+			NodeSelector:                 map[string]string{"pool": "class"},
+			Tolerations:                  []corev1.Toleration{{Key: "class-taint"}},
 			Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
 				PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{
 					Weight: 1,
