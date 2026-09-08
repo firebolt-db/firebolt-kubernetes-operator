@@ -67,15 +67,15 @@ The Gateway exposes a read-only stats listener on its metrics port. Its Envoy ad
 
 | Metric | Type | Labels | Updated | Description |
 |---|---|---|---|---|
-| `firebolt_engine_status_phase` | Gauge | `namespace`, `name`, `instance`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`. |
-| `firebolt_engine_status_condition` | Gauge | `namespace`, `name`, `instance`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `InstanceReady`. |
-| `firebolt_engine_spec_replicas` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Desired replica count from `spec.replicas`. |
-| `firebolt_engine_active_generation` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Generation number currently serving traffic. |
-| `firebolt_engine_pods_ready` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Number of ready pods in the active generation. |
-| `firebolt_engine_pods_total` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Total pods in the active generation (includes non-ready). |
-| `firebolt_engine_draining_generation` | Gauge | `namespace`, `name`, `instance` | Every reconcile | Generation being drained, or -1 if no drain is in progress. |
-| `firebolt_engine_last_reconciled_timestamp` | Gauge | `namespace`, `name`, `instance` | Successful reconciles | Unix timestamp of the last successful reconcile. |
-| `firebolt_engine_drain_check_errors_total` | Counter | `namespace`, `name`, `instance` | On drain probe failure | Cumulative count of drain probe failures (pod unreachable, metrics missing). |
+| `firebolt_engine_status_phase` | Gauge | `namespace`, `name`, `firebolt_io_instance`, `phase` | Every reconcile | StateSet-style: 1 for the current phase, 0 for all others. Phases: `stable`, `creating`, `switching`, `draining`, `cleaning`, `stopped`. |
+| `firebolt_engine_status_condition` | Gauge | `namespace`, `name`, `firebolt_io_instance`, `type` | Every reconcile | 1 when the condition is True, 0 when False or Unknown. Types: `Ready`, `InstanceReady`. |
+| `firebolt_engine_spec_replicas` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Every reconcile | Desired replica count from `spec.replicas`. |
+| `firebolt_engine_active_generation` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Every reconcile | Generation number currently serving traffic. |
+| `firebolt_engine_pods_ready` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Every reconcile | Number of ready pods in the active generation. |
+| `firebolt_engine_pods_total` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Every reconcile | Total pods in the active generation (includes non-ready). |
+| `firebolt_engine_draining_generation` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Every reconcile | Generation being drained, or -1 if no drain is in progress. |
+| `firebolt_engine_last_reconciled_timestamp` | Gauge | `namespace`, `name`, `firebolt_io_instance` | Successful reconciles | Unix timestamp of the last successful reconcile. |
+| `firebolt_engine_drain_check_errors_total` | Counter | `namespace`, `name`, `firebolt_io_instance` | On drain probe failure | Cumulative count of drain probe failures (pod unreachable, metrics missing). |
 
 ### FireboltInstance metrics
 

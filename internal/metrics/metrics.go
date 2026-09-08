@@ -16,7 +16,11 @@ import (
 )
 
 // Engine metric label keys.
-var engineLabels = []string{"namespace", "name", "instance"}
+// engineLabels names the parent FireboltInstance as firebolt_io_instance, not
+// instance: Prometheus reserves instance for the scrape target, so a scraper
+// that does not honor exposed labels overwrites it with the target address and
+// every consumer joining engines to their instance matches nothing.
+var engineLabels = []string{"namespace", "name", "firebolt_io_instance"}
 
 // Instance metric label keys.
 var instanceLabels = []string{"namespace", "name"}
