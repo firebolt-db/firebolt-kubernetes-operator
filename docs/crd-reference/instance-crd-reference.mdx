@@ -98,9 +98,12 @@ The same set of pod-level fields is rejected on **both** components:
 | `spec.template.spec.hostname` | Firebolt Operator-owned. |
 | `spec.template.spec.restartPolicy` | Fixed by the Deployment / StatefulSet controller. |
 | `spec.template.spec.activeDeadlineSeconds` | Incompatible with long-lived component pods. |
-| `spec.template.spec.terminationGracePeriodSeconds` | Firebolt Operator-stamped per component (15s gateway, 30s metadata). |
 | `spec.template.metadata.labels[firebolt.io/*]` | Reserved label prefix. |
 | `spec.template.metadata.annotations[firebolt.io/*]` | Reserved annotation prefix (most importantly `firebolt.io/config-hash`, which drives pod rollouts). |
+
+`spec.gateway.template.spec.terminationGracePeriodSeconds` accepts a positive integer and defaults to `180` seconds. It bounds the entire Gateway pod shutdown, including request draining and container termination. The corresponding Metadata template field is rejected; Metadata pods use a fixed 30-second budget.
+
+`spec.gateway.template.spec.serviceAccountName` selects an existing ServiceAccount; if unset, the Firebolt Operator creates `<instance>-gateway`. Both identities receive the same namespaced read-only routing Role. `spec.gateway.template.spec.automountServiceAccountToken` is rendered as `false`, including for a custom ServiceAccount. A rotating token is projected only into the agent. See [Gateway custom service account](../instance/gateway/overview#gateway-custom-service-account).
 
 Per-component primary container rejections:
 
@@ -120,11 +123,11 @@ Per-component pass-through (allowed without restriction):
 - All pod-level scheduling fields: `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName`.
 - Pod-level: `securityContext` (PodSecurityContext), `imagePullSecrets`, `serviceAccountName`, additional `volumes` (names that do not collide with Firebolt Operator-owned volume names).
 - Additional `containers` (sidecars): Appended after the Firebolt Operator-rendered primary container.
-- Additional `initContainers`: Passed through verbatim.
+- Additional `initContainers`: Passed through in order. The Firebolt Operator appends its mandatory `wake-agent` native sidecar with `restartPolicy: Always` after these entries.
 - Sidecars and init containers may mount the Firebolt Operator-rendered `config-volume` / `config` and `tmp` volumes, but **not** the Secret-backed ones: `tls-gateway`, `client-ca`, `engine-ca`, `engine-crl`, `client-crl`, and `wake-agent-token` on the gateway; `postgres-creds` and `postgres-ca` on the metadata pod.
 - Pod-template `metadata.labels` and `metadata.annotations` outside the `firebolt.io/` reserved prefix.
 
-A second container or init container using the Firebolt Operator-rendered primary name (`envoy` or `metadata`) is rejected as a duplicate.
+A second container or init container using the Firebolt Operator-rendered primary name (`envoy` or `metadata`) is rejected as a duplicate. The Gateway also reserves the `wake-agent` container name in both lists.
 
 ## Instance phases
 
@@ -141,7 +144,7 @@ A second container or init container using the Firebolt Operator-rendered primar
 |-------|-------------|
 | `status.phase` | Instance lifecycle phase. See [Instance phases](#instance-phases). |
 | `status.metadataReady` | Whether the metadata service Deployment has a ready replica. |
-| `status.gatewayReady` | Whether the gateway Deployment has a ready replica. |
+| `status.gatewayReady` | Whether the Gateway Deployment has a ready replica, including an agent registered for that Pod UID and process identity. |
 | `status.metadataEndpoint` | In-cluster metadata gRPC endpoint (cleared when metadata is not ready). |
 | `status.gatewayEndpoint` | In-cluster gateway HTTP endpoint (cleared when gateway is not ready). |
 | `status.conditions` | `Ready`, `MetadataReady`, `GatewayReady`, `AuthReady`, `EngineTLSReady`, `GatewayTLSReady`, `InstanceIDCanonical`. See [Conditions](#conditions). |
@@ -162,7 +165,7 @@ A second container or init container using the Firebolt Operator-rendered primar
 |-----------|------------------------|---------|
 | `Ready` | - | Roll-up of the conditions below that participate. |
 | `MetadataReady` | Yes | Metadata service (and its PostgreSQL) are usable. |
-| `GatewayReady` | Yes | Gateway has a ready replica. |
+| `GatewayReady` | Yes | Gateway has a ready replica with registered agent admission. |
 | `EngineTLSReady` | Yes | Engine TLS is provisioned **and** the whole fleet re-encrypts. Convergence-gated, so `Ready` never advertises a secure posture the fleet has not reached. |
 | `GatewayTLSReady` | Yes | Gateway TLS is provisioned and the secure listener is serving. |
 | `AuthReady` | **No** | Auth material is provisioned. Deliberately excluded from the roll-up: auth provisioning has no bearing on whether the Metadata Service or Gateway are usable. Stays `True` with reason `RotationWaitingForEngines` while a signing-key rotation is parked, since the Active key still signs and validates. |

@@ -7,7 +7,7 @@ For the user-visible contract, use the published documentation:
 - [`docs/engine/engine-scaling.mdx`](../../docs/engine/engine-scaling.mdx) explains scaling, stopping, and resuming.
 - [`docs/architecture.mdx`](../../docs/architecture.mdx) defines the published architecture and lifecycle contract.
 - [`docs/engine/engine-rollouts.mdx`](../../docs/engine/engine-rollouts.mdx) explains rollout strategies and drain checks.
-- [`docs/instance/gateway/gateway-query-routing.mdx`](../../docs/instance/gateway/gateway-query-routing.mdx) defines the gateway and zero-downtime routing contract.
+- [`docs/instance/gateway/gateway-query-routing.mdx`](../../docs/instance/gateway/gateway-query-routing.mdx) describes Gateway admission and withdrawal before Engine shutdown.
 
 Do not duplicate CRD field reference material here. The API types and [`docs/crd-reference/engine-crd-reference.mdx`](../../docs/crd-reference/engine-crd-reference.mdx) own that surface.
 
@@ -83,7 +83,7 @@ spec:
 
 ## Resource topology
 
-One FireboltEngine owns a stable routing Service and one or more generation-scoped resource sets:
+One FireboltEngine owns internal Services and one or more generation-scoped resource sets:
 
 ```text
 FireboltEngine
@@ -91,6 +91,7 @@ FireboltEngine
 ├── generation gN                    desired/current generation
 │   ├── <engine>-gN-config           rendered Engine configuration
 │   ├── <engine>-gN-hl               StatefulSet peer discovery
+│   ├── engine-route-<uid-hash>-gN   immutable, ready-only query Service
 │   ├── <engine>-gN                  StatefulSet
 │   ├── optional TLS Certificate
 │   └── optional per-pod PVCs
@@ -98,10 +99,11 @@ FireboltEngine
     └── corresponding generation resources
 ```
 
-The two Service roles are different:
+The Service roles are different:
 
 - `<engine>-gN-hl` is generation-specific and uses `publishNotReadyAddresses: true`. It gives StatefulSet pods deterministic peer DNS before readiness, which allows cluster formation.
-- `<engine>-service` is the stable routing endpoint. It is also headless, but excludes not-ready pods and selects exactly the generation that should receive new traffic.
+- `<engine>-service` tracks the active generation as an internal resource; it is not a supported query entry point.
+- `engine-route-<uid-hash>-gN` is the immutable, ready-only destination issued by Gateway admission. Its selector never moves to a different generation; the Engine UID separates same-name Engine recreations.
 
 The ConfigMap is generated before the StatefulSet because its node list depends on predictable StatefulSet identities. Storage is mounted at the operator-owned data path and can resolve to `emptyDir`, `hostPath`, or per-pod persistent volume claims.
 
@@ -145,9 +147,15 @@ The phase machine references at most two generations at once, but the cluster ca
 
 Promotion requires every desired pod in the new generation to be ready. At zero replicas, readiness is vacuously true, allowing scale-to-zero to pass through `creating` without waiting for pods that should not exist.
 
-Switching changes only the stable routing Service selector. The gateway resolves that headless Service and supplies the remaining data-plane protections: per-request connection behavior, Envoy active health checks, transport retries, and the retry-safe Engine shutdown-fence response. The reconciler intentionally does not gate phase progress on EndpointSlice membership.
+Switching publishes the replacement's generation-specific route in the Instance coordination ConfigMap. This atomically closes the old assignment and snapshots its registered Gateway sessions. The stable Service selector still tracks the active generation, but Gateway SQL uses immutable route Services.
 
-Graceful rollout drain checks the old generation after traffic switches. The scrape transport comes from the parent FireboltInstance: direct Pod IP is the default, while API-server proxying is optional and requires its opt-in RBAC grant. `rollout: recreate` or disabled drain checking skips the operator-side wait, but the Engine's own SIGTERM handling still applies.
+The local agent records each admission before returning its authority to Envoy. The same admission covers pending dispatch and every retry. Applying a new routing revision fences new grants for the old assignment without erasing its outstanding requests. Retirement requires matching session acknowledgments, the applied fence revision, and zero outstanding or unknown old admissions. Missing reports, Pod absence, readiness, or a timeout cannot establish withdrawal.
+
+Gateway sessions bind Pod UID to an agent boot identity. The Firebolt Operator preserves old sessions across restarts; a changed boot identity or uncertain request completion requires replacing the Gateway Pod. A Pod finalizer retains positive Envoy termination evidence until the session is cleared durably. Agents can continue serving authorized routes during a Firebolt Operator restart, but retirement waits for its coordination decisions.
+
+Generation deletion and scale-down must pass the routing withdrawal gate independently of metric drain checks. Graceful drain samples the old generation's running and suspended queries; `recreate` or disabled drain checks skip that metric wait only. The Engine must finish all accepted work within its SIGTERM budget, including queued connections that have not reached a query handler.
+
+Metric scraping remains an observation path: direct Pod IP is the default, and API-server proxying is available with its opt-in RBAC grant. Product SQL and E2E query load use the Gateway exclusively.
 
 ## Partial writes and crash recovery
 

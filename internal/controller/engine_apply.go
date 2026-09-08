@@ -18,7 +18,10 @@ package controller
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"slices"
+	"strconv"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -30,6 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/routing"
 )
 
 // applyEngineState writes the EngineReconcileResult to the cluster: ensures
@@ -37,6 +41,10 @@ import (
 // All operations are idempotent.
 func (r *FireboltEngineReconciler) applyEngineState(ctx context.Context, engine *computev1alpha1.FireboltEngine, result *EngineReconcileResult) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
+
+	if err := r.publishEngineRoute(ctx, engine); err != nil {
+		return err
+	}
 
 	// Apply the per-generation engine TLS Certificate first, so cert-manager
 	// can begin issuing its Secret before the StatefulSet's pods try to mount
@@ -201,12 +209,30 @@ func (r *FireboltEngineReconciler) ensureConfigMap(ctx context.Context, engine *
 func (r *FireboltEngineReconciler) ensureEngineTLSCert(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *certmanagerv1.Certificate) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 
+	if err := bindEngineTLSRoutingAuthority(engine, want); err != nil {
+		return err
+	}
 	want.TypeMeta = metav1.TypeMeta{APIVersion: certmanagerv1.SchemeGroupVersion.String(), Kind: KindCertificate}
 	if err := controllerutil.SetControllerReference(engine, want, r.Scheme); err != nil {
 		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
 	log.V(1).Info("Applying engine TLS Certificate", "name", want.Name)
 	return applySSA(ctx, r.Client, want)
+}
+
+// Bind the rendered certificate to this Engine object's immutable routing
+// authority alongside its owner reference. The pure phase renderer only knows
+// the Engine name; a recreated Engine must receive a different routing identity.
+func bindEngineTLSRoutingAuthority(engine *computev1alpha1.FireboltEngine, cert *certmanagerv1.Certificate) error {
+	gen, err := strconv.Atoi(cert.Labels[LabelGeneration])
+	if err != nil || gen < 0 || engine.UID == "" {
+		return stderrors.New("engine TLS routing identity requires an Engine UID and nonnegative generation")
+	}
+	dnsName := routing.GenerationServiceName(string(engine.UID), gen) + "." + engine.Namespace + ".svc.cluster.local"
+	if !slices.Contains(cert.Spec.DNSNames, dnsName) {
+		cert.Spec.DNSNames = append(cert.Spec.DNSNames, dnsName)
+	}
+	return nil
 }
 
 func (r *FireboltEngineReconciler) ensureService(ctx context.Context, engine *computev1alpha1.FireboltEngine, want *corev1.Service) error {
@@ -235,11 +261,30 @@ func (r *FireboltEngineReconciler) ensureStatefulSetResource(ctx context.Context
 }
 
 func (r *FireboltEngineReconciler) deleteIfExists(ctx context.Context, obj client.Object) error {
+	// Every generation resource shares this guard; removing a Service or TLS
+	// Secret can disrupt a holder just as removing its StatefulSet can.
+	if genText := obj.GetLabels()[LabelGeneration]; genText != "" {
+		gen, err := strconv.Atoi(genText)
+		if err != nil {
+			return err
+		}
+		engine := &computev1alpha1.FireboltEngine{}
+		key := client.ObjectKey{Namespace: obj.GetNamespace(), Name: obj.GetLabels()[LabelEngine]}
+		if err := r.sweepReader().Get(ctx, key, engine); err != nil {
+			return err
+		}
+		if err := r.authorizeGenerationRemoval(ctx, engine, gen); err != nil {
+			return err
+		}
+	}
 	var opts []client.DeleteOption
+	if uid := obj.GetUID(); uid != "" {
+		opts = append(opts, client.Preconditions{UID: &uid})
+	}
 	if _, ok := obj.(*appsv1.StatefulSet); ok {
-		// Foreground propagation: K8s GC deletes pods before removing the STS.
-		// Without this, background deletion leaves orphaned pods Running+Ready,
-		// which inflates pod counts seen by the test helper and the drain check.
+		// Keep the StatefulSet until its Pods are gone. A recreated Engine can
+		// reuse this generation's name; publication rejects the terminating STS
+		// so its remaining Pods cannot receive the new Engine's routing authority.
 		prop := metav1.DeletePropagationForeground
 		opts = append(opts, &client.DeleteOptions{PropagationPolicy: &prop})
 	}

@@ -58,13 +58,17 @@ Inspect the decision and timestamps in Engine status:
 
 ## Wake a stopped Engine with the Gateway
 
-With Helm value `wakeAgent.enabled=true` (the default) and the Firebolt Operator-managed Gateway ServiceAccount, a query sent through the Instance Gateway can wake an Engine at zero replicas:
+A query through the Instance Gateway can wake an Engine at zero replicas:
 
-1. The Gateway holds the request while the Engine has no ready endpoints.
-2. The Firebolt Operator sets the Engine to `activeReplicas`.
-3. The held request proceeds after Engine endpoints become ready.
+1. The local Gateway agent parks the request and records wake demand.
+2. The Firebolt Operator observes that demand and sets the Engine to `activeReplicas`.
+3. The Firebolt Operator publishes an enabled generation route. The agent waits for a usable route through Envoy before admitting the held request.
 
-The first query pays the full Engine cold-start time, which can take tens of seconds when images or volumes must be prepared. Set the client timeout accordingly. If the Gateway reaches its held-request capacity, additional requests receive `503` with `Retry-After` while wake-up continues.
+EndpointSlice readiness alone does not release the request: Envoy's DNS state is independent. The agent checks the generation destination through a local routing probe and rechecks its assignment before granting admission. Routing withdrawal is still established by registered session fences and request accounting, not by that probe.
+
+The first query pays the full Engine cold-start time, which can take tens of seconds when images or volumes must be prepared. Set the client timeout accordingly. Held requests are bounded by the agent's capacity and 120-second hold timeout; exhaustion or inability to establish a route returns `503`.
+
+During Gateway replacement, the agent remains running as a Kubernetes native sidecar while Envoy drains accepted requests. Registration, routing updates, and wake handling continue during this period. The Gateway Pod's configurable shutdown budget must cover the remaining hold, query execution, and container shutdown. See [Gateway replacement](../instance/gateway/overview#gateway-replacement).
 
 Wake-up applies to any zero-replica Engine with auto-stop enabled, including one whose replica count was set to zero manually. To keep an Engine stopped, disable auto-stop as well:
 
@@ -79,9 +83,7 @@ Wake-up works only for queries sent through the Instance Gateway. Traffic that b
 
 The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine.
 
-Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
-
-Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
+The agent is mandatory for query admission and cannot be disabled independently of routing. A custom Gateway ServiceAccount retains the agent and receives its read-only routing Role. To keep an Engine stopped, disable that Engine's auto-stop policy as shown above.
 
 ## Sampling limitations
 

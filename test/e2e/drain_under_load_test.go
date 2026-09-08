@@ -20,7 +20,7 @@ limitations under the License.
 package e2e
 
 import (
-	"context"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,19 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
-// This spec is the consumer-side half of the query-liveness contract pinned
-// by engine_metrics_test.go: with drainCheckEnabled=true, a blue-green
-// rollout must HOLD the old generation in draining while queries are in
-// flight on its pods, and release it promptly once they finish. Every other
-// spec in the suite runs with the drain check off, so before this spec the
-// busy-pod-blocks-cleanup behavior had no end-to-end coverage at all — a
-// drain signal that always read "drained" (as engine builds before
-// 2026-07-07 produced) passed the whole suite.
-//
-// The instance uses metricScrapeMode=ApiserverProxy because the in-process
-// operator scrapes from the host, where kind pod IPs are unreachable.
+// The rollout must retain an old generation while a query accepted through the
+// gateway is still running. Direct Pod access is used only to observe metrics.
+// ApiserverProxy scraping lets the in-process operator observe Kind Pods.
 const (
 	// drainHoldWindow is how long the spec requires the draining phase to
 	// persist while old-generation pods are busy. With drainCheckInterval=2s
@@ -61,14 +54,6 @@ const (
 	// carries a matching taint, so scheduling is unaffected.
 	drainRolloutTolerationKey = "firebolt.io/e2e-drain-under-load"
 )
-
-// keepPodBusy keeps queries in flight against ONE pod, bypassing the cluster
-// Service. That targeting is the point: the drain spec has to keep loading the
-// OLD generation after the selector has flipped away from it, which is exactly
-// the traffic the drain check exists to protect.
-func keepPodBusy(ctx context.Context, clientPod, podIP string) (stop func() (succeeded, failed int64)) {
-	return keepURLBusy(ctx, clientPod, enginePodQueryURL(podIP), computeBoundQuery)
-}
 
 var _ = Describe("Firebolt Engine Drain", func() {
 	Describe("Drain Under Load", Ordered, func() {
@@ -112,26 +97,15 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			oldPod := oldPods[0]
 			Expect(oldPod.Status.PodIP).NotTo(BeEmpty())
 
-			By("Starting continuous queries against the old-generation pod")
-			stopLoad := keepPodBusy(ctx, clientPod, oldPod.Status.PodIP)
-			// A failing assertion below must still stop the in-pod loop (a loop
-			// left running would keep the pod busy into the next spec) and must
-			// still record the load evidence, which otherwise only the success
-			// path printed. stopLoad is idempotent, so the explicit call on the
-			// success path keeps its ordering and counts.
-			DeferCleanup(func() {
-				succeeded, failed := stopLoad()
-				GinkgoWriter.Printf("Old-generation load (cleanup): %d succeeded, %d failed\n",
-					succeeded, failed)
+			By("Staging the replacement before the routing cutover")
+			staged := make(chan struct{})
+			resume := controller.SetCrashPoint(engineName, controller.CrashBeforeCreatingToSwitching, func() {
+				close(staged)
 			})
-
-			// The hold below is far enough from here that ramp-up cannot pollute
-			// it — the rollout wait sits in between. Waiting anyway pins the
-			// premise before the rollout is triggered, so a load loop that never
-			// produced traffic fails here, with that as the reason, instead of
-			// surfacing later as a drain that released "too early".
-			By("Waiting for the load to actually reach the old-generation pod")
-			waitForLoadInFlight(ctx, clientPod, oldPod.Status.PodIP)
+			var resumeOnce sync.Once
+			release := func() { resumeOnce.Do(func() { close(resume) }) }
+			DeferCleanup(release)
+			DeferCleanup(func() { controller.ClearCrashPointsForEngine(engineName) })
 
 			By("Triggering a blue-green rollout via a no-op toleration")
 			Expect(UpdateEngineScheduling(ctx, engineName, nil, []corev1.Toleration{{
@@ -140,6 +114,26 @@ var _ = Describe("Firebolt Engine Drain", func() {
 				Effect:   corev1.TaintEffectNoSchedule,
 			}}, nil)).To(Succeed())
 
+			Eventually(staged, rolloutToDrainingTimeout).Should(BeClosed(),
+				"replacement must be ready before starting the held query")
+
+			By("Admitting one long query through the gateway to the old generation")
+			type queryResult struct {
+				body string
+				err  error
+			}
+			finished := make(chan queryResult, 1)
+			go func() {
+				body, queryErr := execCurlQueryWithDeadline(ctx, clientPod,
+					gatewayLoadQueryURL(instanceName, engineName)+"&enable_internal_functions=true",
+					"SELECT sleep(45)", 65)
+				finished <- queryResult{body: body, err: queryErr}
+			}()
+			waitForLoadInFlight(ctx, clientPod, oldPod.Status.PodIP)
+			Consistently(finished, time.Second).ShouldNot(Receive(),
+				"the held query must remain in flight before cutover")
+			release()
+
 			By("Waiting for the rollout to reach draining on the old generation")
 			Eventually(func(g Gomega) {
 				engine, err := GetEngine(ctx, engineName)
@@ -147,7 +141,7 @@ var _ = Describe("Firebolt Engine Drain", func() {
 				g.Expect(string(engine.Status.Phase)).To(Equal(string(computev1alpha1.PhaseDraining)))
 				g.Expect(engine.Status.DrainingGeneration).NotTo(BeNil())
 				g.Expect(*engine.Status.DrainingGeneration).To(Equal(activeGen))
-			}, rolloutToDrainingTimeout, pollInterval).Should(Succeed())
+			}, 20*time.Second, time.Second).Should(Succeed())
 
 			By("Verifying the busy old generation is held in draining")
 			// The gauge is sampled alongside the phase so a failure can say
@@ -179,11 +173,15 @@ var _ = Describe("Firebolt Engine Drain", func() {
 				"the pod went idle during the hold window (%d of %d samples read 0); the hold "+
 					"proved nothing even though it passed", held.idle, len(held.samples))
 
-			By("Stopping the query load")
-			succeeded, failed := stopLoad()
-			GinkgoWriter.Printf("Old-generation load: %d succeeded, %d failed\n", succeeded, failed)
-			Expect(succeeded).To(BeNumerically(">", 0),
-				"no query completed against the old pod (%d failed); the hold assertion proved nothing", failed)
+			By("Serving fresh gateway queries while the old query finishes")
+			_, err = RunQueryViaGateway(ctx, clientPod, instanceName, engineName, "SELECT 1")
+			Expect(err).NotTo(HaveOccurred())
+			var heldResult queryResult
+			Eventually(finished, 65*time.Second).Should(Receive(&heldResult))
+			Expect(heldResult.err).NotTo(HaveOccurred(), "the query admitted before cutover must complete")
+			value, err := ParseQueryResult(heldResult.body)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(value).To(BeNumerically("==", 0))
 
 			By("Waiting for the drained generation to be released and cleaned")
 			Eventually(func(g Gomega) {

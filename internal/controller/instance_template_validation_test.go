@@ -59,7 +59,7 @@ func instanceTemplateTestScheme(t *testing.T) *runtime.Scheme {
 // fake client. Lives in namespace "default".
 func readyInstanceWithTemplates() *computev1alpha1.FireboltInstance {
 	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:       "fi",
 			Namespace:  "default",
 			Generation: 1,

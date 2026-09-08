@@ -101,12 +101,9 @@ var _ = Describe("Firebolt Engine AutoStop", func() {
 			Expect(enginePods[0].Status.PodIP).NotTo(BeEmpty())
 
 			By("Keeping the engine busy past the idle timeout")
-			// The load loop runs inside the client pod (see keepURLBusy). It used
-			// to be two goroutines each paying a kubectl-exec round trip per
-			// query, which leaves holes where nothing is running on the engine —
-			// and autoStop is entitled to scale down in one of them, so the hold
-			// below failed on correct behaviour. Same defect as the drain spec had.
-			stopLoad := keepURLBusy(ctx, clientPod, engineServiceQueryURL(engineName), computeBoundQuery)
+			// The in-pod loop overlaps queries through the gateway to keep the
+			// query gauges nonzero throughout the hold window.
+			stopLoad := keepURLBusy(ctx, clientPod, gatewayLoadQueryURL(instanceName, engineName), computeBoundQuery)
 			DeferCleanup(func() { stopLoad() })
 
 			By("Waiting for the load to actually reach the engine before holding")

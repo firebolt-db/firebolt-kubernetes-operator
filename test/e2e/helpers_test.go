@@ -25,10 +25,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1084,7 +1084,7 @@ func dumpPodLogs(ctx context.Context, pod *corev1.Pod, tailLines int) string {
 		prevDesc = state.String()
 		previousPath = filepath.Join(dir, pod.Name+"-previous.log")
 		header := fmt.Sprintf("# previous container instance: %s\n", prevDesc)
-		prevTail, prevOK = fetchPodLog(ctx, pod.Name, previousPath, corev1.PodLogOptions{Previous: true}, tailLines, header)
+		prevTail, prevOK = fetchPodLog(ctx, pod.Name, previousPath, corev1.PodLogOptions{Previous: true, Container: state.Container}, tailLines, header)
 	}
 
 	if !currentOK && !prevOK {
@@ -1289,10 +1289,12 @@ func (s *terminatedState) String() string {
 	return strings.Join(parts, " ")
 }
 
-// findPreviousState returns metadata about the most recently terminated
-// container instance in the pod, or nil if no container has restarted yet.
+// findPreviousState returns the previous instance of the first restarted
+// container, including native sidecars, or nil if no container has restarted.
 func findPreviousState(pod *corev1.Pod) *terminatedState {
-	for _, cs := range pod.Status.ContainerStatuses {
+	statuses := slices.Concat(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses)
+	for i := range statuses {
+		cs := &statuses[i]
 		if cs.RestartCount == 0 {
 			continue
 		}
@@ -1843,9 +1845,8 @@ func DeleteClientPod(ctx context.Context, podName string) {
 //   - --max-time 33: cap the entire request so a hung upstream doesn't block
 //     the background runner indefinitely. The zero-downtime tests tolerate
 //     no failures, so this budget exists only to surface real bugs as
-//     failures rather than to hide transient latency. It's sized larger
-//     than the worst-case DFP DNS-refresh window plus a handful of retry
-//     back-offs, so a healthy scale/blue-green event can never exhaust it.
+//     failures rather than to hide transient latency. It is a test deadline,
+//     not a proven upper bound on DNS convergence or rollout duration.
 //   - -w "%{stderr}...": append a timing breakdown to stderr after transfer
 //     so failures carry DNS/connect/response timings that pinpoint the phase
 //     that stalled.
@@ -1903,23 +1904,14 @@ func kubectlArgs(args ...string) []string {
 	return args
 }
 
-// RunQuery executes a SQL query against the engine's ClusterIP service from
-// inside a client pod. The podName must reference a pod previously created
-// with CreateClientPod.
+// RunQuery executes SQL through the owning Instance's gateway. Engine Services
+// and Pod IPs are internal destinations, not supported query entry points.
 func RunQuery(ctx context.Context, podName, engineName, query string) (string, error) {
-	url := fmt.Sprintf("http://%s-service.%s.svc.cluster.local:3473/?query_label=e2e-test&output_format=JSON_Compact",
-		engineName, testNamespace)
-	return execCurlQuery(ctx, podName, url, query)
-}
-
-// RunQueryAgainstPodIP executes a SQL query against a specific engine pod's
-// IP, bypassing the cluster Service. Used by the drain spec to keep load on
-// the OLD generation after the Service selector has flipped to the new one —
-// exactly the traffic the drain check exists to protect.
-func RunQueryAgainstPodIP(ctx context.Context, podName, podIP, query string) (string, error) {
-	url := fmt.Sprintf("http://%s/?query_label=e2e-test&output_format=JSON_Compact",
-		net.JoinHostPort(podIP, "3473"))
-	return execCurlQuery(ctx, podName, url, query)
+	engine, err := GetEngine(ctx, engineName)
+	if err != nil {
+		return "", err
+	}
+	return RunQueryViaGateway(ctx, podName, engine.Spec.InstanceRef, engineName, query)
 }
 
 // EnginePodsForGeneration lists the pods of one engine generation.
@@ -2006,6 +1998,10 @@ type InstanceOperator struct {
 // for any other FireboltInstance, so multiple instance operators can coexist
 // in the same namespace.
 func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
+	wakeAgentImage := os.Getenv("E2E_WAKE_AGENT_IMAGE")
+	if wakeAgentImage == "" {
+		return nil, fmt.Errorf("E2E_WAKE_AGENT_IMAGE is required; run make prepare-test-e2e and make test-e2e")
+	}
 	config, err := getRestConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
@@ -2043,11 +2039,12 @@ func StartInstanceOperator(instanceName string) (*InstanceOperator, error) {
 	}
 
 	reconciler := &controller.FireboltInstanceReconciler{
-		Client:                 mgr.GetClient(),
-		Scheme:                 mgr.GetScheme(),
-		NameFilter:             instanceName,
-		MetricsRecorder:        fireboltmetrics.NoOpInstanceRecorder{},
-		GatewayWakeClusterRole: e2eGatewayWakeClusterRole,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		NameFilter:               instanceName,
+		MetricsRecorder:          fireboltmetrics.NoOpInstanceRecorder{},
+		WakeAgentImage:           wakeAgentImage,
+		WakeAgentImagePullPolicy: corev1.PullIfNotPresent,
 	}
 	controllerName := fmt.Sprintf("fireboltinstance-%d", operatorInstanceCounter.Add(1))
 	if err := reconciler.SetupWithManagerNamed(mgr, controllerName); err != nil {
@@ -2599,9 +2596,7 @@ func NewGatewayBackgroundQueryRunner(podName, instanceName, engineName, query st
 // NewGatewayBackgroundQueryRunnerWithValidator creates a gateway-routed
 // background query runner with a caller-supplied validator. Zero-downtime
 // tests must use this variant (directly or via NewGatewayBackgroundQueryRunner)
-// because the gateway is the only entry point on which we promise zero
-// downtime - direct engine-service clients are responsible for their own
-// retry / endpoint-selection semantics.
+// because the gateway is the supported query entry point.
 func NewGatewayBackgroundQueryRunnerWithValidator(podName, instanceName, engineName, query string, validator QueryValidator) *GatewayBackgroundQueryRunner {
 	return &GatewayBackgroundQueryRunner{
 		podName:        podName,

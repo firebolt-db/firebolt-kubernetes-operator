@@ -14,6 +14,15 @@ install. Helm does not upgrade or delete CRDs from the `crds/` directory. To
 manage CRD upgrades independently, use the `firebolt-operator-crds` chart
 instead.
 
+## Gateway admission
+
+Every Gateway Pod runs the manager image's local agent for request admission,
+request accounting, and wake-up. The agent cannot be disabled independently of
+query routing. The Firebolt Operator grants each Instance's Gateway identity a
+namespaced, read-only Role for EndpointSlices and its single routing ConfigMap.
+Custom Gateway ServiceAccounts receive the same grant; only the agent mounts
+a Kubernetes token.
+
 ## Uninstallation
 
 ```bash

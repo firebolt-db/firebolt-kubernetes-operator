@@ -265,8 +265,9 @@ type MetadataSpec struct {
 // template that lands at a path the operator owns end-to-end: the
 // Envoy container's args / ports / probes / lifecycle preStop hook /
 // reserved volume mounts (config-volume / tmp), and the pod-level
-// terminationGracePeriodSeconds / subdomain / hostname / restartPolicy
-// / activeDeadlineSeconds. See the GatewayPodTemplateRules ruleset in
+// subdomain / hostname / restartPolicy / activeDeadlineSeconds.
+// template.spec.terminationGracePeriodSeconds sets the positive shutdown
+// deadline; it defaults to 180 seconds when omitted. See the GatewayPodTemplateRules ruleset in
 // operatorauthority.go for the authoritative allowlist.
 //
 // The Envoy `per_connection_buffer_limit_bytes` is intentionally NOT

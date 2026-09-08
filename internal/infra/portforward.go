@@ -46,8 +46,15 @@ func (c *Client) gatewayCmd(instance string, localPort int) KubectlCmd {
 	return c.kubectl.portForward(c.namespace, "svc/"+instance+"-gateway", 80, localPort)
 }
 
-func (c *Client) engineCmd(engine string, localPort int) KubectlCmd {
-	return c.kubectl.portForward(c.namespace, "svc/"+engine+"-service", 3473, localPort)
+func (c *Client) engineCmd(ctx context.Context, engine string, localPort int) (KubectlCmd, error) {
+	eng, err := c.GetEngine(ctx, engine)
+	if err != nil {
+		return KubectlCmd{}, err
+	}
+	if eng.Spec.InstanceRef == "" {
+		return KubectlCmd{}, fmt.Errorf("engine %q has no instanceRef", engine)
+	}
+	return c.gatewayCmd(eng.Spec.InstanceRef, localPort), nil
 }
 
 // PortForwardGateway forwards to an instance's <instance>-gateway service (port
@@ -56,9 +63,14 @@ func (c *Client) PortForwardGateway(ctx context.Context, instance string, localP
 	return spawnPortForward(ctx, c.gatewayCmd(instance, localPort))
 }
 
-// PortForwardEngine forwards to an engine's <engine>-service (port 3473).
+// PortForwardEngine resolves the owning Instance and forwards to its gateway.
+// Queries must carry X-Firebolt-Engine with the requested engine name.
 func (c *Client) PortForwardEngine(ctx context.Context, engine string, localPort int) (*PortForward, error) {
-	return spawnPortForward(ctx, c.engineCmd(engine, localPort))
+	cmd, err := c.engineCmd(ctx, engine, localPort)
+	if err != nil {
+		return nil, err
+	}
+	return spawnPortForward(ctx, cmd)
 }
 
 // PortForwardGatewayScript renders the gateway port-forward (--print-commands).
@@ -67,8 +79,12 @@ func (c *Client) PortForwardGatewayScript(instance string, localPort int) string
 }
 
 // PortForwardEngineScript renders the engine port-forward (--print-commands).
-func (c *Client) PortForwardEngineScript(engine string, localPort int) string {
-	return c.engineCmd(engine, localPort).Render()
+func (c *Client) PortForwardEngineScript(ctx context.Context, engine string, localPort int) (string, error) {
+	cmd, err := c.engineCmd(ctx, engine, localPort)
+	if err != nil {
+		return "", err
+	}
+	return cmd.Render(), nil
 }
 
 // spawnPortForward starts the kubectl port-forward and blocks until it binds.

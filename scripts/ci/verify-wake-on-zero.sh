@@ -3,28 +3,15 @@ set -euo pipefail
 
 # Verify wake-on-zero end to end against a chart-installed operator.
 #
-# This is the only check anywhere that exercises the real path: the
-# operator-rendered Envoy config, the wake-agent sidecar built from the
-# operator image, the agent's EndpointSlice watch, and the operator's demand
-# poll. It lives here rather than in the Go e2e suite because that suite runs
-# the operator in-process and never publishes an operator image, so the
-# sidecar — which must occupy the gateway pod's own loopback for Envoy's Lua
-# call to reach it — cannot exist there.
+# Exercise the generated Gateway config, local admission agent, routing
+# assignments, and operator demand polling together. The triggering query must
+# succeed without client retries. WAKE_CACHE_CASE=warm first uses the same
+# Gateway process against an active immutable route, then verifies wake selects
+# a different generation authority after auto-stop.
 #
-# The sequence is the one a user hits on their first query after an idle
-# period: auto-stop parks the engine at zero, a query arrives, the gateway
-# holds it, the operator scales the engine back up, and the held query is
-# released and answered. A 503 or a connection reset at any point is a
-# failure — the whole point of the feature is that the triggering query
-# survives.
-#
-# The negative half of the same contract is pinned here too, while the engine
-# is parked: a health probe on the gateway's /healthz is answered by the
-# health-check filter ahead of the wake filter, so it never registers demand
-# and never wakes the engine. Both halves are asserted from outside the pod,
-# against the gateway Service — no filter-config inspection — so a refactor
-# that reorders the filters or moves the health path fails these checks
-# instead of slipping past them.
+# Health probes use the Gateway Service and must never register wake demand.
+# Warm-case SQL targets one Gateway Pod's normal client listener so process
+# replacement cannot silently turn the test into a cold-cache case.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -43,6 +30,21 @@ ENGINE_NAME="${ENGINE_NAME:-engine}"
 FLOCI_BUCKET="${FLOCI_BUCKET:-${ENGINE_NAME}-bucket}"
 FLOCI_ENDPOINT="http://floci.${NAMESPACE}.svc.cluster.local:4566"
 GATEWAY_SVC="${INSTANCE_NAME}-gateway"
+WAKE_CACHE_CASE="${WAKE_CACHE_CASE:-cold}"
+case "$WAKE_CACHE_CASE" in
+  cold) initial_auto_stop_enabled=true ;;
+  warm) initial_auto_stop_enabled=false ;;
+  *) echo "WAKE_CACHE_CASE must be cold or warm, got '${WAKE_CACHE_CASE}'"; exit 1 ;;
+esac
+query_url="http://${GATEWAY_SVC}.${NAMESPACE}.svc.cluster.local:80/?output_format=JSON_Compact"
+
+# kubectl adds informational lines around the response. JSON_Compact may span
+# several lines, so parse its complete object rather than searching for "42"
+# in a diagnostic or an echoed query.
+query_returned_42() {
+  jq -Rse 'try (capture("(?s)(?<body>\\{.*\\})").body | fromjson |
+    (.data == [[42]] or .data == [["42"]]) and .rows == 1) catch false' >/dev/null
+}
 
 # Aggressive so the idle scale-down lands inside a CI-friendly window. The
 # operator's own defaults are 30m/1m.
@@ -60,11 +62,9 @@ WAKE_QUERY_TIMEOUT="${WAKE_QUERY_TIMEOUT:-240}"
 # bring it back.
 STOP_WAIT_SECONDS="${STOP_WAIT_SECONDS:-180}"
 WAKE_WAIT_SECONDS="${WAKE_WAIT_SECONDS:-240}"
-# Scaling the FireboltEngine to zero only records the desired state. Pod
-# termination and EndpointSlice reconciliation finish asynchronously, so give
-# the data plane its own bounded convergence window before testing the parked
-# engine contract.
-ENDPOINT_WAIT_SECONDS="${ENDPOINT_WAIT_SECONDS:-60}"
+# Desired replicas can reach zero before withdrawal and Pod cleanup finish.
+# Wait for the stopped phase and its disabled routing assignment.
+ROUTE_WAIT_SECONDS="${ROUTE_WAIT_SECONDS:-60}"
 
 # How many health probes to send at the parked engine, how long the probe
 # pod may take to schedule and finish them, and how long the engine must
@@ -92,9 +92,9 @@ kubectl apply -n "$NAMESPACE" -f "${REPO_ROOT}/examples/instance-basic.yaml"
 # than from docs) and an aggressive auto-stop policy. idleReplicas 0 is what
 # makes this a wake test rather than a scale-down test.
 BUCKET="$FLOCI_BUCKET" ENDPOINT="$FLOCI_ENDPOINT" \
-IDLE="$IDLE_TIMEOUT" POLL="$POLL_INTERVAL" yq eval '
+IDLE="$IDLE_TIMEOUT" POLL="$POLL_INTERVAL" AUTO_STOP_ENABLED="$initial_auto_stop_enabled" yq eval '
   (select(.kind == "FireboltEngine").spec.autoStop) = {
-    "enabled": true,
+    "enabled": env(AUTO_STOP_ENABLED),
     "activeReplicas": 1,
     "idleReplicas": 0,
     "idleTimeout": env(IDLE),
@@ -129,14 +129,20 @@ fi
 echo "Gateway pod: ${gateway_pod}"
 
 containers=$(kubectl get pod "$gateway_pod" -n "$NAMESPACE" \
-  -o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}')
+  -o jsonpath='{range .spec.initContainers[*]}{.name}{"\n"}{end}')
 if ! grep -qx "wake-agent" <<<"$containers"; then
   echo "Gateway pod has no wake-agent container. Containers present:"
   printf '%s\n' "$containers"
   dump_namespace_debug "$NAMESPACE"
   exit 1
 fi
-echo "wake-agent sidecar is present"
+restart_policy=$(kubectl get pod "$gateway_pod" -n "$NAMESPACE" \
+  -o jsonpath='{.spec.initContainers[?(@.name=="wake-agent")].restartPolicy}')
+if [[ "$restart_policy" != "Always" ]]; then
+  echo "wake-agent must be a native sidecar (restartPolicy: Always)"
+  exit 1
+fi
+echo "wake-agent native sidecar is present"
 
 # The security property the design rests on: Envoy terminates untrusted
 # traffic and must not be able to reach a Kubernetes credential. Containers
@@ -157,14 +163,12 @@ if grep -q "serviceaccount" <<<"$envoy_mounts"; then
 fi
 echo "envoy holds no ServiceAccount token; automount is disabled"
 
-# With no probes on the sidecar (deliberately — see buildWakeAgentContainer),
-# Ready here means "started without crashing", not "healthy". That is still
-# worth asserting: it catches a bad image, a bad flag, or a crash loop. The
-# wake path itself is proven by the query below, not by this.
-echo "Waiting for the wake-agent container to start..."
+# The agent's readiness probe requires its Pod/process session to be registered.
+# Query success below additionally exercises route acquisition and wake-up.
+echo "Waiting for the wake-agent container to register..."
 for i in $(seq 1 60); do
   agent_ready=$(kubectl get pod "$gateway_pod" -n "$NAMESPACE" \
-    -o jsonpath='{.status.containerStatuses[?(@.name=="wake-agent")].ready}' 2>/dev/null || echo "")
+    -o jsonpath='{.status.initContainerStatuses[?(@.name=="wake-agent")].ready}' 2>/dev/null || echo "")
   if [[ "${agent_ready}" == "true" ]]; then
     echo "wake-agent Ready after ${i} attempt(s)"
     break
@@ -178,10 +182,109 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# The routing ConfigMap is labeled by Instance and component. Discover it by
+# those labels rather than duplicating its hashed resource-name algorithm.
+engine_route() {
+  kubectl get configmaps -n "$NAMESPACE" \
+    -l "firebolt.io/instance=${INSTANCE_NAME},firebolt.io/component=routing" -o json |
+    jq -ce --arg engine "$ENGINE_NAME" '
+      if (.items | length) != 1 then error("expected one routing ConfigMap") else
+        (.items[0].data["routing.json"] | fromjson | .routes[$engine]) |
+        select(.engineUID != null and .authority != null and .epoch != null)
+      end'
+}
+
+if [[ "$WAKE_CACHE_CASE" == "warm" ]]; then
+  # Keep auto-stop disabled until this Gateway has served an active route.
+  # The same process must later acquire a different generation authority.
+  gateway_identity() {
+    kubectl get pod "$gateway_pod" -n "$NAMESPACE" -o json | jq -er '
+      [.metadata.uid, (.status.containerStatuses[] | select(.name == "envoy") |
+        .containerID, (.restartCount | tostring))] | @tsv'
+  }
+  gateway_incarnation=$(gateway_identity)
+  gateway_ip=$(kubectl get pod "$gateway_pod" -n "$NAMESPACE" -o jsonpath='{.status.podIP}')
+  if [[ -z "$gateway_ip" ]]; then
+    echo "Gateway pod has no IP"
+    exit 1
+  fi
+  gateway_host="$gateway_ip"
+  if [[ "$gateway_ip" == *:* ]]; then gateway_host="[$gateway_ip]"; fi
+  query_url="http://${gateway_host}:8080/?output_format=JSON_Compact"
+  deadline=$(( SECONDS + 15 ))
+  active_route="null"
+  while (( SECONDS < deadline )); do
+    if active_route=$(engine_route) && jq -e '.enabled == true' <<<"$active_route" >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if ! jq -e '.enabled == true' <<<"$active_route" >/dev/null; then
+    echo "Warm-cache setup requires an enabled routing assignment: $active_route"
+    exit 1
+  fi
+  active_authority=$(jq -er '.authority' <<<"$active_route")
+  engine_cluster="DFPCluster:${active_authority}"
+
+  require_same_gateway() {
+    if [[ "$(gateway_identity)" != "$gateway_incarnation" ]]; then
+      echo "Gateway process changed; a fresh process cannot prove wake after using the old route"
+      exit 1
+    fi
+  }
+
+  # The admin listener is loopback-only; bash is present in the Envoy image for
+  # its preStop hook. Decode HTTP/1.1 chunk framing with the host's standard HTTP
+  # parser. This observation establishes the test premise; it is not a production
+  # request-release or traffic-drain gate.
+  gateway_clusters() {
+    timeout 10 kubectl exec "$gateway_pod" -n "$NAMESPACE" -c envoy -- bash -c '
+      exec 3<>/dev/tcp/127.0.0.1/9901
+      printf "GET /clusters?format=json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3
+      cat <&3
+    ' | python3 -c '
+import http.client, json, sys
+class InputSocket:
+    def makefile(self, *args):
+        return sys.stdin.buffer
+response = http.client.HTTPResponse(InputSocket())
+response.begin()
+if response.status != 200:
+    raise SystemExit("Envoy admin returned HTTP " + str(response.status))
+json.dump(json.loads(response.read()), sys.stdout)
+'
+  }
+
+  warm_pod="wake-warm-$$"
+  echo "Warming ${engine_cluster} through gateway ${gateway_pod}..."
+  if ! warm_output=$(kubectl run "$warm_pod" -n "$NAMESPACE" --rm -i --restart=Never \
+    --image="${CURL_IMAGE}" --command -- \
+    curl -sS -o /dev/stdout -w '\nHTTP_STATUS=%{http_code}\n' --max-time 15 \
+      -X POST -H "Content-Type: text/plain" -H "X-Firebolt-Engine: ${ENGINE_NAME}" \
+      -d "SELECT 42" "$query_url"); then
+    printf '%s\n' "$warm_output"
+    dump_namespace_debug "$NAMESPACE"
+    exit 1
+  fi
+  if ! grep -q '^HTTP_STATUS=200$' <<<"$warm_output" || ! query_returned_42 <<<"$warm_output"; then
+    echo "The setup query did not succeed through the gateway:"
+    printf '%s\n' "$warm_output"
+    exit 1
+  fi
+  require_same_gateway
+  gateway_clusters | jq -e --arg name "$engine_cluster" '
+    [.cluster_statuses[] | select(.name == $name)] |
+    length == 1 and (.[0].host_statuses | length) > 0' >/dev/null
+fi
+
 # ---------------------------------------------------------------------------
 # 2. Let auto-stop park the engine at zero.
 # ---------------------------------------------------------------------------
 
+if [[ "$WAKE_CACHE_CASE" == "warm" ]]; then
+  kubectl patch fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" --type merge \
+    -p '{"spec":{"autoStop":{"enabled":true}}}'
+fi
 echo "Waiting up to ${STOP_WAIT_SECONDS}s for auto-stop to scale the engine to zero..."
 deadline=$(( SECONDS + STOP_WAIT_SECONDS ))
 while (( SECONDS < deadline )); do
@@ -200,31 +303,28 @@ if [[ "$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" -o jsonpath='
   exit 1
 fi
 
-# A stopped engine's headless Service has no endpoints, so its name does not
-# resolve. That is precisely why Envoy cannot ride this out on its own and
-# why the agent has to hold the request.
-echo "Confirming the stopped engine has no endpoints..."
-deadline=$(( SECONDS + ENDPOINT_WAIT_SECONDS ))
-endpoints="<not read>"
+echo "Confirming the stopped phase and disabled routing assignment..."
+deadline=$(( SECONDS + ROUTE_WAIT_SECONDS ))
+stopped=false
 while (( SECONDS < deadline )); do
-  if current_endpoints=$(kubectl get endpointslice -n "$NAMESPACE" \
-    -l "kubernetes.io/service-name=${ENGINE_NAME}-service" \
-    -o jsonpath='{range .items[*]}{.endpoints[*].addresses[*]}{" "}{end}' 2>/dev/null); then
-    endpoints="$current_endpoints"
-    if [[ -z "${endpoints// /}" ]]; then
-      break
-    fi
-  else
-    endpoints="<EndpointSlice read failed>"
+  phase=$(kubectl get fireboltengine "$ENGINE_NAME" -n "$NAMESPACE" -o jsonpath='{.status.phase}')
+  parked_route=$(engine_route)
+  if [[ "$phase" == "stopped" ]] && jq -e '.enabled == false' <<<"$parked_route" >/dev/null; then
+    stopped=true
+    break
   fi
   sleep 1
 done
-if [[ -n "${endpoints// /}" ]]; then
-  echo "Timed out after ${ENDPOINT_WAIT_SECONDS}s waiting for stopped-engine endpoints to disappear; last result: ${endpoints}"
+if [[ "$stopped" != "true" ]]; then
+  echo "Engine did not reach stopped with a disabled route within ${ROUTE_WAIT_SECONDS}s"
   dump_namespace_debug "$NAMESPACE"
   exit 1
 fi
-echo "No endpoints, as expected"
+if [[ "$WAKE_CACHE_CASE" == "warm" ]]; then
+  require_same_gateway
+  # The retired Service can disappear while Envoy retains a last DNS answer.
+  # This is harmless: admission cannot reuse that generation authority.
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Health probes are answered while the engine is parked, and never wake it.
@@ -383,7 +483,10 @@ echo "${health_got} probes answered 200 and the engine stayed parked at zero"
 # ---------------------------------------------------------------------------
 
 probe_pod="wake-probe-$$"
-query_url="http://${GATEWAY_SVC}.${NAMESPACE}.svc.cluster.local:80/?output_format=JSON_Compact"
+if [[ "$WAKE_CACHE_CASE" == "warm" ]]; then
+  require_same_gateway
+  engine_route | jq -e '.enabled == false' >/dev/null
+fi
 
 echo "Sending a query through the gateway at the stopped engine (timeout ${WAKE_QUERY_TIMEOUT}s)..."
 echo "  The gateway should hold this request until the operator brings the engine up."
@@ -449,8 +552,20 @@ fi
 
 query_output=$(cat /tmp/wake-query-output)
 printf '%s\n' "$query_output"
+if [[ "$WAKE_CACHE_CASE" == "warm" ]]; then
+  require_same_gateway
+  woken_route=$(engine_route)
+  if ! jq -e --arg old "$active_authority" '.enabled == true and .authority != $old' <<<"$woken_route" >/dev/null; then
+    echo "Wake must publish an enabled, different generation authority: $woken_route"
+    exit 1
+  fi
+  woken_authority=$(jq -er '.authority' <<<"$woken_route")
+  gateway_clusters | jq -e --arg name "DFPCluster:${woken_authority}" '
+    [.cluster_statuses[] | select(.name == $name)] |
+    length == 1 and (.[0].host_statuses | length) > 0' >/dev/null
+fi
 
-if ! grep -q "HTTP_STATUS=200" <<<"$query_output"; then
+if ! grep -q '^HTTP_STATUS=200 ' <<<"$query_output"; then
   echo "The held query did not return 200. Wake is only useful if the triggering"
   echo "query survives; a 503 here means the client saw an error and would have"
   echo "had to retry, which is the behavior this feature exists to remove."
@@ -458,7 +573,7 @@ if ! grep -q "HTTP_STATUS=200" <<<"$query_output"; then
   dump_namespace_debug "$NAMESPACE"
   exit 1
 fi
-if ! grep -q "42" <<<"$query_output"; then
+if ! query_returned_42 <<<"$query_output"; then
   echo "The held query returned 200 but not the expected result; it may have been"
   echo "answered by something other than the woken engine."
   exit 1

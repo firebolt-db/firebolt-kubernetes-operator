@@ -165,7 +165,8 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 		engName := engineName
 		RegisterFailedSpecPodLogDump(&instName, &engName)
 
-		// engineHTTPSURL targets the engine's TLS listener on the routing Service
+		// This component check performs only a TLS handshake; product SQL uses
+		// the gateway. engineHTTPSURL targets the engine's TLS listener on the routing Service
 		// FQDN — which is one of the per-generation cert's SANs — so a verifying
 		// curl proves both the SAN and the CA chain / bundle.
 		engineHTTPSURL := fmt.Sprintf("https://%s-service.%s.svc.cluster.local:%d/",
@@ -238,7 +239,7 @@ var _ = Describe("FireboltInstance auth + TLS", func() {
 			}
 		})
 
-		It("engine serves TLS with a valid per-generation certificate", func() {
+		It("component TLS listener serves a valid per-generation certificate", func() {
 			By("installing the CA into the client pod")
 			ca, err := engineTrustCAPEM(ctx)
 			Expect(err).NotTo(HaveOccurred())

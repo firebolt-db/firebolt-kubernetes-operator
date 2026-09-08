@@ -141,6 +141,7 @@ func TestReconcileDraining_BusyPodBlocksCleanup(t *testing.T) {
 		Scheme:          sch,
 		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
 	}
+	seedEngineRoutingFixture(t, cli, engine)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}
 
 	// Phase 1: the pod reports active queries. Multiple consecutive

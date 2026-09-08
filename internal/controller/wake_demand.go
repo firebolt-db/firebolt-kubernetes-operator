@@ -62,18 +62,16 @@ const wakeDemandScrapeTimeout = 3 * time.Second
 // WakeDemandSource reports when the gateway last saw a request for an
 // engine that had no ready endpoints.
 //
-// An interface so the engine reconciler can be unit-tested without a
-// running poller, and so the no-op implementation below can stand in when
-// wake-on-zero is disabled.
+// The interface lets the engine reconciler run without a poller in unit tests.
 type WakeDemandSource interface {
 	// LastDemand returns the most recent demand timestamp for the engine,
 	// or nil when the gateway has not asked for it recently.
 	LastDemand(namespace, engine string) *time.Time
 }
 
-// NoWakeDemand is the WakeDemandSource used when wake-on-zero is off. It
-// reports no demand, ever, which leaves autoStop's behavior identical to
-// what it was before wake existed.
+// NoWakeDemand reports no demand when no tracker is available. It supplies
+// an empty observation source for tests and missing-agent configuration; it
+// does not bypass the Gateway's mandatory request admission.
 type NoWakeDemand struct{}
 
 // LastDemand implements WakeDemandSource.

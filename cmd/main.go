@@ -99,7 +99,6 @@ func main() {
 	var watchNamespacesArg string
 	var watchLabelSelectorArg string
 	var engineMaxCPUStr, engineMaxMemoryStr, engineMaxEphemeralStorageStr string
-	var gatewayWakeClusterRole string
 	var wakeAgentImage string
 	var wakeAgentImagePullPolicy string
 	var telemetryEnabled bool
@@ -149,15 +148,9 @@ func main() {
 	flag.StringVar(&engineMaxEphemeralStorageStr, "engine-max-ephemeral-storage", "",
 		"Maximum value (Kubernetes resource.Quantity, e.g. \"10Ti\") for FireboltEngine.spec.resources requests/limits ephemeral-storage. "+
 			"Empty disables the bound.")
-	flag.StringVar(&gatewayWakeClusterRole, "gateway-wake-cluster-role", "",
-		"Name of the chart-managed ClusterRole that grants get/list/watch on endpointslices. "+
-			"The operator binds this ClusterRole to each FireboltInstance's gateway ServiceAccount via "+
-			"a per-instance RoleBinding, so the wake-agent sidecar can observe when a stopped engine's "+
-			"endpoints appear. Empty skips the binding and disables wake-on-zero; query routing is unaffected.")
 	flag.StringVar(&wakeAgentImage, "wake-agent-image", "",
-		"Image for the gateway's wake-agent sidecar. Set by the chart to the operator's own image: "+
-			"the agent is a subcommand of this binary, so shipping them together keeps the operator and "+
-			"the demand endpoint it polls on the same version. Empty omits the sidecar and disables wake-on-zero.")
+		"Image for the mandatory Gateway admission and wake agent. The chart uses the operator image "+
+			"to keep the routing protocol in sync. Empty leaves Gateway request admission closed.")
 	flag.StringVar(&wakeAgentImagePullPolicy, "wake-agent-image-pull-policy", "",
 		"Pull policy for the wake-agent sidecar. Empty applies Kubernetes' own tag-derived default.")
 	flag.BoolVar(&telemetryEnabled, "telemetry", true,
@@ -320,10 +313,9 @@ func main() {
 	}
 
 	if err := (&controller.FireboltInstanceReconciler{
-		Client:                 mgr.GetClient(),
-		Scheme:                 mgr.GetScheme(),
-		MetricsRecorder:        instanceMetrics,
-		GatewayWakeClusterRole: gatewayWakeClusterRole,
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		MetricsRecorder: instanceMetrics,
 
 		WakeAgentImage:           wakeAgentImage,
 		WakeAgentImagePullPolicy: corev1.PullPolicy(wakeAgentImagePullPolicy),

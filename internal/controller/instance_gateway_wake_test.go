@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/wakeagent"
@@ -55,6 +56,11 @@ func containerByName(pt *corev1.PodTemplateSpec, name string) *corev1.Container 
 			return &pt.Spec.Containers[i]
 		}
 	}
+	for i := range pt.Spec.InitContainers {
+		if pt.Spec.InitContainers[i].Name == name {
+			return &pt.Spec.InitContainers[i]
+		}
+	}
 	return nil
 }
 
@@ -67,9 +73,12 @@ func volumeByName(pt *corev1.PodTemplateSpec, name string) *corev1.Volume {
 	return nil
 }
 
-func TestGatewayPodOmitsWakeAgentWithoutImage(t *testing.T) {
+func TestGatewayPodWithoutAgentImageCannotBypassAdmission(t *testing.T) {
 	t.Parallel()
 	pt := renderGatewayPod(t, wakeInstance(t, nil), wakeAgentConfig{})
+	if !strings.Contains(buildEnvoyConfigYAML(wakeInstance(t, nil), false), "failure_mode_allow: false") {
+		t.Fatal("an unconfigured agent must fail closed, never bypass admission")
+	}
 
 	if c := containerByName(pt, computev1alpha1.GatewayWakeAgentContainerName); c != nil {
 		t.Errorf("wake-agent container rendered with no image configured: %+v", c)
@@ -194,35 +203,21 @@ func TestGatewayPodProjectsRotatingToken(t *testing.T) {
 	}
 }
 
-// A user who brings their own ServiceAccount owns their pod's credential
-// story, sidecars included, so the operator must not override their choice.
-func TestGatewayPodHonorsUserAutomountWithCustomSA(t *testing.T) {
+// A custom ServiceAccount still projects credentials only into the agent.
+func TestGatewayPodDisablesAutomountWithCustomSA(t *testing.T) {
 	t.Parallel()
-	userValue := true
-	inst := wakeInstance(t, &corev1.PodTemplateSpec{
-		Spec: corev1.PodSpec{
-			ServiceAccountName:           "my-gateway-sa",
-			AutomountServiceAccountToken: &userValue,
-		},
-	})
-	pt := renderGatewayPod(t, inst, wakeAgentConfig{Image: testWakeAgentImage})
-
-	if pt.Spec.AutomountServiceAccountToken == nil || !*pt.Spec.AutomountServiceAccountToken {
-		t.Errorf("AutomountServiceAccountToken = %v, want the user's *true to pass through",
-			pt.Spec.AutomountServiceAccountToken)
-	}
-}
-
-func TestGatewayPodLeavesAutomountUnsetForUnopinionatedCustomSA(t *testing.T) {
-	t.Parallel()
-	inst := wakeInstance(t, &corev1.PodTemplateSpec{
-		Spec: corev1.PodSpec{ServiceAccountName: "my-gateway-sa"},
-	})
-	pt := renderGatewayPod(t, inst, wakeAgentConfig{Image: testWakeAgentImage})
-
-	if pt.Spec.AutomountServiceAccountToken != nil {
-		t.Errorf("AutomountServiceAccountToken = %v, want nil so Kubernetes' own default applies",
-			*pt.Spec.AutomountServiceAccountToken)
+	boolPointer := func(value bool) *bool { return &value }
+	for _, userValue := range []*bool{nil, boolPointer(true), boolPointer(false)} {
+		inst := wakeInstance(t, &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			ServiceAccountName: "my-gateway-sa", AutomountServiceAccountToken: userValue,
+		}})
+		pt := renderGatewayPod(t, inst, wakeAgentConfig{Image: testWakeAgentImage})
+		if pt.Spec.AutomountServiceAccountToken == nil || *pt.Spec.AutomountServiceAccountToken {
+			t.Fatal("custom ServiceAccount must not expose its credential to Envoy")
+		}
+		if containerByName(pt, computev1alpha1.GatewayWakeAgentContainerName) == nil {
+			t.Fatal("custom ServiceAccount must retain the routing agent")
+		}
 	}
 }
 
@@ -288,35 +283,16 @@ func envByName(c *corev1.Container, name string) *corev1.EnvVar {
 	return nil
 }
 
-// No liveness probe, deliberately: restarting a wedged agent would reset
-// every request it is holding, turning a degraded wake into client-visible
-// errors. Envoy fails open, so an unready agent costs wake, not routing.
-// The sidecar must carry no probes.
-//
-// A readiness probe is the dangerous one: a pod is Ready only when EVERY
-// container is, so probing the agent would let a wedged one evict the whole
-// gateway pod from its Service and take Envoy with it — the outage the
-// fail-open design exists to prevent, arriving through the back door. An
-// earlier revision had exactly that, and this test asserted its presence.
-//
-// A liveness probe would restart the agent and reset every request it is
-// holding, turning a degraded wake into client-visible errors.
-func TestWakeAgentHasNoProbes(t *testing.T) {
+// Readiness requires durable registration; liveness must not erase accounting.
+func TestWakeAgentRequiresRegisteredReadiness(t *testing.T) {
 	t.Parallel()
 	pt := renderGatewayPod(t, wakeInstance(t, nil), wakeAgentConfig{Image: testWakeAgentImage})
 	agent := containerByName(pt, computev1alpha1.GatewayWakeAgentContainerName)
-	if agent == nil {
-		t.Fatal("wake-agent container missing")
+	if agent == nil || agent.ReadinessProbe == nil || agent.ReadinessProbe.HTTPGet.Path != "/readyz" {
+		t.Fatal("agent must gate readiness on registration")
 	}
 	if agent.LivenessProbe != nil {
-		t.Error("wake-agent has a liveness probe; a restart would reset held requests")
-	}
-	if agent.ReadinessProbe != nil {
-		t.Error("wake-agent has a readiness probe; an unready agent would take " +
-			"the gateway pod out of its Service and break the data path")
-	}
-	if agent.StartupProbe != nil {
-		t.Error("wake-agent has a startup probe; same failure mode as readiness")
+		t.Fatal("liveness restart would erase accounting")
 	}
 }
 
@@ -342,167 +318,85 @@ func TestWakeAgentRunsLockedDown(t *testing.T) {
 	}
 }
 
-// The Envoy half of the contract: a loopback cluster for the agent, and a
-// Lua call that consults it before the :authority rewrite sends the request
-// at an engine that may not be there.
-func TestEnvoyConfigCallsWakeAgent(t *testing.T) {
+// The admission filter must run after engine validation and before DNS routing.
+// Response headers stay enabled so Envoy reports the request lifetime, including
+// cancellation, instead of closing the processor immediately after admission.
+func TestEnvoyConfigTracksAdmissionBeforeRouting(t *testing.T) {
 	t.Parallel()
-	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
-		Spec: computev1alpha1.FireboltInstanceSpec{
-			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
-		},
+	cfg := buildEnvoyConfigYAML(wakeInstance(t, nil), true)
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(cfg), &parsed); err != nil {
+		t.Fatal(err)
 	}
-	cfg := buildEnvoyConfigYAML(inst, true)
-
-	if !strings.Contains(cfg, "- name: wake_agent") {
-		t.Error("envoy config has no wake_agent cluster")
+	chain := listenerFilterChain(t, parsed)
+	filters := chain["filters"].([]any)[0].(map[string]any)["typed_config"].(map[string]any)["http_filters"].([]any)
+	want := []string{"envoy.filters.http.health_check", "envoy.filters.http.lua", "envoy.filters.http.ext_proc", "envoy.filters.http.dynamic_forward_proxy", "envoy.filters.http.router"}
+	if len(filters) != len(want) {
+		t.Fatalf("HTTP filters = %v", filters)
 	}
-	if !strings.Contains(cfg, fmt.Sprintf("port_value: %d", gatewayWakeAgentHoldPort)) {
-		t.Errorf("wake_agent cluster does not point at the hold port %d", gatewayWakeAgentHoldPort)
+	for i, name := range want {
+		if filters[i].(map[string]any)["name"] != name {
+			t.Fatalf("filter %d must be %s", i, name)
+		}
 	}
-	if !strings.Contains(cfg, `handle:httpCall(`) || !strings.Contains(cfg, `"wake_agent"`) {
-		t.Error("Lua filter does not call the wake agent")
+	processor := filters[2].(map[string]any)["typed_config"].(map[string]any)
+	if failOpen, ok := processor["failure_mode_allow"].(bool); !ok || failOpen {
+		t.Fatal("processor transport failures must not bypass admission")
 	}
-	if !strings.Contains(cfg, "/hold?engine=") {
-		t.Error("Lua filter does not pass the engine to the hold endpoint")
+	mode := processor["processing_mode"].(map[string]any)
+	if mode["request_header_mode"] != "SEND" || mode["response_header_mode"] != "SEND" {
+		t.Fatal("processor must observe both admission and response headers")
+	}
+	for _, body := range []string{"request_body_mode", "response_body_mode"} {
+		if mode[body] != "NONE" {
+			t.Fatalf("%s must keep SQL and result bodies out of the agent", body)
+		}
+	}
+	if strings.Contains(cfg, `headers:replace(":authority"`) || strings.Contains(cfg, "/hold?engine=") {
+		t.Fatal("Lua must not assign an engine authority or perform an untracked hold")
+	}
+	grpc := processor["grpc_service"].(map[string]any)["envoy_grpc"].(map[string]any)
+	if grpc["cluster_name"] != "routing_agent" {
+		t.Fatal("external processor must target the routing agent")
 	}
 }
 
-// Envoy invalidates the Lua header object across the coroutine yield that
-// httpCall performs. A headers:replace() after the call raises "object used
-// outside of proper scope", which the client never sees: :authority is left
-// unrewritten and the query is routed straight back at the gateway. Every
-// header mutation must therefore be ordered BEFORE the hold.
-//
-// This inverts an assertion an earlier revision of this test made, which is
-// how the bug shipped past unit coverage in the first place — nothing but a
-// live Envoy could tell the two orderings apart.
-func TestWakeHoldRunsAfterHeaderRewrites(t *testing.T) {
+func TestEnvoyAdmissionCannotBeDisabled(t *testing.T) {
 	t.Parallel()
-	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
-		Spec: computev1alpha1.FireboltInstanceSpec{
-			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
-		},
-	}
-	cfg := buildEnvoyConfigYAML(inst, true)
-
-	holdAt := strings.Index(cfg, "/hold?engine=")
-	if holdAt < 0 {
-		t.Fatal("wake hold absent from the rendered config")
-	}
-	for _, rewrite := range []string{
-		`headers:replace(":authority"`,
-		`headers:replace("x-firebolt-engine"`,
-		`headers:replace(":path"`,
-	} {
-		at := strings.Index(cfg, rewrite)
-		if at < 0 {
-			t.Errorf("%s absent from the rendered config", rewrite)
-			continue
+	inst := wakeInstance(t, nil)
+	for _, enabled := range []bool{false, true} {
+		cfg := buildEnvoyConfigYAML(inst, enabled)
+		for _, required := range []string{"name: envoy.filters.http.ext_proc", "failure_mode_allow: false", "response_header_mode: SEND", "ext_proc_graceful_grpc_close: true"} {
+			if !strings.Contains(cfg, required) {
+				t.Errorf("missing %q", required)
+			}
 		}
-		if at > holdAt {
-			t.Errorf("%s at %d runs after the wake hold at %d; "+
-				"the header object is invalid past the httpCall yield",
-				rewrite, at, holdAt)
+		if strings.Contains(cfg, "/hold?engine=") {
+			t.Fatal("legacy hold path remains")
 		}
 	}
 }
 
-// Rendering the hold without an agent behind it is worse than not having the
-// feature: Envoy synthesizes a 503 for a refused loopback connection, so
-// every query would be answered from a port with nothing listening on it.
-func TestEnvoyConfigOmitsWakeWhenDisabled(t *testing.T) {
+// The rendered processor deadline must let the agent return its bounded wake
+// rejection before Envoy's processor or stream-idle timeout resets the request.
+func TestAdmissionTimeoutFitsInsideStreamIdleTimeout(t *testing.T) {
 	t.Parallel()
-	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
-		Spec: computev1alpha1.FireboltInstanceSpec{
-			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
-		},
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(buildEnvoyConfigYAML(wakeInstance(t, nil), true)), &parsed); err != nil {
+		t.Fatal(err)
 	}
-	cfg := buildEnvoyConfigYAML(inst, false)
-
-	for _, fragment := range []string{"wake_agent", "/hold?engine=", "httpCall"} {
-		if strings.Contains(cfg, fragment) {
-			t.Errorf("wake-disabled config still contains %q", fragment)
-		}
+	hcm := listenerFilterChain(t, parsed)["filters"].([]any)[0].(map[string]any)["typed_config"].(map[string]any)
+	processor := hcm["http_filters"].([]any)[2].(map[string]any)["typed_config"].(map[string]any)
+	deadline, err := time.ParseDuration(processor["message_timeout"].(string))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The rest of the filter chain must be intact.
-	if !strings.Contains(cfg, `headers:replace(":authority"`) {
-		t.Error("wake-disabled config lost the :authority rewrite")
+	idle, err := time.ParseDuration(hcm["stream_idle_timeout"].(string))
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// A non-200 is only honored when it carries the agent's own decision
-// header. Envoy's synthesized failure response has no such header, which is
-// what makes an unreachable agent fall through to normal routing instead of
-// taking the gateway down.
-func TestEnvoyConfigFailsOpenOnSynthesizedResponse(t *testing.T) {
-	t.Parallel()
-	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
-		Spec: computev1alpha1.FireboltInstanceSpec{
-			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
-		},
-	}
-	cfg := buildEnvoyConfigYAML(inst, true)
-
-	guard := fmt.Sprintf(`wake_headers[%q] ~= nil`, wakeagent.DecisionHeader)
-	if !strings.Contains(cfg, guard) {
-		t.Errorf("Lua does not gate on the decision header; expected %q.\n"+
-			"Without it, Envoy's synthesized 503 for an unreachable agent is "+
-			"indistinguishable from a deliberate shed and every query fails.", guard)
-	}
-	statusCheck := strings.Index(cfg, `wake_headers[":status"] ~= "200"`)
-	guardAt := strings.Index(cfg, guard)
-	if statusCheck < 0 || guardAt < 0 || guardAt > statusCheck {
-		t.Error("the decision-header guard must be evaluated before the status check")
-	}
-}
-
-// The Lua timeout must outlast the agent's own hold timeout, so a
-// never-arriving engine surfaces the agent's 503 rather than an opaque
-// Lua-side timeout.
-func TestWakeHoldTimeoutOutlastsAgent(t *testing.T) {
-	t.Parallel()
-	luaTimeout := time.Duration(gatewayWakeHoldTimeoutMillis) * time.Millisecond
-	if luaTimeout <= wakeagent.DefaultHoldTimeout {
-		t.Errorf("Lua httpCall timeout %v must exceed the agent's hold timeout %v",
-			luaTimeout, wakeagent.DefaultHoldTimeout)
-	}
-}
-
-// The agent duplicates the service suffix rather than importing it, to keep
-// controller-runtime out of the sidecar's dependency graph. Pin the two
-// together so the duplication cannot silently drift.
-func TestWakeAgentServiceSuffixMatches(t *testing.T) {
-	t.Parallel()
-	if wakeagent.ServiceSuffix != SuffixService {
-		t.Errorf("wakeagent.ServiceSuffix = %q, controller.SuffixService = %q; "+
-			"the agent would derive engine names from the wrong Service naming",
-			wakeagent.ServiceSuffix, SuffixService)
-	}
-}
-
-// Three timeouts have to stay ordered or a held query dies in the wrong
-// place: the agent's own hold ceiling, the Lua httpCall bounding it, and
-// the stream idle timeout bounding both. Getting this wrong surfaces as a
-// stream reset instead of the agent's 503 + Retry-After, which is much
-// harder to diagnose from a client.
-func TestWakeHoldFitsInsideStreamIdleTimeout(t *testing.T) {
-	t.Parallel()
-	agentHold := wakeagent.DefaultHoldTimeout
-	luaCall := time.Duration(gatewayWakeHoldTimeoutMillis) * time.Millisecond
-	streamIdle := time.Duration(gatewayStreamIdleTimeoutSeconds) * time.Second
-
-	if luaCall <= agentHold {
-		t.Errorf("Lua httpCall timeout %v must exceed the agent's hold %v, "+
-			"so a never-arriving engine surfaces the agent's 503", luaCall, agentHold)
-	}
-	if streamIdle <= luaCall {
-		t.Errorf("stream_idle_timeout %v must exceed the Lua httpCall timeout %v, "+
-			"or Envoy resets the held stream before the filter can answer", streamIdle, luaCall)
+	if deadline <= wakeagent.DefaultHoldTimeout || idle <= deadline {
+		t.Fatalf("timeouts must satisfy hold < processor < idle, got %s < %s < %s", wakeagent.DefaultHoldTimeout, deadline, idle)
 	}
 }
 
@@ -518,5 +412,36 @@ func TestEnvoyConfigSetsStreamIdleTimeout(t *testing.T) {
 	want := fmt.Sprintf("stream_idle_timeout: %ds", gatewayStreamIdleTimeoutSeconds)
 	if got := buildEnvoyConfigYAML(inst, true); !strings.Contains(got, want) {
 		t.Errorf("rendered config missing %q", want)
+	}
+}
+
+func TestGatewayPodNativeSidecarOrderAndGracePeriod(t *testing.T) {
+	t.Parallel()
+	seconds := int64(240)
+	template := &corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		InitContainers:                []corev1.Container{{Name: "prepare", Image: "busybox:1"}},
+		Containers:                    []corev1.Container{{Name: "exporter", Image: "busybox:1"}},
+		TerminationGracePeriodSeconds: &seconds,
+	}}
+	pt := renderGatewayPod(t, wakeInstance(t, template), wakeAgentConfig{Image: testWakeAgentImage})
+	if len(pt.Spec.InitContainers) != 2 || pt.Spec.InitContainers[0].Name != "prepare" || pt.Spec.InitContainers[1].Name != computev1alpha1.GatewayWakeAgentContainerName {
+		t.Fatalf("init sequence = %+v", pt.Spec.InitContainers)
+	}
+	agent := pt.Spec.InitContainers[1]
+	if agent.RestartPolicy == nil || *agent.RestartPolicy != corev1.ContainerRestartPolicyAlways || agent.Lifecycle != nil {
+		t.Fatalf("agent must use native sidecar ordering without a sleep hook: %+v", agent)
+	}
+	if len(pt.Spec.Containers) != 2 || pt.Spec.Containers[0].Name != computev1alpha1.GatewayContainerName || pt.Spec.Containers[1].Name != "exporter" {
+		t.Fatalf("main containers = %+v", pt.Spec.Containers)
+	}
+	if *pt.Spec.TerminationGracePeriodSeconds != seconds {
+		t.Fatalf("grace period = %d", *pt.Spec.TerminationGracePeriodSeconds)
+	}
+	if len(template.Spec.InitContainers) != 1 {
+		t.Fatal("rendering modified the input template")
+	}
+	defaults := renderGatewayPod(t, wakeInstance(t, nil), wakeAgentConfig{})
+	if *defaults.Spec.TerminationGracePeriodSeconds != gatewayTerminationGracePeriodSeconds {
+		t.Fatal("default shutdown deadline was not applied")
 	}
 }

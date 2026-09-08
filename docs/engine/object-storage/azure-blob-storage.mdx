@@ -14,7 +14,7 @@ You configure Azure Blob Storage on the engine through `spec.customEngineConfig.
 
 Before you begin, ensure that you have the following installed and configured:
 
-* A [Kubernetes](https://kubernetes.io/) cluster (v1.28+) running on Azure Kubernetes Service (AKS) with workload identity and the OIDC issuer enabled.
+* A [Kubernetes](https://kubernetes.io/) cluster (v1.33+) running on Azure Kubernetes Service (AKS) with workload identity and the OIDC issuer enabled.
 * The Firebolt Operator installed in the cluster. See [Installation](../../installation).
 * A `FireboltInstance` in the `Ready` phase. See the [Quickstart](../../quickstart).
 * `kubectl` command-line tool configured to access your cluster.
@@ -154,13 +154,13 @@ For the full set of engine fields, including `customEngineConfig` and `serviceAc
 
 ### Confirm that object storage is working
 
-To confirm that managed storage works, create a table and check that new blobs appear in your container. Engine pods follow the name pattern `<engine>-g<generation>-<index>`, so the first pod of generation `0` for `my-engine` is `my-engine-g0-0`.
+To confirm that managed storage works, create a table and check that new blobs appear in your container. Use the Instance Gateway and select the Engine with `X-Firebolt-Engine`.
 
 ```bash
-kubectl port-forward pod/my-engine-g0-0 3473:3473 -n firebolt
+kubectl port-forward svc/my-instance-gateway 8123:80 -n firebolt
 
-curl -s "http://localhost:3473" --data-binary "create table test (val int);"
-curl -s "http://localhost:3473" --data-binary "insert into test values (1);"
+curl -fsS "http://localhost:8123" -H "X-Firebolt-Engine: my-engine" --data-binary "create table test (val int);"
+curl -fsS "http://localhost:8123" -H "X-Firebolt-Engine: my-engine" --data-binary "insert into test values (1);"
 
 az storage blob list \
   --container-name firebolt-engine-demo-data \

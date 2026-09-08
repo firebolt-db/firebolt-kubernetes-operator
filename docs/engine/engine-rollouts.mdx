@@ -4,14 +4,14 @@ description: Configure Engine rollout strategy, readiness, and query draining.
 sidebarTitle: Engine rollouts
 ---
 
-The Firebolt Operator uses blue-green generations for Engine changes. The active generation continues serving while the desired generation starts, then the Engine Service switches to the ready replacement.
+The Firebolt Operator uses blue-green generations for Engine changes. The active generation continues serving while the desired generation starts, then Gateway routing moves to the ready replacement before the old generation can shut down.
 
 ## Choose a rollout strategy
 
 | Strategy | Behavior | Use when |
 |---|---|---|
 | `graceful` | Switches traffic to the ready generation, waits for old pods to finish queries, then removes them. | Query continuity matters. This is the default. |
-| `recreate` | Switches traffic to the ready generation and removes old pods without waiting for the Firebolt Operator drain check. | Faster cleanup matters more than preserving in-flight queries. |
+| `recreate` | Withdraws the old route and removes old Pods without waiting for the additional metric drain check. | Faster cleanup matters more than preserving in-flight queries. |
 
 Configure the strategy on an Engine:
 
@@ -30,9 +30,11 @@ Persistent volume claims are generation-specific. Ensure the storage provisioner
 
 ## Readiness and traffic switching
 
-The Engine Service switches only after every desired Engine pod is ready. Readiness includes every sidecar with a readiness probe. Add readiness probes to sidecars that must be available before the pod receives queries; a sidecar without a probe is considered ready as soon as its process starts.
+The Firebolt Operator publishes the replacement route only after every desired Engine Pod is ready. Readiness includes every sidecar with a readiness probe. Add readiness probes to sidecars that must be available before the pod receives queries; a sidecar without a probe is considered ready as soon as its process starts.
 
-During pod termination, the Engine readiness endpoint stops advertising the pod before its process exits. The Gateway retries requests that reach an Engine already entering shutdown.
+Every Gateway session that could dispatch to the old generation must first stop granting old requests and account for its remaining admissions, including retries. The Firebolt Operator waits for these acknowledgments before removing old Engine Pods. This gate also applies to `recreate`, scale-to-zero, and Engine deletion; DNS propagation and metric samples do not replace it. See [Graceful Engine shutdown](../instance/gateway/gateway-query-routing#graceful-engine-shutdown).
+
+An unavailable Gateway report or uncertain request state blocks retirement. The Firebolt Operator replaces a Gateway whose agent restarted or lost request accounting and waits for positive evidence that its old Envoy process stopped. This recovery can delay an Engine rollout.
 
 ## Configure graceful drain checks
 
@@ -41,15 +43,15 @@ During a graceful rollout, the Firebolt Operator waits until old-generation pods
 - `firebolt_running_queries`
 - `firebolt_suspended_queries`
 
-A pod is drained when their sum is zero.
+The Firebolt Operator treats a Pod as drained when their sum is zero. This is an additional query-activity check; the Gateway withdrawal gate independently prevents future dispatch.
 
 | Field | Default | Description |
 |---|---|---|
-| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the Firebolt Operator drain gate. |
+| `spec.drainCheckEnabled` | `true` | Set to `false` to skip the metric drain check; Gateway withdrawal remains required. |
 | `spec.drainCheckInterval` | `5s` | Interval between drain checks. |
-| `spec.rollout` | `graceful` | Set to `recreate` to skip the drain phase. |
+| `spec.rollout` | `graceful` | Set to `recreate` to skip the metric drain phase; Gateway withdrawal remains required. |
 
-The Engine process still waits for unfinished queries during Kubernetes termination when the Firebolt Operator drain gate is disabled. The Engine pod termination grace period is fixed at 60 seconds, and the Engine reserves the final 5 seconds for shutdown.
+When metric drain checks are disabled, the Engine shutdown implementation must still finish accepted work within Kubernetes termination, including connections that have not yet reached a query handler. The Engine pod termination grace period is fixed at 60 seconds, and the Engine reserves the final 5 seconds for shutdown.
 
 ## Select the metrics transport
 
@@ -58,4 +60,4 @@ Drain checks and auto-stop use `FireboltInstance.spec.metricScrapeMode`:
 - `PodIP` connects directly to each Engine pod and is the default.
 - `ApiserverProxy` uses the Kubernetes API server `pods/proxy` endpoint. Enable Helm value `rbac.apiserverProxyGrant=true` for this mode.
 
-If a drain scrape fails or a required metric is missing, the Firebolt Operator keeps the old generation and reports `Ready=False` with reason `DrainCheckFailing`. Fix pod network reachability, metrics availability, or the API-server proxy permission before retrying. To accept interrupted queries and continue immediately, set `spec.rollout: recreate`.
+If a drain scrape fails or a required metric is missing, the Firebolt Operator keeps the old generation and reports `Ready=False` with reason `DrainCheckFailing`. Fix pod network reachability, metrics availability, or the API-server proxy permission before retrying. Setting `spec.rollout: recreate` bypasses these metric checks, but still waits for Gateway withdrawal and retains the finite Engine shutdown budget.

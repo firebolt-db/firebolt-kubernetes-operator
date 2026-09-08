@@ -1,24 +1,21 @@
 ---
 title: Gateway overview
-description: Per-instance Envoy gateway for query routing and zero-downtime engine cutovers.
+description: Per-instance Envoy gateway for query routing and Engine cutover behavior.
 sidebarTitle: Overview
 ---
 
 ## Overview
 
-The Firebolt Operator Gateway is based on [Envoy Proxy](https://www.envoyproxy.io/) and responsible for query routing.
-It uses a Lua filter to pick the target Engine from the `X-Firebolt-Engine` request header or the `engine` query
-parameter and a dynamic forward proxy (DFP) to resolve the per-Engine headless Service at request time. The Gateway
-removes the routing-only query parameter before forwarding the request to the Engine.
+The Firebolt Operator Gateway uses [Envoy Proxy](https://www.envoyproxy.io/) for client traffic and a local agent for request admission. Lua validates the Engine selector; the agent supplies an immutable generation destination through Envoy's `ext_proc` filter. Envoy discovers ready Pods for that destination through its dynamic forward proxy.
 
-- [Gateway query routing](./gateway-query-routing) describes Envoy routing, retries, graceful shutdown, and why the Firebolt Operator does not gate on EndpointSlice updates.
-- [Gateway sizing](./gateway-sizing) describes replica count, memory limits, and the 2 MiB per-connection buffer constraint.
+- [Gateway query routing](./gateway-query-routing) describes admission, retries, and withdrawal before Engine shutdown.
+- [Gateway sizing](./gateway-sizing) describes replica count, memory limits, and the 2 MiB retry-buffer constraint.
 
 ## Connect to engines
 
 ### Instance gateway
 
-The Instance Gateway is the entry point for engine queries. The Envoy proxy routes requests based on the target engine name and handles retries during blue-green transitions. Pass the engine with the `X-Firebolt-Engine` header (raw HTTP clients) or the `engine` query parameter (the bundled `firebolt` CLI).
+The Instance Gateway is the supported entry point for Engine queries. The Envoy proxy routes requests based on the target engine name and handles retries during blue-green transitions. Pass the engine with the `X-Firebolt-Engine` header (raw HTTP clients) or the `engine` query parameter (the bundled `firebolt` CLI).
 
 ```text
 POST http://<instance-name>-gateway.<namespace>.svc.cluster.local/
@@ -41,23 +38,19 @@ firebolt client \
 
 ### Configuration
 
-The gateway ConfigMap (`{instance}-gateway-config`) is a pure function of the `FireboltInstance`. The Firebolt Operator does not regenerate it on engine create, delete, scale, or blue-green events, so those events never trigger a gateway rollout.
+The Envoy ConfigMap (`<instance>-gateway-config`) depends on Instance configuration. Engine create, delete, scale, and rollout events update a separate routing coordination ConfigMap instead of restarting the Gateway fleet.
+
+The local agent is required for all Engine query traffic. It must register its Pod UID and process identity with the Firebolt Operator before becoming ready or admitting requests. The agent's `/readyz` probe checks that registration. An unavailable or unregistered agent cannot be bypassed by Envoy.
 
 ### Gateway custom service account
 
-By default the Firebolt Operator creates a ServiceAccount named `<instance>-gateway` and a RoleBinding tying it to the chart-managed `<release>-gateway-wake` ClusterRole, which grants `get` / `list` / `watch` on `endpointslices` in the instance's namespace.
+By default, the Firebolt Operator creates the `<instance>-gateway` ServiceAccount. It binds a namespaced Role granting the agent `get`, `list`, and `watch` on EndpointSlices and on its single coordination ConfigMap. The ConfigMap grant is restricted by resource name. Only the Firebolt Operator writes routing assignments and session records.
 
-That read is the wake-agent sidecar's entire Kubernetes grant: it watches for a stopped engine's endpoints appearing so it can release the query it is holding. Nothing in the gateway pod can write to the API, and the Envoy container holds no token at all — the pod sets `automountServiceAccountToken: false` and projects the token into the agent container alone. See [Auto-stop and wake-up](../../engine/auto-stop-and-wake-up#gateway-wake-up-protocol).
+Set `spec.gateway.template.spec.serviceAccountName` to use an existing ServiceAccount. You create that account; the Firebolt Operator leaves the account itself untouched and binds the same read-only Role to it. A custom identity does not disable admission or wake-up.
 
-When `spec.gateway.template.spec.serviceAccountName` is set, the Firebolt Operator interprets this as the user taking ownership of the gateway's identity and **skips creating the SA and RoleBinding entirely**. It also **turns off wake-on-zero for that gateway**: the wake-agent sidecar and its hold hook are not rendered, so queries for auto-stopped engines return `503` and do not wake them, exactly as when the [wake agent is disabled in the chart](../../engine/auto-stop-and-wake-up#disabling-wake). Engines still scale up on `spec.autoStop.schedule` windows. The Firebolt Operator records a `WakeOnZeroDisabled` warning event on the `FireboltInstance` when this applies.
+The Gateway Pod always sets `automountServiceAccountToken: false`. A rotating token is projected only into the agent, so Envoy does not hold a Kubernetes credential. The Firebolt Operator overrides a template's `automountServiceAccountToken: true` value to preserve this isolation.
 
-You are responsible for creating the ServiceAccount in the instance's namespace under the name you specified. It needs no Kubernetes permissions: with the wake agent gone, nothing in the gateway pod talks to the API.
-
-Taking ownership of the ServiceAccount also means taking ownership of the pod's token: the Firebolt Operator no longer forces `automountServiceAccountToken: false`, and your value on `spec.gateway.template.spec` applies. Set it to `false` unless a sidecar of your own needs API access.
-
-The common reason to override is IRSA / Pod Identity: annotate the SA with the IAM role binding. For IRSA, you can also annotate the Firebolt Operator-managed SA (`spec.gateway.template.metadata.annotations`) and leave `serviceAccountName` unset. That path keeps the Firebolt Operator in charge of the RBAC, and keeps wake-on-zero available.
-
-A missing user ServiceAccount does **not** fail at admission: the gateway pod fails to start with `ServiceAccount … not found` on the kubelet event stream. Create the SA before pointing the Instance at it.
+A missing custom ServiceAccount prevents the Gateway Pod from starting. Create it in the Instance namespace before selecting it.
 
 ## Rolling update parameters
 
@@ -68,3 +61,19 @@ A missing user ServiceAccount does **not** fail at admission: the gateway pod fa
 | `maxSurge` | `25%` | Standard Kubernetes default for gradual rollout |
 | `maxUnavailable` | `0` | Maintain full capacity during image switches |
 | PodDisruptionBudget | `maxUnavailable: 1` | Allow voluntary disruptions while maintaining availability |
+
+### Gateway replacement
+
+During a planned Gateway replacement, Envoy fails readiness and closes its query listener to new connections. Accepted requests can finish, including requests waiting for an Engine to wake. The agent runs as a Kubernetes native sidecar, so routing registration, request accounting, and wake handling remain active until Envoy and the other main containers have stopped. A Pod finalizer preserves evidence of Envoy termination until the Firebolt Operator has cleared its registered session. The metrics listener and local admin interface remain available during draining.
+
+The default pod shutdown budget is 180 seconds. Set `spec.gateway.template.spec.terminationGracePeriodSeconds` to cover the remaining wake wait, query execution, and container shutdown:
+
+```yaml
+spec:
+  gateway:
+    template:
+      spec:
+        terminationGracePeriodSeconds: 180
+```
+
+The budget starts when Kubernetes begins terminating the pod. When it expires, Kubernetes forcibly terminates remaining containers, interrupting unfinished requests. Closing the query listener does not wait for external load balancers to observe the pod's removal; configure their draining behavior for your environment.

@@ -51,6 +51,11 @@ func runWakeAgent(args []string) error {
 
 	var (
 		namespace       string
+		instanceName    string
+		instanceUID     string
+		podUID          string
+		extProcPort     int
+		routeProbeURL   string
 		holdPort        int
 		demandPort      int
 		envoyAdminURL   string
@@ -64,8 +69,13 @@ func runWakeAgent(args []string) error {
 	fs.StringVar(&namespace, "namespace", os.Getenv("POD_NAMESPACE"),
 		"Namespace whose EndpointSlices are watched. Defaults to $POD_NAMESPACE "+
 			"(set from the downward API by the operator-rendered pod template).")
+	fs.StringVar(&instanceName, "instance-name", os.Getenv("INSTANCE_NAME"), "Instance owning this gateway.")
+	fs.StringVar(&instanceUID, "instance-uid", os.Getenv("INSTANCE_UID"), "UID of the Instance owning this gateway.")
+	fs.StringVar(&podUID, "pod-uid", os.Getenv("POD_UID"), "UID of this gateway Pod.")
+	fs.IntVar(&extProcPort, "ext-proc-port", wakeagent.DefaultExtProcPort, "Loopback port for Envoy request admission.")
+	fs.StringVar(&routeProbeURL, "route-probe-url", "http://127.0.0.1:9905/health/ready", "Loopback Envoy routing probe URL.")
 	fs.IntVar(&holdPort, "hold-port", wakeagent.DefaultHoldPort,
-		"Port for the hold endpoint Envoy calls. Bound to loopback only.")
+		"Port for the agent liveness endpoint. Bound to loopback only.")
 	fs.IntVar(&demandPort, "demand-port", wakeagent.DefaultDemandPort,
 		"Port for the demand endpoint the operator polls. Bound to all interfaces.")
 	fs.StringVar(&envoyAdminURL, "envoy-admin-url", "",
@@ -95,6 +105,10 @@ func runWakeAgent(args []string) error {
 			"the agent must know which namespace's EndpointSlices to watch")
 	}
 
+	if instanceName == "" || instanceUID == "" || podUID == "" {
+		return errors.New("routing requires --instance-name, --instance-uid, and --pod-uid")
+	}
+
 	ctrl.SetLogger(zap.New(zapLoggerOpts(zapOpts)...))
 	logger := ctrl.Log.WithName("wake-agent")
 	logger.Info("starting wake agent",
@@ -107,7 +121,9 @@ func runWakeAgent(args []string) error {
 	)
 
 	agent := wakeagent.New(wakeagent.Config{
-		Namespace:             namespace,
+		Namespace:    namespace,
+		InstanceName: instanceName, InstanceUID: instanceUID, PodUID: podUID,
+		ExtProcAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(extProcPort)), RouteProbeURL: routeProbeURL,
 		HoldAddr:              net.JoinHostPort("127.0.0.1", strconv.Itoa(holdPort)),
 		DemandAddr:            net.JoinHostPort("0.0.0.0", strconv.Itoa(demandPort)),
 		EnvoyAdminURL:         envoyAdminURL,
@@ -149,10 +165,9 @@ func isWakeAgentInvocation(args []string) bool {
 //
 // The tracker polls each gateway's read-only wake agent and caches the
 // per-engine demand it reports; the engine reconciler reads that cache and
-// does the scaling. Nothing in a gateway pod ever writes to the API, which
-// is the point of the arrangement. Without an agent image there is no agent
-// to poll, so wake stays off and auto-stop behaves exactly as it did before
-// the feature existed.
+// does the scaling. Gateways only read Kubernetes state. If the mandatory
+// agent image is missing, no agent can be polled and Gateway admission stays
+// closed; the empty demand source does not provide an admission fallback.
 func setupWakeDemand(
 	mgr ctrl.Manager,
 	wakeAgentImage string,

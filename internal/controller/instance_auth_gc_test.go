@@ -86,6 +86,7 @@ var _ = Describe("FireboltInstance deletion tolerates a missing cert-manager CRD
 		// cert-manager CRD installed does not surface as an error, and
 		// that the finalizer removal it performs actually lets the
 		// server complete the deletion.
+		Expect(r.ensureGatewayRouting(ctx, instance)).To(Succeed())
 		Expect(r.reconcileDelete(ctx, instance)).To(Succeed())
 
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, &computev1alpha1.FireboltInstance{})

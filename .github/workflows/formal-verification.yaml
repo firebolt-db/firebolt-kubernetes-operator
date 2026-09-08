@@ -141,12 +141,12 @@ jobs:
             -config formal/EngineWake.cfg \
             formal/EngineWake.tla
 
-      - name: Run TLC — WakeAgentHold
+      - name: Run TLC — GatewayRouting
         run: |
           java -cp tla2tools.jar tlc2.TLC \
             -workers 2 \
-            -config formal/WakeAgentHold.cfg \
-            formal/WakeAgentHold.tla
+            -config formal/GatewayRouting.cfg \
+            formal/GatewayRouting.tla
 
       - name: Every naive config must still produce its pinned violation
         # Delegates to the same script and table the Makefile target uses. This

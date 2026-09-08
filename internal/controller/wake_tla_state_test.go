@@ -47,10 +47,9 @@ package controller
 // tuning knobs (arbitrary idleReplicas / activeReplicas / timeouts, schedule
 // windows) that the model abstracts to three replica levels and one timeout.
 //
-// The model's OTHER half, WakeAgentHold.tla, has no binding here: its subject is
-// the wake agent's in-memory waiter bookkeeping, which lives in
-// internal/wakeagent behind unexported types. See formal/model-scope.tsv for
-// that decision, stated as a row rather than left as a silence.
+// GatewayRouting.tla separately checks request admission and withdrawal. Agent
+// hold capacity, timeouts and readiness probes have unit/runtime coverage;
+// neither model establishes those availability mechanisms.
 
 import (
 	"fmt"
@@ -306,11 +305,8 @@ func checkWakeInvariants(t *testing.T, m *tlaWakeSim) {
 //
 // There is no exemption list, and that is a claim rather than an omission:
 // every conjunct of EngineWake.tla's Safety is expressible against the decision
-// function's inputs. The two invariants that are NOT -- Inv_NoStrandedWaiter
-// and Inv_WaiterRefsAccurate -- live in WakeAgentHold.tla, which deliberately
-// has no fixture and no Go binding; formal/model-scope.tsv carries that as a
-// row. If a conjunct is ever added here that genuinely cannot be bound, add the
-// exemption mechanism then, with the reason.
+// function's inputs. If a conjunct is added that cannot be bound, add an
+// explicit exemption mechanism with its reason.
 func TestWakeInvariantsMatchSpec(t *testing.T) {
 	if len(tlaWakeRequiredInvariants) == 0 {
 		t.Fatal("tlaWakeRequiredInvariants is empty: the generator stopped parsing the spec's Safety predicate")

@@ -583,17 +583,10 @@ func computeCreating(
 	r.Requeue = true
 }
 
-// computeSwitching updates the cluster service selector to point to the new
-// generation, waits for the endpoints controller to propagate ready addresses,
-// then transitions to draining (if there's an old generation) or stable (if
-// this is the initial deployment).
-//
-// Because the cluster Service is headless, flipping its selector to the new
-// generation immediately changes the set of A records returned for the
-// Service hostname. Kubernetes excludes not-ready pods from the headless
-// endpoint set automatically, and the new generation's pods only reach this
-// phase once their readiness probe already passes. No separate
-// endpoint-readiness gate is therefore required.
+// computeSwitching updates the routing Service selector and, after observing
+// that selector, transitions to draining or stable. EndpointSlice updates,
+// DNS propagation, and gateway host selection converge asynchronously; observing
+// the Service selector does not acknowledge traffic withdrawal at the gateways.
 func computeSwitching(
 	spec *computev1alpha1.FireboltEngineSpec,
 	r *EngineReconcileResult,
@@ -715,10 +708,12 @@ func buildGenResources(
 //     regardless of replica count. A per-generation wildcard is scale-safe (a
 //     within-generation scale-up needs no reissue) and covers exactly the
 //     node hostnames buildConfigMap renders into engine.nodes[].host, which
-//     packdb uses for SNI and certificate verification between nodes.
-//   - "<engine>-service.<ns>.svc.cluster.local": the stable routing Service the
-//     gateway (and external clients) connect to. The gateway verifies engine
-//     certs against the issuer CA and suffix-matches this SAN.
+//     the Engine uses for SNI and certificate verification between nodes.
+//   - "<engine>-service.<ns>.svc.cluster.local": the stable Service identity
+//     used by the gateway's static health-check SAN matcher.
+//   - The immutable generation Service identity is added when binding this
+//     certificate to its Engine UID (bindEngineTLSRoutingAuthority). Gateway
+//     requests and admission probes verify that exact authority.
 //   - "localhost": the engine-web sidecar's same-pod loopback connection.
 //
 // Same issuer/algorithm/size/RotationPolicy/duration choices as the instance
@@ -1435,34 +1430,16 @@ func buildStatefulSet(spec *computev1alpha1.FireboltEngineSpec, engineName, name
 	}
 }
 
-// buildClusterService builds the per-engine routing Service. It is a
-// first-class entry point for engine traffic used by two kinds of callers:
+// buildClusterService builds the internal per-engine routing Service used by
+// the gateway. It is headless so Envoy can discover and load-balance individual
+// pod addresses. Direct clients bypass the gateway's routing and retry policy
+// and are outside the supported query path.
 //
-//  1. The in-instance Envoy gateway, which resolves the Service hostname at
-//     request time (via the dynamic_forward_proxy filter).
-//  2. External clients that want to do their own connection-level load
-//     balancing — they resolve the Service's A records and pick an endpoint
-//     IP directly, without going through a VIP.
-//
-// To make both paths work correctly we expose this Service as headless
-// (ClusterIP=None). Kubernetes then serves the Service hostname as a set of
-// A records, one per endpoint pod IP. This has two consequences that are
-// central to the zero-downtime behavior the gateway depends on:
-//
-//   - kube-proxy is removed from the data path. Requests go client -> pod IP
-//     directly, avoiding the well-known terminating-endpoint race where a
-//     SYN is still DNAT'd to a pod that has already closed its listener.
-//
-//   - PublishNotReadyAddresses is false, so only endpoints whose pod-level
-//     readiness probe passes appear in DNS. A not-ready pod is excluded
-//     from the A-record set automatically; conversely a ready pod appears
-//     as soon as the readiness probe passes, without waiting for an
-//     endpoints-controller propagation we have to gate on.
-//
-// The selector keeps `LabelGeneration` so the blue-green cutover mechanism
-// is preserved: atomically flipping the selector from the draining
-// generation to the new generation swaps the DNS A-record set over to the
-// new pod IPs.
+// PublishNotReadyAddresses is false: the endpoint controller publishes ready
+// pods matching the generation selector. EndpointSlice updates, DNS answers,
+// resolver caches, and Envoy's periodic STRICT_DNS refresh converge separately.
+// Updating the Service selector is not an atomic change to gateway routing, and
+// bypassing kube-proxy does not eliminate stale-address shutdown races.
 func buildClusterService(engineName, namespace string, gen int) *corev1.Service {
 	name := engineName + SuffixService
 	return &corev1.Service{

@@ -36,7 +36,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -62,15 +61,6 @@ const (
 	generationSweepTimeout = 15 * time.Second
 	instanceReadyTimeout   = 300 * time.Second
 	pollInterval           = 1 * time.Second
-
-	// e2eGatewayWakeClusterRole is the name of the suite's stand-in for
-	// the chart-managed ClusterRole that grants get/list/watch on
-	// endpointslices to the gateway ServiceAccount — the wake-agent
-	// sidecar's entire, read-only Kubernetes grant. The suite creates it
-	// once in SynchronizedBeforeSuite (and deletes it in
-	// SynchronizedAfterSuite) and StartInstanceOperator passes it to every
-	// per-instance FireboltInstanceReconciler via GatewayWakeClusterRole.
-	e2eGatewayWakeClusterRole = "firebolt-gateway-wake-e2e"
 )
 
 // Image references for the E2E suite, sourced from the variant-specific
@@ -195,7 +185,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Checking minimum Kubernetes version")
-	ensureMinK8sVersion(k8sClient, 1, 28)
+	ensureMinK8sVersion(k8sClient, 1, 33)
 
 	By("Verifying no operator deployments are installed in the cluster")
 	ensureNoOperatorDeployed(ctx, k8sClient)
@@ -258,15 +248,6 @@ var _ = SynchronizedBeforeSuite(func() {
 	}
 	_, err = k8sClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
-
-	By("Ensuring the gateway-wake ClusterRole exists for in-process operators")
-	// The chart ships this ClusterRole at install time; the suite runs the
-	// operator in-process and doesn't go through Helm, so create the
-	// equivalent here. Each FireboltInstanceReconciler started by
-	// StartInstanceOperator references this same name via
-	// GatewayWakeClusterRole; the per-instance RoleBindings created by
-	// ensureGatewayWakeRoleBinding point their roleRef at it.
-	ensureGatewayWakeClusterRole(ctx, k8sClient)
 
 	By("Deploying floci (S3 emulator) and pre-creating the engine bucket")
 	// The engine refuses to start without managed_storage pointing at object
@@ -343,12 +324,6 @@ var _ = SynchronizedAfterSuite(func() {
 			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace: %v\n", err)
 		}
 
-		By("Deleting the gateway-wake ClusterRole")
-		err = k8sClient.RbacV1().ClusterRoles().Delete(cleanupCtx, e2eGatewayWakeClusterRole, metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			fmt.Fprintf(GinkgoWriter, "Warning: failed to delete gateway-wake ClusterRole: %v\n", err)
-		}
-
 		By("Deleting the CA ClusterIssuer chain")
 		// cert-manager itself is left installed: the CI kind cluster is ephemeral,
 		// and on a persistent local cluster the InstallCertManager guard makes a
@@ -356,37 +331,6 @@ var _ = SynchronizedAfterSuite(func() {
 		testhelpers.DeleteCAClusterIssuer()
 	}
 })
-
-// ensureGatewayWakeClusterRole creates (or refreshes) the cluster-wide
-// gateway-wake ClusterRole. The chart ships an equivalent ClusterRole at
-// install time; the E2E suite runs the operator in-process and bypasses
-// Helm, so the equivalent setup happens here. The rules MUST mirror
-// helm/firebolt-operator/templates/clusterrole-gateway-wake.yaml: the
-// gateway pod terminates untrusted traffic, so its grant is read-only —
-// nothing bound to a gateway ServiceAccount may write to the API.
-func ensureGatewayWakeClusterRole(ctx context.Context, cs *kubernetes.Clientset) {
-	cr := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{Name: e2eGatewayWakeClusterRole},
-		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{"discovery.k8s.io"},
-			Resources: []string{"endpointslices"},
-			Verbs:     []string{"get", "list", "watch"},
-		}},
-	}
-	createCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	_, err := cs.RbacV1().ClusterRoles().Create(createCtx, cr, metav1.CreateOptions{})
-	if errors.IsAlreadyExists(err) {
-		// Earlier run left it behind; refresh the rules in case they
-		// changed and the previous run was on an older operator. Update
-		// is fine because ClusterRole rules are mutable.
-		existing, getErr := cs.RbacV1().ClusterRoles().Get(createCtx, e2eGatewayWakeClusterRole, metav1.GetOptions{})
-		Expect(getErr).NotTo(HaveOccurred(), "fetching pre-existing gateway-wake ClusterRole")
-		existing.Rules = cr.Rules
-		_, err = cs.RbacV1().ClusterRoles().Update(createCtx, existing, metav1.UpdateOptions{})
-	}
-	Expect(err).NotTo(HaveOccurred(), "creating gateway-wake ClusterRole")
-}
 
 // ensureNoOperatorDeployed fails the suite if any firebolt operator Deployment
 // is already running in the cluster. The E2E suite runs its own in-process
@@ -436,20 +380,21 @@ func newK8sClient() (*kubernetes.Clientset, error) {
 }
 
 // ensureMinK8sVersion aborts the suite if the cluster's Kubernetes version is
-// below the required minimum. CEL transition rules (oldSelf) require 1.28+.
+// below the required minimum. Gateway shutdown uses native sidecar ordering,
+// which is stable in Kubernetes 1.33+.
 func ensureMinK8sVersion(cs *kubernetes.Clientset, minMajor, minMinor int) {
 	info, err := cs.Discovery().ServerVersion()
 	Expect(err).NotTo(HaveOccurred(), "Failed to fetch server version")
 
 	var major, minor int
 	_, _ = fmt.Sscanf(info.Major, "%d", &major)
-	// Minor may contain trailing characters like "+" (e.g. "28+").
+	// Minor may contain trailing characters like "+" (e.g. "33+").
 	_, _ = fmt.Sscanf(info.Minor, "%d", &minor)
 
 	if major < minMajor || (major == minMajor && minor < minMinor) {
 		Fail(fmt.Sprintf(
 			"Kubernetes %s.%s is below the minimum required version %d.%d. "+
-				"The operator CRDs use CEL transition rules (oldSelf) which require Kubernetes 1.28+. "+
+				"Gateway shutdown uses Kubernetes native sidecars, which are stable in Kubernetes 1.33+. "+
 				"Upgrade your cluster before running E2E tests.",
 			info.Major, info.Minor, minMajor, minMinor,
 		))

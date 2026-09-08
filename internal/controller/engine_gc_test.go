@@ -127,7 +127,7 @@ func TestGCOrphanedResources_DeletesOrphans(t *testing.T) {
 		},
 	}
 
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	// Orphaned resources (gen 1) should be deleted.
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphanedSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err == nil {
@@ -195,7 +195,7 @@ func TestGCOrphanedResources_DeletesOrphanedCertsAndSecrets(t *testing.T) {
 			CurrentGeneration: 3, ActiveGeneration: 3, DrainingGeneration: &drain,
 		},
 	}
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	gone := func(name string, obj client.Object) bool {
 		return errors.IsNotFound(fc.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, obj))
@@ -258,7 +258,7 @@ func TestGCOrphanedResources_PreservesDrainingGeneration(t *testing.T) {
 		},
 	}
 
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	// Both draining (gen 2) and current (gen 3) should survive.
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: drainingSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
@@ -327,7 +327,7 @@ func TestGCOrphanedResources_PreservesUnlabeledResources(t *testing.T) {
 		},
 	}
 
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: unlabeledSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("unlabeled StatefulSet should not have been deleted: %v", err)
@@ -375,7 +375,7 @@ func TestGCOrphanedResources_NoOpWhenClean(t *testing.T) {
 		},
 	}
 
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: currentSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("current StatefulSet should not have been deleted: %v", err)
@@ -442,7 +442,7 @@ func TestGCOrphanedResources_PreservesActiveGenerationMidRollout(t *testing.T) {
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
-	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, 2)); backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, 2)); backlogged {
 		t.Error("expected the sweep to report no backlog for two orphans")
 	}
 
@@ -500,7 +500,7 @@ func TestGCOrphanedResources_RetriesFailedDeleteOnNextPass(t *testing.T) {
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 	engine := gcTestEngine(engineName, ns, 3, -1)
 
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	gone := func(name string) bool {
 		return errors.IsNotFound(base.Get(context.Background(), types.NamespacedName{Name: name, Namespace: ns}, &corev1.Service{}))
@@ -510,7 +510,7 @@ func TestGCOrphanedResources_RetriesFailedDeleteOnNextPass(t *testing.T) {
 	}
 
 	throttled = false
-	r.gcOrphanedResources(context.Background(), engine)
+	runGatewayAwareGC(context.Background(), t, r, engine)
 
 	if !gone(orphanA.Name) {
 		t.Errorf("orphan %q should have been deleted once deletes were accepted again", orphanA.Name)
@@ -555,7 +555,7 @@ func TestGCOrphanedResources_StopsAtDeleteBudget(t *testing.T) {
 		return len(list.Items)
 	}
 
-	if backlogged := r.gcOrphanedResources(context.Background(), engine); !backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, engine); !backlogged {
 		t.Error("expected the sweep to report a backlog after spending its budget")
 	}
 	// One survivor is the current generation, which is never in scope.
@@ -563,7 +563,7 @@ func TestGCOrphanedResources_StopsAtDeleteBudget(t *testing.T) {
 		t.Errorf("expected %d Services left after one capped pass, got %d", want, survivors())
 	}
 
-	if backlogged := r.gcOrphanedResources(context.Background(), engine); backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, engine); backlogged {
 		t.Error("expected the remaining orphans to fit in one more pass")
 	}
 	if survivors() != 1 {
@@ -602,7 +602,7 @@ func TestGCOrphanedResources_SkipsTerminatingResources(t *testing.T) {
 	})
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, -1))
 
 	if len(deleted) != 1 || deleted[0] != standing.Name {
 		t.Errorf("expected exactly one delete, of %q; got %v", standing.Name, deleted)
@@ -691,6 +691,7 @@ func TestReconcileSweepsAbandonedGenerationsWhileCreating(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	seedEngineRoutingFixture(t, cli, engine)
 	ctx := context.Background()
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
@@ -807,6 +808,7 @@ func TestReconcileRetriesAbandonedGenerationDeletesUntilAccepted(t *testing.T) {
 	})
 
 	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	seedEngineRoutingFixture(t, cli, engine)
 	ctx := context.Background()
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}
 
@@ -902,6 +904,7 @@ func TestReconcileSweepsWhenAGateEndsThePass(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	seedEngineRoutingFixture(t, cli, engine)
 	ctx := context.Background()
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
@@ -1006,7 +1009,7 @@ func TestGCOrphanedResources_ReportsBacklogWhenAListFails(t *testing.T) {
 	})
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1)); !backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, -1)); !backlogged {
 		t.Error("expected a failed List to report a backlog")
 	}
 	if err := base.Get(context.Background(), types.NamespacedName{Name: genSvc(engineName, ns, 0).Name, Namespace: ns}, &corev1.Service{}); err != nil {
@@ -1083,6 +1086,7 @@ func TestReconcileReclaimsTheGenerationItAbandonsInTheSamePass(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	seedEngineRoutingFixture(t, cli, engine)
 	ctx := context.Background()
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: engName, Namespace: ns}}); err != nil {
@@ -1152,6 +1156,7 @@ func TestReconcilePanicSkipsTheSweep(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: cli, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
+	seedEngineRoutingFixture(t, cli, engine)
 	ctx := context.Background()
 
 	func() {
@@ -1220,7 +1225,7 @@ func TestGCOrphanedResources_LeavesUnownedResourcesAlone(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, -1))
 
 	survivors := []struct {
 		name string
@@ -1285,7 +1290,7 @@ func TestGCOrphanedResources_MovesOnWhenAKindKeepsFailing(t *testing.T) {
 	})
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, currentGen, -1)); !backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, currentGen, -1)); !backlogged {
 		t.Error("expected a backlog while a whole kind's deletes are failing")
 	}
 
@@ -1343,7 +1348,7 @@ func TestGCOrphanedResources_KeepsTheGenerationTheServiceSelects(t *testing.T) {
 		Build()
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, statusGen, statusGen))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, statusGen, statusGen))
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: servingSTS.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("the generation the cluster Service selects was deleted: %v", err)
@@ -1377,7 +1382,7 @@ func TestGCOrphanedResources_BailsWhenTheClusterServiceIsUnreadable(t *testing.T
 	})
 
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
-	if backlogged := r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1)); !backlogged {
+	if backlogged := runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, -1)); !backlogged {
 		t.Error("expected an unreadable cluster Service to report a backlog")
 	}
 	if err := base.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); err != nil {
@@ -1430,7 +1435,7 @@ func TestGCOrphanedResources_NeverDeletesNewerThanItsKeepSet(t *testing.T) {
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, staleView, staleView))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, staleView, staleView))
 
 	for _, s := range newer {
 		if err := fc.Get(context.Background(), types.NamespacedName{Name: s.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
@@ -1468,7 +1473,7 @@ func TestGCOrphanedResources_SkipsUnparsableGenerationLabels(t *testing.T) {
 	fc := fake.NewClientBuilder().WithScheme(scheme).WithObjects(odd, orphan).Build()
 	r := &FireboltEngineReconciler{Client: fc, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
 
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, 3, -1))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, 3, -1))
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: odd.Name, Namespace: ns}, &corev1.Service{}); err != nil {
 		t.Errorf("a resource whose generation label is not a number must be left alone: %v", err)
@@ -1525,7 +1530,7 @@ func TestGCOrphanedResources_ReadsTheStatusUncached(t *testing.T) {
 		MetricsRecorder: metrics.NoOpEngineRecorder{},
 	}
 
-	r.gcOrphanedResources(context.Background(), cached.DeepCopy())
+	runGatewayAwareGC(context.Background(), t, r, cached.DeepCopy())
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: orphan.Name, Namespace: ns}, &corev1.Service{}); !errors.IsNotFound(err) {
 		t.Errorf("generation 3 is abandoned according to the live status and should have been reclaimed (err=%v)", err)
@@ -1612,7 +1617,7 @@ func TestGCOrphanedResources_ServiceSelectorDoesNotRaiseTheFloor(t *testing.T) {
 	// The status the sweep works from is behind, which is the case the floor is
 	// for; with the selector anchoring the floor at 100 the current generation
 	// would fall below it and be deleted.
-	r.gcOrphanedResources(context.Background(), gcTestEngine(engineName, ns, currentGen-1, currentGen-1))
+	runGatewayAwareGC(context.Background(), t, r, gcTestEngine(engineName, ns, currentGen-1, currentGen-1))
 
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: current.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("a stale Service selector must not raise the floor past a live generation: %v", err)
@@ -1684,7 +1689,7 @@ func TestGCOrphanedResources_ReadsTheClusterServiceFromTheSameView(t *testing.T)
 		Scheme:          scheme,
 		MetricsRecorder: metrics.NoOpEngineRecorder{},
 	}
-	r.gcOrphanedResources(context.Background(), engine.DeepCopy())
+	runGatewayAwareGC(context.Background(), t, r, engine.DeepCopy())
 
 	if err := cached.Get(context.Background(), types.NamespacedName{Name: serving.Name, Namespace: ns}, &appsv1.StatefulSet{}); err != nil {
 		t.Errorf("the generation the live selector points at was deleted: %v", err)

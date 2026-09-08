@@ -17,21 +17,31 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"encoding/json"
+	"os/exec"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/routing"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// TestUserGatewayServiceAccountName pins down the helper that decides
-// whether the operator manages the gateway ServiceAccount and RBAC
-// (returns "") or hands ownership over to the user (returns the
-// user-supplied name). The behavior is load-bearing: when this
-// returns non-empty, ensureGatewayResources skips ensureGatewayRBAC
-// entirely; otherwise the operator creates the SA + Role + RoleBinding
-// at the default name.
+// A user-supplied account controls the bound identity. The operator still
+// grants its narrowly scoped read-only routing permissions.
 func TestUserGatewayServiceAccountName(t *testing.T) {
 	mk := func(template *corev1.PodTemplateSpec) *computev1alpha1.FireboltInstance {
 		return &computev1alpha1.FireboltInstance{
@@ -69,13 +79,7 @@ func TestUserGatewayServiceAccountName(t *testing.T) {
 	})
 }
 
-// TestEffectiveGatewayPodTemplate_ServiceAccountFallback pins down
-// the partner behavior on the pod-template side: when the user did
-// not set spec.gateway.template.spec.serviceAccountName, the operator
-// stamps gatewayServiceAccountName(instance.Name) on the rendered pod
-// so it binds to the operator-managed SA. When the user did set it,
-// the user value passes through and the operator skips RBAC creation
-// (verified by TestUserGatewayServiceAccountName).
+// The gateway uses either the supplied account or the managed default account.
 func TestEffectiveGatewayPodTemplate_ServiceAccountFallback(t *testing.T) {
 	envoyYAML := "" // contents don't matter for SA assertion
 	baseLabels := map[string]string{"firebolt.io/instance": "fb"}
@@ -334,4 +338,106 @@ func TestEffectiveGatewayPodTemplate_GatewayTLSVolumeAndProbeScheme(t *testing.T
 			t.Errorf("client-CA mount = %+v, want MountPath=%s ReadOnly=true", m, gatewayClientCAMountPath)
 		}
 	})
+}
+
+func TestGatewayRoutingRBACRestrictsBothAccountKinds(t *testing.T) {
+	for _, customAccount := range []string{"", "existing-gateway"} {
+		t.Run("account="+customAccount, func(t *testing.T) {
+			inst := &computev1alpha1.FireboltInstance{
+				ObjectMeta: metav1.ObjectMeta{Name: "shared", Namespace: "work", UID: "instance-uid"},
+				Spec: computev1alpha1.FireboltInstanceSpec{Gateway: computev1alpha1.GatewaySpec{
+					Template: &corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: customAccount}},
+				}},
+			}
+			var role rbacv1.Role
+			var binding rbacv1.RoleBinding
+			var accounts int
+			scheme := authTestScheme(t)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+				Apply: func(_ context.Context, _ client.WithWatch, object runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
+					data, err := json.Marshal(object)
+					if err != nil {
+						return err
+					}
+					var kind metav1.TypeMeta
+					if err := json.Unmarshal(data, &kind); err != nil {
+						return err
+					}
+					switch kind.Kind {
+					case "Role":
+						return json.Unmarshal(data, &role)
+					case "RoleBinding":
+						return json.Unmarshal(data, &binding)
+					case "ServiceAccount":
+						accounts++
+					default:
+						t.Errorf("unexpected RBAC object %s", data)
+					}
+					return nil
+				},
+			}).Build()
+			r := &FireboltInstanceReconciler{Client: c, Scheme: scheme}
+			if err := r.ensureGatewayRBAC(context.Background(), inst); err != nil {
+				t.Fatal(err)
+			}
+			wantAccount := customAccount
+			if customAccount == "" {
+				wantAccount = gatewayServiceAccountName(inst.Name)
+				if accounts != 1 {
+					t.Fatal("managed ServiceAccount was not created")
+				}
+			} else if accounts != 0 {
+				t.Fatal("custom ServiceAccount must not be modified")
+			}
+			if len(binding.Subjects) != 1 || binding.Subjects[0].Name != wantAccount || binding.Subjects[0].Namespace != inst.Namespace {
+				t.Fatalf("wrong routing identity: %+v", binding.Subjects)
+			}
+			if binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != role.Name || role.Namespace != inst.Namespace {
+				t.Fatal("routing permission must bind the namespaced Role")
+			}
+			wantRules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{routing.ConfigMapName(inst.Name)}, Verbs: []string{"get", "list", "watch"}},
+				{APIGroups: []string{"discovery.k8s.io"}, Resources: []string{"endpointslices"}, Verbs: []string{"get", "list", "watch"}},
+			}
+			if !reflect.DeepEqual(role.Rules, wantRules) {
+				t.Fatalf("agent RBAC must be read-only and ConfigMap access name-scoped: %+v", role.Rules)
+			}
+		})
+	}
+}
+
+func TestGatewayAgentChartConfigurationIsMandatory(t *testing.T) {
+	helmAvailable(t)
+	for _, imageOverride := range []bool{false, true} {
+		args := []string{"template", "firebolt-operator", "../../helm/firebolt-operator", "--kube-version", "1.33.0", "--show-only", "templates/deployment.yaml"}
+		if imageOverride {
+			args = append(args, "--set", "image.repository=example.com/custom/operator", "--set", "image.tag=custom")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		out, err := exec.CommandContext(ctx, "helm", args...).CombinedOutput()
+		cancel()
+		if err != nil {
+			t.Fatalf("helm template: %v\n%s", err, out)
+		}
+		var deployment appsv1.Deployment
+		if err := yaml.Unmarshal(out, &deployment); err != nil {
+			t.Fatal(err)
+		}
+		if len(deployment.Spec.Template.Spec.Containers) == 0 {
+			t.Fatal("operator container missing")
+		}
+		manager := deployment.Spec.Template.Spec.Containers[0]
+		if !slices.Contains(manager.Args, "--wake-agent-image="+manager.Image) {
+			t.Fatalf("gateway agent must use the same image as the manager: %v", manager.Args)
+		}
+	}
+	for _, removedOption := range []string{"wakeAgent.enabled=false", "gatewayWakeClusterRole.create=false"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		out, err := exec.CommandContext(ctx, "helm", "template", "firebolt-operator", "../../helm/firebolt-operator",
+			"--kube-version", "1.33.0", "--set", removedOption).CombinedOutput()
+		cancel()
+		if err == nil || !strings.Contains(string(out), "schema") {
+			t.Fatalf("removed option %s must be rejected by the values schema: %v\n%s", removedOption, err, out)
+		}
+	}
 }

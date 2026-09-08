@@ -3,9 +3,11 @@
 [![Downloads](https://scarf.sh/installs-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
 [![Companies](https://scarf.sh/company-badge/firebolt-db/firebolt-operator?package-type=docker)](https://scarf.sh/)
 
-A Kubernetes operator that manages Firebolt infrastructure: metadata services, an Envoy query-routing proxy, and compute engines with zero-downtime scaling via blue-green deployments.
+The Firebolt Operator manages Firebolt infrastructure: metadata services, an Envoy query-routing proxy, and compute engines with blue-green deployments designed for zero-downtime scaling.
 
 ## Overview
+
+Kubernetes 1.33 or later is required. The mandatory Gateway agent uses native sidecar ordering to keep request accounting and wake handling available while accepted requests drain.
 
 The operator manages five custom resources:
 
@@ -15,7 +17,7 @@ The operator manages five custom resources:
 - **ClusterFireboltEngineClass** *(optional, cluster-scoped)* is a SKU catalog of the same name: instance type, resources, affinity/tolerations, and optional engine image. It does not carry ServiceAccount names, Secret refs, IAM annotations, storage, or rollout/autoStop. `spec.engineClassRef` resolves namespaced-first: a `FireboltEngineClass` in the engine's namespace wins over a cluster object of the same name.
 - **FireboltEnginePreset** *(optional, namespaced)* is an ambient overlay merged under every engine in the namespace (service account, storage, credential env, `customEngineConfig`). Engines do not reference it by name. The object must be named `firebolt` (a CEL rule on the CRD pins the name), so a namespace holds at most one.
 
-When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a zero-downtime blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Editing the resolved `FireboltEngineClass` or `ClusterFireboltEngineClass` triggers the same blue-green flow on every consumer engine.
+When you change an engine's configuration (e.g., scale from 3 to 5 nodes), the operator performs a blue-green transition: it creates a new generation, waits for readiness, switches traffic, drains the old generation, and deletes it. Before old Engine Pods can shut down, registered Gateway agents must acknowledge routing withdrawal and account for their remaining requests. See [Gateway admission and shutdown](docs/instance/gateway/gateway-query-routing.mdx#graceful-engine-shutdown) for the protocol and finite termination budgets. Editing the resolved `FireboltEngineClass` or `ClusterFireboltEngineClass` triggers the same blue-green flow on every consumer engine.
 
 ## Documentation
 For more detailed information checkout our [official documentation](https://docs.firebolt.io/self-managed/firebolt-operator/quickstart)

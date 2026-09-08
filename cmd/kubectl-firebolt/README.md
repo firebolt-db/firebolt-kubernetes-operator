@@ -21,7 +21,8 @@ Any executable named `kubectl-firebolt` on `PATH` is invoked as
 `--namespace/-n` defaults to the current context's namespace when omitted; the
 cluster is your current context (override with `--context` / `--kubeconfig`).
 Add `--print-commands` (alias `--debug`) to any command to print the `kubectl`
-it would run instead of running it.
+it would run instead of starting a port-forward or changing resources. Engine
+port-forward reads the Engine to resolve its owning Instance.
 
 ```bash
 # Instances
@@ -131,3 +132,5 @@ A draft krew manifest lives at [`plugin.yaml`](plugin.yaml). It is **not install
 - It is a thin client over the operator: it creates CRs, the operator
   reconciles them. See [`internal/infra/AGENTS.md`](../../internal/infra/AGENTS.md)
   for internals.
+
+Engine port-forward resolves the engine's `spec.instanceRef` and forwards to the Instance gateway. Queries require `X-Firebolt-Engine: <engine-name>`. This resolution reads Kubernetes even with `--print-commands`.

@@ -69,7 +69,7 @@ func TestInstanceReconcile_RecordsMetrics(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			instance := &computev1alpha1.FireboltInstance{
-				ObjectMeta: metav1.ObjectMeta{
+				ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 					Name:       tc.instanceName,
 					Namespace:  ns,
 					Finalizers: []string{instanceFinalizerName},
@@ -125,7 +125,7 @@ func TestInstanceReconcile_DoesNotAdvanceSuccessTimestampOnError(t *testing.T) {
 	)
 	terminationGracePeriod := int64(30)
 	instance := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:       instanceName,
 			Namespace:  ns,
 			Finalizers: []string{instanceFinalizerName},

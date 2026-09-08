@@ -3,6 +3,9 @@ package infra
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -146,5 +149,44 @@ func TestParsePort(t *testing.T) {
 		if ok != tc.wantOK || port != tc.wantPort {
 			t.Errorf("parsePort(%q) = (%d, %v), want (%d, %v)", tc.line, port, ok, tc.wantPort, tc.wantOK)
 		}
+	}
+}
+
+func TestEnginePortForwardUsesOwningGateway(t *testing.T) {
+	dir := t.TempDir()
+	fakeKubectl := filepath.Join(dir, "kubectl")
+	// The resolver must read the Engine and preserve the caller's connection
+	// flags; the forwarding command must target the owning gateway on port 80.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$KUBECTL_ARGS_FILE\"\nprintf '%s\\n' '{\"spec\":{\"instanceRef\":\"shared\"}}'\n"
+	if err := os.WriteFile(fakeKubectl, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	argsFile := filepath.Join(dir, "args")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KUBECTL_ARGS_FILE", argsFile)
+	c := NewClient("work", "lab", "/tmp/test-kubeconfig")
+	cmd, err := c.engineCmd(context.Background(), "analytics", 8123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--context", "lab", "--kubeconfig", "/tmp/test-kubeconfig", "port-forward", "-n", "work", "svc/shared-gateway", "8123:80"}
+	if !reflect.DeepEqual(cmd.Args(), want) {
+		t.Fatalf("forward args = %q, want %q", cmd.Args(), want)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"lab", "/tmp/test-kubeconfig", "get", "work", "analytics"} {
+		if !strings.Contains(string(args), required+"\n") {
+			t.Errorf("Engine lookup missing %q in %s", required, args)
+		}
+	}
+	rendered, err := c.PortForwardEngineScript(context.Background(), "analytics", 8123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered != cmd.Render() {
+		t.Fatalf("printed command differs from forwarding command: %s", rendered)
 	}
 }

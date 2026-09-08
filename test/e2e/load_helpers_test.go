@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -34,33 +33,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// Continuous query load for the specs that assert the operator does NOT act on
-// a busy engine — the drain hold and the autoStop busy-hold. Both watch a signal
-// derived from the same query-liveness gauges, so both need load with no gaps in
-// it, and both were written with a load generator that could not provide that.
-//
-// The load loop runs INSIDE the client pod under a single long-lived kubectl
-// exec, and that is the entire point. Re-issuing a query from the test process
-// costs a kubectl-exec round trip — API-server SPDY handshake plus a container
-// process spawn — during which no query is running on the engine and
-// firebolt_running_queries is legitimately 0. The operator samples that gauge
-// instantaneously, so a scrape landing in one of those holes correctly concludes
-// the engine is idle: the drain releases its generation, or autoStop scales down.
-// Both specs then fail on behaviour that is correct against what the operator
-// actually observed. Two overlapping workers, which is what both specs used
-// before, only lower the odds of both being in a hole at the same instant; they
-// cannot remove them, and a contended runner widens every hole. In-pod,
-// re-issuing costs a local process spawn and loadWorkers of them overlap.
-//
-// This matters because both specs assert something STRONGER than the contract
-// they are protecting. The contract is "do not act on an engine with in-flight
-// queries"; the assertion is "do not act for the whole hold window while I load
-// it". Those coincide only while the load is gapless — during an idle instant
-// the operator is entitled to act. Fixing the premise is what keeps the strong
-// assertion honest. Weakening the assertion instead (only failing when the
-// operator acts at a moment a sample happened to show work in flight) would let
-// an operator that never checks at all pass whenever it got lucky with timing,
-// and the luck lives exactly where the flake does.
+// Auto-stop load runs inside the client Pod to avoid a kubectl exec handshake
+// between queries. Overlapping workers keep the engine busy through the gateway.
 const (
 	// loadWorkers is how many queries the in-pod loop keeps in flight at once.
 	//
@@ -108,20 +82,10 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// engineServiceQueryURL is the URL RunQuery targets: the engine's ClusterIP
-// Service. Kept in step with RunQuery by hand — a load loop that talked to a
-// different endpoint than the spec's own queries would be a silent divergence.
-func engineServiceQueryURL(engineName string) string {
-	return fmt.Sprintf("http://%s-service.%s.svc.cluster.local:3473/?query_label=e2e-load&output_format=JSON_Compact",
-		engineName, testNamespace)
-}
-
-// enginePodQueryURL is the URL RunQueryAgainstPodIP targets: one pod directly,
-// bypassing the Service. The drain spec needs this to keep load on the OLD
-// generation after the selector has flipped away from it.
-func enginePodQueryURL(podIP string) string {
-	return fmt.Sprintf("http://%s/?query_label=e2e-load&output_format=JSON_Compact",
-		net.JoinHostPort(podIP, "3473"))
+// gatewayLoadQueryURL selects an engine through the supported gateway entry point.
+func gatewayLoadQueryURL(instanceName, engineName string) string {
+	return fmt.Sprintf("http://%s-gateway.%s.svc.cluster.local:80/?engine=%s&query_label=e2e-load&output_format=JSON_Compact",
+		instanceName, testNamespace, engineName)
 }
 
 // keepURLBusy keeps queries continuously in flight against one URL until the

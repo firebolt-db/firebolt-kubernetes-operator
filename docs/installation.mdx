@@ -8,7 +8,7 @@ This page explains how to install the Firebolt Operator in a Kubernetes cluster.
 
 ## Prerequisites
 
-- Kubernetes 1.28 or later. The CRDs use CEL transition rules for field immutability.
+- Kubernetes 1.33 or later. The Gateway uses Kubernetes native sidecars to keep wake handling available while accepted requests drain.
 - Helm installed on the machine or automation that deploys the Firebolt Operator.
 - Access to the OCI Helm chart registry that hosts the Firebolt Operator charts.
 - Engine nodes that run Linux kernel 6.1 or later. See [Kernel requirement](#kernel-requirement).
