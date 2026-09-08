@@ -38,13 +38,9 @@
 \* To check with TLC:
 \*   java -jar tla2tools.jar -config EngineWake.cfg EngineWake.tla
 \*
-\* The agent's OTHER half -- parking a request on the EndpointSlice-derived
-\* readiness signal and releasing it when endpoints appear -- is
-\* WakeAgentHold.tla. The two are separate modules because no property spans
-\* them: everything here is about how stale a demand timestamp may be, and
-\* everything there is about the ORDER of two in-memory bookkeeping operations,
-\* with no clock in it at all. One module would multiply two independent state
-\* spaces (120k states against 4k and 300) and check nothing across the seam.
+\* GatewayRouting.tla separately checks admission permits and withdrawal
+\* ordering. This model concerns accepted demand stamps and polling freshness;
+\* hold capacity, timeout and readiness-probe behavior are tested in the agent.
 \*
 \* ---------------------------------------------------------------------------
 \* Design decisions
@@ -79,8 +75,9 @@
 \*     exactly what a node drain or a rolling restart produces; leaving readiness
 \*     out lets DemandArrives fire at any replica count, which is a superset of
 \*     the real behaviours and is what
-\*     Inv_DemandOnlyForStoppedEngines needs to be non-vacuous. Readiness is a
-\*     variable in WakeAgentHold.tla, where it drives something.
+\*     Inv_DemandOnlyForStoppedEngines needs to be non-vacuous. Admission also
+\*     waits for route assignment and an Envoy readiness probe; those waits can
+\*     refresh demand periodically and are abstracted by repeated DemandArrives.
 \*
 \*   - What is deliberately NOT here. autoStop.enabled = FALSE returns before
 \*     anything in this protocol runs, so modelling it adds a variable and no
@@ -88,7 +85,10 @@
 \*     on the same target as a wake and interacts with nothing else. The hold
 \*     capacity limiter is out of scope beyond the fact that demand is stamped
 \*     BEFORE the cap is consulted, which is why a shed request still registers
-\*     demand: DemandArrives stamps unconditionally and nothing here can shed.
+\*     demand: DemandArrives represents an accepted stamp and nothing here can
+\*     shed a hold. The timestamp map may reject a previously unseen name at
+\*     its cardinality bound; such an arrival is a stuttering step here, not a
+\*     guarantee that every client request creates an observable demand stamp.
 \*     The blue-green phase machine, which gates auto-stop to the terminal
 \*     phases, is FireboltEngine.tla's subject.
 \*

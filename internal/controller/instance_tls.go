@@ -575,23 +575,12 @@ func (r *FireboltInstanceReconciler) ensureEngineTLSCertificate(ctx context.Cont
 	return true, nil
 }
 
-// buildEngineTLSCertificate returns the desired cert-manager Certificate
-// used to provision the TLS server certificate every engine in this
-// Instance shares. Kept as a pure function so its shape is unit-testable
-// without envtest (see ensureEngineTLSCertificate's doc comment).
+// buildEngineTLSCertificate provisions the Instance CA anchor. Its non-routable
+// DNS name supplies cert-manager's required identity; engines never serve this
+// certificate. Each generation serves its own certificate, and the gateway uses
+// the anchor's ca.crt to verify that common issuer.
 //
-// DNSNames carries only the namespace-wide wildcard (see
-// engineTLSWildcardDNSName) plus "localhost": the wildcard covers every
-// engine's stable routing Service that the gateway and external clients
-// connect to, and "localhost" covers the engine web UI sidecar's
-// same-pod loopback connection (see EngineWebBackendURL). No CommonName
-// is set — DNSNames alone satisfies cert-manager's "at least one
-// identity" requirement, and a SAN-only certificate is the modern (post
-// CN-deprecation) convention for TLS server certs.
-//
-// Usages is pinned to ServerAuth: unlike buildSigningCertificate's
-// Certificate (never presented in a TLS handshake), this one is, so an
-// issuer enforcing strict key-usage/EKU policy needs the explicit hint.
+// Usages is ServerAuth to match the certificates issued for engine listeners.
 //
 // PrivateKey.Encoding/RotationPolicy/Duration mirror
 // buildSigningCertificate's choices verbatim — see

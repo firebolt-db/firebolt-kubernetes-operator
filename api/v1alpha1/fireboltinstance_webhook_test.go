@@ -1703,9 +1703,9 @@ func TestFireboltInstanceValidator_GatewayRejectsOwnedFields(t *testing.T) {
 		wantField string
 	}{
 		{
-			name: "pod terminationGracePeriodSeconds",
+			name: "zero gateway terminationGracePeriodSeconds",
 			mutate: func(inst *FireboltInstance) {
-				v := int64(30)
+				v := int64(0)
 				inst.Spec.Gateway.Template.Spec.TerminationGracePeriodSeconds = &v
 			},
 			wantField: "spec.gateway.template.spec.terminationGracePeriodSeconds",
@@ -2178,6 +2178,22 @@ func TestValidateCertManagerKey_RSASizesMatchCertManager(t *testing.T) {
 		cm := &CertManagerSpec{Algorithm: "RSA", Size: size}
 		if err := validateCertManagerKey(cm, path); err == nil {
 			t.Errorf("RSA size %d is rejected by cert-manager and must not be admitted", size)
+		}
+	}
+}
+
+func TestGatewayTerminationGracePeriodValidation(t *testing.T) {
+	for _, seconds := range []int64{-1, 0, 1, 180, 300} {
+		template := &corev1.PodTemplateSpec{Spec: corev1.PodSpec{TerminationGracePeriodSeconds: &seconds}}
+		base := field.NewPath("spec", "gateway", "template")
+		errs := ValidatePodTemplate(template, base, &GatewayPodTemplateRules)
+		if (len(errs) == 0) != (seconds > 0) {
+			t.Errorf("gateway seconds=%d: %v", seconds, errs)
+		}
+		for _, rules := range []*PodTemplateRules{&MetadataPodTemplateRules, &FireboltEngineClassPodTemplateRules} {
+			if len(ValidatePodTemplate(template, base, rules)) == 0 {
+				t.Errorf("%s accepted operator-owned grace period", rules.Component)
+			}
 		}
 	}
 }

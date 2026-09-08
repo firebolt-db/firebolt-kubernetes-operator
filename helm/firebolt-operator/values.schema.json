@@ -78,13 +78,8 @@
         "apiserverProxyGrant": { "type": "boolean" }
       }
     },
-    "gatewayWakeClusterRole": {
-      "type": "object",
-      "properties": {
-        "create": { "type": "boolean" },
-        "name": { "type": "string" }
-      }
-    },
+    "wakeAgent": false,
+    "gatewayWakeClusterRole": false,
     "leaderElection": {
       "type": "object",
       "properties": {

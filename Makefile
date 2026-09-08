@@ -30,6 +30,8 @@ GO_BUILD_TAGS := $(GO_BUILD_TAGS_BASE)
 # Helm chart configuration
 HELM_CHART_DIR ?= helm/firebolt-operator
 HELM_CRD_CHART_DIR ?= helm/firebolt-operator-crds
+# Kubernetes version used for offline chart validation.
+HELM_KUBE_VERSION ?= 1.33.0
 HELM_REGISTRY ?= oci://ghcr.io/firebolt-db/helm-charts
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -152,6 +154,17 @@ test-webhook-integration: manifests generate setup-envtest ## Run the webhook-on
 	$(ENVTEST_STOP_TIMEOUT_ENV) KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -tags webhook_integration -count=1 ./internal/controller/...
 
+ENVOY_BINARY ?= $(LOCALBIN)/envoy
+
+.PHONY: envoy
+envoy: | $(LOCALBIN) ## Fetch the checksum-verified Envoy fixture (Linux).
+	scripts/ci/fetch-verified.sh envoy "$(ENVOY_BINARY)"
+	chmod +x "$(ENVOY_BINARY)"
+
+.PHONY: test-envoy-integration
+test-envoy-integration: ## Exercise generated gateway configuration using ENVOY_BINARY (fetch with make envoy).
+	ENVOY_BINARY="$(ENVOY_BINARY)" go test -tags "envoy_integration,$(GO_BUILD_TAGS)" -run '^(TestEnvoyRuntime|TestProductionProcessorRuntime)' -count=1 -v ./internal/controller/... ./internal/wakeagent/...
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run $(if $(GO_BUILD_TAGS),--build-tags=$(GO_BUILD_TAGS),)
@@ -227,13 +240,13 @@ helm-docs: ## Generate Helm chart README from values.yaml comments.
 
 .PHONY: helm-lint
 helm-lint: ## Lint the Helm charts.
-	helm lint $(HELM_CHART_DIR)
-	helm lint $(HELM_CRD_CHART_DIR)
+	helm lint $(HELM_CHART_DIR) --kube-version "$(HELM_KUBE_VERSION)"
+	helm lint $(HELM_CRD_CHART_DIR) --kube-version "$(HELM_KUBE_VERSION)"
 
 .PHONY: helm-template
 helm-template: ## Render Helm chart templates locally.
-	helm template firebolt-operator $(HELM_CHART_DIR)
-	helm template firebolt-crds $(HELM_CRD_CHART_DIR)
+	helm template firebolt-operator $(HELM_CHART_DIR) --kube-version "$(HELM_KUBE_VERSION)"
+	helm template firebolt-crds $(HELM_CRD_CHART_DIR) --kube-version "$(HELM_KUBE_VERSION)"
 
 .PHONY: helm-package
 helm-package: ## Package the Helm charts into dist/.
@@ -313,6 +326,7 @@ KIND_CLUSTER ?= operator-test-e2e
 # tool. The same defaults are baked into scripts/setup-local-registry.sh.
 REGISTRY_NAME ?= kind-registry
 REGISTRY_PORT ?= 5001
+E2E_WAKE_AGENT_IMAGE ?= docker.io/library/firebolt-operator:e2e-$(IMAGE_VARIANT)
 
 .PHONY: setup-local-registry
 setup-local-registry: ## Start the local Docker registry that kind nodes mirror through.
@@ -322,9 +336,13 @@ setup-local-registry: ## Start the local Docker registry that kind nodes mirror 
 setup-kind: setup-local-registry ## Create a Kind cluster if it does not exist (also starts the local registry).
 	@REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/setup-kind-cluster.sh $(KIND_CLUSTER)
 
+.PHONY: build-e2e-agent-image
+build-e2e-agent-image: build ## Package the local manager binary as the E2E gateway agent.
+	printf 'FROM scratch\nCOPY bin/manager /manager\nUSER 65532:65532\nENTRYPOINT ["/manager"]\n' | docker build -t "$(E2E_WAKE_AGENT_IMAGE)" -f - .
+
 .PHONY: load-test-images
-load-test-images: ## Publish required Docker images to the local registry (via mirror, kind nodes pull on demand).
-	IMAGE_VARIANT=$(IMAGE_VARIANT) REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
+load-test-images: build-e2e-agent-image ## Publish required Docker images to the local registry (via mirror, kind nodes pull on demand).
+	IMAGE_VARIANT=$(IMAGE_VARIANT) E2E_WAKE_AGENT_IMAGE="$(E2E_WAKE_AGENT_IMAGE)" REGISTRY_NAME=$(REGISTRY_NAME) REGISTRY_PORT=$(REGISTRY_PORT) ./scripts/load-e2e-images.sh $(KIND_CLUSTER)
 
 .PHONY: prepare-test-e2e
 prepare-test-e2e: manifests generate setup-kind load-test-images ## Full setup: create cluster as needed, publish images
@@ -349,6 +367,7 @@ endif
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run E2E tests against an existing Kind cluster (run prepare-test-e2e first)
 	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) \
+		E2E_WAKE_AGENT_IMAGE="$(E2E_WAKE_AGENT_IMAGE)" \
 		REGISTRY_HOST_ENDPOINT="localhost:$(REGISTRY_PORT)" \
 		"$(GINKGO)" run \
 		--tags=$(GINKGO_TAGS) \
@@ -397,7 +416,7 @@ formal-check: tla2tools ## Run TLC model checker on all TLA+ specs.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/FireboltInstance.cfg formal/FireboltInstance.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/SigningKeyRotation.cfg formal/SigningKeyRotation.tla
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/EngineWake.cfg formal/EngineWake.tla
-	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/WakeAgentHold.cfg formal/WakeAgentHold.tla
+	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto -config formal/GatewayRouting.cfg formal/GatewayRouting.tla
 
 .PHONY: formal-check-counterexample
 formal-check-counterexample: tla2tools ## Assert every naive config still produces its pinned violation.
@@ -453,7 +472,7 @@ formal-check-mutants: ## Assert each pinned mutant still makes the state-cover s
 	echo "OK: every pinned mutant still fails the test its row names"
 
 .PHONY: formal-dump
-formal-dump: tla2tools ## Dump the TLC state graph of every spec to formal/*.dot.
+formal-dump: tla2tools ## Dump TLC graphs for models with generated Go fixtures.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/FireboltEngine.cfg \
 		-dump dot,actionlabels formal/FireboltEngine.dot \
@@ -466,9 +485,8 @@ formal-dump: tla2tools ## Dump the TLC state graph of every spec to formal/*.dot
 		-config formal/SigningKeyRotation.cfg \
 		-dump dot,actionlabels formal/SigningKeyRotation.dot \
 		formal/SigningKeyRotation.tla
-	@# WakeAgentHold.tla is deliberately absent: it has no state-cover fixture, so
-	@# nothing consumes its state graph. See formal/model-scope.tsv for why the
-	@# agent-side half is not bound to Go.
+	@# GatewayRouting.tla has no generated state-cover fixture. Its distributed
+	@# actions are checked by TLC and implementation tests at the protocol seams.
 	java -cp "$(TLA2TOOLS)" tlc2.TLC -workers auto \
 		-config formal/EngineWake.cfg \
 		-dump dot,actionlabels formal/EngineWake.dot \

@@ -407,6 +407,10 @@ type PodTemplateRules struct {
 	// (it would collide with the operator-rendered primary container).
 	AllowInitContainers bool
 
+	// AllowTerminationGracePeriod permits a positive, user-selected Pod
+	// shutdown deadline. Other components retain operator-owned deadlines.
+	AllowTerminationGracePeriod bool
+
 	// ReservedContainerNames are additional operator-owned container names
 	// (beyond PrimaryContainerName) that the operator may inject into the
 	// rendered pod, e.g. the optional engine web UI sidecar. A user container
@@ -476,10 +480,12 @@ var FireboltEngineClassPodTemplateRules = PodTemplateRules{
 // Envoy versions) and resources (so users can size the pod). The user
 // may add sidecars (e.g. a stats exporter, a network filter) and
 // init containers (e.g. a config validator); the gateway builder
-// appends them after the operator-rendered Envoy container.
+// preserves the user init sequence, then starts the native wake sidecar.
+// User ordinary sidecars follow Envoy in the main container list.
 var GatewayPodTemplateRules = PodTemplateRules{
-	Component:            "gateway",
-	PrimaryContainerName: GatewayContainerName,
+	Component:                   "gateway",
+	AllowTerminationGracePeriod: true,
+	PrimaryContainerName:        GatewayContainerName,
 	AllowedPrimaryFields: PrimaryContainerFields{
 		Image:     true,
 		Resources: true,
@@ -535,7 +541,7 @@ func ValidateOperatorOwnedPodTemplate(template *corev1.PodTemplateSpec, base *fi
 //   - pod-template metadata.labels / metadata.annotations under the
 //     ReservedFireboltKeyPrefix.
 //   - pod-level fields the operator owns universally:
-//     terminationGracePeriodSeconds, subdomain, hostname,
+//     subdomain, hostname, and component-owned termination deadlines,
 //     restartPolicy, activeDeadlineSeconds.
 //   - the primary container (matched by rules.PrimaryContainerName):
 //     allowlist-driven — only fields enabled in rules.AllowedPrimaryFields
@@ -567,7 +573,7 @@ func ValidatePodTemplate(template *corev1.PodTemplateSpec, base *field.Path, rul
 	errs = append(errs, ValidateReservedKeyPrefix(metaPath.Child("annotations"), template.Annotations)...)
 
 	specPath := base.Child("spec")
-	errs = append(errs, validateUniversalPodFields(&template.Spec, specPath)...)
+	errs = append(errs, validateUniversalPodFields(&template.Spec, specPath, rules)...)
 	errs = append(errs, validateContainersAgainstRules(template.Spec.Containers, specPath.Child("containers"), rules)...)
 	errs = append(errs, validateInitContainersAgainstRules(template.Spec.InitContainers, specPath.Child("initContainers"), rules)...)
 
@@ -642,8 +648,8 @@ func validatePodTemplateMetadata(meta *metav1.ObjectMeta, base *field.Path) fiel
 // validateUniversalPodFields enforces the pod-level (non-container)
 // ownership rules that apply to every component. Three categories:
 //
-//   - Operator-stamped: terminationGracePeriodSeconds (component default
-//     or hardcoded engine 60s).
+//   - Shutdown deadlines: operator-owned except for the gateway, which
+//     permits a positive terminationGracePeriodSeconds override.
 //   - Workload-contract: subdomain / hostname (headless DNS),
 //     restartPolicy (StatefulSet / Deployment), activeDeadlineSeconds
 //     (long-lived pods).
@@ -653,11 +659,16 @@ func validatePodTemplateMetadata(meta *metav1.ObjectMeta, base *field.Path) fiel
 //     long-lived data-plane workload depends on; we close those at
 //     admission rather than silently accept and let a user accidentally
 //     expose engine memory to anything else running on the node.
-func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path) field.ErrorList {
+func validateUniversalPodFields(spec *corev1.PodSpec, base *field.Path, rules *PodTemplateRules) field.ErrorList {
 	var errs field.ErrorList
-	if spec.TerminationGracePeriodSeconds != nil {
-		errs = append(errs, field.Forbidden(base.Child("terminationGracePeriodSeconds"),
-			"terminationGracePeriodSeconds is operator-owned"))
+	if seconds := spec.TerminationGracePeriodSeconds; seconds != nil {
+		if !rules.AllowTerminationGracePeriod {
+			errs = append(errs, field.Forbidden(base.Child("terminationGracePeriodSeconds"),
+				"terminationGracePeriodSeconds is operator-owned"))
+		} else if *seconds < 1 {
+			errs = append(errs, field.Invalid(base.Child("terminationGracePeriodSeconds"), *seconds,
+				"must be at least 1 second"))
+		}
 	}
 	if spec.Subdomain != "" {
 		errs = append(errs, field.Forbidden(base.Child("subdomain"),

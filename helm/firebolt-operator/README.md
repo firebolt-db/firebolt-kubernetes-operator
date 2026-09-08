@@ -14,6 +14,15 @@ install. Helm does not upgrade or delete CRDs from the `crds/` directory. To
 manage CRD upgrades independently, use the `firebolt-operator-crds` chart
 instead.
 
+## Gateway admission
+
+Every Gateway Pod runs the manager image's local agent for request admission,
+request accounting, and wake-up. The agent cannot be disabled independently of
+query routing. The Firebolt Operator grants each Instance's Gateway identity a
+namespaced, read-only Role for EndpointSlices and its single routing ConfigMap.
+Custom Gateway ServiceAccounts receive the same grant; only the agent mounts
+a Kubernetes token.
+
 ## Uninstallation
 
 ```bash
@@ -45,9 +54,6 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | extraVolumeMounts | list | `[]` | Extra volume mounts for the operator container. Rendered as-is into `container.volumeMounts`. Pair each entry with an `extraVolumes` entry of the same `name`. |
 | extraVolumes | list | `[]` | Extra volumes attached to the operator Pod. Rendered as-is into `pod.spec.volumes`. Useful for mounting externally-provisioned certs, custom CAs, config files, or sidecar outputs (Vault Agent, CSI secrets-store, projected service-account tokens, etc.). |
 | fullnameOverride | string | `""` | Override the full resource name. |
-| gatewayWakeClusterRole | object | {} | Chart-managed ClusterRole the operator binds to each FireboltInstance's gateway ServiceAccount (via a per-instance RoleBinding), granting `get/list/watch` on `discovery.k8s.io/endpointslices` so the gateway's wake-agent sidecar can observe when a stopped engine's endpoints appear. Read-only: nothing in the gateway pod may write to the Kubernetes API. |
-| gatewayWakeClusterRole.create | bool | `true` | Render the ClusterRole. Set to false when supplying a pre-existing ClusterRole via `gatewayWakeClusterRole.name` (e.g. one shared between multiple operator releases or managed by a platform team). |
-| gatewayWakeClusterRole.name | string | `""` | ClusterRole name. Empty defaults to `<release>-gateway-wake` (see the `firebolt-operator.gatewayWakeClusterRoleName` helper). The same value is passed to the operator via `--gateway-wake-cluster-role`, so override here when using an externally managed ClusterRole. |
 | healthProbeBindAddress | string | `":8081"` | Address the health probe endpoint binds to. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | image.repository | string | `"oci.firebolt.io/firebolt-db/firebolt-operator"` | Container image repository. |
@@ -82,8 +88,6 @@ kubectl delete crd fireboltengines.compute.firebolt.io fireboltinstances.compute
 | telemetry.enabled | bool | `true` | Send a once-daily anonymous aggregate usage event to Scarf. The event contains operator/engine versions, Kubernetes minor, OS/architecture, and bucketed instance/engine/replica counts. It contains no names, stable identifiers, query data, schemas, or configuration. The source IP is visible to Scarf for company inference but is not stored. Set false to disable; when the default Scarf image repositories are unchanged, this also switches operator and engine pulls to GHCR, and the operator stamps DO_NOT_TRACK=1 on every engine container it deploys so engine usage telemetry is disabled too (a user-supplied DO_NOT_TRACK in the engine template's container env still wins; envFrom sources cannot override the injected entry). User-supplied image repositories are preserved. DO_NOT_TRACK and SCARF_NO_ANALYTICS on the operator pod disable its runtime events only. |
 | tolerations | list | `[]` | Tolerations for the operator pod. |
 | topologySpreadConstraints | list | `[]` | Topology spread constraints for the operator pod. |
-| wakeAgent | object | {} | Wake-on-zero. When enabled, each gateway pod runs a read-only wake-agent sidecar that holds a query arriving for an auto-stopped engine while the operator scales that engine back up. The sidecar runs the operator's own image (it is a subcommand of the same binary), so there is no second image to pin or keep in step.  Disabling this omits the sidecar and the RoleBinding: a query for a stopped engine gets a 503 instead of waiting, and nothing wakes the engine. Query routing to running engines is unaffected either way. |
-| wakeAgent.enabled | bool | `true` | Run the wake-agent sidecar and bind the EndpointSlice-read ClusterRole to each gateway ServiceAccount. |
 | watchLabelSelector | string | `""` | Label selector restricting which FireboltEngine, FireboltInstance, FireboltEngineClass, and FireboltEnginePreset objects the operator caches and reconciles. Empty (the default) applies no restriction. Non-empty is passed as `--watch-label-selector=<selector>` and applies only to those four namespaced Firebolt CRD types — child objects and third-party Secrets are cached unfiltered, so they never need the label, and so is the cluster-scoped `ClusterFireboltEngineClass` SKU catalog: it is shared by every install in the cluster and the FireboltEngine webhook resolves it live, so filtering it would admit engines whose class the operator could never see. Lets a cluster-wide install ignore CRs owned by namespace-scoped installs, e.g. `"!example.com/managed"`. CRs that reference each other (an engine and the instance or engine class it points at) must land on the same side of the selector: label whole stacks, never individual CRs. The selector is not an isolation boundary: RBAC is governed by `watchNamespaces` alone, and admission webhooks (when enabled) still validate every Firebolt CR in the cluster, so enable webhooks only on a cluster-wide install (empty `watchNamespaces`) — a namespace-scoped install lacks the RBAC to validate CRs outside its namespaces and would fail their admission under the default failurePolicy Fail. Give each install its own release namespace: leader election uses a fixed lease ID, so co-located releases contend for one lease and only one of them ever runs. |
 | watchNamespaces | list | `[]` | Namespaces the operator watches and the chart's manager RBAC is scoped to. Empty (the default) renders a cluster-wide install: one `ClusterRole` + `ClusterRoleBinding` for the manager, and the operator starts with `--namespaces=""` (controller-runtime watches every namespace). A non-empty list renders a `Role` + `RoleBinding` pair per listed namespace for namespaced resources, plus a ClusterRole granting `get/list/watch` on ClusterFireboltEngineClass (the shared SKU catalog is read-only). The operator starts with `--namespaces=<comma-list>` so its cache spans only those namespaces. Switching modes is a `helm upgrade` plus an operator restart. |
 | webhook.caBundle | string | `""` | Static CA bundle (base64-encoded) for admission webhook clients. Ignored when `webhookConfigurationAnnotations` drives CA injection via a controller (cert-manager, etc.); use this as a last-resort manual override when no injector is available. |

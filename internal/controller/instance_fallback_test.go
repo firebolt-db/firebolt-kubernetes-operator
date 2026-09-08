@@ -49,7 +49,7 @@ import (
 func TestInstanceReconcile_GeneratesULIDWhenSpecIDEmpty(t *testing.T) {
 	sch := instanceTemplateTestScheme(t)
 	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:       "fi",
 			Namespace:  "default",
 			Finalizers: []string{instanceFinalizerName},

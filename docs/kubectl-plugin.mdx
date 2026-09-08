@@ -87,6 +87,8 @@ kubectl firebolt engine port-forward my-engine \
 kubectl firebolt engine delete my-engine -n firebolt
 ```
 
+The Engine port-forward resolves `spec.instanceRef` and forwards to that Instance's Gateway. Send `X-Firebolt-Engine: my-engine` on queries. Resolving the Instance requires a read from Kubernetes, including with `--print-commands`.
+
 ## Inspect EnginePreset
 
 ```bash

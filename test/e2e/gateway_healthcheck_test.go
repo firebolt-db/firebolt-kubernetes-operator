@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -27,6 +28,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,21 +40,13 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
-// drainEjectionEnabled gates the drain-ejection step below.
-// Both required conditions are met as of ENGINE_TAG release-4.32.0-pre.0.20260423061425.6d49af2e16b4:
-//  1. Engine exposes GET /health/ready on port 3473, returning 200 normally
-//     and 503 on SIGTERM (so Envoy can distinguish healthy from draining):
-//     https://github.com/firebolt-analytics/packdb/commit/e130589baddfd64a63720ae1eb294137940d1c7b
-//  2. expected_statuses removed from the health_check in instance_gateway.go.
-const drainEjectionEnabled = true
-
 var _ = Describe("Envoy Gateway Health Checks", func() {
 	// Verifies that Envoy's active HTTP health checks are running against engine
 	// pods on port 3473 (/health/ready) and that those pods are reported healthy.
 	// The check uses the Envoy admin API (port 9901) reached via kubectl
 	// port-forward, because the admin is bound to 127.0.0.1 and is not reachable
 	// via the pod-proxy subresource (which connects to the pod IP).
-	Describe("Active Health Check on Engine HealthPort", Ordered, func() {
+	Describe("Active Health Check on Engine Query Port", Ordered, func() {
 		var (
 			instanceName = "inst-gw-hc"
 			engineName   = "test-gw-hc-engine"
@@ -105,7 +99,7 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			Expect(WaitForResourcesDeleted(ctx, engineName, resourceCleanupTimeout)).To(Succeed())
 		})
 
-		It("should perform active health checks against the engine HealthPort and report success", func() {
+		It("should discover the engine query endpoint and observe successful health checks", func() {
 			By("Finding the ready gateway pod")
 			gwPodName, err := findGatewayPod(instanceName)
 			Expect(err).NotTo(HaveOccurred())
@@ -115,14 +109,6 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(cleanupPF)
 
-			// Health check interval is 1s; within 15s we expect multiple successes.
-			// The previous 3-second diagnostic sleep before this Eventually has
-			// been removed: it was a wall-clock guess that "let health checks
-			// fire a few times" and the diagnostic dump produced from it was
-			// redundant with the post-condition stats this loop already
-			// captures into `stats`. Dumping after the Eventually succeeds
-			// gives the same diagnostic value when something downstream
-			// fails, without the 3-second per-run cost.
 			By("Waiting for Envoy to record at least one health_check.success")
 			var stats string
 			Eventually(func() (int, error) {
@@ -142,21 +128,18 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 				}
 			}
 
-			By("Verifying health_check.success dominates (log failure count)")
-			successes := parseEnvoyHealthStat(stats, ".health_check.success")
-			failures := parseEnvoyHealthStat(stats, ".health_check.failure")
-			GinkgoWriter.Printf("health_check: success=%d failure=%d\n", successes, failures)
-			// A single transient failure at sub-cluster creation time (before
-			// DNS resolves) is acceptable; what matters is that successes are
-			// accumulating and failures are not growing beyond the startup transient.
-			Expect(successes).To(BeNumerically(">=", failures),
-				"sustained health check failures indicate /health/ready on port 3473 is not returning 2xx")
-
-			By("Verifying no engine endpoint is flagged as unhealthy in /clusters")
-			clusters, err := envoyAdminClusters(adminBase)
+			By("Verifying the expected engine endpoint is present and healthy")
+			_, podIP, err := findEnginePod(engineName)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(clusters).NotTo(ContainSubstring("failed_active_hc"),
-				"all engine endpoints should be considered healthy by Envoy active health checks")
+			Eventually(func() (bool, error) {
+				clusters, err := envoyAdminClusters(adminBase)
+				if err != nil {
+					return false, err
+				}
+				present, healthy := envoyEndpointHealth(clusters, engineName, podIP)
+				return present && healthy, nil
+			}, 15*time.Second, 500*time.Millisecond).Should(BeTrue(),
+				"the expected engine endpoint must pass its active health check")
 		})
 
 		It("should consume and validate the engine query parameter before forwarding", func() {
@@ -218,13 +201,7 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			)
 		})
 
-		It("should eject a terminating pod within one health check interval and clear the flag once a replacement is healthy", func() {
-			if !drainEjectionEnabled {
-				Skip("drain ejection requires engine to serve /health/ready on port 3473 " +
-					"(200 normally, 503 on SIGTERM) and expected_statuses removed from health check config; " +
-					"see drainEjectionEnabled comment above")
-			}
-
+		It("should remove the deleted endpoint and discover a healthy replacement", func() {
 			By("Finding the ready gateway pod")
 			gwPodName, err := findGatewayPod(instanceName)
 			Expect(err).NotTo(HaveOccurred())
@@ -239,12 +216,8 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoWriter.Printf("engine pod %s has IP %s\n", podName, podIP)
 
-			By("Recording health_check.failure count before deletion")
-			statsBefore, statsErr := envoyAdminStats(adminBase)
-			Expect(statsErr).NotTo(HaveOccurred())
-			failuresBefore := parseEnvoyHealthStat(statsBefore, ".health_check.failure")
-			GinkgoWriter.Printf("health_check.failure before deletion: %d\n", failuresBefore)
-
+			oldPod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, podName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
 			By("Deleting the engine pod to trigger SIGTERM")
 			gracePeriod := int64(30)
 			err = k8sClient.CoreV1().Pods(testNamespace).Delete(ctx, podName, metav1.DeleteOptions{
@@ -252,33 +225,38 @@ var _ = Describe("Envoy Gateway Health Checks", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// With unhealthy_threshold: 1 and interval: 1s, Envoy's health check should
-			// detect the 503 from /health/ready within one check cycle (~1s) of SIGTERM.
-			// We verify via the health_check.failure counter delta rather than looking for
-			// podIP+":3473" in /clusters: STRICT_DNS sub-clusters remove endpoints when
-			// DNS propagates the deletion, which in Kind can happen before the health check
-			// fires — so the pod IP may be gone from /clusters before we can observe it as
-			// failed_active_hc. The cumulative failure counter doesn't disappear with the
-			// endpoint and is the reliable signal here.
-			By("Verifying Envoy detects the draining pod within one health check interval (failure counter)")
-			Eventually(func() (int, error) {
-				stats, err := envoyAdminStats(adminBase)
+			// This single-pod deletion checks discovery and recovery. It does not
+			// assert uninterrupted queries while the only engine pod is replaced.
+			By("Waiting for a ready replacement pod with a different identity")
+			var replacementIP string
+			Eventually(func() (bool, error) {
+				name, ip, err := findEnginePod(engineName)
 				if err != nil {
-					return 0, err
+					return false, err
 				}
-				return parseEnvoyHealthStat(stats, ".health_check.failure"), nil
-			}, 3*time.Second, 500*time.Millisecond).Should(
-				BeNumerically(">", failuresBefore),
-				"Envoy health check should detect the draining pod's 503 on /health/ready within ~1s of SIGTERM")
+				pod, err := k8sClient.CoreV1().Pods(testNamespace).Get(ctx, name, metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				if pod.UID == oldPod.UID {
+					return false, nil
+				}
+				replacementIP = ip
+				return true, nil
+			}, clusterReadyTimeout, time.Second).Should(BeTrue())
 
-			By("Waiting for the replacement pod to become ready")
-			Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
-
-			By("Verifying the failed_active_hc flag is cleared once the replacement pod is healthy")
-			clusters, err := envoyAdminClusters(adminBase)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(clusters).NotTo(ContainSubstring("failed_active_hc"),
-				"the replacement pod should be healthy with no failed_active_hc entries in /clusters")
+			By("Waiting for Envoy to remove the old address and report the replacement healthy")
+			Eventually(func() (bool, error) {
+				clusters, err := envoyAdminClusters(adminBase)
+				if err != nil {
+					return false, err
+				}
+				oldPresent, _ := envoyEndpointHealth(clusters, engineName, podIP)
+				present, healthy := envoyEndpointHealth(clusters, engineName, replacementIP)
+				// Kubernetes may reuse the deleted pod's IP for its replacement.
+				return (!oldPresent || podIP == replacementIP) && present && healthy, nil
+			}, 15*time.Second, 500*time.Millisecond).Should(BeTrue(),
+				"Envoy must discover the ready replacement and withdraw the deleted pod's address")
 		})
 	})
 })
@@ -384,7 +362,7 @@ func findEnginePod(engineName string) (name, ip string, err error) {
 		return "", "", fmt.Errorf("list engine pods for %s: %w", engineName, err)
 	}
 	for _, pod := range pods.Items {
-		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" || !pod.DeletionTimestamp.IsZero() {
 			continue
 		}
 		for _, cond := range pod.Status.Conditions {
@@ -429,6 +407,9 @@ func envoyAdminGet(baseURL, path string) (string, error) {
 		return "", fmt.Errorf("GET %s%s: %w", baseURL, path, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s returned %s", path, resp.Status)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read %s body: %w", path, err)
@@ -441,9 +422,103 @@ func envoyAdminStats(baseURL string) (string, error) {
 	return envoyAdminGet(baseURL, "/stats")
 }
 
-// envoyAdminClusters fetches the Envoy admin /clusters page from the given base URL.
-func envoyAdminClusters(baseURL string) (string, error) {
-	return envoyAdminGet(baseURL, "/clusters")
+type envoyClusterStatus struct {
+	Name  string `json:"name"`
+	Hosts []struct {
+		Address struct {
+			SocketAddress struct {
+				Address string `json:"address"`
+				Port    int32  `json:"port_value"`
+			} `json:"socket_address"`
+		} `json:"address"`
+		Health *struct {
+			FailedActive    bool   `json:"failed_active_health_check"`
+			FailedOutlier   bool   `json:"failed_outlier_check"`
+			Degraded        bool   `json:"failed_active_degraded_check"`
+			PendingRemoval  bool   `json:"pending_dynamic_removal"`
+			PendingCheck    bool   `json:"pending_active_hc"`
+			Excluded        bool   `json:"excluded_via_immediate_hc_fail"`
+			CheckTimeout    bool   `json:"active_hc_timeout"`
+			DiscoveryHealth string `json:"eds_health_status"`
+		} `json:"health_status"`
+	} `json:"host_statuses"`
+}
+
+// envoyAdminClusters fetches the structured endpoint and health observations.
+func envoyAdminClusters(baseURL string) ([]envoyClusterStatus, error) {
+	body, err := envoyAdminGet(baseURL, "/clusters?format=json")
+	if err != nil {
+		return nil, err
+	}
+	return parseEnvoyClusters(body)
+}
+
+func parseEnvoyClusters(body string) ([]envoyClusterStatus, error) {
+	var clusters struct {
+		Statuses []envoyClusterStatus `json:"cluster_statuses"`
+	}
+	if err := json.Unmarshal([]byte(body), &clusters); err != nil {
+		return nil, fmt.Errorf("parse Envoy clusters: %w", err)
+	}
+	return clusters.Statuses, nil
+}
+
+// envoyEndpointHealth requires a matching query endpoint and explicit health
+// observation. An absent endpoint or health object is not proof of health.
+func envoyEndpointHealth(clusters []envoyClusterStatus, engineName, ip string) (present, healthy bool) {
+	wantCluster := fmt.Sprintf("DFPCluster:%s%s.%s.svc.cluster.local:%d", engineName, controller.SuffixService, testNamespace, controller.EngineHTTPQueryPort)
+	for _, cluster := range clusters {
+		if cluster.Name != wantCluster {
+			continue
+		}
+		for _, host := range cluster.Hosts {
+			if host.Address.SocketAddress.Address != ip || host.Address.SocketAddress.Port != controller.EngineHTTPQueryPort {
+				continue
+			}
+			h := host.Health
+			if h == nil {
+				return true, false
+			}
+			discoveryHealthy := h.DiscoveryHealth == "" || h.DiscoveryHealth == "UNKNOWN" || h.DiscoveryHealth == "HEALTHY"
+			return true, discoveryHealthy && !h.FailedActive && !h.FailedOutlier && !h.Degraded &&
+				!h.PendingRemoval && !h.PendingCheck && !h.Excluded && !h.CheckTimeout
+		}
+	}
+	return false, false
+}
+
+func TestEnvoyEndpointHealth(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		cluster string
+		hosts   string
+		present bool
+		healthy bool
+	}{
+		{name: "no endpoints", hosts: `[]`},
+		{name: "different cluster", cluster: "DFPCluster:other-service.firebolt-e2e.svc.cluster.local:3473", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}},"health_status":{"eds_health_status":"HEALTHY"}}]`},
+		{name: "different endpoint", hosts: `[{"address":{"socket_address":{"address":"127.0.0.2","port_value":3473}},"health_status":{}}]`},
+		{name: "missing health", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}}}]`, present: true},
+		{name: "healthy", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}},"health_status":{"eds_health_status":"HEALTHY"}}]`, present: true, healthy: true},
+		{name: "awaiting first check", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}},"health_status":{"pending_active_hc":true}}]`, present: true},
+		{name: "failed check", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}},"health_status":{"failed_active_health_check":true}}]`, present: true},
+		{name: "withdrawn but retained", hosts: `[{"address":{"socket_address":{"address":"127.0.0.1","port_value":3473}},"health_status":{"pending_dynamic_removal":true}}]`, present: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cluster := tt.cluster
+			if cluster == "" {
+				cluster = "DFPCluster:engine-service.firebolt-e2e.svc.cluster.local:3473"
+			}
+			clusters, err := parseEnvoyClusters(fmt.Sprintf(`{"cluster_statuses":[{"name":%q,"host_statuses":%s}]}`, cluster, tt.hosts))
+			if err != nil {
+				t.Fatal(err)
+			}
+			present, healthy := envoyEndpointHealth(clusters, "engine", "127.0.0.1")
+			if present != tt.present || healthy != tt.healthy {
+				t.Fatalf("endpoint observation = (%t, %t), want (%t, %t)", present, healthy, tt.present, tt.healthy)
+			}
+		})
+	}
 }
 
 // parseEnvoyHealthStat sums all counters in the Envoy stats text whose key ends

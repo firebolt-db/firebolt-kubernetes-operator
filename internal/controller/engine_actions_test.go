@@ -312,14 +312,6 @@ var tlaActionCoverageLedger = []tlaActionCoverage{
 			"is bound too -- see formal/model-scope.tsv",
 	},
 	{
-		Spec: "WakeAgentHold.tla",
-		Reason: "no Go binding at all, by decision: its subject is unexported " +
-			"in-memory bookkeeping in internal/wakeagent, which cannot import this " +
-			"package. formal/model-scope.tsv carries the reason and what unblocking " +
-			"it would take. Its Next also uses the existentially-quantified shape " +
-			"the generator's parser rejects",
-	},
-	{
 		Spec: "SigningKeyRotation.tla",
 		Reason: "no rapid/sim harness exists to correspond to. " +
 			"rotation_tla_state_test.go calls production stepSigningKeyRotation " +
@@ -327,6 +319,13 @@ var tlaActionCoverageLedger = []tlaActionCoverage{
 			"vocabulary on the Go side. Writing one is the prerequisite for " +
 			"covering this spec, and its Next also uses the quantified shape the " +
 			"parser rejects",
+	},
+	{
+		Spec: "GatewayRouting.tla",
+		Reason: "distributed protocol actions span durable routing mutations, agent request bookkeeping, " +
+			"and positive kubelet termination evidence. TLC explores their interleavings and negative controls; " +
+			"routing unit tests, controller CAS/finalizer tests and pinned Envoy runtime tests check the implementation seams. " +
+			"There is no generated state-cover binding or equivalent rapid harness action vocabulary",
 	},
 }
 

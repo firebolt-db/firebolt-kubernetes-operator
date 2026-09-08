@@ -33,7 +33,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
-	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/wakeagent"
 )
 
 // The dynamic forward proxy is configured in "sub cluster" mode rather
@@ -51,10 +50,10 @@ import (
 // the complete set of A-records and creates one host per IP, so the
 // normal load-balancer, outlier-detection and retry-host-predicate
 // machinery all work as expected: requests round-robin across the pod
-// set and retries actually land on a different pod than the failing
-// one. This also dissolves the DNS-cache-vs-pod-teardown race that
-// previously hid behind the cache's host_ttl: a stale IP is just one
-// entry in a load-balanced pool now, not the only target.
+// set and retries can prefer a different pod. Resolution is periodic,
+// so the discovered set can still contain old-generation addresses
+// during cutover. Sub-cluster mode does not synchronize pod teardown
+// with DNS convergence or completion of outstanding requests.
 //
 // The HTTP filter and the cluster share the same dynamic-forward-proxy
 // mode (sub-clusters) but their configs live in different protobufs
@@ -68,9 +67,8 @@ const (
 	gatewayServicePort   int32 = 80
 	gatewayConfigKey           = "envoy.yaml"
 
-	// gatewayWakeAgentHoldPort is the loopback port the wake-agent serves
-	// its hold endpoint on. Bound to 127.0.0.1 inside the pod, so it is
-	// reachable from Envoy and from nothing else.
+	// gatewayWakeAgentHoldPort is the local agent's ext_proc gRPC port.
+	// It binds Pod loopback so Envoy can request admission and report completion.
 	gatewayWakeAgentHoldPort int32 = 9902
 
 	// gatewayWakeAgentDemandPort is the port the agent exposes per-engine
@@ -79,30 +77,21 @@ const (
 	// engines to scale back up.
 	gatewayWakeAgentDemandPort int32 = 9903
 
-	// Resource floor for the wake-agent sidecar. Small and flat: it holds
-	// per-engine timestamps and parked connections, nothing that scales
-	// with query volume. No CPU limit, so a burst of releases is not
-	// throttled into looking like a hung agent.
+	// Resource floor for the local agent. Memory holds per-engine demand and
+	// request admission bookkeeping. No CPU limit, so completion processing is
+	// not throttled into delaying withdrawal acknowledgments.
 	gatewayWakeAgentCPURequest    = "10m"
 	gatewayWakeAgentMemoryRequest = "32Mi"
 	gatewayWakeAgentMemoryLimit   = "128Mi"
 
-	// gatewayWakeAgentDrainSeconds keeps the agent alive past Envoy's own
-	// 8-second preStop drain so held requests are not reset on rollout.
-	gatewayWakeAgentDrainSeconds int64 = 12
+	// gatewayTerminationGracePeriodSeconds bounds gateway shutdown, including
+	// wake holds and query completion. A drained gateway exits immediately.
+	gatewayTerminationGracePeriodSeconds int64 = 180
 
 	// gatewayStreamIdleTimeoutSeconds is Envoy's own HCM default, stated
 	// explicitly so the wake hold's dependency on it is visible. Must stay
-	// comfortably above gatewayWakeHoldTimeoutMillis.
+	// above the external processor admission timeout (185 seconds).
 	gatewayStreamIdleTimeoutSeconds = 300
-
-	// gatewayWakeHoldTimeoutMillis bounds the Lua httpCall to the wake
-	// agent. Deliberately longer than the agent's own hold timeout
-	// (wakeagent.DefaultHoldTimeout, 120s) so that when an engine never
-	// arrives it is the agent's 503 + Retry-After that reaches the client,
-	// not an opaque Lua-side timeout. Keep the two in that order if either
-	// is changed.
-	gatewayWakeHoldTimeoutMillis = 125_000
 
 	// gatewayPerConnectionBufferLimitBytes is the value the operator stamps
 	// onto Envoy's per_connection_buffer_limit_bytes on BOTH the listener
@@ -114,8 +103,8 @@ const (
 	//      replay a request whose full body fits in this buffer. The
 	//      X-Firebolt-Drained retry rule (see retry_policy below) and the
 	//      transport-failure retries (`connect-failure`, `refused-stream`,
-	//      `reset`) ALL share this constraint. A request body larger than
-	//      this limit is dispatched without buffering and any 5xx it
+	//      `reset-before-request`) ALL share this constraint. A request body
+	//      larger than this limit is dispatched without buffering and any 5xx it
 	//      receives — including a retry-safe shutdown-fence 503 —
 	//      propagates to the client unretried, breaking the zero-downtime
 	//      contract for that request. The chosen 2 MiB covers typical
@@ -147,8 +136,8 @@ const (
 	gatewayPerConnectionBufferLimitBytes int64 = 2 << 20 // 2 MiB
 
 	// gatewayMaxConnectionsPerEngine is the Envoy circuit-breaker cap on
-	// concurrent upstream TCP connections in one DFP sub-cluster (i.e.
-	// per engine, per gateway pod). With max_requests_per_connection=1
+	// concurrent upstream TCP connections in one DFP sub-cluster (one engine
+	// generation, per gateway Pod). With max_requests_per_connection=1
 	// this is also the cap on concurrent in-flight queries to one
 	// engine. See the cluster-level comment in buildEnvoyConfigYAML for
 	// the rationale; keep this in lockstep with
@@ -248,36 +237,8 @@ func (r *FireboltInstanceReconciler) ensureGatewayResources(ctx context.Context,
 
 	envoyYAML := buildEnvoyConfigYAML(instance, r.wakeAgentEnabled(instance))
 
-	// RBAC: the operator manages the gateway ServiceAccount, RoleBinding, and
-	// the binding to the chart's wake ClusterRole only when the user has NOT
-	// supplied a custom spec.gateway.template.spec.serviceAccountName. Setting
-	// that field is the explicit opt-out signal: the user takes over the
-	// gateway's identity, and wake-on-zero goes away with it (see
-	// wakeAgentEnabled) — no sidecar, no Lua hold, and no EndpointSlice grant
-	// for the operator to manage. Queries for auto-stopped engines then return
-	// 503 and do not wake them; schedule windows still scale engines up.
-	//
-	// This path also hands back the pod's token: the operator stops forcing
-	// automountServiceAccountToken: false, so the user's value applies. The log
-	// has to say both, because a user following it with the Kubernetes
-	// automount default would put a token in the Envoy container, which
-	// terminates untrusted traffic and needs no API access at all.
-	if userSA := userGatewayServiceAccountName(instance); userSA != "" {
-		log.Info(
-			"Skipping operator-managed gateway RBAC; user supplied spec.gateway.template.spec.serviceAccountName, "+
-				"so the user owns the ServiceAccount and wake-on-zero is disabled: "+
-				"queries for auto-stopped engines return 503 and do not wake them. "+
-				"automountServiceAccountToken is no longer forced to false on this path — "+
-				"set it explicitly on spec.gateway.template.spec unless a sidecar of your own needs API access",
-			"serviceAccountName", userSA,
-		)
-		if r.WakeAgentImage != "" && r.EventRecorder != nil {
-			r.EventRecorder.Eventf(instance, nil, corev1.EventTypeWarning, "WakeOnZeroDisabled",
-				"Reconciling", "wake-on-zero is disabled because spec.gateway.template.spec.serviceAccountName is set; "+
-					"queries for auto-stopped engines return 503 and do not wake them")
-		}
-	} else if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway RBAC: %w", err)
+	if err := r.ensureGatewayRBAC(ctx, instance); err != nil {
+		return err
 	}
 
 	if err := r.ensureGatewayConfigMap(ctx, instance, envoyYAML); err != nil {
@@ -451,32 +412,12 @@ func engineUpstreamTLSReady(instance *computev1alpha1.FireboltInstance) bool {
 // lb_policy/load_assignment) — so configuring TLS once here covers every
 // engine's sub-cluster with no per-authority enumeration needed.
 //
-// Uses a static match_typed_subject_alt_names suffix match against the
-// certificate's own SAN text, NOT Envoy's auto_sni/auto_san_validation
-// mechanism, for three reasons found during implementation research:
-//  1. auto_sni/auto_san_validation becomes a silent no-op (falls back to
-//     manually-set defaults only when upstream_http_protocol_options is
-//     entirely absent) the moment any typed_extension_protocol_options
-//     block is configured on the cluster, and the dynamic_forward_proxy
-//     cluster factory then refuses to load the cluster at all unless
-//     both are explicitly re-enabled — an easy trap to hit by adding
-//     unrelated HTTP-version config later.
-//  2. auto_sni/auto_san_validation are populated in the HTTP router
-//     filter's request path, which active health checks never traverse —
-//     so Option B's SAN check silently doesn't apply to health-check
-//     connections (chain verification via trusted_ca still does). The
-//     static matcher lives in validation_context alongside trusted_ca and
-//     applies uniformly to data-plane AND health-check connections.
-//  3. The certificate's SAN is a static, namespace-wide wildcard (see
-//     engineTLSWildcardDNSName in instance_tls.go) — matching against the
-//     certificate's own SAN text needs no per-authority hostname
-//     enumeration, which sub_clusters_config's dynamically-created,
-//     unbounded sub-cluster set would make impractical anyway.
-//
-// suffix (not exact) is required: an exact matcher would only match a
-// certificate whose SAN is literally the wildcard string
-// "*.<namespace>.svc.cluster.local" verbatim, never any real presented
-// hostname.
+// The static SAN matchers also apply to health-check TLS connections, which
+// do not traverse the HTTP router. Engine certificates carry the stable Service
+// identity and per-generation Pod names for these checks. Data requests and the
+// admission probe additionally use DFP's automatic authority verification; their
+// immutable generation Service name must therefore appear in the certificate
+// (see bindEngineTLSRoutingAuthority). The Instance anchor is never served.
 //
 // ecdh_curves must be set explicitly and must list every curve an engine
 // certificate may use. Envoy defaults to X25519 and P-256 only, so BoringSSL
@@ -677,6 +618,7 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
               common_tls_context:
+                alpn_protocols: [h2, http/1.1]
                 tls_params:
                   tls_minimum_protocol_version: %s
                 tls_certificates:
@@ -691,7 +633,7 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
 		validationContext, requireClientCert)
 }
 
-func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnabled bool) string {
+func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, _ bool) string {
 	// Fail closed while a requested client TLS certificate is still
 	// provisioning: serve no client-facing listener at all rather than
 	// plaintext (see buildFailClosedEnvoyConfigYAML and
@@ -699,9 +641,15 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
 	if gatewayDownstreamTLSPending(instance) {
 		return buildFailClosedEnvoyConfigYAML(instance)
 	}
-	return fmt.Sprintf(`static_resources:
+	return fmt.Sprintf(`layered_runtime:
+  layers:
+    - name: routing_lifecycle
+      static_layer:
+        envoy.reloadable_features.ext_proc_graceful_grpc_close: true
+static_resources:
   listeners:
     - name: listener
+      traffic_direction: INBOUND
       # per_connection_buffer_limit_bytes caps both downstream-receive and
       # upstream-send buffering on this listener, AND it is the budget the
       # router uses when deciding whether to BUFFER a request for retry.
@@ -889,9 +837,26 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                               headers:replace(":path", stripped_path)
                             end
                             headers:replace("x-firebolt-engine", engine)
-                            headers:replace(":authority", engine .. "-service.%s.svc.cluster.local:%d")
 
-%s                          end
+                          end
+                  - name: envoy.filters.http.ext_proc
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: routing_agent
+                        timeout: 0s
+                      failure_mode_allow: false
+                      message_timeout: 185s
+                      processing_mode:
+                        request_header_mode: SEND
+                        response_header_mode: SEND
+                        request_body_mode: NONE
+                        response_body_mode: NONE
+                        request_trailer_mode: SKIP
+                        response_trailer_mode: SKIP
+                      mutation_rules:
+                        allow_all_routing: true
                   - name: envoy.filters.http.dynamic_forward_proxy
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
@@ -918,63 +883,49 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                             cluster: dynamic_forward_proxy
                             # No route-level timeout: the caller's own deadline
                             # (HTTP client timeout) is the only overall cap. This
-                            # lets the retry loop below ride out an arbitrary
-                            # DNS-refresh window without having to match it to a
-                            # magic constant here.
+                            # avoids imposing a route deadline on long queries.
+                            # Retries still have finite attempt and buffering
+                            # budgets and can expire before DNS converges.
                             timeout: 0s
                             # Retry strategy.
                             #
-                            # We retry ONLY on transport-level failures where the
-                            # engine could not have observed the request as
-                            # accepted work, and therefore retrying cannot
-                            # duplicate any side effect:
+                            # Retry only failures that establish the request
+                            # was not processed, including an explicit pre-work
+                            # rejection from the engine:
                             #   - connect-failure: TCP connect failed (SYN RST,
                             #     timeout, etc.) - no bytes ever reached the
                             #     engine.
                             #   - refused-stream:  HTTP/2 REFUSED_STREAM - the
                             #     peer explicitly told us the stream was not
                             #     processed.
-                            #   - reset:           stream reset before any
-                            #     response bytes - same guarantee as
-                            #     connect-failure.
+                            #   - reset-before-request: stream reset before
+                            #     request headers are sent to the engine.
                             #   - retriable-headers (X-Firebolt-Drained):
                             #     a 503 emitted by the engine's pre-work
-                            #     shutdown fence (HTTPHandler::handleRequestImpl
-                            #     fast-fails before any executor / Storage
-                            #     Manager work). The fence sets this header
-                            #     ONLY on that early-bail path, so the same
-                            #     side-effect-free guarantee as the transport
-                            #     failures above holds. Without this trigger,
-                            #     a request that lands on a pod between
-                            #     SIGTERM and the EndpointSlice update
-                            #     would propagate a 503 to the client.
+                            #     shutdown fence before executing the query.
+                            #     The header is safe only for this early rejection.
+                            #     A connection closed before reaching the handler
+                            #     has no such marker and may surface as a 503.
                             #
+                            # General "reset" can happen after the engine
+                            # receives a request, so it is unsafe to retry.
                             # We deliberately do NOT list "5xx" or
                             # "gateway-error" here: those match 5xx responses
                             # RETURNED BY THE ENGINE, which may have already
                             # executed side effects (e.g. a DML statement that
-                            # partially mutated state). "5xx" returned by
-                            # Envoy itself (flags=UF/URX, zero upstream bytes)
-                            # falls under connect-failure/reset and is already
-                            # covered.
+                            # partially mutated state). Connection failures
+                            # and resets before request delivery are covered
+                            # by the safe transport conditions above.
                             #
-                            # num_retries is set well above the steady-state
-                            # replica count of any one engine. Combined with
-                            # the previous_hosts retry predicate, this means
-                            # each successive retry is directed to a pod we
-                            # have not tried yet, until every pod in the
-                            # sub-cluster's load-balanced set has been tried
-                            # or the client-side deadline expires. Short
-                            # exponential back-off lets the sub-cluster's
-                            # own STRICT_DNS refresh tick (and any outlier
-                            # ejection) take effect between attempts without
-                            # needing to match its timer to a magic constant
-                            # here. Each per-try attempt is bounded only by
-                            # the cluster's connect_timeout, not by
-                            # per_try_timeout, so legitimate long-running
-                            # queries are never cut off mid-flight.
+                            # previous_hosts prefers an untried host, but host
+                            # selection is bounded by host_selection_retry_max_attempts
+                            # and can fall back to a previously attempted host.
+                            # Back-off allows discovery and health updates between
+                            # attempts; it does not guarantee DNS convergence before
+                            # the retry budget is exhausted. connect_timeout bounds
+                            # connection establishment, not an executing query.
                             retry_policy:
-                              retry_on: connect-failure,refused-stream,reset,retriable-headers
+                              retry_on: connect-failure,refused-stream,reset-before-request,retriable-headers
                               retriable_headers:
                                 - name: X-Firebolt-Drained
                                   present_match: true
@@ -988,6 +939,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
 %s    - name: stats_listener
+      traffic_direction: OUTBOUND
       address:
         socket_address:
           address: 0.0.0.0
@@ -1025,6 +977,42 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+    - name: routing_probe
+      traffic_direction: OUTBOUND
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: 9905
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: routing_probe
+                route_config:
+                  name: routing_probe
+                  virtual_hosts:
+                    - name: routing_probe
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            path: /health/ready
+                            headers:
+                              - name: ":method"
+                                string_match:
+                                  exact: GET
+                          route:
+                            cluster: dynamic_forward_proxy
+                            timeout: 1s
+                http_filters:
+                  - name: envoy.filters.http.dynamic_forward_proxy
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                      sub_cluster_config:
+                        cluster_init_timeout: 1s
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
@@ -1045,23 +1033,21 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
       # but short enough that the retry policy above can iterate many
       # times within a single client-side deadline.
       connect_timeout: 0.25s
-      # One request per TCP connection.  Forces a fresh DNS lookup on every
-      # query, so after the engine service selector switches (gen N → gen N+1)
-      # the stale-IP window collapses to a single TCP connect rather than the
-      # STRICT_DNS TTL (~5s).  Firebolt queries are long-running (seconds to
-      # minutes), so the per-query handshake overhead (~1–3ms TLS) is
-      # negligible.  Without this, HTTP/2 connection reuse means Envoy keeps
-      # dispatching new streams to gen N pod IPs for up to the full DNS TTL
-      # after the selector switch, and "Killing all queries" responses (HTTP
-      # 200 + error body) from draining pods are not covered by the
-      # transport-failure retry policy.
+      # Do not reuse upstream TCP connections between queries.
+      # DNS refresh is independent of connection creation. Immutable generation
+      # authorities and admission fences establish withdrawal, not DNS timing.
       max_requests_per_connection: 1
-      # Circuit breakers — per-engine concurrency caps for the gateway.
+      # A healthy pod removed from DNS must also leave the routing set.
+      # With active health checks, Envoy otherwise retains removed hosts until
+      # a health check fails. This handles membership within a generation;
+      # the admission protocol separately fences retired generations.
+      ignore_health_on_host_removal: true
+      # Circuit breakers — per-generation concurrency caps for the gateway.
       #
-      # Each unique authority (one per engine's headless Service) gets
+      # Each unique authority (one per engine generation's Service) gets
       # its own STRICT_DNS sub-cluster, and the thresholds below apply
       # per sub-cluster (Envoy circuit-breaker semantics). The effect is
-      # per-engine isolation of gateway resources: a runaway or
+      # per-generation isolation of gateway resources: a runaway or
       # misbehaving engine's traffic cannot consume more than its share
       # of connection pool slots, pending-request queue, in-flight
       # request budget, or retries, and therefore cannot starve sibling
@@ -1069,6 +1055,9 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
       #
       # Sizing rationale (priority DEFAULT only — we do not route to
       # priority HIGH):
+      #
+      # Retired and replacement generations have independent limits while
+      # they coexist. The limits below apply independently to each.
       #
       #   - max_connections: 1024. With max_requests_per_connection=1
       #     above, this is also the maximum concurrent in-flight queries
@@ -1108,29 +1097,19 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
             max_pending_requests: %d
             max_requests: %d
             max_retries: %d
-      # Active health checks — fast ejection of draining pods.
-      #
-      # Envoy probes every pod IP in the sub-cluster's STRICT_DNS set on
-      # the interval below. When an engine pod receives SIGTERM it must
-      # immediately start returning a non-2xx from /health/ready while
-      # still accepting and completing any query that arrived before the
-      # shutdown signal. Once Envoy sees unhealthy_threshold consecutive
-      # failures it removes that pod from the load-balanced set, so no new
-      # queries are dispatched to it for the remainder of its graceful-
-      # shutdown window. Combined with max_requests_per_connection: 1
-      # (which collapses the DNS-TTL staleness window to a single TCP
-      # connect) this gives two independent layers of zero-downtime
-      # protection without requiring xDS dynamic configuration.
+      # Active health checks track readiness independently of DNS.
+      # A failed check marks a host unhealthy. With the default panic
+      # threshold, Envoy can still select unhealthy hosts when too few
+      # hosts are healthy; health failure is not a withdrawal barrier.
+      # DNS removal independently withdraws a pod through
+      # ignore_health_on_host_removal. Neither mechanism acknowledges that
+      # every gateway has stopped dispatching requests before pod shutdown.
       #
       # Why not a ClusterIP service instead of a headless one?
-      # A ClusterIP VIP would remove the DNS-TTL race at the source, but
-      # Envoy would see only one endpoint and lose the ability to load-
-      # balance across pod IPs itself. That breaks the previous_hosts
-      # retry predicate — which guarantees each retry attempt is directed
-      # to a pod that has not already been tried — turning the retry loop
-      # into a probabilistic gamble rather than an exhaustive sweep.
-      # Keeping the headless service preserves Envoy's per-pod LB and
-      # makes the retry policy meaningful.
+      # A ClusterIP VIP hides individual pod addresses from Envoy. A
+      # headless service lets Envoy balance and apply previous_hosts to
+      # individual endpoints. Both designs have asynchronous discovery
+      # propagation; neither is a traffic-withdrawal acknowledgement.
       #
       # Active health checks on the query port (3473). DFP sub-clusters
       # create endpoints dynamically from DNS and do not support per-
@@ -1140,12 +1119,6 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
       # exposes GET /health/ready on the query port: 200 when ready,
       # 503 on SIGTERM.
       #
-      # When an engine pod receives SIGTERM it immediately returns 503
-      # from /health/ready while still completing in-flight queries.
-      # Once Envoy sees unhealthy_threshold consecutive failures it
-      # removes that pod from the load-balanced set so no new queries
-      # are dispatched to it for the remainder of its graceful-shutdown
-      # window.
       health_checks:
         - timeout: 0.5s
           interval: 1s
@@ -1159,7 +1132,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
           http_health_check:
             path: /health/ready
       # Resolve the authority exactly as written, never through the pod's
-      # resolv.conf search domains. The Lua filter always rewrites
+      # resolv.conf search domains. The routing agent rewrites
       # :authority to a fully qualified in-cluster Service name, but that
       # name's dot count sits below the kubelet ndots default (5), so
       # without this option c-ares tries every search-domain expansion of
@@ -1224,9 +1197,6 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
 		gatewayPerConnectionBufferLimitBytes,                // listener: per_connection_buffer_limit_bytes
 		gatewayContainerPort,                                // listener: port_value
 		gatewayStreamIdleTimeoutSeconds,                     // http_connection_manager: stream_idle_timeout
-		instance.Namespace,                                  // Lua: :authority rewrite
-		EngineHTTPQueryPort,                                 // Lua: :authority rewrite port
-		buildWakeHoldLua(wakeEnabled),                       // Lua: wake-agent hold (empty when wake is off)
 		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
 		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
 		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
@@ -1236,7 +1206,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
 		gatewayMaxRequestsPerEngine,                         // circuit_breakers: max_requests
 		gatewayMaxRetriesPerEngine,                          // circuit_breakers: max_retries
 		gatewayAdminPort,                                    // admin_stats endpoint: port_value
-		buildWakeAgentCluster(wakeEnabled),                  // wake_agent cluster (empty when wake is off)
+		buildRoutingAgentCluster(),                          // mandatory admission processor
 		gatewayAdminPort,                                    // admin: port_value
 	)
 }
@@ -1255,6 +1225,7 @@ func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) 
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: stats_listener
+      traffic_direction: OUTBOUND
       address:
         socket_address:
           address: 0.0.0.0
@@ -1551,26 +1522,12 @@ func (r *FireboltInstanceReconciler) ensureGatewayDeployment(ctx context.Context
 		return err
 	}
 
-	// Gated by the same predicate as the Envoy config, not just by the
-	// image being set. A user-supplied ServiceAccount opts out of
-	// operator-managed RBAC, so an agent injected against it could never
-	// watch EndpointSlices, so its informer would never sync. An unsynced
-	// agent answers DecisionUnsynced and lets every request straight through
-	// without recording demand (readinessTracker.Synced), so wake would never
-	// fire and stopped engines would keep 503ing — silently, and for the
-	// lifetime of the pod.
-	//
-	// The cost is wake, not availability: the sidecar carries no probes at all,
-	// deliberately, so even a wedged agent cannot drop the gateway pod out of
-	// its Service (see the container definition, which explains why an earlier
-	// readiness probe here was a mistake). Omitting the agent rather than
-	// shipping one that can only ever no-op keeps the degraded mode a single
-	// documented state — reported as WakeOnZeroDisabled — instead of a sidecar
-	// and a projected token that look functional and are not.
 	wakeAgent := wakeAgentConfig{}
 	if r.wakeAgentEnabled(instance) {
 		wakeAgent = wakeAgentConfig{
 			Image:           r.WakeAgentImage,
+			InstanceName:    instance.Name,
+			InstanceUID:     string(instance.UID),
 			ImagePullPolicy: r.WakeAgentImagePullPolicy,
 		}
 	}
@@ -1693,7 +1650,8 @@ func gatewayMetricsPort(gw *computev1alpha1.GatewaySpec) int32 {
 //     user template.
 //   - ServiceAccountName: pass through from user when set; otherwise
 //     the operator-built per-instance name.
-//   - terminationGracePeriodSeconds, enableServiceLinks: operator-stamped.
+//   - enableServiceLinks: operator-stamped; terminationGracePeriodSeconds defaults
+//     to the gateway shutdown deadline and accepts a positive user override.
 //   - Primary container: operator-rendered Envoy at index 0; image
 //     and ImagePullPolicy and Resources merged from any user-supplied
 //     container with name == GatewayContainerName. User sidecars
@@ -1704,129 +1662,38 @@ func gatewayMetricsPort(gw *computev1alpha1.GatewaySpec) int32 {
 //     those, but the merge is defensive in case the webhook is off)
 //     appended.
 //
-// wakeAgentEnabled reports whether this instance's gateway runs the
-// wake-agent sidecar.
-//
-// It gates the Envoy config as well as the pod: rendering the Lua hold call
-// without an agent behind it would be worse than not having the feature,
-// because Envoy's httpCall synthesizes a 503 on a refused connection rather
-// than reporting failure (see wakeagent.DecisionHeader), so every query
-// would be answered from a loopback port with nothing listening on it.
-//
-// A user-supplied ServiceAccount opts out. The agent needs an EndpointSlice
-// read grant that only the operator-managed RoleBinding provides; running it
-// against an SA that lacks it would leave the informer permanently unsynced.
-func (r *FireboltInstanceReconciler) wakeAgentEnabled(instance *computev1alpha1.FireboltInstance) bool {
-	if r.WakeAgentImage == "" {
-		return false
-	}
-	return userGatewayServiceAccountName(instance) == ""
+// Routing admission is mandatory even when the operator has no agent image:
+// Envoy then rejects queries instead of bypassing the retirement fence.
+func (r *FireboltInstanceReconciler) wakeAgentEnabled(_ *computev1alpha1.FireboltInstance) bool {
+	return r.WakeAgentImage != ""
 }
 
-// buildWakeHoldLua renders the wake-on-zero hold, or nothing when wake is
-// disabled for this instance.
-func buildWakeHoldLua(enabled bool) string {
-	if !enabled {
-		return ""
-	}
-	return fmt.Sprintf(`
-                            -- Wake-on-zero. Ask the in-pod wake agent whether
-                            -- this engine is routable. For a running engine
-                            -- the agent answers from an in-memory map and
-                            -- returns immediately; for an auto-stopped one it
-                            -- parks this request while the operator scales the
-                            -- engine back up, then releases it once the
-                            -- engine's EndpointSlice shows a ready endpoint.
-                            --
-                            -- Why the agent and not Envoy alone: the engine
-                            -- Service is headless, so a stopped engine's name
-                            -- has no A records and the request fails at DNS
-                            -- resolution as a LOCAL REPLY. retry_policy acts
-                            -- on upstream responses, so the route's retries
-                            -- below never see it and cannot ride out a cold
-                            -- start.
-                            --
-                            -- MUST be the last thing this filter does. Envoy
-                            -- invalidates the header object across the
-                            -- coroutine yield httpCall performs, so any
-                            -- headers:replace() after this point fails with
-                            -- "object used outside of proper scope" — and
-                            -- fails silently as far as the client is
-                            -- concerned, leaving :authority unrewritten and
-                            -- the query routed at the gateway itself.
-                            --
-                            -- Fail open, and note how. httpCall does NOT
-                            -- return nil when it cannot reach the agent:
-                            -- Envoy synthesizes a 503 and delivers it through
-                            -- the success path, so status alone cannot tell a
-                            -- crashed agent from one that deliberately shed
-                            -- the request. Only a response carrying the
-                            -- agent's own decision header is honored; the
-                            -- synthesized one has no such header and falls
-                            -- through to normal routing.
-                            local wake_headers = handle:httpCall(
-                              "wake_agent",
-                              {
-                                [":method"] = "GET",
-                                [":path"] = "/hold?engine=" .. engine,
-                                [":authority"] = "wake_agent"
-                              },
-                              nil,
-                              %d
-                            )
-                            if wake_headers ~= nil
-                              and wake_headers["%s"] ~= nil
-                              and wake_headers[":status"] ~= "200" then
-                              handle:respond(
-                                {[":status"] = "503", ["retry-after"] = "10"},
-                                "engine is not available; retry shortly"
-                              )
-                              return
-                            end
-`, gatewayWakeHoldTimeoutMillis, wakeagent.DecisionHeader)
-}
-
-// buildWakeAgentCluster renders the loopback cluster the Lua filter calls,
-// or nothing when wake is disabled.
-func buildWakeAgentCluster(enabled bool) string {
-	if !enabled {
-		return ""
-	}
-	return fmt.Sprintf(`    # The wake-agent sidecar, reached over loopback from the Lua filter.
-    #
-    # No circuit breakers configured, so Envoy's defaults (1024 connections,
-    # requests and pending requests) apply. The agent's own hold cap is
-    # derived from Envoy's memory limit and can exceed that on a large
-    # gateway, in which case Envoy sheds first with a synthetic 503 — which
-    # the filter treats as "agent unreachable" and routes anyway. That is the
-    # safe direction, but it means the effective hold ceiling is the lower of
-    # the two.
-    - name: wake_agent
+func buildRoutingAgentCluster() string {
+	return `    - name: routing_agent
       connect_timeout: 0.25s
       type: STATIC
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
       load_assignment:
-        cluster_name: wake_agent
+        cluster_name: routing_agent
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
                       address: 127.0.0.1
-                      port_value: %d
-`, gatewayWakeAgentHoldPort)
+                      port_value: 9904
+`
 }
 
-// wakeAgentConfig carries what effectiveGatewayPodTemplate needs in order to
-// render the wake-agent sidecar.
-//
-// A zero value omits the sidecar entirely. That is the degraded mode for an
-// operator installed without --wake-agent-image: no agent runs, Envoy's Lua
-// call to the wake_agent cluster fails fast against a refused loopback
-// connection, and the filter falls through to ordinary routing. Wake stops
-// working; query routing does not.
 type wakeAgentConfig struct {
 	Image           string
 	ImagePullPolicy corev1.PullPolicy
+	InstanceName    string
+	InstanceUID     string
 }
 
 // computev1alpha1.GatewayWakeAgentTokenVolumeName is the projected ServiceAccount token mounted
@@ -1868,20 +1735,11 @@ func effectiveGatewayPodTemplate(
 	image := envoyImageFromUser(userPrimary)
 	pullPolicy := envoyImagePullPolicy(userPrimary, image)
 
-	var gracePeriod int64 = 15
+	gracePeriod := gatewayTerminationGracePeriodSeconds
+	if userPodSpec.TerminationGracePeriodSeconds != nil {
+		gracePeriod = *userPodSpec.TerminationGracePeriodSeconds
+	}
 	var runAsUser int64 = 101 // Envoy default UID
-
-	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
-	// admin API without requiring curl/wget in the image. The POST flips
-	// the envoy.filters.http.health_check filter (pass_through_mode=false
-	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
-	// the kubelet readiness probe hits.
-	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
-printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
-cat <&3 >/dev/null
-exec 3<&- 3>&-
-sleep 8
-`, gatewayAdminPort)
 
 	// Both probes hit /healthz on the metrics port, NOT the client-facing
 	// port. Two independent reasons force this:
@@ -1908,7 +1766,7 @@ sleep 8
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
-		Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
+		Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml", "--drain-time-s", "0", "--drain-strategy", "immediate"},
 		Ports: []corev1.ContainerPort{
 			{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
 			{Name: "metrics", ContainerPort: gatewayMetricsPort(&instance.Spec.Gateway), Protocol: corev1.ProtocolTCP},
@@ -1916,7 +1774,7 @@ sleep 8
 		Lifecycle: &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"bash", "-c", preStopScript},
+					Command: []string{"bash", "-c", gatewayPreStopScript(gatewayAdminPort)},
 				},
 			},
 		},
@@ -2083,8 +1941,11 @@ sleep 8
 	}
 
 	containers := append([]corev1.Container{envoy}, userSidecars...)
+	initContainers := userPodSpec.InitContainers
 	if wakeAgentContainer != nil {
-		containers = append(containers, *wakeAgentContainer)
+		// Native sidecars remain alive until every main container, including
+		// Envoy, finishes. Preserve the user init sequence before the agent.
+		initContainers = append(initContainers, *wakeAgentContainer)
 		operatorVolumes = append(operatorVolumes, *wakeAgentVolume)
 	}
 	volumes := appendUserVolumes(operatorVolumes, userPodSpec.Volumes, instanceProtectedSecret(instance),
@@ -2125,30 +1986,20 @@ sleep 8
 			PriorityClassName:             userPodSpec.PriorityClassName,
 			SecurityContext:               userPodSpec.SecurityContext,
 			ImagePullSecrets:              userPodSpec.ImagePullSecrets,
-			InitContainers:                userPodSpec.InitContainers,
+			InitContainers:                initContainers,
 			Containers:                    containers,
 			Volumes:                       volumes,
 		},
 	}
 }
 
-// automountForGateway returns the pod's automountServiceAccountToken.
-//
-// False for operator-managed ServiceAccounts. When the user supplies their
-// own ServiceAccount they have taken ownership of the pod's RBAC (see
-// userGatewayServiceAccountName), so their explicit value is honored and
-// the absence of one leaves the field unset — Kubernetes' own default
-// applies rather than a decision the operator makes on their behalf.
-func automountForGateway(userPodSpec *corev1.PodSpec) *bool {
-	if userPodSpec.ServiceAccountName != "" {
-		return userPodSpec.AutomountServiceAccountToken
-	}
-	return boolPtr(false)
-}
+// automountForGateway disables the Pod-wide token mount for both managed and
+// custom ServiceAccounts. Only the local agent receives a projected API token.
+func automountForGateway(_ *corev1.PodSpec) *bool { return boolPtr(false) }
 
 // buildWakeAgentContainer renders the wake-agent sidecar and the projected
-// token volume it alone mounts. Returns (nil, nil) when no image is
-// configured, which omits the sidecar (see wakeAgentConfig).
+// token volume it alone mounts. A missing image omits the sidecar; Envoy's
+// mandatory admission filter then keeps client requests closed.
 //
 // envoy is read, not modified: the agent's memory-derived hold cap is
 // sourced from the Envoy container's own limit, because the memory a held
@@ -2159,10 +2010,12 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 	}
 
 	var runAsUser int64 = 65532 // distroless nonroot, matching the operator image
+	restartPolicy := corev1.ContainerRestartPolicyAlways
 
 	args := []string{
 		"wake-agent",
-		fmt.Sprintf("--hold-port=%d", gatewayWakeAgentHoldPort),
+		"--instance-name=" + cfg.InstanceName,
+		"--instance-uid=" + cfg.InstanceUID, fmt.Sprintf("--hold-port=%d", gatewayWakeAgentHoldPort),
 		fmt.Sprintf("--demand-port=%d", gatewayWakeAgentDemandPort),
 		fmt.Sprintf("--envoy-admin-url=http://127.0.0.1:%d", gatewayAdminPort),
 		fmt.Sprintf("--per-hold-bytes=%d", gatewayPerConnectionBufferLimitBytes),
@@ -2174,6 +2027,8 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"},
 		},
 	}}
+
+	env = append(env, corev1.EnvVar{Name: "POD_UID", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.uid"}}})
 
 	// Only expose Envoy's memory limit when one is actually set. The
 	// downward API's resourceFieldRef does not report "unset" — for a
@@ -2199,6 +2054,7 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 		Image:           cfg.Image,
 		ImagePullPolicy: cfg.ImagePullPolicy,
 		Args:            args,
+		RestartPolicy:   &restartPolicy,
 		Env:             env,
 		// Explicit requests and limits, not left unset. Adding an
 		// unbounded container would demote a previously Guaranteed
@@ -2215,38 +2071,11 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 				corev1.ResourceMemory: resource.MustParse(gatewayWakeAgentMemoryLimit),
 			},
 		},
-		// Outlive Envoy's drain. Envoy's preStop flips /healthz to 503
-		// and sleeps 8s so in-flight work finishes; an agent that exited
-		// first would reset every request it is holding and, for the
-		// remainder of that window, leave newly arriving queries talking
-		// to a dead loopback port. Sleeping past it lets the holds end
-		// the way they normally do.
-		Lifecycle: &corev1.Lifecycle{
-			PreStop: &corev1.LifecycleHandler{
-				Sleep: &corev1.SleepAction{Seconds: gatewayWakeAgentDrainSeconds},
-			},
-		},
+
 		Ports: []corev1.ContainerPort{
 			{Name: "wake-demand", ContainerPort: gatewayWakeAgentDemandPort, Protocol: corev1.ProtocolTCP},
 		},
-		// No probes at all, and both omissions are deliberate.
-		//
-		// No readiness probe, because a pod is Ready only when EVERY
-		// container is. A probe here would let a wedged agent evict the
-		// whole gateway pod from its Service and take Envoy down with it —
-		// the exact outage the fail-open design exists to prevent, arriving
-		// through the back door. An earlier revision had one, with a comment
-		// claiming an unready agent "costs wake, not availability". That was
-		// simply wrong.
-		//
-		// No liveness probe, because restarting a wedged agent would reset
-		// every request it is currently holding, turning a degraded wake
-		// into client-visible errors.
-		//
-		// Nothing is lost by having neither. Envoy fails open when the agent
-		// does not answer, and the operator's demand poll just sees nothing
-		// — so a broken agent degrades to "wake stops working" on its own,
-		// with no probe needed to arrange it.
+		ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromInt(int(gatewayWakeAgentDemandPort))}}, PeriodSeconds: 1, FailureThreshold: 1},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                &runAsUser,
 			RunAsNonRoot:             boolPtr(true),

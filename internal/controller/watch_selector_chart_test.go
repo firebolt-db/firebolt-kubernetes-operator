@@ -33,7 +33,7 @@ func renderChartRaw(t *testing.T, extraArgs ...string) string {
 	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	chartDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "helm", "firebolt-operator")
-	args := append([]string{"template", "firebolt-operator", chartDir}, extraArgs...)
+	args := append([]string{"template", "firebolt-operator", chartDir, "--kube-version", "1.33.0"}, extraArgs...)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "helm", args...)

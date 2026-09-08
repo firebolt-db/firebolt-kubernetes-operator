@@ -4,7 +4,7 @@ description: Size Gateway replicas and memory for query traffic and retries.
 sidebarTitle: Gateway sizing
 ---
 
-The Gateway is the zero-downtime query entry point. Size its replica count and memory for steady-state traffic plus retries during Engine cutovers.
+The Gateway is the supported query entry point. Size its replica count and memory for steady-state traffic plus retries during Engine cutovers.
 
 ## Memory budget
 
@@ -31,13 +31,15 @@ spec:
                 memory: 2Gi
 ```
 
-An out-of-memory Gateway restart can cause client-visible failures. Monitor container memory, restarts, and Envoy response flags under peak load.
+An out-of-memory Gateway restart can interrupt requests and delay Engine retirement while the Firebolt Operator replaces the affected Gateway Pod and clears its old session. Monitor container memory, restarts, and Envoy response flags under peak load.
 
-Requests larger than 2 MiB are not buffered for retry. Split large requests client-side when they must tolerate cutovers.
+Requests larger than 2 MiB are not buffered for retry. Split large requests when retry coverage is required. All request sizes use the same routing withdrawal gate.
+
+The agent tracks outstanding admissions in memory and bounds parked wake requests using the Envoy memory budget. This bookkeeping adds a local request/response exchange; it does not add Kubernetes API writes per query.
 
 ## Per-Engine circuit breakers
 
-Each Gateway pod applies these limits independently to each Engine:
+Each Gateway Pod applies these limits independently to each generation destination:
 
 | Limit | Value | What it caps |
 |---|---|---|
@@ -46,6 +48,6 @@ Each Gateway pod applies these limits independently to each Engine:
 | Active requests | `1024` | Concurrent request streams |
 | Retries | `256` | Simultaneous retries |
 
-Total capacity grows with Gateway replicas. If expected concurrency for one Engine approaches 1024 requests per Gateway pod, add Gateway replicas and verify Engine capacity as well.
+Old and replacement generation destinations can coexist during a rollout. Total capacity grows with Gateway replicas. If expected concurrency for one Engine approaches 1024 requests per Gateway pod, add Gateway replicas and verify Engine capacity as well.
 
 A tripped circuit breaker appears as an Envoy-generated `503` with response flag `UO` in the access log. `URX` means Envoy exhausted the configured retry limit and can accompany repeated upstream failures, but does not by itself identify circuit-breaker saturation. Check the target Engine, Gateway CPU and memory, upstream latency, request concurrency, and the surrounding response flags before adding capacity.

@@ -160,6 +160,7 @@ func newReconcileDeleteTestEnv(t *testing.T, children ...runtime.Object) *reconc
 		MetricsRecorder: metrics.NoOpEngineRecorder{},
 		EventRecorder:   rec,
 	}
+	seedEngineRoutingFixture(t, r.Client, engine)
 	return &reconcileDeleteTestEnv{r: r, engine: engine, recorder: rec}
 }
 
@@ -198,7 +199,7 @@ func labeledStatefulSet(name string, finalizers ...string) *appsv1.StatefulSet {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
 			Namespace:  "ns",
-			Labels:     map[string]string{LabelEngine: "eng"},
+			Labels:     map[string]string{LabelEngine: "eng", LabelGeneration: "1"},
 			Finalizers: append([]string{}, finalizers...),
 		},
 		Spec: appsv1.StatefulSetSpec{

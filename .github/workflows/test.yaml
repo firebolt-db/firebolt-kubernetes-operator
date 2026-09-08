@@ -80,6 +80,12 @@ jobs:
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
+      - name: Test generated gateway configuration with Envoy
+        if: matrix.variant == 'dev'
+        run: |
+          make envoy
+          make test-envoy-integration
+
       # The outer-Reconcile rapid harness (build tag `outerharness`) drives the
       # real reconciler against envtest, so it catches CRD/admission regressions
       # that the pure-function property test and `make test` miss — e.g. the

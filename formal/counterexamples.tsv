@@ -39,4 +39,6 @@ FireboltInstanceNaiveRollup.cfg	FireboltInstance.tla	Action property PhaseReflec
 EngineWakeNaiveStoppedFirst.cfg	EngineWake.tla	Temporal property WakeIsNotLost was violated
 EngineWakeNaiveStaleDemand.cfg	EngineWake.tla	Action property ScaleUpOnlyOnFreshDemand is violated
 EngineWakeNaiveUnfilteredPoll.cfg	EngineWake.tla	Invariant Inv_DemandOnlyForStoppedEngines is violated
-WakeAgentHoldNaiveNameRelease.cfg	WakeAgentHold.tla	Invariant Inv_NoStrandedWaiter is violated
+GatewayRoutingNaiveUnregistered.cfg	GatewayRouting.tla	Invariant Safety is violated
+GatewayRoutingNaiveStaleAck.cfg	GatewayRouting.tla	Invariant Safety is violated
+GatewayRoutingNaiveReopenInstance.cfg	GatewayRouting.tla	Invariant Safety is violated

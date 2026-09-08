@@ -4,7 +4,7 @@ description: Select an Engine, understand retries, and preserve queries during c
 sidebarTitle: Gateway query routing
 ---
 
-The Instance Gateway is the supported zero-downtime entry point for client queries. It resolves ready Engine pods for every request and routes to the selected Engine.
+The Instance Gateway is the supported entry point for client queries. Direct Engine Services and Pod IPs are internal destinations.
 
 ## Select an Engine
 
@@ -26,31 +26,42 @@ The Gateway removes the routing-only `engine` query parameter before forwarding 
 ## Traffic path
 
 ```text
-Client -> Gateway Service -> Envoy -> Engine Service -> ready Engine pod
+Client -> Gateway Service -> Envoy -> generation-specific Service -> ready Engine Pod
+                              |
+                              +-> local agent: request admission and completion
 ```
 
-The Engine Service is headless and returns the ready pod IPs for the active generation. The Gateway performs active readiness checks and opens a new upstream connection for each request.
+Envoy validates the Engine selector, then asks its local agent to admit the request through the `ext_proc` filter. The agent records an outstanding request before returning an immutable generation destination. SQL and result bodies pass through Envoy; they are not sent to the agent. Each admitted request keeps its destination across Envoy retries.
 
-The Gateway resolves the Engine Service by its fully qualified name, `<engine>-service.<namespace>.svc.cluster.local`, and does not expand the pod's DNS search domains. If you enforce DNS-level network policies, allow queries for that name; the Gateway sends no other lookups for Engine routing.
+The Firebolt Operator publishes routing assignments and registered Gateway sessions in a separate coordination ConfigMap. A session combines a Gateway Pod UID with the agent's process identity. The agent watches this ConfigMap and reports its applied revision and outstanding requests. Admission and completion update local memory; they do not write Kubernetes objects per query. A registered agent can keep using its assignment during a Firebolt Operator restart.
 
-Creating, scaling, or rolling an Engine does not restart the Gateway. Engine destinations are resolved dynamically.
+The assigned Service is headless, ready-only, and named for the Engine UID and generation. Its selector never switches to another generation. The StatefulSet peer-discovery Service, which publishes not-ready addresses, is not a query destination.
+
+Envoy resolves generation Services by fully qualified names under `<namespace>.svc.cluster.local` without expanding the Pod's DNS search domains. DNS refreshes run independently of requests; opening a connection does not force a fresh lookup. Active health checks and `ignore_health_on_host_removal` keep the discovered host set usable, but DNS and health observations do not authorize Engine shutdown.
+
+Engine lifecycle changes update routing assignments without changing Envoy's static configuration or requiring every Gateway to restart.
 
 ## Retry behavior
 
-The Gateway retries connection failures, refused streams, resets, and a shutdown response marked `X-Firebolt-Drained`. It does not retry arbitrary HTTP 5xx responses because the Engine might already have applied a request's side effects.
+The Gateway retries connection failures, refused streams, resets before request headers are sent (`reset-before-request`), and a pre-work shutdown response marked `X-Firebolt-Drained`. Other resets after request delivery and arbitrary HTTP 5xx responses are returned to the client because the Engine might already have applied a request's side effects.
 
-Requests with bodies up to 2 MiB can be replayed during a retry. Larger request bodies are forwarded without retry buffering, so a cutover-related failure is returned to the client. Split large ingest or multi-statement requests if they must tolerate Engine cutovers.
+Retries have a finite attempt budget and remain part of the original admission. They cannot switch an already admitted request to another generation or trigger a DNS refresh.
+
+Request bodies up to 2 MiB can be buffered for retry. Larger requests are forwarded without retry buffering. This limit affects retry coverage, not the requirement to withdraw routing before shutting an Engine down.
 
 ## Graceful Engine shutdown
 
-During an Engine cutover or scale-down:
+The shutdown order is routing withdrawal, followed by Engine termination:
 
-1. A terminating Engine pod becomes unready and stops accepting new work.
-2. The Gateway removes the pod from its healthy upstream set.
-3. A request that reaches the pod while shutdown begins receives a retry-safe `X-Firebolt-Drained` response before query execution starts.
-4. The Gateway retries that request on another ready pod.
-5. Queries accepted before shutdown continue until they finish or the Engine's termination window expires.
+1. The replacement generation becomes ready. The Firebolt Operator publishes its immutable route and closes the old assignment, recording every registered session that could have used it.
+2. Each affected agent applies the new revision and stops granting old-generation requests. Requests already admitted retain their old destination, including pending dispatch and retries.
+3. The Firebolt Operator waits until every recorded session has applied the fence and has no outstanding or uncertain old-generation requests. Positive termination evidence for that Gateway's Envoy process also closes its liability.
+4. Only then may the Firebolt Operator remove the old Engine Pods and Kubernetes send SIGTERM. Graceful drain checks can additionally wait for Engine query metrics before deletion.
 
-The zero-downtime contract applies to traffic through the Gateway and to request bodies within the 2 MiB retry limit. Traffic that bypasses the Gateway is unsupported and receives none of these guarantees.
+Pod readiness, a zero-query scrape, elapsed time, a successful routing probe, and disappearance of a Pod object are not withdrawal acknowledgments. If an agent loses the processor connection without a clean completion signal, its request state becomes uncertain and blocks retirement. An agent restart in the same Pod cannot replace its old session with an empty ledger. The Firebolt Operator replaces that Gateway Pod and uses its finalizer to retain termination evidence until the old session is safely cleared.
+
+Deleting an Instance permanently closes its routing assignments and stops its Gateways. Engine resources remain independently managed. The coordination ConfigMap retains the confirmed shutdown record until those Engine resources are deleted, so their cleanup can still verify withdrawal after the Instance is gone or the Firebolt Operator restarts. Recreating an Instance with the same name waits for the previous Engines and their retained routing record to be removed.
+
+Engine termination remains bounded by the Pod's grace period. The Engine's shutdown implementation must account for all accepted work, including connections waiting to reach a query handler. Requests still unfinished when that budget expires can be interrupted. Disabling metric drain checks or selecting `recreate` does not bypass the Gateway withdrawal fence.
 
 See [Engine rollouts](../../engine/engine-rollouts) for drain controls and [Gateway sizing](./gateway-sizing) for memory and concurrency planning.

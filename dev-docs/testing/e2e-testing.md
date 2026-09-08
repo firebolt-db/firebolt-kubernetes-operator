@@ -1,12 +1,12 @@
 # E2E testing
 
-The E2E suite runs Ginkgo specs against a Kind cluster. Workload pods run in Kubernetes, while the Firebolt Operator controllers run in process inside the test binary. The suite does not deploy the operator image or admission webhooks.
+The E2E suite runs Ginkgo specs against a Kind cluster. Workload pods run in Kubernetes, while the Firebolt Operator controllers run in process inside the test binary. The suite deploys the locally built manager binary as the Gateway agent, while reconciliation stays in process. It does not deploy admission webhooks.
 
 This split makes controller restart and fault injection cheap while retaining real Kubernetes behavior for StatefulSets, Services, pods, DNS, volumes, and scheduling.
 
 ## Prepare and run
 
-Prepare the existing test cluster and publish its workload images:
+Prepare the existing test cluster, build the Gateway agent image, and publish the workload images to its local registry:
 
 ```bash
 make prepare-test-e2e
@@ -23,6 +23,8 @@ Run a focused set through the Make target rather than invoking Ginkgo directly:
 ```bash
 make test-e2e GINKGO_FOCUS='Crash Recovery'
 ```
+
+`make prepare-test-e2e` packages the static manager binary in a scratch image. `make test-e2e` passes its reference as `E2E_WAKE_AGENT_IMAGE`; override that Make variable only when using an explicitly prepared image. Gateway admission is mandatory, so an unset image is a setup error.
 
 Set `GINKGO_PROCS=1` for serial debugging. The default is half the host's online CPUs, with a floor of one.
 
@@ -81,7 +83,33 @@ When adding a wait, reuse an existing helper or timeout constant if it describes
 
 A zero-downtime test must gather enough requests to make a zero-failure assertion meaningful. Start the background runner before the transition, require a minimum success count, and fail on every observed data-plane query error. The runner retries only explicit client-pod failures to resolve the stable Gateway Service name, with a bounded attempt count; those requests never reached the Gateway and measure Kind/CoreDNS availability rather than the Operator's routing contract. Exhausted DNS retries still fail the test.
 
-Do not accept transient HTTP failures, connection errors, or generic request timeouts as expected rollout behavior. The routing contract is layered specifically so blue-green transitions do not leak a 5xx to requests within its supported request-size and gateway-entry constraints.
+Do not accept transient HTTP failures, connection errors, or generic request timeouts as expected rollout behavior. These assertions express the required rollout behavior and must expose regressions in admission, withdrawal, and shutdown. A passing sampled run can miss a short race; it is not proof that every request ordering is safe.
+
+## Gateway test scope
+
+All product SQL helpers, continuous load, authentication, and discovery tests use the Gateway. Direct Pod access is limited to explicit component checks and observations such as TLS handshakes, readiness, metrics, and logs. Do not keep an old Engine busy by sending it fresh queries directly after cutover.
+
+The drain-under-load test stages the replacement using `CrashBeforeCreatingToSwitching`, admits one finite long query through the Gateway, observes it on the old generation, and releases the transition. The query must remain in flight across withdrawal and complete successfully; fresh queries use the Gateway throughout. This staging avoids spending the held-query budget on replacement startup.
+
+`gateway_routing_test.go` disables metric drain checks so they cannot mask a missing routing fence. It checks two registered sessions, old admissions during engine-reconciler restart, requests admitted to the replacement while that reconciler is stopped, Gateway Pod replacement with old liability retained, fresh Pod UID/session registration, and retirement after successful query completion. It reads actual coordination records and agent reports and observes execution on the replacement Engine Pod.
+
+Configuration tests verify that the generated fields select the intended Envoy policy. They do not execute Envoy, demonstrate DNS refresh timing, or prove traffic withdrawal. A health-check failure counter does not identify an HTTP status or prove that a particular endpoint stopped receiving traffic. Endpoint assertions must require the intended address to be present and healthy; absence of an unhealthy flag can also mean an empty cluster.
+
+Runtime coverage must distinguish routing admission fences from DNS and health observations. Verify late admission responses, retries pending across cutover, client cancellation, processor transport failure, agent restart, missing Gateway reports, and positive process termination. DNS behavior still needs separate checks: withdraw a still-healthy old address from DNS, keep a request in flight there, and verify that new requests move to the replacement while the existing request completes. Separate controlled upstream tests must verify that a received request followed by a reset is not replayed, a generic 503 is not retried, and a pre-work drained response can be retried. Idle-listener shutdown under concurrent fresh connections is a separate regression from shutdown with a long-running query holding the listener open.
+
+Gateway termination tests must observe an executing query and a parked wake request before deleting the Gateway pod. Verify that the inbound listener stops accepting connections, the agent continues processing routing updates and wake demand, accepted requests complete once, and the containers exit within the pod budget. Exercise an existing downstream connection as well as fresh clients. Draining Envoy listeners does not exit the Envoy process; the pre-stop hook must observe completion before it returns and Kubernetes sends SIGTERM.
+
+Use an independent connection to check listener closure. A failed connection through a shared `kubectl port-forward` can terminate that forwarding process and interrupt the very request the test is measuring. Require a connection-refused result from the independent probe; a timeout or unrelated network error does not prove listener closure.
+
+The agent is an init container with `restartPolicy: Always`. Inspect `initContainerStatuses` for its lifecycle; `containerStatuses` contains Envoy and any ordinary user sidecars. Pod-wide readiness alone does not prove that a held wake request can finish.
+
+Run `make envoy` to fetch the checksum-pinned Envoy binary, then `make test-envoy-integration` for the generated-configuration runtime tests. These tests use local DNS and controlled upstreams without Kubernetes. The unit-test workflow runs them once, independently of the engine image variant. `ENVOY_BINARY=/path/to/envoy` selects an existing binary for local runs.
+
+Cold and warm-empty routing tests must hold DNS or route discovery until the query is parked, then release it and require success without client retries. A successful local route probe demonstrates usability of that immutable generation destination; it is not evidence that every Gateway worker withdrew another generation. Keep these concerns separate in assertions.
+
+The Helm workflow tests both `WAKE_CACHE_CASE=cold` and `WAKE_CACHE_CASE=warm` through `make helm-test-wake`. The warm case captures the active route, sends a successful Gateway query, waits for auto-stop and a disabled assignment, then wakes through the same Gateway Pod and Envoy process. The waking query must succeed without client retries and use a different immutable generation authority. The old DNS subcluster need not become empty: deleting its Service may leave a cached answer, but closed admission prevents reuse of that destination.
+
+The Engine controller model abstracts metric drain into a boolean. `formal/GatewayRouting.tla` separately models registration, admission liability, fencing, restart, cancellation, and positive stop evidence. Its safety invariant forbids dispatch to a retired route. Formal checks establish the modeled interleavings; they do not execute Envoy or prove the Core shutdown implementation. Bind each implementation boundary to unit and runtime regressions, and retain a counterexample that demonstrates the model detects premature retirement.
 
 ## Crash-recovery coverage
 

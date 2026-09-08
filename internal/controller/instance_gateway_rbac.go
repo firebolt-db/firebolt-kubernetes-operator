@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -27,6 +26,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/routing"
 )
 
 const (
@@ -38,7 +38,7 @@ const (
 
 // gatewayServiceAccountName returns the ServiceAccount name attached to
 // gateway pods. The wake-agent sidecar uses this identity to watch
-// EndpointSlices, which is the whole of what it is permitted to do; Envoy
+// EndpointSlices and its instance routing ConfigMap; Envoy
 // itself never holds a token (see automountForGateway).
 func gatewayServiceAccountName(instanceName string) string {
 	return instanceName + SuffixGateway
@@ -46,9 +46,8 @@ func gatewayServiceAccountName(instanceName string) string {
 
 // userGatewayServiceAccountName returns the user-supplied
 // spec.gateway.template.spec.serviceAccountName, or "" when the user
-// did not set one. Treated as the explicit opt-out signal for
-// operator-managed gateway RBAC: when non-empty, ensureGatewayRBAC is
-// skipped and the user takes ownership of the ServiceAccount + RBAC.
+// did not set one. A custom identity still receives the read-only routing
+// RoleBinding, while its ServiceAccount object remains user-managed.
 // See docs/crd-reference/instance-crd-reference.mdx "Gateway custom ServiceAccount"
 // for the verb set the user must bind.
 func userGatewayServiceAccountName(instance *computev1alpha1.FireboltInstance) string {
@@ -58,39 +57,32 @@ func userGatewayServiceAccountName(instance *computev1alpha1.FireboltInstance) s
 	return ""
 }
 
-// gatewayWakeRoleBindingName returns the per-instance RoleBinding name.
-func gatewayWakeRoleBindingName(instanceName string) string {
-	return instanceName + SuffixGatewayWakeRole
-}
-
-// ensureGatewayRBAC creates or updates the ServiceAccount and the
-// per-instance RoleBinding used by the gateway pods. The RoleBinding
-// targets a chart-managed ClusterRole (named via
-// `--gateway-wake-cluster-role`) granting `get/list/watch` on
-// EndpointSlices, so the operator needs neither `roles:
-// create/update/patch` in its own RBAC nor any write grant on the
-// gateway's identity.
-//
-// A missing flag is not an error. The grant exists only so the wake agent
-// can observe endpoints appearing; without it wake stops working and
-// everything users actually route traffic through carries on. Failing the
-// reconcile here would report a healthy gateway as broken over a
-// capability it does not need in order to proxy queries.
+// ensureGatewayRBAC gives the gateway agent read-only access to its routing
+// table and namespace EndpointSlices. Envoy has no Kubernetes credentials.
 func (r *FireboltInstanceReconciler) ensureGatewayRBAC(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	if err := r.ensureGatewayServiceAccount(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway ServiceAccount: %w", err)
+	saName := userGatewayServiceAccountName(instance)
+	if saName == "" {
+		saName = gatewayServiceAccountName(instance.Name)
+		if err := r.ensureGatewayServiceAccount(ctx, instance); err != nil {
+			return err
+		}
 	}
-	if r.GatewayWakeClusterRole == "" {
-		logf.FromContext(ctx).Info(
-			"--gateway-wake-cluster-role is empty; skipping the gateway wake RoleBinding. "+
-				"Wake-on-zero is disabled for this instance; query routing is unaffected.",
-			"instance", instance.Name)
-		return nil
+	name := routing.ConfigMapName(instance.Name)
+	role := &rbacv1.Role{TypeMeta: metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "Role"}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace, Labels: instanceLabels(instance.Name, "gateway")}, Rules: []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, ResourceNames: []string{name}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"discovery.k8s.io"}, Resources: []string{"endpointslices"}, Verbs: []string{"get", "list", "watch"}},
+	}}
+	if err := controllerutil.SetControllerReference(instance, role, r.Scheme); err != nil {
+		return err
 	}
-	if err := r.ensureGatewayWakeRoleBinding(ctx, instance); err != nil {
-		return fmt.Errorf("ensuring gateway wake RoleBinding: %w", err)
+	if err := applySSA(ctx, r.Client, role); err != nil {
+		return err
 	}
-	return nil
+	binding := &rbacv1.RoleBinding{TypeMeta: metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "RoleBinding"}, ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: instance.Namespace, Labels: instanceLabels(instance.Name, "gateway")}, Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: saName, Namespace: instance.Namespace}}, RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: name}}
+	if err := controllerutil.SetControllerReference(instance, binding, r.Scheme); err != nil {
+		return err
+	}
+	return applySSA(ctx, r.Client, binding)
 }
 
 // ensureGatewayServiceAccount writes through Server-Side Apply with
@@ -112,39 +104,5 @@ func (r *FireboltInstanceReconciler) ensureGatewayServiceAccount(ctx context.Con
 		return err
 	}
 	log.V(1).Info("Applying gateway ServiceAccount", "name", name)
-	return applySSA(ctx, r.Client, desired)
-}
-
-// ensureGatewayWakeRoleBinding creates or updates a RoleBinding in the
-// instance namespace that binds the chart-managed gateway-wake
-// ClusterRole to the gateway ServiceAccount. A RoleBinding (not a
-// ClusterRoleBinding) so the read is confined to the instance's own
-// namespace, which is where its engines live.
-func (r *FireboltInstanceReconciler) ensureGatewayWakeRoleBinding(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
-	log := logf.FromContext(ctx)
-	name := gatewayWakeRoleBindingName(instance.Name)
-	saName := gatewayServiceAccountName(instance.Name)
-	desired := &rbacv1.RoleBinding{
-		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: instance.Namespace,
-			Labels:    instanceLabels(instance.Name, "gateway"),
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind:      rbacv1.ServiceAccountKind,
-			Name:      saName,
-			Namespace: instance.Namespace,
-		}},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     "ClusterRole",
-			Name:     r.GatewayWakeClusterRole,
-		},
-	}
-	if err := controllerutil.SetControllerReference(instance, desired, r.Scheme); err != nil {
-		return err
-	}
-	log.V(1).Info("Applying gateway wake RoleBinding", "name", name)
 	return applySSA(ctx, r.Client, desired)
 }

@@ -63,8 +63,11 @@ rules:
     resources:
       - pods
     verbs:
+      - delete
       - get
       - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - apps
@@ -174,6 +177,7 @@ rules:
       - rbac.authorization.k8s.io
     resources:
       - rolebindings
+      - roles
     verbs:
       - create
       - delete
@@ -255,8 +259,11 @@ rules:
     resources:
       - pods
     verbs:
+      - delete
       - get
       - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - apps
@@ -358,6 +365,7 @@ rules:
       - rbac.authorization.k8s.io
     resources:
       - rolebindings
+      - roles
     verbs:
       - create
       - delete

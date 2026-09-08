@@ -166,7 +166,7 @@ func TestInstanceReconcile_CanonicalizesUppercaseULIDWhenImagesMeetFloor(t *test
 
 	sch := instanceTemplateTestScheme(t)
 	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:       "fi",
 			Namespace:  "default",
 			Finalizers: []string{instanceFinalizerName},
@@ -324,7 +324,7 @@ func TestInstanceReconcile_SurfacesConditionWhenIDUpdateRejected(t *testing.T) {
 
 	sch := instanceTemplateTestScheme(t)
 	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:       "fi",
 			Namespace:  "default",
 			Finalizers: []string{instanceFinalizerName},
@@ -382,7 +382,7 @@ func TestInstanceReconcile_DeletesWithoutCanonicalizingID(t *testing.T) {
 	}
 	now := metav1.Now()
 	inst := &computev1alpha1.FireboltInstance{
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{UID: "instance-fixture-uid",
 			Name:              "fi",
 			Namespace:         "default",
 			Finalizers:        []string{instanceFinalizerName},

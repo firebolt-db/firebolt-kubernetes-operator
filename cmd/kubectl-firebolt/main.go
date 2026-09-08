@@ -408,23 +408,29 @@ func newEnginePortForwardCmd() *cobra.Command {
 	var localPort int
 	cmd := &cobra.Command{
 		Use:   "port-forward <engine-name>",
-		Short: "Port-forward to a FireboltEngine's service",
-		Long: `Port-forward to the service of the named FireboltEngine.
+		Short: "Port-forward to a FireboltEngine through its gateway",
+		Long: `Resolve the named FireboltEngine's Instance and port-forward to its gateway.
 
-The argument is the FireboltEngine name; the command forwards to
-svc/<engine-name>-service.`,
+Queries must carry X-Firebolt-Engine: <engine-name>. The engine is read from
+Kubernetes to resolve its Instance, including when --print-commands is used.`,
 		Example: "  kubectl firebolt engine port-forward my-engine -n my-ns --local-port 8123",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := newClient()
 			if flagPrintCommands {
-				fmt.Println(c.PortForwardEngineScript(args[0], localPort))
+				script, err := c.PortForwardEngineScript(cmd.Context(), args[0], localPort)
+				if err != nil {
+					return err
+				}
+				fmt.Println(script)
+				fmt.Printf("# Query header: X-Firebolt-Engine: %s\n", args[0])
 				return nil
 			}
 			pf, err := c.PortForwardEngine(cmd.Context(), args[0], localPort)
 			if err != nil {
 				return err
 			}
+			fmt.Printf("Query header: X-Firebolt-Engine: %s\n", args[0])
 			return runForeground(pf, engineForwardScheme(cmd.Context(), c, args[0]))
 		},
 	}
@@ -499,9 +505,8 @@ func gatewayForwardScheme(ctx context.Context, c *infra.Client, instanceName str
 	return infra.GatewayServingScheme(inst)
 }
 
-// engineForwardScheme reports the scheme for an engine port-forward. Engine TLS
-// lives on the owning Instance (engines carry no TLS spec), reached via
-// spec.instanceRef; any unreadable state degrades to a protocol-neutral endpoint.
+// engineForwardScheme reports the owning gateway's serving scheme.
+// Unreadable state degrades to a protocol-neutral endpoint.
 func engineForwardScheme(ctx context.Context, c *infra.Client, engineName string) string {
 	eng, err := c.GetEngine(ctx, engineName)
 	if err != nil {
@@ -511,7 +516,7 @@ func engineForwardScheme(ctx context.Context, c *infra.Client, engineName string
 	if err != nil {
 		return infra.SchemeUnknown
 	}
-	return infra.EngineFleetServingScheme(inst)
+	return infra.GatewayServingScheme(inst)
 }
 
 func fmtReady(b *bool) string {

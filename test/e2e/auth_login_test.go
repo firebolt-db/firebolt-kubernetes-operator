@@ -42,18 +42,10 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
-// This suite exercises the login path end to end against a real engine: the
-// embedded authorization server issues a JWT for the operator-provisioned admin
-// credential, signed by the operator-provisioned key, and the engine accepts it
-// on a query. auth_tls_test.go covers the transport; nothing there ever obtained
-// a token, so the design's central claim — every engine in an Instance runs
-// byte-identical signing keys, so a token minted by one validates on another —
-// went untested.
-//
-// The contract is packdb's specs/authentication.md §8.2 and §10.13: POST
-// /oauth/token, grant_type=client_credentials, username as client_id, password
-// as client_secret, and a REQUIRED RFC 8707 resource parameter naming the
-// Instance.
+// Login, discovery and SQL all pass through the gateway. These tests verify
+// that the embedded authorization server issues a token for the configured
+// credentials and every engine in the Instance accepts that token.
+// The client_credentials exchange requires the Instance resource identifier.
 
 // newTestSecretValue returns a fresh random value for use as a test credential.
 //
@@ -111,7 +103,7 @@ func curlHTTP(ctx context.Context, pod, caPath string, curlArgs ...string) (body
 }
 
 // fireboltDiscovery is the subset of /.well-known/firebolt this suite reads.
-// Field names follow packdb's specs/metadata-discovery.md §3.
+// Only fields asserted by the discovery tests are decoded.
 type fireboltDiscovery struct {
 	Instance struct {
 		ID   string `json:"id"`
@@ -132,8 +124,8 @@ type fireboltDiscovery struct {
 }
 
 // fetchDiscovery reads the Firebolt Metadata document from an engine.
-func fetchDiscovery(ctx context.Context, pod, baseURL, caPath string) (*fireboltDiscovery, error) {
-	body, status, err := curlHTTP(ctx, pod, caPath, baseURL+"/.well-known/firebolt")
+func fetchDiscovery(ctx context.Context, pod, baseURL, engineName, caPath string) (*fireboltDiscovery, error) {
+	body, status, err := curlHTTP(ctx, pod, caPath, "-H", "X-Firebolt-Engine: "+engineName, baseURL+"/.well-known/firebolt")
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +151,7 @@ type tokenResponse struct {
 // requestToken runs the client_credentials exchange against an engine's embedded
 // authorization server. resource is passed verbatim (empty omits it) so the
 // negative cases can exercise the RFC 8707 rules.
-func requestToken(ctx context.Context, pod, baseURL, caPath, user, pass, resource string) (*tokenResponse, int, error) {
+func requestToken(ctx context.Context, pod, baseURL, engineName, caPath, user, pass, resource string) (*tokenResponse, int, error) {
 	form := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {user},
@@ -169,6 +161,7 @@ func requestToken(ctx context.Context, pod, baseURL, caPath, user, pass, resourc
 		form.Set("resource", resource)
 	}
 	body, status, err := curlHTTP(ctx, pod, caPath,
+		"-H", "X-Firebolt-Engine: "+engineName,
 		"-X", "POST",
 		"-H", "Content-Type: application/x-www-form-urlencoded",
 		"--data", form.Encode(),
@@ -216,8 +209,8 @@ func decodeJWT(token string) (header, claims map[string]any, err error) {
 
 // jwksKids lists the key IDs an engine publishes at /oauth/jwks — what it will
 // actually validate against, as opposed to what the operator believes it rendered.
-func jwksKids(ctx context.Context, pod, baseURL, caPath string) ([]string, error) {
-	body, status, err := curlHTTP(ctx, pod, caPath, baseURL+"/oauth/jwks")
+func jwksKids(ctx context.Context, pod, baseURL, engineName, caPath string) ([]string, error) {
+	body, status, err := curlHTTP(ctx, pod, caPath, "-H", "X-Firebolt-Engine: "+engineName, baseURL+"/oauth/jwks")
 	if err != nil {
 		return nil, err
 	}
@@ -243,14 +236,15 @@ func jwksKids(ctx context.Context, pod, baseURL, caPath string) ([]string, error
 // status.
 //
 // execCurlQuery cannot serve here: it has no --cacert option, so it cannot
-// verify a privately-issued engine certificate — which is the whole point of
+// verify a privately-issued gateway certificate — which is the whole point of
 // these specs. It also uses -f, which would collapse an auth rejection into a
 // generic curl failure instead of a status this suite can assert on.
-func runAuthedQuery(ctx context.Context, pod, baseURL, caPath, token, query string, extraHeaders ...string) (string, int, error) {
+func runAuthedQuery(ctx context.Context, pod, baseURL, engineName, caPath, token, query string, extraHeaders ...string) (string, int, error) {
 	args := []string{
 		"-X", "POST",
 		"-H", "Content-Type: text/plain",
 		"-H", "Authorization: Bearer " + token,
+		"-H", "X-Firebolt-Engine: " + engineName,
 	}
 	for _, h := range extraHeaders {
 		args = append(args, "-H", h)
@@ -259,12 +253,9 @@ func runAuthedQuery(ctx context.Context, pod, baseURL, caPath, token, query stri
 	return curlHTTP(ctx, pod, caPath, args...)
 }
 
-// engineQueryURL is an engine's routing Service over TLS. The Service FQDN is
-// covered by the engine certificate's namespace-wide wildcard SAN, so a
-// verifying curl works against it.
-func engineQueryURL(engineName string) string {
-	return fmt.Sprintf("https://%s-service.%s.svc.cluster.local:%d",
-		engineName, testNamespace, controller.EngineHTTPQueryPort)
+// authGatewayURL is the verified TLS entry point for authentication and SQL.
+func authGatewayURL(instanceName string) string {
+	return fmt.Sprintf("https://%s-gateway.%s.svc.cluster.local:80", instanceName, testNamespace)
 }
 
 // instanceAuthStatus reads the Instance's provisioned signing keys.
@@ -368,11 +359,8 @@ var _ = Describe("FireboltInstance auth login", func() {
 			Expect(writeFileInPod(ctx, clientPod, caPodPath, ca)).To(Succeed())
 
 			By("creating two engines in the same Instance")
-			// Two engines, not two pods of one engine: the engine certificate's
-			// SANs are the namespace wildcard and localhost, and a one-label
-			// wildcard does not cover per-pod StatefulSet DNS — so a verifying
-			// client cannot address an individual pod, but can address each
-			// engine's own routing Service.
+			// Separate engines prove that tokens work across the Instance fleet;
+			// the gateway selects each using X-Firebolt-Engine.
 			for _, name := range []string{engineA, engineB} {
 				Expect(CreateEngine(ctx, instanceName, name, 1)).To(Succeed())
 			}
@@ -408,7 +396,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 			// embedded AS is present in it, so a failure here means someone moved
 			// the tag past auth support and should hear about it loudly rather
 			// than watch this whole Describe quietly stop testing anything.
-			doc, err := fetchDiscovery(ctx, clientPod, engineQueryURL(engineA), caPodPath)
+			doc, err := fetchDiscovery(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(doc.Instance.Auth).NotTo(BeNil(),
 				"instance.auth is null — the engine reports authentication disabled")
@@ -435,14 +423,14 @@ var _ = Describe("FireboltInstance auth login", func() {
 
 		It("rejects a query carrying no credentials", func() {
 			_, status, err := curlHTTP(ctx, clientPod, caPodPath,
-				"-X", "POST", "--data", "SELECT 1", engineQueryURL(engineA)+"/?output_format=JSON_Compact")
+				"-X", "POST", "--data", "SELECT 1", "-H", "X-Firebolt-Engine: "+engineA, authGatewayURL(instanceName)+"/?output_format=JSON_Compact")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(401),
 				"an unauthenticated query must be rejected once auth is enabled")
 		})
 
 		It("issues a token signed by the operator-provisioned key", func() {
-			tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(200), "token request failed: %+v", tr)
@@ -465,12 +453,12 @@ var _ = Describe("FireboltInstance auth login", func() {
 		})
 
 		It("accepts a query bearing that token", func() {
-			tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(200))
 
-			body, qStatus, err := runAuthedQuery(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			body, qStatus, err := runAuthedQuery(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				tr.AccessToken, "SELECT 1")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(qStatus).To(Equal(200), "authenticated query rejected: %s", body)
@@ -481,12 +469,12 @@ var _ = Describe("FireboltInstance auth login", func() {
 			// The design's central claim: auth is Instance-wide, so every engine
 			// renders byte-identical signing keys. If the operator ever let two
 			// engines diverge, this is the spec that fails.
-			tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(200))
 
-			body, qStatus, err := runAuthedQuery(ctx, clientPod, engineQueryURL(engineB), caPodPath,
+			body, qStatus, err := runAuthedQuery(ctx, clientPod, authGatewayURL(instanceName), engineB, caPodPath,
 				tr.AccessToken, "SELECT 2")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(qStatus).To(Equal(200),
@@ -506,7 +494,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 			}
 			Expect(want).NotTo(BeEmpty())
 
-			kids, err := jwksKids(ctx, clientPod, engineQueryURL(engineA), caPodPath)
+			kids, err := jwksKids(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(kids).To(ConsistOf(want),
 				"the engine's JWKS does not match the keys the operator rendered")
@@ -521,21 +509,21 @@ var _ = Describe("FireboltInstance auth login", func() {
 			clientError := SatisfyAny(Equal(400), Equal(401))
 
 			By("a wrong password is invalid_client")
-			tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, newTestSecretValue(), resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(clientError)
 			Expect(tr.Error).To(Equal("invalid_client"))
 
 			By("omitting the required resource parameter is invalid_request")
-			tr, status, err = requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err = requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, "")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(clientError)
 			Expect(tr.Error).To(Equal("invalid_request"))
 
 			By("a resource naming another Instance is invalid_target")
-			tr, status, err = requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err = requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, instanceResource("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(clientError)
@@ -544,9 +532,8 @@ var _ = Describe("FireboltInstance auth login", func() {
 
 		It("carries the token through the gateway to an engine", func() {
 			// Proves the gateway forwards Authorization untouched while
-			// re-encrypting upstream to a TLS-serving engine. The token is minted
-			// directly against the engine and only spent through the gateway, so a
-			// failure here is unambiguously about the gateway's request path.
+			// re-encrypting upstream to a TLS-serving engine. Both the token
+			// exchange and the SQL query pass through the gateway.
 			//
 			// The gateway's client-facing port stays 80 when TLS is enabled — TLS
 			// replaces plaintext on the same listener — and the Service FQDN is one
@@ -554,13 +541,13 @@ var _ = Describe("FireboltInstance auth login", func() {
 			gwURL := fmt.Sprintf("https://%s%s.%s.svc.cluster.local:80",
 				instanceName, controller.SuffixGateway, testNamespace)
 
-			tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineA), caPodPath,
+			tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineA, caPodPath,
 				adminUser, adminPassword, resource)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(status).To(Equal(200), "token request failed: %+v", tr)
 
-			body, qStatus, err := runAuthedQuery(ctx, clientPod, gwURL, caPodPath,
-				tr.AccessToken, "SELECT 3", "X-Firebolt-Engine: "+engineA)
+			body, qStatus, err := runAuthedQuery(ctx, clientPod, gwURL, engineA, caPodPath,
+				tr.AccessToken, "SELECT 3")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(qStatus).To(Equal(200), "query through the gateway failed: %s", body)
 			Expect(body).To(ContainSubstring("3"))
@@ -639,6 +626,10 @@ var _ = Describe("FireboltInstance auth login", func() {
 						},
 					}
 					inst.Spec.TLS = &computev1alpha1.TLSSpec{
+						Gateway: &computev1alpha1.TLSListenerSpec{
+							Enabled:     true,
+							CertManager: &computev1alpha1.CertManagerSpec{IssuerRef: caClusterIssuerRef(), Algorithm: "ECDSA", Size: 384},
+						},
 						Engine: &computev1alpha1.TLSListenerSpec{
 							Enabled:     true,
 							CertManager: &computev1alpha1.CertManagerSpec{IssuerRef: caClusterIssuerRef(), Algorithm: "ECDSA", Size: 384},
@@ -657,6 +648,12 @@ var _ = Describe("FireboltInstance auth login", func() {
 				Expect(CreateEngine(ctx, instanceName, engineName, 1)).To(Succeed())
 				Expect(WaitForEngineReady(ctx, engineName, 1, clusterReadyTimeout)).To(Succeed())
 				Expect(WaitForEngineStable(ctx, engineName, clusterTransitionTimeout)).To(Succeed())
+				for _, condition := range []string{
+					computev1alpha1.InstanceConditionEngineTLSReady,
+					computev1alpha1.InstanceConditionGatewayTLSReady,
+				} {
+					Expect(waitForInstanceCondition(ctx, instanceName, condition, metav1.ConditionTrue)).To(Succeed())
+				}
 
 				cl, err := getCRDClient()
 				Expect(err).NotTo(HaveOccurred())
@@ -676,7 +673,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 
 			It("keeps a pre-rotation token valid across the promotion", func() {
 				By("minting a token under the original key")
-				tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineName), caPodPath,
+				tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineName, caPodPath,
 					adminUser, adminPassword, resource)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(200), "token request failed: %+v", tr)
@@ -699,7 +696,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 
 				By("both kids are published while the demoted key is retained")
 				Eventually(func(g Gomega) {
-					kids, err := jwksKids(ctx, clientPod, engineQueryURL(engineName), caPodPath)
+					kids, err := jwksKids(ctx, clientPod, authGatewayURL(instanceName), engineName, caPodPath)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(kids).To(ContainElement(originalKid),
 						"the demoted key left the JWKS before its retain window elapsed")
@@ -709,7 +706,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 				By("a token signed before the promotion still validates")
 				// The whole point of the retain window: the demoted key keeps
 				// validating tokens it already signed.
-				retained, qStatus, err := runAuthedQuery(ctx, clientPod, engineQueryURL(engineName), caPodPath,
+				retained, qStatus, err := runAuthedQuery(ctx, clientPod, authGatewayURL(instanceName), engineName, caPodPath,
 					oldToken, "SELECT 1")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(qStatus).To(Equal(200),
@@ -723,7 +720,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 				// rather than at demotion, so a test that demanded the new kid the
 				// instant status changed would be asserting against the design.
 				Eventually(func(g Gomega) {
-					tr, status, err := requestToken(ctx, clientPod, engineQueryURL(engineName), caPodPath,
+					tr, status, err := requestToken(ctx, clientPod, authGatewayURL(instanceName), engineName, caPodPath,
 						adminUser, adminPassword, resource)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(status).To(Equal(200))
@@ -760,7 +757,7 @@ var _ = Describe("FireboltInstance auth login", func() {
 					"the demoted key entered Removing before its retain window elapsed")
 
 				By("the engine still publishes it for validation")
-				kids, err := jwksKids(ctx, clientPod, engineQueryURL(engineName), caPodPath)
+				kids, err := jwksKids(ctx, clientPod, authGatewayURL(instanceName), engineName, caPodPath)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(kids).To(ContainElement(demoted.ID))
 			})

@@ -33,6 +33,7 @@ set -euo pipefail
 CLUSTER_NAME="${1:-operator-test-e2e}"
 LOAD_PARALLELISM="${E2E_LOAD_PARALLELISM:-4}"
 IMAGE_VARIANT="${IMAGE_VARIANT:-latest}"
+E2E_WAKE_AGENT_IMAGE="${E2E_WAKE_AGENT_IMAGE:-docker.io/library/firebolt-operator:e2e-${IMAGE_VARIANT}}"
 
 # Local registry endpoints. The host-side endpoint is what `docker push`
 # talks to; the in-cluster endpoint is what containerd resolves through the
@@ -92,6 +93,7 @@ fi
 #            here. The Helm-based local-deploy path uses its own
 #            `make kind-load-operator` target.
 declare -a IMAGES=(
+    "${E2E_WAKE_AGENT_IMAGE}|local"
     "${ENGINE_IMAGE}:${ENGINE_TAG}|pull"
     "${METADATA_IMAGE}:${METADATA_TAG}|pull"
     "${POSTGRES_IMAGE}|pull"

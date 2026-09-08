@@ -14,29 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package wakeagent implements the gateway's wake-on-zero sidecar.
-//
-// The agent holds a query that arrived for an auto-stopped engine while the
-// operator scales that engine back up, and reports the demand that makes
-// the operator do so. It deliberately holds no write credential: its entire
-// Kubernetes grant is get/list/watch on EndpointSlices. The operator is the
-// only component that writes, which is what keeps a compromise of the
-// gateway — the one component terminating untrusted traffic — from reaching
-// the FireboltEngine API at all.
-//
-// Request flow:
-//
-//  1. Envoy's Lua filter calls /hold?engine=X on loopback before routing.
-//  2. The agent stamps demand for X and, if X has no ready endpoints,
-//     parks the request.
-//  3. The operator polls /demand, sees fresh demand against an engine it
-//     knows is at zero replicas, and scales it.
-//  4. The agent's EndpointSlice watch observes endpoints appear and
-//     releases the parked request; Envoy routes it.
-//
-// Step 4 is exact rather than approximate: the engine Service is headless
-// with PublishNotReadyAddresses false, so the endpoints the agent watches
-// are precisely the A records kube-dns will serve to Envoy's resolver.
+// Package wakeagent implements gateway request admission and wake-on-zero.
+// The operator publishes routing assignments; the agent watches them, accounts
+// for local Envoy requests, and reports fences and demand without API writes.
 package wakeagent
 
 import (
@@ -48,22 +28,23 @@ import (
 	"strconv"
 	"time"
 
+	extpb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Default ports. The hold listener is bound to loopback only — it is
-// reachable from Envoy in the same pod and from nothing else. The demand
-// listener binds all interfaces because the operator polls it across the
-// pod network.
+// Default ports. Local health and admission listeners bind loopback only.
+// The demand and routing report listener binds all interfaces for the operator.
 const (
-	DefaultHoldPort   = 9902
-	DefaultDemandPort = 9903
+	DefaultHoldPort    = 9902
+	DefaultDemandPort  = 9903
+	DefaultExtProcPort = 9904
 
 	// DefaultHoldTimeout bounds how long a single request is parked before
 	// the agent gives up and returns 503. Sized to cover an engine cold
-	// start (image pull on a fresh node plus packdb startup) without
+	// start (image pull on a fresh node plus engine startup) without
 	// pinning a connection indefinitely when the engine never arrives.
 	DefaultHoldTimeout = 120 * time.Second
 
@@ -82,39 +63,17 @@ const (
 	envoyStatsRefreshInterval = 5 * time.Second
 )
 
-// DecisionHeader is set on every response the agent itself produces, and is
-// how Envoy's Lua filter tells "the agent answered" from "the agent could
-// not be reached".
-//
-// That distinction cannot be made from the status code alone. Envoy's Lua
-// httpCall does NOT return nil when the call fails at the transport layer:
-// StreamHandleWrapper::onFailure synthesizes a 503 and delivers it through
-// the success path. So a crashed or absent agent is indistinguishable from
-// an agent that deliberately shed the request — and treating both as "do
-// not route" turns any agent outage into a total gateway outage, which is
-// the opposite of the intended failure mode.
-//
-// Envoy's synthesized response carries no headers of ours, so requiring
-// this one before honoring a non-200 makes the filter fail open by
-// construction.
-const DecisionHeader = "x-firebolt-wake-decision"
-
-// Values for DecisionHeader.
-const (
-	DecisionReady    = "ready"    // engine was already routable
-	DecisionReleased = "released" // held, then released when endpoints appeared
-	DecisionShed     = "shed"     // hold capacity reached
-	DecisionTimeout  = "timeout"  // engine did not arrive within the hold window
-	DecisionRejected = "rejected" // malformed engine name
-	DecisionUnsynced = "unsynced" // EndpointSlice cache not yet usable
-)
-
 // Config is the agent's runtime configuration, assembled from flags and
 // the downward API by the wake-agent subcommand.
 type Config struct {
 	// Namespace is the namespace whose EndpointSlices the agent watches.
 	// Always the agent's own: engine Services live alongside the gateway.
-	Namespace string
+	Namespace     string
+	InstanceName  string
+	InstanceUID   string
+	PodUID        string
+	ExtProcAddr   string
+	RouteProbeURL string
 
 	HoldAddr   string
 	DemandAddr string
@@ -139,6 +98,12 @@ type Config struct {
 }
 
 func (c *Config) applyDefaults() {
+	if c.ExtProcAddr == "" {
+		c.ExtProcAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultExtProcPort))
+	}
+	if c.RouteProbeURL == "" {
+		c.RouteProbeURL = "http://127.0.0.1:9905/health/ready"
+	}
 	if c.HoldAddr == "" {
 		c.HoldAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(DefaultHoldPort))
 	}
@@ -158,6 +123,8 @@ func (c *Config) applyDefaults() {
 
 // Agent is the assembled sidecar.
 type Agent struct {
+	extpb.UnimplementedExternalProcessorServer
+	routes    *routeLedger
 	cfg       Config
 	demand    *demandTracker
 	readiness *readinessTracker
@@ -165,10 +132,11 @@ type Agent struct {
 }
 
 // New builds an Agent with its collaborators wired but nothing started.
-func New(cfg Config) *Agent {
+func New(cfg Config) *Agent { //nolint:gocritic // Snapshot configuration so callers cannot mutate a running agent.
 	cfg.applyDefaults()
 	return &Agent{
 		cfg:       cfg,
+		routes:    newRouteLedger(cfg.PodUID, cfg.InstanceUID),
 		demand:    newDemandTracker(cfg.DemandRetention, time.Now),
 		readiness: newReadinessTracker(),
 		capacity: newCapacityLimiter(
@@ -180,7 +148,7 @@ func New(cfg Config) *Agent {
 	}
 }
 
-// Run starts the informer and both HTTP servers, blocking until ctx is
+// Run starts the informers, HTTP observers and gRPC processor, blocking until ctx is
 // canceled or a server fails.
 func (a *Agent) Run(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("wake-agent")
@@ -194,21 +162,24 @@ func (a *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("building clientset: %w", err)
 	}
 
-	// Started in the background, and deliberately not waited on. A missing
-	// EndpointSlice grant makes the reflector retry forever without ever
-	// syncing; blocking here would leave the listeners unbound, the
-	// readiness probe failing, and the whole gateway pod out of its
-	// Service — turning a lost wake capability into a lost data path.
+	// Bind listeners while caches synchronize; admission remains closed until
+	// registration and generation readiness have been observed.
 	go func() {
 		logger.Info("syncing EndpointSlice cache", "namespace", a.cfg.Namespace)
 		if err := startReadinessInformer(ctx, clientset, a.cfg.Namespace, 10*time.Minute, a.readiness); err != nil {
 			logger.Error(err, "EndpointSlice informer never synced; "+
-				"wake-on-zero is disabled and queries will route straight through. "+
+				"gateway admission remains unavailable. "+
 				"Check that the gateway ServiceAccount can watch endpointslices.")
 			return
 		}
 		a.readiness.MarkSynced()
 		logger.Info("EndpointSlice cache synced; wake-on-zero active")
+	}()
+
+	go func() {
+		if err := a.startRoutingInformer(ctx, clientset); err != nil {
+			logger.Error(err, "routing informer failed")
+		}
 	}()
 
 	go a.refreshEnvoyStats(ctx)
@@ -225,7 +196,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	errCh := make(chan error, 2)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", a.cfg.ExtProcAddr)
+	if err != nil {
+		return fmt.Errorf("routing processor listener: %w", err)
+	}
+	processor := grpc.NewServer()
+	extpb.RegisterExternalProcessorServer(processor, a)
+	defer processor.Stop()
+	errCh := make(chan error, 3)
+	go func() { errCh <- processor.Serve(listener) }()
 	serve := func(name string, srv *http.Server) {
 		logger.Info("listening", "server", name, "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -277,7 +256,6 @@ func (a *Agent) refreshEnvoyStats(ctx context.Context) {
 
 func (a *Agent) holdMux() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/hold", a.handleHold)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -286,6 +264,14 @@ func (a *Agent) holdMux() http.Handler {
 
 func (a *Agent) demandMux() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/routing", a.handleRouting)
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !a.RoutingReport().Registered || !a.readiness.Synced() {
+			http.Error(w, "routing session or endpoint cache is not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("/demand", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = w.Write([]byte(a.demand.Render()))
@@ -294,91 +280,6 @@ func (a *Agent) demandMux() http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	return mux
-}
-
-// handleHold is the request-path hook Envoy calls before routing.
-//
-// Responses are deliberately coarse: 200 means "route it", anything else
-// means "do not". Envoy is configured to fail open, so an unreachable or
-// erroring agent lets the query through to the same 503 it would have got
-// without the wake feature at all — the agent is a convenience, not a
-// security control, and must never be able to take the data path down.
-func (a *Agent) handleHold(w http.ResponseWriter, r *http.Request) {
-	engine := r.URL.Query().Get("engine")
-	if !isValidEngineName(engine) {
-		w.Header().Set(DecisionHeader, DecisionRejected)
-		http.Error(w, "invalid engine name", http.StatusBadRequest)
-		return
-	}
-
-	// Before the initial cache sync every engine looks not-ready, which
-	// would park every query for the full hold timeout. An agent that
-	// cannot watch EndpointSlices — a missing RBAC grant is the likely
-	// cause — must degrade to "route it" rather than to "hold everything".
-	if !a.readiness.Synced() {
-		w.Header().Set(DecisionHeader, DecisionUnsynced)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Fast path: the engine is up, so there is nothing to wake and nothing
-	// to record. This is every request in steady state, so it must not
-	// touch the demand map or take a write lock.
-	if a.readiness.IsReady(engine) {
-		w.Header().Set(DecisionHeader, DecisionReady)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	// Stamp before consulting the cap. A shed request still proves someone
-	// asked for this engine, and that is the signal the operator acts on.
-	a.demand.Stamp(engine)
-
-	if !a.demand.AcquireHold(engine, a.capacity.Cap()) {
-		w.Header().Set(DecisionHeader, DecisionShed)
-		w.Header().Set("Retry-After", "5")
-		http.Error(w, "gateway wake capacity reached", http.StatusServiceUnavailable)
-		return
-	}
-	defer a.demand.ReleaseHold(engine)
-
-	ready := a.readiness.WaitChan(engine)
-	defer a.readiness.DoneWaiting(engine, ready)
-	timer := time.NewTimer(a.cfg.HoldTimeout)
-	defer timer.Stop()
-
-	select {
-	case <-ready:
-		// Re-check rather than trusting the edge: an engine can flap back
-		// to not-ready between the close and this wakeup, and releasing
-		// into a name that no longer resolves just converts the wait into
-		// a confusing upstream error.
-		if !a.readiness.IsReady(engine) {
-			w.Header().Set(DecisionHeader, DecisionTimeout)
-			w.Header().Set("Retry-After", "5")
-			http.Error(w, "engine became ready then went away", http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set(DecisionHeader, DecisionReleased)
-		w.WriteHeader(http.StatusOK)
-	case <-timer.C:
-		// A wake that completes exactly at the deadline can lose the race
-		// between the channel close and the timer: both arms are readable
-		// and select picks either. The engine is routable, so answer 200
-		// rather than telling the client a lie it will retry through.
-		if a.readiness.IsReady(engine) {
-			w.Header().Set(DecisionHeader, DecisionReleased)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		w.Header().Set(DecisionHeader, DecisionTimeout)
-		w.Header().Set("Retry-After", "10")
-		http.Error(w, "engine did not become ready", http.StatusServiceUnavailable)
-	case <-r.Context().Done():
-		// Client hung up. Nothing to write; the demand stamp already
-		// recorded that they asked, which is why the timestamp rather
-		// than a pending-count is what the operator reads.
-	}
 }
 
 // isValidEngineName mirrors the Lua filter's is_valid_engine: a single

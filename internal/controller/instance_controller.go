@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -67,7 +68,9 @@ const reasonTemplateRejected = "TemplateRejected"
 // PostgreSQL, the metadata service, and the gateway.
 type FireboltInstanceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	APIReader client.Reader
+	Clientset *kubernetes.Clientset
 
 	// MetricsRecorder records Prometheus metrics for instance CRs.
 	// Must be non-nil; use metrics.NoOpInstanceRecorder{} in tests.
@@ -88,24 +91,9 @@ type FireboltInstanceReconciler struct {
 	// reconciler processes every FireboltInstance it watches.
 	NameFilter string
 
-	// GatewayWakeClusterRole is the name of the chart-managed ClusterRole
-	// bound to each gateway ServiceAccount via a per-instance RoleBinding.
-	// It grants get/list/watch on EndpointSlices — the wake agent's entire
-	// Kubernetes grant, and read-only. The operator never creates the
-	// ClusterRole itself, so the cluster-wide `roles` verbs stay out of the
-	// operator's own RBAC.
-	//
-	// Empty is not fatal: the binding is skipped and wake stops working
-	// while query routing continues. The gateway is not degraded by the
-	// absence of a capability it only needs in order to wake stopped
-	// engines.
-	GatewayWakeClusterRole string
-
-	// WakeAgentImage is the image the gateway's wake-agent sidecar runs.
-	// The chart sets this to the operator's own image: the agent is a
-	// subcommand of the manager binary, so the two cannot drift out of
-	// sync on the demand-endpoint contract they share. Empty omits the
-	// sidecar entirely and disables wake (see wakeAgentConfig).
+	// WakeAgentImage runs the mandatory local Gateway admission and wake agent.
+	// The chart uses the operator image so the routing protocol stays in sync.
+	// An empty image leaves Gateway request admission closed.
 	WakeAgentImage string
 
 	// WakeAgentImagePullPolicy is the pull policy for the sidecar. Empty
@@ -119,11 +107,9 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=compute.firebolt.io,resources=fireboltengines,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
-// The operator does not read EndpointSlices itself. It holds this grant so it
-// can bind the gateway-wake ClusterRole to each gateway ServiceAccount:
-// Kubernetes rejects a RoleBinding whose referenced role carries permissions
-// the creator lacks, so without it ensureGatewayWakeRoleBinding 403s on every
-// reconcile and the gateway is never created.
+// The operator grants each Gateway ServiceAccount a namespace Role with read
+// access to EndpointSlices and its coordination ConfigMap. Kubernetes requires
+// the grantor to hold those permissions when creating the Role.
 // +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete
@@ -131,12 +117,13 @@ type FireboltInstanceReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the PostgreSQL, metadata service, and gateway components
 // described by a FireboltInstance are running and healthy.
 func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
+	defer func() { res, err = routingReconcileResult(res, err) }()
 	if r.NameFilter != "" && req.Name != r.NameFilter {
 		return ctrl.Result{}, nil
 	}
@@ -146,17 +133,13 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	instance := &computev1alpha1.FireboltInstance{}
 	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.cleanupOrphanGatewayRouting(ctx, req.NamespacedName)
 		}
 		return ctrl.Result{}, err
 	}
 
-	if !controllerutil.ContainsFinalizer(instance, instanceFinalizerName) {
-		controllerutil.AddFinalizer(instance, instanceFinalizerName)
-		if err := r.Update(ctx, instance); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
+	if requeue, err := r.prepareInstanceRouting(ctx, instance); err != nil || requeue {
+		return ctrl.Result{Requeue: requeue}, err
 	}
 
 	// Teardown runs before any spec.id work: reconcileDelete sweeps owned
@@ -374,7 +357,7 @@ func (r *FireboltInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 }
 
 func (r *FireboltInstanceReconciler) recordReconcileMetrics(
@@ -424,6 +407,9 @@ func (r *FireboltInstanceReconciler) publishRolledEngineTrustCAs(ctx context.Con
 func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instance *computev1alpha1.FireboltInstance) error {
 	log := logf.FromContext(ctx).WithValues("instance", instance.Name)
 	log.Info("Handling instance deletion")
+	if err := r.withdrawInstanceRoutes(ctx, instance); err != nil {
+		return err
+	}
 
 	ns := instance.Namespace
 	matchLabels := client.MatchingLabels{LabelInstance: instance.Name}
@@ -456,6 +442,7 @@ func (r *FireboltInstanceReconciler) reconcileDelete(ctx context.Context, instan
 	deleteList(&appsv1.DeploymentList{}, "Deployment")
 	deleteList(&corev1.ServiceList{}, "Service")
 	deleteList(&corev1.ConfigMapList{}, "ConfigMap")
+	deleteList(&rbacv1.RoleList{}, "Role")
 	// Certificate MUST be deleted before Secret: cert-manager's
 	// Certificate controller recreates its target Secret whenever that
 	// Secret goes missing while the Certificate still exists (cert-manager
@@ -512,6 +499,8 @@ func extractItems(list client.ObjectList) []client.Object {
 		return boxItems[policyv1.PodDisruptionBudget, *policyv1.PodDisruptionBudget](l.Items)
 	case *corev1.ServiceAccountList:
 		return boxItems[corev1.ServiceAccount, *corev1.ServiceAccount](l.Items)
+	case *rbacv1.RoleList:
+		return boxItems[rbacv1.Role, *rbacv1.Role](l.Items)
 	case *rbacv1.RoleBindingList:
 		return boxItems[rbacv1.RoleBinding, *rbacv1.RoleBinding](l.Items)
 	default:
@@ -923,6 +912,16 @@ func (r *FireboltInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // custom controller name. Useful for E2E tests that spin up multiple in-process
 // reconcilers per suite and need unique metric names across them.
 func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, name string) error {
+	if r.Clientset == nil {
+		clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			return err
+		}
+		r.Clientset = clientset
+	}
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
+	}
 	if r.EventRecorder == nil {
 		r.EventRecorder = mgr.GetEventRecorder(name)
 	}
@@ -1109,4 +1108,12 @@ func enqueueInstanceFromEngine(_ context.Context, obj client.Object) []reconcile
 	return []reconcile.Request{{
 		NamespacedName: types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: eng.Namespace},
 	}}
+}
+
+func (r *FireboltInstanceReconciler) prepareInstanceRouting(ctx context.Context, instance *computev1alpha1.FireboltInstance) (bool, error) {
+	if !controllerutil.ContainsFinalizer(instance, instanceFinalizerName) {
+		controllerutil.AddFinalizer(instance, instanceFinalizerName)
+		return true, r.Update(ctx, instance)
+	}
+	return false, r.ensureGatewayRouting(ctx, instance)
 }

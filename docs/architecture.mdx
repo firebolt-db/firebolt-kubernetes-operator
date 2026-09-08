@@ -36,7 +36,7 @@ The Firebolt Operator manages five custom resources:
 └──────────────────────┘         └──────────────────────┘
 ```
 
-Every Engine references one Instance in the same namespace through `spec.instanceRef`. The Instance must publish a ready Metadata Service before the Engine can start or materialize configuration in the `stable`, `stopped`, or `creating` phases. The Engine reports `InstanceReady=False` and waits when that gate fails. The `switching`, `draining`, and `cleaning` phases operate on already-rendered resources and finish without reading the Instance.
+Every Engine references one Instance in the same namespace through `spec.instanceRef`. The Instance must publish a ready Metadata Service before the Engine can start or materialize configuration in the `stable`, `stopped`, or `creating` phases. The Engine reports `InstanceReady=False` and waits when that gate fails. The `switching`, `draining`, and `cleaning` phases operate on already-rendered resources. Routing publication and retirement still read the Instance and its coordination state.
 
 The same scheduling window applies to the fail-closed EngineClass and FireboltEnginePreset gates. When a namespaced class is not Ready for an operator-owned template path, a `ClusterFireboltEngineClass` live spec fails the SKU-only or operator-owned check, or Preset is required and missing, or not Ready for an operator-owned path, the Engine stays not Ready and does not render a StatefulSet. The `switching`, `draining`, and `cleaning` phases finish that rollout anyway. The Firebolt Operator may still read the EngineClass while draining, for inherited drain settings (`rollout`, `drainCheckEnabled`, drain interval). It does not fail closed on those reads.
 
@@ -64,23 +64,39 @@ contains Secret bytes.
 
 ## Query traffic
 
-Clients connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header. The Gateway forwards traffic only to ready pods in the Engine's active generation.
+Clients connect to the Instance Gateway and select an Engine with the `X-Firebolt-Engine` header or `engine` query parameter. Direct Engine Services and Pod IPs are not supported client entry points.
 
-Internally, each Engine exposes a Service that the Gateway resolves at request time. The Gateway resolves that Service by its fully qualified name and never expands the pod's DNS search domains: the name is already complete, and some environments inject infrastructure search domains whose expansions a DNS-filtering CNI can reject in a way that Envoy's c-ares resolver treats as fatal for the whole lookup. Exact-name resolution applies to every per-Engine sub-cluster the dynamic forward proxy synthesizes. The Firebolt Operator switches the Service between generations during blue-green rollouts. It is an internal mechanism, not a client entry point: traffic that bypasses the Gateway is unsupported and loses Gateway features, including waking an auto-stopped Engine.
+Each Gateway Pod runs Envoy and the mandatory local agent. Envoy validates the Engine selector, then uses `ext_proc` to request admission. The agent records the admission before returning a generation-specific authority. SQL and result bodies remain in Envoy. A request retains its generation across retries, and its local accounting remains outstanding until Envoy signals that no future dispatch is possible. An uncertain processor termination retains liability rather than assuming completion.
 
-See [Gateway overview](./instance/gateway/overview) for connection examples and [Gateway query routing](./instance/gateway/gateway-query-routing) for routing behavior.
+The Firebolt Operator owns a routing ConfigMap per Instance, separate from Envoy's static configuration. It contains generation assignments, revisions, registered Pod UID/agent boot sessions, and outstanding retirement records. Agents watch it using read-only Kubernetes credentials and report applied revisions and local counts; there are no per-query Kubernetes writes. A registered agent keeps serving its authorized route during a Firebolt Operator restart.
+
+Generation query Services are headless and ready-only, with immutable selectors and names derived from Engine UID and generation. Peer-discovery Services still publish not-ready addresses for cluster formation. Envoy resolves query Services by exact fully qualified DNS names. DNS refresh and active health checks determine usable hosts inside the assigned generation; neither constitutes permission to retire that generation.
+
+The Gateway retries only failures establishing that the Engine has not processed the request: connection failures, refused streams, resets before request headers are sent, and pre-work shutdown responses marked `X-Firebolt-Drained`. Other resets after request delivery and arbitrary HTTP 5xx responses are returned to the client because replay could duplicate a write.
+
+See [Gateway overview](./instance/gateway/overview) for connection examples and [Gateway query routing](./instance/gateway/gateway-query-routing) for the admission and withdrawal protocol.
+
+### Gateway termination
+
+During planned Gateway pod termination, Envoy's pre-stop hook fails readiness and drains the inbound query listener. It closes that listener to new connections while existing query connections finish, including requests parked for Engine wake-up. The metrics listener and local admin interface remain available. The hook waits for the query listener's downstream connection count to reach zero before returning; Kubernetes then sends SIGTERM to Envoy.
+
+The agent runs as a Kubernetes native sidecar after user-provided init containers. Kubernetes keeps it running until the main containers, including Envoy, have stopped, so routing and wake handling continue during draining. This ordering requires Kubernetes 1.33 or later. The agent checks routing usability before granting a held request; this check is separate from the withdrawal acknowledgment.
+
+The Gateway pod's shutdown budget defaults to 180 seconds and can be set with `spec.gateway.template.spec.terminationGracePeriodSeconds`. The budget covers wake waiting, remaining query execution, and container shutdown. Kubernetes forcibly terminates remaining containers when the budget expires. Gateway listener draining protects accepted requests within that budget; it does not acknowledge propagation through an external load balancer or replace an Engine traffic-withdrawal gate.
 
 ## Engine availability
 
 The Firebolt Operator applies Engine changes with blue-green generations:
 
-1. It creates the desired generation.
-2. It waits for all pods and readiness-aware sidecars to become ready.
-3. It switches the Engine Service to the new generation.
-4. For a graceful rollout, it waits for queries on the old generation to drain.
-5. It removes the old generation.
+1. It creates the desired generation and waits for every Pod and readiness-aware sidecar.
+2. It publishes the replacement route and closes the old assignment, durably recording its registered Gateway holders.
+3. Every holder applies the fence and reports that its old admissions and uncertain requests are zero. A positively observed stop of that Envoy process can also clear its liability.
+4. For graceful rollouts, metric drain checks additionally wait for Engine query activity to finish.
+5. Only after withdrawal can the Firebolt Operator remove old Engine Pods and Kubernetes send SIGTERM.
 
-The active generation remains available while the replacement starts. Plan cluster capacity for both generations to coexist during a rollout. See [Engine scaling](./engine/engine-scaling) and [Engine rollouts](./engine/engine-rollouts).
+The withdrawal gate also covers scale-to-zero, deletion, and cleanup paths; `recreate` and disabling metric checks do not bypass it. Missing reports, stale session identities, or unknown admissions block retirement. A changed agent boot identity in the same Pod cannot erase old accounting. The Firebolt Operator replaces that Gateway Pod; a finalizer retains its terminal status until positive Envoy termination evidence has been recorded. Pod absence, readiness, and timeout are not substitutes for that evidence.
+
+Plan enough cluster capacity for both Engine generations and Gateway replacements. Accepted Engine work must finish within the Pod termination budget, and the Engine's shutdown accounting must include connections queued before query-handler execution. Budget expiry can interrupt unfinished requests. See [Engine rollouts](./engine/engine-rollouts).
 
 ## Instance-wide security
 

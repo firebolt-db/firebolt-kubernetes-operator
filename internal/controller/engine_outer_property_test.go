@@ -58,6 +58,7 @@ import (
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
+	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/routing"
 )
 
 // outerHarnessEnv carries the envtest fixtures shared across rapid draws.
@@ -492,6 +493,17 @@ func TestEngineOuterStateMachine(t *testing.T) {
 		instance.Status.Phase = computev1alpha1.InstancePhaseReady
 		if err := env.cli.Status().Update(ctx, instance); err != nil {
 			rt.Fatalf("Set instance Ready: %v", err)
+		}
+		// This component harness runs no gateway processes. Materialize its
+		// empty registry so engine deletion still executes the routing guard.
+		routingData, err := routing.Encode(routing.NewState(string(instance.UID)))
+		if err != nil {
+			rt.Fatalf("Encode routing state: %v", err)
+		}
+		if err := env.cli.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: routing.ConfigMapName(instance.Name), Namespace: ns,
+		}, Data: map[string]string{routing.DataKey: string(routingData)}}); err != nil {
+			rt.Fatalf("Create routing registry: %v", err)
 		}
 
 		falseVal := false

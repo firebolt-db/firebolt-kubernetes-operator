@@ -21,6 +21,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,9 +112,8 @@ type FireboltEngineReconciler struct {
 
 	// WakeDemand reports when a gateway last received a query for an
 	// engine that had no ready endpoints, which autoStop honors as a
-	// request to scale back up. Nil is tolerated and means "no demand,
-	// ever" — the behavior when wake-on-zero is disabled, and the
-	// default in unit tests that do not exercise wake.
+	// request to scale back up. Nil reports no demand and is the default
+	// in unit tests that do not exercise wake.
 	WakeDemand WakeDemandSource
 
 	// EventRecorder emits Kubernetes Events on the engine CR. Populated
@@ -163,7 +163,7 @@ type FireboltEngineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 //
@@ -182,6 +182,7 @@ type FireboltEngineReconciler struct {
 // reconcile actions needed, and applies them. Deletion is handled separately
 // via a finalizer.
 func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
+	defer func() { res, err = routingReconcileResult(res, err) }()
 	log := logf.FromContext(ctx)
 
 	engine := &computev1alpha1.FireboltEngine{}
@@ -278,6 +279,10 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			// a generation it bumped to in the same pass, so whatever the
 			// ensures created is still in the keep set the sweep reads.
 			res = applyGCBacklogRequeue(res, r.gcOrphanedResources(ctx, engine))
+			if cleanupErr := r.reclaimEngineRetirements(ctx, engine); cleanupErr != nil {
+				log.Error(cleanupErr, "Routing retirement cleanup pending")
+				res = applyGCBacklogRequeue(res, true)
+			}
 		}()
 	}
 
@@ -547,6 +552,18 @@ type externalFinalizerEntry struct {
 func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *computev1alpha1.FireboltEngine) error {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name)
 	log.Info("Handling engine deletion")
+	if err := r.withdrawEngineRoute(ctx, engine); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		uninitialized, checkErr := r.allowUninitializedEngineDeletion(ctx, engine)
+		if checkErr != nil {
+			return checkErr
+		}
+		if !uninitialized {
+			return err
+		}
+	}
 
 	ns := engine.Namespace
 	var errs []error
@@ -560,9 +577,16 @@ func (r *FireboltEngineReconciler) reconcileDelete(ctx context.Context, engine *
 		errs = append(errs, err)
 	} else {
 		for i := range stsList.Items {
+			gen, parseErr := strconv.Atoi(stsList.Items[i].Labels[LabelGeneration])
+			if parseErr != nil {
+				return parseErr
+			}
+			if err := r.authorizeGenerationRemoval(ctx, engine, gen); err != nil {
+				return err
+			}
 			externals = appendExternalFinalizer(externals, "StatefulSet", &stsList.Items[i])
 			log.Info("Deleting StatefulSet", "name", stsList.Items[i].Name)
-			if err := r.Delete(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
+			if err := r.deleteIfExists(ctx, &stsList.Items[i]); err != nil && !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete StatefulSet", "name", stsList.Items[i].Name)
 				errs = append(errs, err)
 			}

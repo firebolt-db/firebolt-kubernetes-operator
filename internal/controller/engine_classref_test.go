@@ -777,6 +777,8 @@ func TestEngineReconcile_UnreadyClassDoesNotAbortRollout(t *testing.T) {
 				WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
 				Build()
 			r := engineRefTestReconciler(cli, sch)
+			seedEngineRoutingFixture(t, cli, engine)
+			seedSwitchingGeneration(t, cli, engine)
 			if _, err := r.Reconcile(context.Background(), ctrl.Request{
 				NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
 			}); err != nil {
