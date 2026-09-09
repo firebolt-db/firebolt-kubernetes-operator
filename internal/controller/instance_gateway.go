@@ -973,8 +973,9 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                             #   - refused-stream:  HTTP/2 REFUSED_STREAM - the
                             #     peer explicitly told us the stream was not
                             #     processed.
-                            #   - reset:           stream reset before any
-                            #     response bytes - same guarantee as
+                            #   - reset-before-request: the stream was reset
+                            #     before the request was sent, so the engine
+                            #     never received it - same guarantee as
                             #     connect-failure.
                             #   - retriable-headers (X-Firebolt-Drained):
                             #     a 503 emitted by the engine's pre-work
@@ -1013,7 +1014,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                             # per_try_timeout, so legitimate long-running
                             # queries are never cut off mid-flight.
                             retry_policy:
-                              retry_on: connect-failure,refused-stream,reset,retriable-headers
+                              retry_on: connect-failure,refused-stream,reset-before-request,retriable-headers
                               retriable_headers:
                                 - name: X-Firebolt-Drained
                                   present_match: true
