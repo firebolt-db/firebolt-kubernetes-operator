@@ -19,8 +19,10 @@
 #   yq         .../checksums (SHA-256 is the column named in checksums_hashes_order)
 #   helm-docs  .../checksums.txt
 # tlaplus publishes no checksums, so tla2tools.jar is pinned from the artifact
-# itself; a mismatch there means the release tag was re-cut and needs a look
-# before the digest is updated.
+# itself. Its v1.8.0 pre-release asset is rebuilt from upstream master on every
+# push, so a mismatch there is expected churn rather than a re-cut tag: download
+# the current jar, run `make formal-check formal-check-counterexample
+# formal-verify` against it, and update the digest only if all three pass.
 
 kind       amd64  eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa  https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
 kind       arm64  8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4  https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-arm64
