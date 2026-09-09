@@ -26,6 +26,16 @@ func (a *Agent) Process(stream extpb.ExternalProcessor_ProcessServer) error {
 	if err != nil {
 		return err
 	}
+	if request.GetResponseHeaders() != nil {
+		// A local reply, such as the health_check filter answering /healthz,
+		// never reaches this filter's decode path: Envoy opens the stream on
+		// the encode path with response headers first. No upstream dispatch
+		// happened, so there is no permit to account. Rejecting here would
+		// turn every such reply into a 500 because the filter fails closed.
+		return stream.Send(&extpb.ProcessingResponse{Response: &extpb.ProcessingResponse_ResponseHeaders{
+			ResponseHeaders: &extpb.HeadersResponse{Response: &extpb.CommonResponse{}},
+		}})
+	}
 	headers := request.GetRequestHeaders()
 	if headers == nil {
 		return status.Error(codes.InvalidArgument, "expected request headers")

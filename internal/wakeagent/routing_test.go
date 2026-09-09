@@ -255,6 +255,34 @@ func TestProcessorCleanCloseAndTransportFailure(t *testing.T) {
 	}
 }
 
+func TestProcessorAnswersLocalReplyWithoutPermit(t *testing.T) {
+	// The health_check filter answers /healthz before ext_proc decodes the
+	// request, so the processor stream starts with response headers. That
+	// reply must pass and must not be counted as an admission.
+	a, _, _ := routingTestAgent(t)
+	client, _ := testProcessorClient(t, a)
+	stream, err := client.Process(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&extpb.ProcessingRequest{Request: &extpb.ProcessingRequest_ResponseHeaders{ResponseHeaders: &extpb.HttpHeaders{}}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("local reply rejected: %v", err)
+	}
+	if response.GetResponseHeaders() == nil {
+		t.Fatalf("unexpected processing response %T", response.GetResponse())
+	}
+	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
+		t.Fatalf("stream did not close cleanly: %v", err)
+	}
+	if len(a.RoutingReport().Outstanding) != 0 {
+		t.Fatal("local reply issued a permit")
+	}
+}
+
 func TestProcessorCancelWhileWaitingDoesNotGrant(t *testing.T) {
 	a, _, _ := routingTestAgent(t)
 	a.readiness.setReady("service:old", false)

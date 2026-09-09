@@ -164,12 +164,19 @@ func newProcessorRuntime(t *testing.T) *processorRuntime {
 		"processing_mode": map[string]any{"request_header_mode": "SEND", "response_header_mode": "SEND", "request_body_mode": "NONE", "response_body_mode": "NONE"},
 		"mutation_rules":  map[string]any{"allow_all_routing": true},
 	}}
+	// Production places the health_check filter ahead of ext_proc, so its
+	// /healthz local reply reaches the processor on the encode path only.
+	healthCheck := map[string]any{"name": "envoy.filters.http.health_check", "typed_config": map[string]any{
+		"@type":             "type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck",
+		"pass_through_mode": false,
+		"headers":           []any{map[string]any{"name": ":path", "string_match": map[string]any{"exact": "/healthz"}}},
+	}}
 	config := map[string]any{"admin": map[string]any{"address": address(0)},
 		"layered_runtime": map[string]any{"layers": []any{map[string]any{"name": "routing", "static_layer": map[string]any{"envoy.reloadable_features.ext_proc_graceful_grpc_close": true}}}},
 		"static_resources": map[string]any{"clusters": []any{cluster("old", old.URL, false), cluster("new", next.URL, false), cluster("admission", listener.Addr().String(), true)},
 			"listeners": []any{map[string]any{"name": "query", "address": address(0), "filter_chains": []any{map[string]any{"filters": []any{map[string]any{"name": "envoy.filters.network.http_connection_manager", "typed_config": map[string]any{
 				"@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager", "stat_prefix": "gateway",
-				"route_config": map[string]any{"name": "query", "virtual_hosts": hosts}, "http_filters": []any{processor, map[string]any{"name": "envoy.filters.http.router", "typed_config": map[string]any{"@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"}}},
+				"route_config": map[string]any{"name": "query", "virtual_hosts": hosts}, "http_filters": []any{healthCheck, processor, map[string]any{"name": "envoy.filters.http.router", "typed_config": map[string]any{"@type": "type.googleapis.com/envoy.extensions.filters.http.router.v3.Router"}}},
 			}}}}}}}}}
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "envoy.json")
@@ -273,6 +280,28 @@ func (f *processorRuntime) waitNoActive(t *testing.T, key string) {
 }
 
 func TestProductionProcessorRuntime(t *testing.T) {
+	t.Run("healthz_local_reply_passes_without_permit", func(t *testing.T) {
+		f := newProcessorRuntime(t)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.query+"/healthz", http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = "old.ns.svc:3473"
+		response, err := f.client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("health check answered %d", response.StatusCode)
+		}
+		if f.oldCalls.Load() != 0 || f.newCalls.Load() != 0 {
+			t.Fatal("health check reached an upstream")
+		}
+		if len(f.agent.RoutingReport().Outstanding) != 0 {
+			t.Fatal("health check issued a permit")
+		}
+	})
 	t.Run("delayed_grant_remains_counted_after_fence", func(t *testing.T) {
 		f := newProcessorRuntime(t)
 		old := f.state.Routes["engine"].Key()
