@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.15.0...firebolt-operator-v0.16.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **metrics:** the engine metrics' instance label is now firebolt_io_instance. Dashboards and rules that filtered, grouped or joined engine series on instance must read firebolt_io_instance.
+
+### Features
+
+* **metrics:** name the engine metrics' instance label firebolt_io_instance (FB-3633) ([f31cb8e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f31cb8ee8fbc7159fafd62f93617579281f8a089))
+
 ## [0.15.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.14.1...firebolt-operator-v0.15.0) (2026-09-07)
 
 
