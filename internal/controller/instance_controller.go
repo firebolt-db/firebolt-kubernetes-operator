@@ -965,6 +965,14 @@ func (r *FireboltInstanceReconciler) SetupWithManagerNamed(mgr ctrl.Manager, nam
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		Watches(
+			&computev1alpha1.ClusterFireboltEngineClass{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromClusterEngineClass),
+			// Same reasoning as the namespaced class watch: an engine bound
+			// to the shared SKU catalog takes its image from the cluster
+			// class, and a catalog bump changes no engine generation.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		Watches(
 			&computev1alpha1.FireboltEnginePreset{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueInstancesFromEnginePreset),
 			// Deliberately unfiltered: resolveFireboltEnginePresetInfo is
@@ -1048,6 +1056,39 @@ func (r *FireboltInstanceReconciler) enqueueInstancesFromEngineClass(
 		ref := eng.Spec.EngineClassRef
 		return ref != nil && *ref == obj.GetName()
 	})
+}
+
+// enqueueInstancesFromClusterEngineClass maps a ClusterFireboltEngineClass
+// event to every instance, in any namespace, with a bound engine whose
+// spec.engineClassRef names it. A namespaced FireboltEngineClass of the
+// same name shadows the catalog for its namespace, so some of these
+// requests re-run a gate whose answer does not change; that costs one
+// reconcile, whereas skipping them would need a second lookup per engine.
+func (r *FireboltInstanceReconciler) enqueueInstancesFromClusterEngineClass(
+	ctx context.Context, obj client.Object,
+) []reconcile.Request {
+	engines := &computev1alpha1.FireboltEngineList{}
+	if err := r.List(ctx, engines); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to list engines for the instance ID canonicalize watch",
+			"clusterEngineClass", obj.GetName())
+		return nil
+	}
+	seen := make(map[types.NamespacedName]struct{}, len(engines.Items))
+	var requests []reconcile.Request
+	for i := range engines.Items {
+		eng := &engines.Items[i]
+		ref := eng.Spec.EngineClassRef
+		if eng.Spec.InstanceRef == "" || ref == nil || *ref != obj.GetName() {
+			continue
+		}
+		key := types.NamespacedName{Name: eng.Spec.InstanceRef, Namespace: eng.Namespace}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		requests = append(requests, reconcile.Request{NamespacedName: key})
+	}
+	return requests
 }
 
 // enqueueInstancesFromEnginePreset maps a FireboltEnginePreset event to
