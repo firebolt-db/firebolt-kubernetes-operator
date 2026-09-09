@@ -146,8 +146,8 @@ func (a *Agent) acquireRoute(ctx context.Context, engine string) (routing.Route,
 		if ready {
 			l.mu.Unlock()
 			if !held {
-				a.demand.Stamp(engine)
 				if !a.demand.AcquireHold(engine, a.capacity.Cap()) {
+					a.demand.Stamp(engine)
 					return routing.Route{}, errors.New("gateway wake capacity reached")
 				}
 				held = true
@@ -162,6 +162,11 @@ func (a *Agent) acquireRoute(ctx context.Context, engine string) (routing.Route,
 				l.mu.Unlock()
 				continue
 			}
+			// Envoy cannot reach the ready route yet, so this request is now
+			// waiting on the engine. Only a waiting request is wake demand: a
+			// stamp before the probe would make the first query on a running
+			// engine look like demand and wake it right after auto-stop.
+			a.demand.Stamp(engine)
 			l.mu.Lock()
 		}
 		changed := l.changed

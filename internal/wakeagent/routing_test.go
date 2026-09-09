@@ -307,6 +307,21 @@ func TestProcessorCancelWhileWaitingDoesNotGrant(t *testing.T) {
 	}
 }
 
+func TestAdmissionOnUsableRouteRecordsNoWakeDemand(t *testing.T) {
+	// The first admission to a ready route probes Envoy before granting. A
+	// query the engine can serve is not wake demand: the operator reads the
+	// stamp after auto-stop and would wake the engine again.
+	a, _, _ := routingTestAgent(t)
+	route, err := a.acquireRoute(t.Context(), "engine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.finishPermit(route.Key(), true)
+	if strings.Contains(a.demand.Render(), `engine="engine"`) {
+		t.Fatal("served query recorded wake demand")
+	}
+}
+
 func TestAdmissionWaitsForUsableEnvoyRoute(t *testing.T) {
 	a, _, _ := routingTestAgent(t)
 	a.cfg.HoldTimeout = 20 * time.Millisecond
