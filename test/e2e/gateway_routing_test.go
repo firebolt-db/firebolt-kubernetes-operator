@@ -84,13 +84,19 @@ func requireRoutingSleepSuccess(result routingQueryResult) {
 // ExpectSleepResult asserts that a `SELECT sleep(n)` body carries the
 // function's completion value. Engine builds differ on its type: some return
 // the integer 0, others the boolean false. Either proves the query ran to
-// completion, which is all these specs need from it.
+// completion, which is all these specs need from it. A type switch rather
+// than SatisfyAny(BeNumerically, BeFalse): BeNumerically errors on a bool and
+// BeFalse errors on a number, so either matcher ordering fails one real case.
 func ExpectSleepResult(body string) {
 	GinkgoHelper()
 	value, err := ParseQueryResult(body)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(value).To(SatisfyAny(BeNumerically("==", 0), BeFalse()),
-		"sleep() should return 0 or false, got %T %v", value, value)
+	switch v := value.(type) {
+	case bool:
+		Expect(v).To(BeFalse(), "sleep() boolean result should be false")
+	default:
+		Expect(value).To(BeNumerically("==", 0), "sleep() numeric result should be 0, got %T %v", value, value)
+	}
 }
 
 var _ = Describe("Gateway routing withdrawal", Ordered, func() {
