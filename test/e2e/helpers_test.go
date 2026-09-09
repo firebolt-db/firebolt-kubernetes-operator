@@ -562,11 +562,11 @@ func CreateEngineWithRequirePreset(ctx context.Context, instanceName, name strin
 }
 
 // CreateEngineWithDrainCheck creates a FireboltEngine like CreateEngine but
-// with the query-liveness drain check ON (the suite default is off because
-// most specs don't provision the ApiserverProxy scrape path the in-process
-// operator needs to reach pod metrics from the host). The instance MUST be
-// created with metricScrapeMode=ApiserverProxy (SetupTestInstanceWithScrapeMode),
-// otherwise the drain probe fails closed and every rollout wedges in draining.
+// with the query-liveness drain check ON (the suite default is off so most
+// specs do not depend on metric scraping at all). Instances are created with
+// metricScrapeMode=ApiserverProxy by default, which is what lets the
+// in-process operator reach pod metrics from the host; with PodIP the drain
+// probe would fail closed and every rollout would wedge in draining.
 func CreateEngineWithDrainCheck(ctx context.Context, instanceName, name string, replicas int) error {
 	return createEngine(ctx, instanceName, name, replicas, "graceful", nil,
 		func(engine *computev1alpha1.FireboltEngine) {
@@ -2185,10 +2185,12 @@ func CreateInstance(ctx context.Context, name, metadataImage, metadataTag string
 	return createInstance(ctx, name, metadataImage, metadataTag, "")
 }
 
-// createInstance builds the suite's standard FireboltInstance. scrapeMode
-// sets spec.metricScrapeMode when non-empty; the in-process operators run on
-// the host, where kind pod IPs are unreachable, so specs that exercise the
-// drain check or autoStop scrape must use MetricScrapeModeApiserverProxy.
+// createInstance builds the suite's standard FireboltInstance. An empty
+// scrapeMode becomes MetricScrapeModeApiserverProxy: the in-process operators
+// run on the host, where kind pod IPs are unreachable, and a gateway Pod stays
+// unready until the operator has fetched its routing report and registered
+// its agent session. PodIP mode is covered by the Helm tests, whose operator
+// runs inside the cluster.
 func createInstance(ctx context.Context, name, metadataImage, metadataTag string, scrapeMode computev1alpha1.MetricScrapeMode) error {
 	return createInstanceWithMutate(ctx, name, metadataImage, metadataTag, scrapeMode, nil)
 }
@@ -2213,6 +2215,9 @@ func createInstanceWithMutate(ctx context.Context, name, metadataImage, metadata
 			corev1.ResourceCPU:    resource.MustParse("200m"),
 			corev1.ResourceMemory: resource.MustParse("256Mi"),
 		},
+	}
+	if scrapeMode == "" {
+		scrapeMode = computev1alpha1.MetricScrapeModeApiserverProxy
 	}
 	instance := &computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2358,10 +2363,9 @@ func SetupTestInstanceWithMutate(ctx context.Context, name string, mutate func(*
 }
 
 // SetupTestInstanceWithScrapeMode is SetupTestInstance with an explicit
-// spec.metricScrapeMode on the FireboltInstance. Specs whose engines enable
-// the drain check or autoStop must pass MetricScrapeModeApiserverProxy: the
-// in-process operator scrapes pod metrics from the host, where kind pod IPs
-// (the PodIP default) are unreachable.
+// spec.metricScrapeMode on the FireboltInstance. The suite default is already
+// MetricScrapeModeApiserverProxy (see createInstance); pass a mode only to
+// exercise something else deliberately.
 func SetupTestInstanceWithScrapeMode(ctx context.Context, name string, scrapeMode computev1alpha1.MetricScrapeMode, opts ...EngineOperatorOption) (*TestInstanceLifecycle, error) {
 	return setupTestInstance(ctx, name, scrapeMode, nil, opts...)
 }
