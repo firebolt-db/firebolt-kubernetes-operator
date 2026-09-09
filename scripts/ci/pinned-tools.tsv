@@ -20,8 +20,10 @@
 #   helm-docs  .../checksums.txt
 # envoy publishes checksums.txt.asc beside its release binaries.
 # tlaplus publishes no checksums, so tla2tools.jar is pinned from the artifact
-# itself; a mismatch there means the release tag was re-cut and needs a look
-# before the digest is updated.
+# itself. Its v1.8.0 pre-release asset is rebuilt from upstream master on every
+# push, so a mismatch on that row is expected churn rather than a re-cut tag:
+# download the current jar, run `make formal-check formal-check-counterexample
+# formal-verify` against it, and update the digest only if all three pass.
 
 kind       amd64  eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa  https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
 kind       arm64  8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4  https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-arm64
@@ -29,6 +31,6 @@ yq         amd64  a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9e
 yq         arm64  0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156  https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64
 helm-docs  amd64  a8cf72ada34fad93285ba2a452b38bdc5bd52cc9a571236244ec31022928d6cc  https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz
 helm-docs  arm64  c3787212332386dcd122debef7848feb165aa701467ae3e3442df7638f3ac4e4  https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_arm64.tar.gz
-tla2tools  any    b658b4e504fdf0b721caf7066320f6b6fe5805f4dd2f717d0e47baba4097205e  https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+tla2tools  any    bb82311bc0493a8d30112a1baa0aece42a5f91b928866c7593930e390c14c340  https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 envoy      amd64  32d3cc203b8abdce8c2ed916a298124364e0c48e83b7196f551e769b6a489bf8  https://github.com/envoyproxy/envoy/releases/download/v1.37.2/envoy-1.37.2-linux-x86_64
 envoy      arm64  b0d7fbf29554384ce23e7190090257feb5ca136f145626b3adefabb2d53f878b  https://github.com/envoyproxy/envoy/releases/download/v1.37.2/envoy-1.37.2-linux-aarch_64
