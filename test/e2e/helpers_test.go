@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1870,7 +1871,7 @@ func execCurlQueryWithDeadline(
 		"connect=%{time_connect}s starttransfer=%{time_starttransfer}s total=%{time_total}s\n"
 
 	curlArgs := []string{
-		"-sSf",
+		"-sS",
 		"--connect-timeout", "2",
 		"--max-time", strconv.Itoa(maxTimeSeconds),
 		"-w", curlTimingFmt,
@@ -1891,6 +1892,21 @@ func execCurlQueryWithDeadline(
 	cmd.Stderr = &stderrBuf
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("curl failed (exit %v): %s", err, strings.TrimSpace(stderrBuf.String()))
+	}
+	// HTTP errors are detected here rather than with curl -f, because -f
+	// discards the response body and the body is the only place an Envoy
+	// local reply ("no healthy upstream", "upstream connect error or
+	// disconnect/reset before headers") identifies itself. Transient 5xx
+	// diagnosis during blue-green depends on seeing it.
+	if m := regexp.MustCompile(`code=(\d{3})`).FindStringSubmatch(stderrBuf.String()); m != nil {
+		if code, convErr := strconv.Atoi(m[1]); convErr == nil && code >= 400 {
+			body := strings.Join(strings.Fields(stdoutBuf.String()), " ")
+			if len(body) > 200 {
+				body = body[:200]
+			}
+			return "", fmt.Errorf("HTTP %d: %s | body: %s",
+				code, strings.TrimSpace(stderrBuf.String()), body)
+		}
 	}
 	return stdoutBuf.String(), nil
 }
@@ -1969,6 +1985,10 @@ func ParseQueryResult(output string) (interface{}, error) {
 // categorizeQueryError extracts a short category from an error detail string.
 func categorizeQueryError(detail string) string {
 	switch {
+	case strings.Contains(detail, "no healthy upstream"):
+		return "503 no healthy upstream (envoy local reply)"
+	case strings.Contains(detail, "disconnect/reset before headers"):
+		return "503 upstream reset (envoy local reply)"
 	case strings.Contains(detail, "connection refused"):
 		return "connection refused"
 	case strings.Contains(detail, "timeout"):
