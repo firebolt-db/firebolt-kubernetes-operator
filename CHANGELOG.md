@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.16.0...firebolt-operator-v0.17.0) (2026-09-09)
+
+
+### Features
+
+* **telemetry:** stamp DO_NOT_TRACK=1 on deployed engines when telemetry is disabled (FB-1354) ([a195aa7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a195aa7368a6e5f0c1948096069e5132f29ff653))
+
+
+### Bug Fixes
+
+* **telemetry:** skip DO_NOT_TRACK injection when the template already sets it ([b7d1d7d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b7d1d7d868fbf7db13514dca699d354c23dbe096))
+
 ## [0.16.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.15.0...firebolt-operator-v0.16.0) (2026-09-09)
 
 
