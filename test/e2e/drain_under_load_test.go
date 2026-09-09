@@ -179,9 +179,7 @@ var _ = Describe("Firebolt Engine Drain", func() {
 			var heldResult queryResult
 			Eventually(finished, 65*time.Second).Should(Receive(&heldResult))
 			Expect(heldResult.err).NotTo(HaveOccurred(), "the query admitted before cutover must complete")
-			value, err := ParseQueryResult(heldResult.body)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(value).To(BeNumerically("==", 0))
+			ExpectSleepResult(heldResult.body)
 
 			By("Waiting for the drained generation to be released and cleaned")
 			Eventually(func(g Gomega) {
