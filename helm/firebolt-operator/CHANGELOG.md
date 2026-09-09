@@ -2,6 +2,13 @@
 
 appVersion: v0.1.1
 
+## [0.14.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.13.2...firebolt-operator-chart-0.14.0) (2026-09-09)
+
+
+### Features
+
+* **telemetry:** stamp DO_NOT_TRACK=1 on deployed engines when telemetry is disabled (FB-1354) ([a195aa7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a195aa7368a6e5f0c1948096069e5132f29ff653))
+
 ## [0.13.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.13.1...firebolt-operator-chart-0.13.2) (2026-09-09)
 
 
