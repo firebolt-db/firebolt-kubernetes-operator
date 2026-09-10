@@ -1567,3 +1567,59 @@ func TestBuildEnvoyConfigYAMLStableAcrossInstances(t *testing.T) {
 		t.Fatal("configs differ in more than the namespace-scoped authority rewrite; a and b should be structurally identical")
 	}
 }
+
+// TestGatewayEnvoyPreStopDrain pins the shutdown wiring on the rendered pod:
+// the envoy container's preStop fails health checks, drains the query
+// listener, and waits for active downstream connections to reach zero rather
+// than sleeping a fixed interval, and the drain flags make a graceful drain
+// take effect at once. The hook's admin protocol itself is exercised in
+// gateway_shutdown_test.go.
+func TestGatewayEnvoyPreStopDrain(t *testing.T) {
+	t.Parallel()
+	pt := renderGatewayPod(t, wakeInstance(t, nil), wakeAgentConfig{})
+	envoy := containerByName(pt, computev1alpha1.GatewayContainerName)
+	if envoy == nil {
+		t.Fatalf("envoy container missing; containers = %v", containerNames(pt))
+	}
+	if envoy.Lifecycle == nil || envoy.Lifecycle.PreStop == nil || envoy.Lifecycle.PreStop.Exec == nil {
+		t.Fatalf("Lifecycle = %+v, want an exec preStop hook", envoy.Lifecycle)
+	}
+	script := strings.Join(envoy.Lifecycle.PreStop.Exec.Command, " ")
+	for _, want := range []string{
+		"/healthcheck/fail",
+		"drain_listeners?inboundonly&graceful",
+		"http." + gatewayQueryStatPrefix + ".downstream_cx_active",
+		"'^" + gatewayQueryListenerName + "::'",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("preStop command %q does not contain %q", script, want)
+		}
+	}
+	if strings.Contains(script, "sleep 8") {
+		t.Errorf("preStop command %q uses a fixed sleep instead of observing the drain", script)
+	}
+	if strings.Contains(script, "&skip_exit") {
+		t.Error("preStop drain must not pass skip_exit: it suppresses the INBOUND listener stop")
+	}
+	cfg := buildEnvoyConfigYAML(wakeInstance(t, nil), false)
+	for _, want := range []string{
+		"- name: " + gatewayQueryListenerName + "\n",
+		"stat_prefix: " + gatewayQueryStatPrefix + "\n",
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Errorf("rendered config lost %q; the preStop script keys on it", strings.TrimSpace(want))
+		}
+	}
+	listenerAt := strings.Index(cfg, "- name: "+gatewayQueryListenerName+"\n")
+	statsAt := strings.Index(cfg, "- name: stats_listener")
+	if listenerAt < 0 || statsAt < 0 || !strings.Contains(cfg[listenerAt:statsAt], "traffic_direction: INBOUND") {
+		t.Error("public query listener is not marked INBOUND; the inboundonly preStop drain would stop nothing")
+	}
+	if !strings.Contains(cfg[statsAt:], "traffic_direction: OUTBOUND") {
+		t.Error("stats listener is not marked OUTBOUND; the preStop drain would stop probe serving")
+	}
+	args := strings.Join(envoy.Args, " ")
+	if !strings.Contains(args, "--drain-time-s 0") || !strings.Contains(args, "--drain-strategy immediate") {
+		t.Errorf("Args = %v, want an immediate zero-time drain so kept-alive connections close as their work finishes", envoy.Args)
+	}
+}
