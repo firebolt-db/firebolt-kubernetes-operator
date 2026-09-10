@@ -1261,6 +1261,11 @@ func TestBuildEnvoyConfigYAML_GatewayTLSDisabled_NoTransportSocket(t *testing.T)
 	if _, present := fc["transport_socket"]; present {
 		t.Errorf("client-facing listener has transport_socket with gateway TLS disabled: %v", fc["transport_socket"])
 	}
+	// ALPN is a TLS-only concept: it lives inside the DownstreamTlsContext,
+	// so a plaintext config must not mention it anywhere.
+	if strings.Contains(got, "alpn_protocols") {
+		t.Error("plaintext config mentions alpn_protocols; got:\n" + got)
+	}
 }
 
 // TestBuildEnvoyConfigYAML_GatewayTLSDisabled_ByteIdenticalAcrossReconciles
@@ -1335,7 +1340,8 @@ func listenerNames(t *testing.T, parsed map[string]any) []string {
 
 // TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured pins
 // down the downstream TLS shape once gateway TLS is ready: a
-// DownstreamTlsContext presenting the mounted certificate/key pair.
+// DownstreamTlsContext presenting the mounted certificate/key pair and
+// advertising h2/http1.1 through ALPN.
 func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
@@ -1370,6 +1376,15 @@ func TestBuildEnvoyConfigYAML_GatewayTLSReady_TransportSocketConfigured(t *testi
 	commonTLS, ok := typedConfig["common_tls_context"].(map[string]any)
 	if !ok {
 		t.Fatalf("typed_config.common_tls_context missing or wrong type: %T", typedConfig["common_tls_context"])
+	}
+	// ALPN must offer h2 before http/1.1 so TLS clients can negotiate
+	// HTTP/2 while HTTP/1.1-only clients still connect.
+	alpn, ok := commonTLS["alpn_protocols"].([]any)
+	if !ok {
+		t.Fatalf("common_tls_context.alpn_protocols missing or wrong type: %T", commonTLS["alpn_protocols"])
+	}
+	if want := []any{"h2", "http/1.1"}; !slices.Equal(alpn, want) {
+		t.Errorf("alpn_protocols = %v, want %v", alpn, want)
 	}
 	certs, ok := commonTLS["tls_certificates"].([]any)
 	if !ok || len(certs) != 1 {
