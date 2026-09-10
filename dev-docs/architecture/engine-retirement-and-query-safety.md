@@ -1,6 +1,6 @@
 # Engine retirement and query safety
 
-What happens to queries when an Engine generation goes away — rollout, scale-down, auto-stop, or deletion — and why the design stops where it does.
+This page describes the behavior when an Engine generation is terminated, which can happen on rollout, scale-down, auto-stop, or deletion.
 
 ## Guarantees
 
