@@ -687,6 +687,7 @@ func buildListenerDownstreamTLSTransportSocket(instance *computev1alpha1.Firebol
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
               common_tls_context:
+                alpn_protocols: [h2, http/1.1]
                 tls_params:
                   tls_minimum_protocol_version: %s
                 tls_certificates:
