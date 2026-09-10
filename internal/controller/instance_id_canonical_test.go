@@ -548,6 +548,128 @@ func TestInstanceReconcile_ContinuesWhenBoundEngineClassMissing(t *testing.T) {
 	if cond.Reason != reasonInstanceIDResolveError {
 		t.Errorf("InstanceIDCanonical.Reason = %q, want %q", cond.Reason, reasonInstanceIDResolveError)
 	}
+	if !strings.Contains(cond.Message, "ClusterFireboltEngineClass") {
+		t.Errorf("InstanceIDCanonical.Message = %q, want it to say the cluster-scoped class was tried too", cond.Message)
+	}
+}
+
+// TestInstanceReconcile_CanonicalizesUppercaseULIDWhenBoundEngineOnClusterClass
+// pins the catalog arm of the gate: an engine bound to a
+// ClusterFireboltEngineClass has no namespaced class at all, and the gate
+// must resolve its image through the cluster-scoped object the way the
+// engine reconciler does instead of reporting ImageResolveFailed.
+func TestInstanceReconcile_CanonicalizesUppercaseULIDWhenBoundEngineOnClusterClass(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.ID = testUppercaseULID
+	eng := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    inst.Name,
+			EngineClassRef: ptr("catalog-class"),
+		},
+	}
+	cc := &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "catalog-class"},
+		Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  computev1alpha1.EngineContainerName,
+						Image: "oci.firebolt.io/firebolt-db/engine:" + DefaultEngineTag,
+					}},
+				},
+			},
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst, eng, cc).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !res.Requeue {
+		t.Error("Requeue = false, want true after spec.id canonicalize Update")
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if want := strings.ToLower(testUppercaseULID); updated.Spec.ID != want {
+		t.Errorf("spec.id = %q, want lowercase %q when the bound engine resolves to a cluster class at the floor", updated.Spec.ID, want)
+	}
+}
+
+// TestInstanceReconcile_LeavesUppercaseULIDWhenClusterClassBelowFloor pins
+// that the cluster-class arm still compares the resolved image against the
+// floor: a catalog entry pinning an old engine holds the id like a
+// namespaced class would.
+func TestInstanceReconcile_LeavesUppercaseULIDWhenClusterClassBelowFloor(t *testing.T) {
+	orig := computev1alpha1.CanonicalInstanceIDImageFloor
+	computev1alpha1.CanonicalInstanceIDImageFloor = DefaultEngineTag
+	t.Cleanup(func() { computev1alpha1.CanonicalInstanceIDImageFloor = orig })
+
+	sch := instanceTemplateTestScheme(t)
+	inst := readyInstanceWithTemplates()
+	inst.Spec.ID = testUppercaseULID
+	eng := &computev1alpha1.FireboltEngine{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: "default"},
+		Spec: computev1alpha1.FireboltEngineSpec{
+			InstanceRef:    inst.Name,
+			EngineClassRef: ptr("catalog-class"),
+		},
+	}
+	cc := &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "catalog-class"},
+		Spec: computev1alpha1.ClusterFireboltEngineClassSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  computev1alpha1.EngineContainerName,
+						Image: "oci.firebolt.io/firebolt-db/engine:release-4.0.0-pre.0.20260101000000.aaaaaaaaaaaa",
+					}},
+				},
+			},
+		},
+	}
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(inst, eng, cc).
+		WithStatusSubresource(&computev1alpha1.FireboltInstance{}).
+		Build()
+	r := &FireboltInstanceReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{},
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltInstance{}
+	if err := cli.Get(context.Background(), client.ObjectKey{Name: inst.Name, Namespace: inst.Namespace}, updated); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Spec.ID != testUppercaseULID {
+		t.Errorf("spec.id = %q, want unchanged uppercase while the cluster class pins an image below the floor", updated.Spec.ID)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.InstanceConditionInstanceIDCanonical)
+	if cond == nil || cond.Reason != reasonInstanceIDBelowFloor {
+		t.Fatalf("InstanceIDCanonical = %+v, want Reason %q", cond, reasonInstanceIDBelowFloor)
+	}
 }
 
 func TestInstanceReconcile_DoesNotRewriteCustomID(t *testing.T) {
@@ -648,6 +770,48 @@ func TestEnqueueInstancesFromEngineClass(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "unreferenced", Namespace: "ns"},
 	}); len(reqs) != 0 {
 		t.Errorf("enqueue for unreferenced class = %v, want none", reqs)
+	}
+}
+
+// TestEnqueueInstancesFromClusterEngineClass pins the catalog arm of the
+// watch: one ClusterFireboltEngineClass serves every namespace, so its
+// event fans out to each instance, in any namespace, with a bound engine
+// naming it — one request per instance.
+func TestEnqueueInstancesFromClusterEngineClass(t *testing.T) {
+	sch := instanceTemplateTestScheme(t)
+	other := boundEngine("eng-x", "fi-other", "big")
+	other.Namespace = "elsewhere"
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(
+			boundEngine("eng-a", "fi", "big"),
+			// Second engine on the same instance and class: one request.
+			boundEngine("eng-b", "fi", "big"),
+			other,
+			boundEngine("eng-c", "fi-small", "small"),
+			// Bound to the class but to no instance: nothing to gate.
+			boundEngine("eng-e", "", "big"),
+		).
+		Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch, MetricsRecorder: fireboltmetrics.NoOpInstanceRecorder{}}
+
+	reqs := r.enqueueInstancesFromClusterEngineClass(context.Background(), &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "big"},
+	})
+	got := requestNames(reqs)
+	if len(reqs) != 2 || len(got) != 2 {
+		t.Fatalf("enqueue = %v, want exactly ns/fi and elsewhere/fi-other", reqs)
+	}
+	for _, want := range []string{"ns/fi", "elsewhere/fi-other"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("enqueue = %v, want %s", reqs, want)
+		}
+	}
+
+	if reqs := r.enqueueInstancesFromClusterEngineClass(context.Background(), &computev1alpha1.ClusterFireboltEngineClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "unreferenced"},
+	}); len(reqs) != 0 {
+		t.Errorf("enqueue for unreferenced cluster class = %v, want none", reqs)
 	}
 }
 
