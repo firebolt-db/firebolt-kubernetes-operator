@@ -77,7 +77,7 @@ spec:
 
 Wake-up works only for queries sent through the Instance Gateway. Traffic that bypasses the Gateway is unsupported and cannot wake a stopped Engine because the Engine Service has no endpoints.
 
-The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine.
+The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine. A query string on that path is ignored, not routed: `/healthz`, `/healthz?`, and `/healthz?anything=value` are answered identically, and none of them registers wake demand or reaches an Engine. Any other path, including `/healthz/`, is treated as an Engine request, so one that names a stopped Engine wakes it.
 
 Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
 
