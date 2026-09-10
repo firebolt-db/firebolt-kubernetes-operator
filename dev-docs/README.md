@@ -20,6 +20,7 @@ If a development page disagrees with code or published documentation, update or 
 | --- | --- |
 | [`architecture/engine-scaling.md`](architecture/engine-scaling.md) | Blue-green scaling rationale, reconciler code map, resources, and change-impact guide |
 | [`architecture/admission-and-controller-validation.md`](architecture/admission-and-controller-validation.md) | Admission, CEL, and controller-side invariant enforcement |
+| [`architecture/engine-retirement-and-query-safety.md`](architecture/engine-retirement-and-query-safety.md) | Query-safety contract during engine retirement: guarantees, accepted limits, drain sequence, rejected alternatives |
 | [`process/release-process.md`](process/release-process.md) | Release component ownership and coupling invariants |
 | [`testing/e2e-testing.md`](testing/e2e-testing.md) | Kind-based E2E architecture, lifecycle helpers, focus, timeouts, and diagnostics |
 | [`testing/formal-verification.md`](testing/formal-verification.md) | TLA+ models, state-cover fixtures, property tests, and negative controls |
