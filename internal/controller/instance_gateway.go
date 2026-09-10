@@ -79,6 +79,16 @@ const (
 	// engines to scale back up.
 	gatewayWakeAgentDemandPort int32 = 9903
 
+	// gatewayWakeAgentRouteProbePort is the loopback port of the
+	// routing_probe listener: Envoy forwards a GET /health/ready received
+	// here to the dynamic_forward_proxy cluster at the authority the
+	// request's Host header names. The wake agent probes it before
+	// releasing a held request, so a release only happens once Envoy
+	// itself — its DNS cache, transport socket, and health view — can
+	// reach the woken engine. The agent's default probe URL
+	// (wakeagent.DefaultRouteProbeURL) is pinned to this port by a test.
+	gatewayWakeAgentRouteProbePort int32 = 9905
+
 	// Resource floor for the wake-agent sidecar. Small and flat: it holds
 	// per-engine timestamps and parked connections, nothing that scales
 	// with query volume. No CPU limit, so a burst of releases is not
@@ -1025,7 +1035,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-  clusters:
+%s  clusters:
     - name: dynamic_forward_proxy
       lb_policy: CLUSTER_PROVIDED
 %s      # Mirror the listener's per_connection_buffer_limit_bytes onto the
@@ -1229,6 +1239,7 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
 		buildWakeHoldLua(wakeEnabled),                       // Lua: wake-agent hold (empty when wake is off)
 		buildListenerDownstreamTLSTransportSocket(instance), // listener filter_chain: transport_socket (empty when gateway TLS is not ready)
 		instance.Spec.Gateway.MetricsPort,                   // stats_listener: port_value
+		buildRouteProbeListener(wakeEnabled),                // routing_probe listener (empty when wake is off)
 		buildDFPUpstreamTLSTransportSocket(instance),        // dynamic_forward_proxy cluster: transport_socket (empty when engine TLS is not ready)
 		gatewayPerConnectionBufferLimitBytes,                // dynamic_forward_proxy cluster: per_connection_buffer_limit_bytes
 		gatewayMaxConnectionsPerEngine,                      // circuit_breakers: max_connections
@@ -1736,7 +1747,9 @@ func buildWakeHoldLua(enabled bool) string {
                             -- returns immediately; for an auto-stopped one it
                             -- parks this request while the operator scales the
                             -- engine back up, then releases it once the
-                            -- engine's EndpointSlice shows a ready endpoint.
+                            -- engine's endpoints are ready AND the agent's
+                            -- probe through this Envoy answers 200 from the
+                            -- engine, still bounded by the hold timeout.
                             --
                             -- Why the agent and not Envoy alone: the engine
                             -- Service is headless, so a stopped engine's name
@@ -1814,6 +1827,67 @@ func buildWakeAgentCluster(enabled bool) string {
                       address: 127.0.0.1
                       port_value: %d
 `, gatewayWakeAgentHoldPort)
+}
+
+// buildRouteProbeListener renders the loopback listener the wake agent
+// probes before releasing a held request, or nothing when wake is disabled.
+//
+// The listener forwards GET /health/ready to the same dynamic_forward_proxy
+// cluster that carries queries, at whatever authority the probe's Host
+// header names — for the agent, the woken engine's Service hostname, i.e.
+// the exact :authority the Lua filter rewrites queries to. A 200 therefore
+// means Envoy's own DNS cache, upstream transport socket, and health-check
+// view can deliver a request to that engine right now; endpoint readiness
+// alone establishes none of those, and a request released before they catch
+// up dies as a local 503 that no retry policy can see. Loopback-bound for
+// the same reason the hold port is: reachable from inside the pod and from
+// nothing else.
+func buildRouteProbeListener(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return fmt.Sprintf(`    - name: routing_probe
+      traffic_direction: OUTBOUND
+      address:
+        socket_address:
+          address: 127.0.0.1
+          port_value: %d
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: routing_probe
+                route_config:
+                  name: routing_probe
+                  virtual_hosts:
+                    - name: routing_probe
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            path: /health/ready
+                            headers:
+                              - name: ":method"
+                                string_match:
+                                  exact: GET
+                          route:
+                            cluster: dynamic_forward_proxy
+                            # Probes are polled, so one attempt stays short:
+                            # a probe that cannot answer inside a second
+                            # fails fast and the next tick asks again.
+                            timeout: 1s
+                http_filters:
+                  - name: envoy.filters.http.dynamic_forward_proxy
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                      sub_cluster_config:
+                        # Shorter than the query listener's 5s for the same
+                        # reason as the route timeout above.
+                        cluster_init_timeout: 1s
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+`, gatewayWakeAgentRouteProbePort)
 }
 
 // wakeAgentConfig carries what effectiveGatewayPodTemplate needs in order to
@@ -2166,6 +2240,10 @@ func buildWakeAgentContainer(cfg wakeAgentConfig, envoy *corev1.Container) (*cor
 		fmt.Sprintf("--demand-port=%d", gatewayWakeAgentDemandPort),
 		fmt.Sprintf("--envoy-admin-url=http://127.0.0.1:%d", gatewayAdminPort),
 		fmt.Sprintf("--per-hold-bytes=%d", gatewayPerConnectionBufferLimitBytes),
+		// Explicit rather than left to the agent's default, so the probe
+		// target and the routing_probe listener the operator renders into
+		// envoy.yaml stay in lockstep by construction.
+		fmt.Sprintf("--route-probe-url=http://127.0.0.1:%d/health/ready", gatewayWakeAgentRouteProbePort),
 	}
 
 	env := []corev1.EnvVar{{
