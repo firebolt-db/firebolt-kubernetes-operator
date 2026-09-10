@@ -31,12 +31,17 @@ limitations under the License.
 //     parks the request.
 //  3. The operator polls /demand, sees fresh demand against an engine it
 //     knows is at zero replicas, and scales it.
-//  4. The agent's EndpointSlice watch observes endpoints appear and
-//     releases the parked request; Envoy routes it.
+//  4. The agent's EndpointSlice watch observes endpoints appear, the agent
+//     confirms through Envoy's loopback routing-probe listener that Envoy
+//     itself can reach the engine, and it releases the parked request;
+//     Envoy routes it.
 //
 // Step 4 is exact rather than approximate: the engine Service is headless
 // with PublishNotReadyAddresses false, so the endpoints the agent watches
 // are precisely the A records kube-dns will serve to Envoy's resolver.
+// Exact records still do not make a routable Envoy, though — its
+// dynamic-forward-proxy sub-cluster refreshes DNS and health state on its
+// own schedule — which is the gap the routing probe closes.
 package wakeagent
 
 import (
@@ -136,6 +141,14 @@ type Config struct {
 	FallbackCap     int
 	HoldTimeout     time.Duration
 	DemandRetention time.Duration
+
+	// RouteProbeURL is the loopback URL of Envoy's routing-probe listener,
+	// probed with the engine's authority as Host before a hold woken by
+	// endpoint readiness is released. Empty disables the probe, so a hold
+	// releases on endpoint readiness alone; there is deliberately no
+	// default here, because defaulting an explicitly emptied value would
+	// remove that escape hatch.
+	RouteProbeURL string
 }
 
 func (c *Config) applyDefaults() {
@@ -162,6 +175,7 @@ type Agent struct {
 	demand    *demandTracker
 	readiness *readinessTracker
 	capacity  *capacityLimiter
+	prober    *routeProber
 }
 
 // New builds an Agent with its collaborators wired but nothing started.
@@ -177,6 +191,7 @@ func New(cfg Config) *Agent {
 			cfg.FallbackCap,
 			cfg.EnvoyAdminURL,
 		),
+		prober: newRouteProber(cfg.RouteProbeURL),
 	}
 }
 
@@ -359,26 +374,59 @@ func (a *Agent) handleHold(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "engine became ready then went away", http.StatusServiceUnavailable)
 			return
 		}
+		// Ready endpoints are necessary but not sufficient: Envoy's own
+		// view of the engine (DNS cache, health checks) can lag them, and
+		// a release into that lag fails as a local 503. Hold on until
+		// Envoy itself answers for the engine, still under the same
+		// deadline the hold started with.
+		switch a.awaitRoutable(r.Context(), engine, timer.C) {
+		case routeWaitDeadline:
+			a.answerHoldDeadline(w, engine)
+			return
+		case routeWaitClientGone:
+			// Same as the client hanging up below: nothing to write.
+			return
+		case routeWaitRoutable:
+		}
+		// Deliberately no readiness re-check after a routable verdict: the
+		// probe's 200 traveled through Envoy moments ago and is the fresher
+		// fact. Endpoints vanishing after that 200 are indistinguishable from
+		// vanishing right after the release below; that failure belongs to
+		// the released query's dispatch. Re-checking here would 503 holds
+		// Envoy can demonstrably serve.
 		w.Header().Set(DecisionHeader, DecisionReleased)
 		w.WriteHeader(http.StatusOK)
 	case <-timer.C:
-		// A wake that completes exactly at the deadline can lose the race
-		// between the channel close and the timer: both arms are readable
-		// and select picks either. The engine is routable, so answer 200
-		// rather than telling the client a lie it will retry through.
-		if a.readiness.IsReady(engine) {
-			w.Header().Set(DecisionHeader, DecisionReleased)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		w.Header().Set(DecisionHeader, DecisionTimeout)
-		w.Header().Set("Retry-After", "10")
-		http.Error(w, "engine did not become ready", http.StatusServiceUnavailable)
+		a.answerHoldDeadline(w, engine)
 	case <-r.Context().Done():
 		// Client hung up. Nothing to write; the demand stamp already
 		// recorded that they asked, which is why the timestamp rather
 		// than a pending-count is what the operator reads.
 	}
+}
+
+// answerHoldDeadline writes the response for a hold whose deadline expired,
+// releasing when the engine has ready endpoints and erroring when it does
+// not.
+//
+// Two paths land here and both want exactly this decision. A wake that
+// completes at the deadline can lose the select race between the channel
+// close and the timer — both arms are readable and select picks either — and
+// the engine is reachable then, so answering 200 beats telling the client a
+// lie it will retry through. And a hold whose routability probe never saw a
+// 200 within the deadline releases into the ready endpoints anyway: the
+// probe delays a release, it never converts one into an error, so a probe
+// that cannot succeed (a misconfigured listener, an engine Envoy can never
+// reach) degrades to exactly the behavior the gateway has without it.
+func (a *Agent) answerHoldDeadline(w http.ResponseWriter, engine string) {
+	if a.readiness.IsReady(engine) {
+		w.Header().Set(DecisionHeader, DecisionReleased)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.Header().Set(DecisionHeader, DecisionTimeout)
+	w.Header().Set("Retry-After", "10")
+	http.Error(w, "engine did not become ready", http.StatusServiceUnavailable)
 }
 
 // isValidEngineName mirrors the Lua filter's is_valid_engine: a single

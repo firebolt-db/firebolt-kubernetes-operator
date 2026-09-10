@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/wakeagent"
@@ -102,6 +103,9 @@ func TestGatewayPodRendersWakeAgent(t *testing.T) {
 	}
 	if !strings.Contains(joined, fmt.Sprintf("--envoy-admin-url=http://127.0.0.1:%d", gatewayAdminPort)) {
 		t.Errorf("Args = %v, want the Envoy admin URL for the live memory reading", agent.Args)
+	}
+	if !strings.Contains(joined, fmt.Sprintf("--route-probe-url=http://127.0.0.1:%d/health/ready", gatewayWakeAgentRouteProbePort)) {
+		t.Errorf("Args = %v, want the probe URL pointing at the routing_probe listener", agent.Args)
 	}
 }
 
@@ -473,6 +477,108 @@ func TestWakeHoldTimeoutOutlastsAgent(t *testing.T) {
 	}
 }
 
+// The routability half of the release condition: a loopback listener that
+// forwards the agent's probe to the dynamic_forward_proxy cluster, so the
+// probe exercises the same DNS cache, transport socket, and health view the
+// released query will. Present exactly when the wake hold is.
+func TestEnvoyConfigRoutingProbeListener(t *testing.T) {
+	t.Parallel()
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "default"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
+		},
+	}
+	cfg := buildEnvoyConfigYAML(inst, true)
+
+	if !strings.Contains(cfg, "- name: routing_probe") {
+		t.Error("wake-enabled config has no routing_probe listener")
+	}
+	if !strings.Contains(cfg, fmt.Sprintf("port_value: %d", gatewayWakeAgentRouteProbePort)) {
+		t.Errorf("routing_probe listener does not bind port %d", gatewayWakeAgentRouteProbePort)
+	}
+	var out map[string]any
+	if err := yaml.Unmarshal([]byte(cfg), &out); err != nil {
+		t.Fatalf("wake-enabled envoy config is not valid YAML: %v\n---\n%s", err, cfg)
+	}
+	// Walk the parsed listener rather than string-matching the whole config:
+	// the admin interface is also loopback-bound, so only a per-listener
+	// assertion proves THIS listener cannot land on 0.0.0.0. With
+	// domains ["*"] over the dynamic-forward-proxy cluster, a pod-IP bind
+	// would be a Host-keyed open proxy.
+	probe := findListenerByName(t, out, "routing_probe")
+	address := dig[map[string]any](t, probe, "address", "socket_address")
+	if got := address["address"]; got != "127.0.0.1" {
+		t.Errorf("routing_probe binds %v, want 127.0.0.1", got)
+	}
+	if got := address["port_value"]; fmt.Sprintf("%v", got) != fmt.Sprintf("%d", gatewayWakeAgentRouteProbePort) {
+		t.Errorf("routing_probe port = %v, want %d", got, gatewayWakeAgentRouteProbePort)
+	}
+	routes := dig[[]any](t, probe, "filter_chains", "0", "filters", "0", "typed_config", "route_config", "virtual_hosts", "0", "routes")
+	if len(routes) != 1 {
+		t.Fatalf("routing_probe has %d routes, want exactly the probe route", len(routes))
+	}
+	route, _ := routes[0].(map[string]any)
+	if got := dig[map[string]any](t, route, "match")["path"]; got != "/health/ready" {
+		t.Errorf("routing_probe route path = %v, want /health/ready", got)
+	}
+	if got := dig[map[string]any](t, route, "route")["cluster"]; got != "dynamic_forward_proxy" {
+		t.Errorf("routing_probe route cluster = %v, want dynamic_forward_proxy; "+
+			"probing any other cluster would not observe the sub-cluster queries use", got)
+	}
+
+	disabled := buildEnvoyConfigYAML(inst, false)
+	for _, fragment := range []string{"routing_probe", fmt.Sprintf("port_value: %d", gatewayWakeAgentRouteProbePort)} {
+		if strings.Contains(disabled, fragment) {
+			t.Errorf("wake-disabled config still contains %q", fragment)
+		}
+	}
+}
+
+// The agent's default probe URL and the operator-rendered listener are two
+// halves of one loopback contract; pin them together.
+func TestWakeAgentRouteProbeURLMatchesListener(t *testing.T) {
+	t.Parallel()
+	want := fmt.Sprintf("http://127.0.0.1:%d/health/ready", gatewayWakeAgentRouteProbePort)
+	if wakeagent.DefaultRouteProbeURL != want {
+		t.Errorf("wakeagent.DefaultRouteProbeURL = %q, want %q; "+
+			"the agent would probe a port the routing_probe listener does not serve",
+			wakeagent.DefaultRouteProbeURL, want)
+	}
+}
+
+// The agent duplicates the engine query port rather than importing it, for
+// the same dependency reason as the service suffix below; pin the two
+// together so a port change cannot leave the probe authority behind.
+func TestWakeAgentEngineQueryPortMatches(t *testing.T) {
+	t.Parallel()
+	if wakeagent.EngineHTTPQueryPort != EngineHTTPQueryPort {
+		t.Errorf("wakeagent.EngineHTTPQueryPort = %d, controller.EngineHTTPQueryPort = %d; "+
+			"the probe would key a different DFP sub-cluster than queries use",
+			wakeagent.EngineHTTPQueryPort, EngineHTTPQueryPort)
+	}
+}
+
+// The probe only observes the right sub-cluster if its Host is byte-for-byte
+// the :authority the Lua filter rewrites queries to. Pin the agent's
+// authority construction against the rendered rewrite.
+func TestWakeAgentAuthorityMatchesLuaRewrite(t *testing.T) {
+	t.Parallel()
+	inst := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "fb", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			Gateway: computev1alpha1.GatewaySpec{MetricsPort: 9090},
+		},
+	}
+	cfg := buildEnvoyConfigYAML(inst, true)
+
+	suffix := strings.TrimPrefix(wakeagent.EngineAuthority("e", "ns-1"), "e")
+	want := `headers:replace(":authority", engine .. "` + suffix + `")`
+	if !strings.Contains(cfg, want) {
+		t.Errorf("rendered config does not rewrite :authority to the agent's probe authority; want %q", want)
+	}
+}
+
 // The agent duplicates the service suffix rather than importing it, to keep
 // controller-runtime out of the sidecar's dependency graph. Pin the two
 // together so the duplication cannot silently drift.
@@ -519,4 +625,49 @@ func TestEnvoyConfigSetsStreamIdleTimeout(t *testing.T) {
 	if got := buildEnvoyConfigYAML(inst, true); !strings.Contains(got, want) {
 		t.Errorf("rendered config missing %q", want)
 	}
+}
+
+// findListenerByName walks static_resources.listeners of a parsed envoy
+// config and fails the test when the named listener is absent.
+func findListenerByName(t *testing.T, cfg map[string]any, name string) map[string]any {
+	t.Helper()
+	listeners := dig[[]any](t, cfg, "static_resources", "listeners")
+	for _, item := range listeners {
+		l, _ := item.(map[string]any)
+		if l["name"] == name {
+			return l
+		}
+	}
+	t.Fatalf("listener %q not found", name)
+	return nil
+}
+
+// dig walks nested maps and slices by key (numeric strings index slices) and
+// fails the test on the first missing step, naming the path walked so far.
+func dig[T any](t *testing.T, node any, path ...string) T {
+	t.Helper()
+	current := node
+	for i, step := range path {
+		switch typed := current.(type) {
+		case map[string]any:
+			next, ok := typed[step]
+			if !ok {
+				t.Fatalf("missing %q at %v", step, path[:i+1])
+			}
+			current = next
+		case []any:
+			index := 0
+			if _, err := fmt.Sscanf(step, "%d", &index); err != nil || index >= len(typed) {
+				t.Fatalf("bad index %q at %v", step, path[:i+1])
+			}
+			current = typed[index]
+		default:
+			t.Fatalf("cannot descend into %T at %v", current, path[:i+1])
+		}
+	}
+	out, ok := current.(T)
+	if !ok {
+		t.Fatalf("value at %v is %T", path, current)
+	}
+	return out
 }

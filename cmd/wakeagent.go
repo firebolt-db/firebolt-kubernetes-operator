@@ -59,6 +59,7 @@ func runWakeAgent(args []string) error {
 		fallbackCap     int
 		holdTimeout     time.Duration
 		demandRetention time.Duration
+		routeProbeURL   string
 	)
 
 	fs.StringVar(&namespace, "namespace", os.Getenv("POD_NAMESPACE"),
@@ -83,6 +84,10 @@ func runWakeAgent(args []string) error {
 		"How long a request is held before the agent gives up and returns 503.")
 	fs.DurationVar(&demandRetention, "demand-retention", wakeagent.DefaultDemandRetention,
 		"How long an engine's demand stamp survives without being refreshed.")
+	fs.StringVar(&routeProbeURL, "route-probe-url", wakeagent.DefaultRouteProbeURL,
+		"URL of Envoy's loopback routing-probe listener, probed with the engine's "+
+			"authority as Host before a held request is released. Set to an empty string "+
+			"to skip the probe and release held requests on endpoint readiness alone.")
 
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(fs)
@@ -116,6 +121,7 @@ func runWakeAgent(args []string) error {
 		FallbackCap:           fallbackCap,
 		HoldTimeout:           holdTimeout,
 		DemandRetention:       demandRetention,
+		RouteProbeURL:         routeProbeURL,
 	})
 
 	return agent.Run(ctrl.SetupSignalHandler())
