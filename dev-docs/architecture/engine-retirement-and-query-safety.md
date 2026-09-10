@@ -12,7 +12,7 @@ This page describes the behavior when an Engine generation is terminated, which 
 
 - A query running longer than the termination budget is interrupted when its Pod is deleted.
 - Involuntary disruption — OOM kill, node loss, forced deletion — fails in-flight queries to the client. They are not replayed; guarantee 1 outranks availability.
-- For one to two seconds after SIGTERM, new queries can still reach the draining Engine. They cost one internal reject-and-retry hop, nothing more.
+- For one to two seconds after SIGTERM, new queries can still reach the draining Engine. They cost one internal reject-and-retry hop.
 
 ## The retirement sequence
 
