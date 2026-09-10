@@ -97,9 +97,24 @@ const (
 	gatewayWakeAgentMemoryRequest = "32Mi"
 	gatewayWakeAgentMemoryLimit   = "128Mi"
 
-	// gatewayWakeAgentDrainSeconds keeps the agent alive past Envoy's own
-	// 8-second preStop drain so held requests are not reset on rollout.
-	gatewayWakeAgentDrainSeconds int64 = 12
+	// gatewayTerminationGraceSeconds bounds the whole gateway Pod teardown,
+	// including Envoy's preStop drain. Single source: the Pod spec and the
+	// wake-agent's preStop sleep both derive from it.
+	gatewayTerminationGraceSeconds int64 = 15
+
+	// gatewayWakeAgentDrainSeconds keeps the agent alive while Envoy's
+	// preStop drains connections so held requests are not reset on rollout.
+	// Envoy's drain may run up to the Pod termination grace period, so the
+	// agent sleeps that same bound and both containers fall to kubelet
+	// teardown together.
+	gatewayWakeAgentDrainSeconds = gatewayTerminationGraceSeconds
+
+	// gatewayQueryListenerName and gatewayQueryStatPrefix name the public
+	// query listener in the rendered envoy.yaml. The preStop script keys its
+	// admission-close and drain checks on both (see gatewayPreStopScript);
+	// the render test pins template and script together so they cannot drift.
+	gatewayQueryListenerName = "listener"
+	gatewayQueryStatPrefix   = "gateway"
 
 	// gatewayStreamIdleTimeoutSeconds is Envoy's own HCM default, stated
 	// explicitly so the wake hold's dependency on it is visible. Must stay
@@ -713,6 +728,10 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: listener
+      # INBOUND is load-bearing: preStop's inboundonly drain stops exactly the
+      # INBOUND listeners, closing query admission while every other listener
+      # keeps serving.
+      traffic_direction: INBOUND
       # per_connection_buffer_limit_bytes caps both downstream-receive and
       # upstream-send buffering on this listener, AND it is the budget the
       # router uses when deciding whether to BUFFER a request for retry.
@@ -999,6 +1018,9 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                                     "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
                               host_selection_retry_max_attempts: 5
 %s    - name: stats_listener
+      # Never INBOUND: the preStop drain must not stop this listener, or the
+      # kubelet's probes and metric scrapes would go dark mid-drain.
+      traffic_direction: OUTBOUND
       address:
         socket_address:
           address: 0.0.0.0
@@ -1267,6 +1289,9 @@ func buildFailClosedEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance) 
 	return fmt.Sprintf(`static_resources:
   listeners:
     - name: stats_listener
+      # Never INBOUND: the preStop drain must not stop this listener, or the
+      # kubelet's probes and metric scrapes would go dark mid-drain.
+      traffic_direction: OUTBOUND
       address:
         socket_address:
           address: 0.0.0.0
@@ -1943,20 +1968,8 @@ func effectiveGatewayPodTemplate(
 	image := envoyImageFromUser(userPrimary)
 	pullPolicy := envoyImagePullPolicy(userPrimary, image)
 
-	var gracePeriod int64 = 15
+	gracePeriod := gatewayTerminationGraceSeconds
 	var runAsUser int64 = 101 // Envoy default UID
-
-	// preStopScript uses bash's /dev/tcp pseudo-device to POST to Envoy's
-	// admin API without requiring curl/wget in the image. The POST flips
-	// the envoy.filters.http.health_check filter (pass_through_mode=false
-	// in the gateway envoy.yaml) to return 503 on /healthz, which is what
-	// the kubelet readiness probe hits.
-	preStopScript := fmt.Sprintf(`exec 3<>/dev/tcp/127.0.0.1/%d
-printf 'POST /healthcheck/fail HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3
-cat <&3 >/dev/null
-exec 3<&- 3>&-
-sleep 8
-`, gatewayAdminPort)
 
 	// Both probes hit /healthz on the metrics port, NOT the client-facing
 	// port. Two independent reasons force this:
@@ -1983,7 +1996,9 @@ sleep 8
 		Name:            computev1alpha1.GatewayContainerName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
-		Args:            []string{"envoy", "-c", "/etc/envoy/envoy.yaml"},
+		// Drain flags let preStop's graceful /drain_listeners close each kept-alive connection
+		// as soon as its in-flight work finishes, instead of over the default 600s window.
+		Args: []string{"envoy", "-c", "/etc/envoy/envoy.yaml", "--drain-time-s", "0", "--drain-strategy", "immediate"},
 		Ports: []corev1.ContainerPort{
 			{Name: "http", ContainerPort: gatewayContainerPort, Protocol: corev1.ProtocolTCP},
 			{Name: "metrics", ContainerPort: gatewayMetricsPort(&instance.Spec.Gateway), Protocol: corev1.ProtocolTCP},
@@ -1991,7 +2006,7 @@ sleep 8
 		Lifecycle: &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"bash", "-c", preStopScript},
+					Command: []string{"bash", "-c", gatewayPreStopScript(gatewayAdminPort)},
 				},
 			},
 		},
