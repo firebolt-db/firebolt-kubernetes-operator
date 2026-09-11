@@ -407,54 +407,73 @@ jobs:
         run: |
           APP_VERSION="$(tr -d '[:space:]' < version.txt)"
           APP_VERSION_TAG="v${APP_VERSION}"
-
-          yq -i ".appVersion = \"${APP_VERSION_TAG}\"" helm/firebolt-operator/Chart.yaml
-
-          make helm-docs
+          PUSH_URL="https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add helm/firebolt-operator/Chart.yaml \
-                  helm/firebolt-operator/README.md
 
-          if git diff --staged --quiet; then
-            echo "Chart appVersion already ${APP_VERSION_TAG}; nothing to commit."
-            COMMITTED=false
-          else
-            git commit -m "chore(deps): set chart appVersion to ${APP_VERSION_TAG}"
-            PUSH_URL="https://x-access-token:${GH_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            COMMITTED=true
+          # Rewrite appVersion and the generated README on the current checkout
+          # and stage them. Returns non-zero when the tree already had this
+          # appVersion, i.e. there is nothing to commit.
+          apply_sync() {
+            yq -i ".appVersion = \"${APP_VERSION_TAG}\"" helm/firebolt-operator/Chart.yaml
+            make helm-docs
+            git add helm/firebolt-operator/Chart.yaml \
+                    helm/firebolt-operator/README.md
+            ! git diff --staged --quiet
+          }
 
-            for attempt in 1 2 3; do
-              if git push "$PUSH_URL" HEAD:main; then
-                break
-              fi
-
-              if [ "$attempt" -eq 3 ]; then
-                echo "Failed to push chart appVersion commit after ${attempt} attempts." 1>&2
-                exit 1
-              fi
-
+          # The edit is "set one key". When the push is rejected because main
+          # moved, regenerate the edit on main's new tip instead of rebasing the
+          # commit: a chart release landing in the same window touches the
+          # neighbouring `version:` line of Chart.yaml, and a textual rebase
+          # conflicts on that hunk (this is how the 0.17.0 sync was lost, see
+          # FB-4073). Re-applying can never conflict, and if the new tip already
+          # carries this appVersion the diff is empty and we stop cleanly.
+          OUTCOME=""
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ]; then
               git fetch "$PUSH_URL" main
-              if ! git rebase FETCH_HEAD; then
-                git rebase --abort || true
-                echo "Failed to rebase chart appVersion commit onto latest main." 1>&2
-                exit 1
-              fi
-            done
-          fi
+              git checkout -q --detach FETCH_HEAD
+            fi
+
+            if ! apply_sync; then
+              OUTCOME="already"
+              break
+            fi
+            git commit -q -m "chore(deps): set chart appVersion to ${APP_VERSION_TAG}"
+
+            if git push "$PUSH_URL" HEAD:main; then
+              OUTCOME="committed"
+              break
+            fi
+            echo "Push rejected on attempt ${attempt}: main moved; re-applying on its tip." 1>&2
+          done
 
           {
             echo "### Chart appVersion sync :link:"
             echo ""
-            if [ "$COMMITTED" = "true" ]; then
-              echo "Committed \`chore(deps): set chart appVersion to ${APP_VERSION_TAG}\` to \`main\`."
-              echo "release-please will open the \`firebolt-operator\` chart release PR that bumps its \`version\`;"
-              echo "merging it publishes the chart (\`release-helm-standalone\`)."
-            else
-              echo "Chart \`appVersion\` was already \`${APP_VERSION_TAG}\`; no chart release needed."
-            fi
+            case "$OUTCOME" in
+              committed)
+                echo "Committed \`chore(deps): set chart appVersion to ${APP_VERSION_TAG}\` to \`main\`."
+                echo "release-please will open the \`firebolt-operator\` chart release PR that bumps its \`version\`;"
+                echo "merging it publishes the chart (\`release-helm-standalone\`)."
+                ;;
+              already)
+                echo "Chart \`appVersion\` was already \`${APP_VERSION_TAG}\`; no chart release needed."
+                ;;
+              *)
+                echo ":x: **Failed to push the chart appVersion commit after 3 attempts.**"
+                echo "The published chart still ships the previous operator. Re-run this job, or set"
+                echo "\`appVersion: ${APP_VERSION_TAG}\` in \`helm/firebolt-operator/Chart.yaml\` by hand."
+                ;;
+            esac
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$OUTCOME" ]; then
+            echo "Failed to push chart appVersion commit after 3 attempts." 1>&2
+            exit 1
+          fi
 
   release-helm-standalone:
     needs:
