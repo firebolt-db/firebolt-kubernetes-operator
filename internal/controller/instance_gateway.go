@@ -147,9 +147,9 @@ const (
 	//      replay a request whose full body fits in this buffer. The
 	//      X-Firebolt-Drained retry rule (see retry_policy below) and the
 	//      transport-failure retries (`connect-failure`, `refused-stream`,
-	//      `reset`) ALL share this constraint. A request body larger than
-	//      this limit is dispatched without buffering and any 5xx it
-	//      receives — including a retry-safe shutdown-fence 503 —
+	//      `reset-before-request`) ALL share this constraint. A request
+	//      body larger than this limit is dispatched without buffering and
+	//      any 5xx it receives — including a retry-safe shutdown-fence 503 —
 	//      propagates to the client unretried, breaking the zero-downtime
 	//      contract for that request. The chosen 2 MiB covers typical
 	//      Firebolt SQL plus modest COPY ingest with headroom; jobs that
@@ -993,10 +993,20 @@ func buildEnvoyConfigYAML(instance *computev1alpha1.FireboltInstance, wakeEnable
                             # "gateway-error" here: those match 5xx responses
                             # RETURNED BY THE ENGINE, which may have already
                             # executed side effects (e.g. a DML statement that
-                            # partially mutated state). "5xx" returned by
-                            # Envoy itself (flags=UF/URX, zero upstream bytes)
-                            # falls under connect-failure/reset and is already
-                            # covered.
+                            # partially mutated state).
+                            #
+                            # Nor do we list "reset". A 503 that Envoy itself
+                            # synthesizes for a stream reset AFTER the request
+                            # was sent ("upstream connect error or
+                            # disconnect/reset before headers", flags=UC/UR)
+                            # is intentionally NOT retried: the engine may
+                            # have received the request and started executing
+                            # it. Of Envoy's own local replies only the
+                            # connect-phase ones (flags=UF, zero bytes sent
+                            # upstream) are retried, via connect-failure
+                            # above. Do not add "reset" back to make such
+                            # 503s disappear - it would replay delivered
+                            # requests.
                             #
                             # num_retries is set well above the steady-state
                             # replica count of any one engine. Combined with
