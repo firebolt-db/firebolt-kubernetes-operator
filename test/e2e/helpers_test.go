@@ -1898,17 +1898,33 @@ func execCurlQueryWithDeadline(
 	// local reply ("no healthy upstream", "upstream connect error or
 	// disconnect/reset before headers") identifies itself. Transient 5xx
 	// diagnosis during blue-green depends on seeing it.
-	if m := regexp.MustCompile(`code=(\d{3})`).FindStringSubmatch(stderrBuf.String()); m != nil {
-		if code, convErr := strconv.Atoi(m[1]); convErr == nil && code >= 400 {
-			body := strings.Join(strings.Fields(stdoutBuf.String()), " ")
-			if len(body) > 200 {
-				body = body[:200]
-			}
-			return "", fmt.Errorf("HTTP %d: %s | body: %s",
-				code, strings.TrimSpace(stderrBuf.String()), body)
-		}
+	//
+	// This makes the -w line the ONLY HTTP-error detector, so its absence
+	// must fail closed: if the kubectl exec stream mangled stderr and the
+	// timings line never arrived, treating the run as a success would let a
+	// 503 body pass as a query result and silence the zero-failure specs.
+	stderr := strings.TrimSpace(stderrBuf.String())
+	m := regexp.MustCompile(`timings: code=(\d{3})`).FindStringSubmatch(stderr)
+	if m == nil {
+		return "", fmt.Errorf("curl exited 0 but no timings line on stderr; stderr: %q | body: %s",
+			stderr, bodySnippet(stdoutBuf.String()))
+	}
+	code, _ := strconv.Atoi(m[1]) // \d{3} guarantees a parseable integer
+	if code >= 400 {
+		return "", fmt.Errorf("HTTP %d: %s | body: %s", code, stderr, bodySnippet(stdoutBuf.String()))
 	}
 	return stdoutBuf.String(), nil
+}
+
+// bodySnippet collapses a response body onto one line and truncates it so an
+// error message carries enough of an Envoy local reply to identify it without
+// dumping a whole result set.
+func bodySnippet(body string) string {
+	body = strings.Join(strings.Fields(body), " ")
+	if len(body) > 200 {
+		body = body[:200]
+	}
+	return body
 }
 
 // kubectlArgs prepends --context if KIND_CLUSTER is set.
