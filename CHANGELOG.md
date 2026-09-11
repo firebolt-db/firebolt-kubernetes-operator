@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.1...firebolt-operator-v0.17.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* **gateway:** hold admission open for endpoint propagation before the preStop drain (FB-4108) ([#254](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/254)) ([69fd8d7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/69fd8d7d370fcd8e45e6c0eeb2864459fb8f0194))
+
+
+### Dependencies
+
+* **deps:** bump github.com/onsi/gomega from 1.42.1 to 1.43.0 in the ginkgo-gomega group ([#228](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/228)) ([236a68c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/236a68cb750f6dbcfe12b8dc25f8f40c1c80cd1e))
+
 ## [0.17.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.0...firebolt-operator-v0.17.1) (2026-09-11)
 
 
