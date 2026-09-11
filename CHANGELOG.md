@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.17.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.0...firebolt-operator-v0.17.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **controller:** answer /healthz with any query string at the gateway (FB-3826) ([#223](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/223)) ([49ccd34](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/49ccd3421ec68202c1c4d821e941df0e3b331a38))
+* **gateway:** advertise ALPN on the TLS listener (FB-4003) ([#248](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/248)) ([b408ad2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/b408ad26bd891704265780d5dda0107248d181b6))
+* **gateway:** drain the query listener in preStop instead of sleeping (FB-4002) ([#247](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/247)) ([239d3df](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/239d3df1244a6ed62ff25f0b18eab5ea487729e2))
+* **gateway:** probe routability through Envoy before releasing held wake queries (FB-3986) ([#249](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/249)) ([2bfc9ec](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2bfc9ec31abf7f0be5b95013d2fb717a7a99da83))
+* **gateway:** retry only conditions that precede request delivery (FB-3097) ([#244](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/244)) ([f9b9f34](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f9b9f342a806ce6da679621f16670c82004f9c97))
+
+
+### Dependencies
+
+* **deps:** bump default engine/metadata image tags ([#251](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/251)) ([#251](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/251)) ([3df0754](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/3df075448e4f2ec42a2e5e68a72b93a1763d82f3))
+
 ## [0.17.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.16.0...firebolt-operator-v0.17.0) (2026-09-09)
 
 
