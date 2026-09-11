@@ -21,14 +21,24 @@ import (
 	"strings"
 )
 
-// gatewayPreStopScript closes public query admission before observing drained
-// connections. Returning lets kubelet send SIGTERM; a drained Envoy does not
-// exit on its own. Admin failures retain the process until the Pod deadline.
-// The image already supplies bash, cat and grep, so no extra client is needed.
+// gatewayPreStopScript fails the health check, holds admission open for
+// propagationSeconds while the Service stops routing to this Pod, then drains
+// the query listener and returns once no downstream connection is left.
+// Returning lets kubelet send SIGTERM; a drained Envoy does not exit on its
+// own. Admin failures retain the process until the Pod deadline. The image
+// already supplies bash, cat, grep and sleep, so no extra client is needed.
+//
+// The propagation floor is load-bearing: the EndpointSlice
+// controller and kube-proxy need on the order of a second to stop sending new
+// connections to a terminating Pod, and the drain below stops the INBOUND
+// listener as soon as it completes. Draining first, as an earlier version of
+// this hook did, refused or black-holed every connection that arrived in that
+// window. A Pod with no open connections would otherwise exit within
+// milliseconds of preStop starting.
 //
 // The script keys on gatewayQueryListenerName / gatewayQueryStatPrefix so it
 // cannot drift from the rendered envoy.yaml; the render test pins both.
-func gatewayPreStopScript(adminPort int32) string {
+func gatewayPreStopScript(adminPort int32, propagationSeconds int) string {
 	statGauge := fmt.Sprintf("http.%s.downstream_cx_active", gatewayQueryStatPrefix)
 	statGaugeRe := strings.ReplaceAll(statGauge, ".", "[.]")
 	return fmt.Sprintf(`set -u
@@ -44,6 +54,9 @@ admin() {
   printf '%%s\n' "$response"
 }
 until admin POST /healthcheck/fail >/dev/null; do sleep 0.1; done
+# Readiness is now failing. Keep accepting until the Service has stopped
+# routing here; only then close admission. See the propagation note above.
+sleep %[5]d
 # graceful: in-flight requests finish and their connections close right after
 # (drain-time-s is 0). The drain's completion also stops the INBOUND-marked
 # listeners, so the query socket refuses new connections while the stats
@@ -67,5 +80,5 @@ while true; do
   fi
   sleep 0.1
 done
-`, adminPort, statGaugeRe, statGauge, gatewayQueryListenerName)
+`, adminPort, statGaugeRe, statGauge, gatewayQueryListenerName, propagationSeconds)
 }

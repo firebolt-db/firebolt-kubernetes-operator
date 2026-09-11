@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func runGatewayShutdownAdminSequence(t *testing.T, steps []gatewayShutdownAdminR
 		}
 	}))
 	port := int32(server.Listener.Addr().(*net.TCPAddr).Port)
-	cmd := exec.CommandContext(ctx, bash, "-c", gatewayPreStopScript(port))
+	cmd := exec.CommandContext(ctx, bash, "-c", gatewayPreStopScript(port, 0))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Cancel the process group so a failed assertion cannot leave cat or sleep
 	// children holding the admin connection or the output pipes open.
@@ -244,7 +245,7 @@ func TestGatewayPreStopRetainsProcessWhenAdminNeverHealthy(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", "-c", gatewayPreStopScript(port))
+	cmd := exec.CommandContext(ctx, "bash", "-c", gatewayPreStopScript(port, 0))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
@@ -262,5 +263,64 @@ func TestGatewayPreStopRetainsProcessWhenAdminNeverHealthy(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("hook reported success after being killed at the deadline")
+	}
+}
+
+// The hold between failing readiness and draining is load-bearing: the
+// Service must stop routing to this Pod before admission closes,
+// or connections still arriving are refused. Pins that the drain request
+// cannot reach the admin API before the propagation floor has elapsed, and
+// that the hook still exits once the gauge reads zero.
+func TestGatewayPreStopHoldsAdmissionForPropagationFloor(t *testing.T) {
+	t.Parallel()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("gateway pre-stop protocol test requires bash")
+	}
+	const floorSeconds = 1
+
+	var mu sync.Mutex
+	var failedAt, drainedAt time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/healthcheck/fail":
+			failedAt = time.Now()
+			_, _ = fmt.Fprint(w, "OK\n")
+		case "/drain_listeners":
+			drainedAt = time.Now()
+			_, _ = fmt.Fprint(w, "OK\n")
+		case "/stats":
+			_, _ = fmt.Fprintf(w, "http.%s.downstream_cx_active: 0\n", gatewayQueryStatPrefix)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	port := int32(server.Listener.Addr().(*net.TCPAddr).Port)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bash, "-c", gatewayPreStopScript(port, floorSeconds))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("hook did not exit cleanly once the gauge read zero: %v\n%s", err, out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if failedAt.IsZero() || drainedAt.IsZero() {
+		t.Fatalf("hook skipped a step: healthcheck/fail at %v, drain at %v", failedAt, drainedAt)
+	}
+	if held := drainedAt.Sub(failedAt); held < floorSeconds*time.Second {
+		t.Fatalf("drain requested %v after readiness failed; admission must stay open for at least %ds so the Service stops routing here first", held, floorSeconds)
 	}
 }

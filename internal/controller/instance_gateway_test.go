@@ -1591,8 +1591,16 @@ func TestGatewayEnvoyPreStopDrain(t *testing.T) {
 			t.Errorf("preStop command %q does not contain %q", script, want)
 		}
 	}
-	if strings.Contains(script, "sleep 8") {
-		t.Errorf("preStop command %q uses a fixed sleep instead of observing the drain", script)
+	// Ordering is the contract: fail readiness, hold admission open
+	// for the propagation floor, then drain. Draining before the floor refuses
+	// connections the Service is still sending here.
+	floor := fmt.Sprintf("\nsleep %d\n", gatewayPreStopPropagationSeconds)
+	failAt, floorAt, drainAt := strings.Index(script, "/healthcheck/fail"), strings.Index(script, floor), strings.Index(script, "drain_listeners?inboundonly&graceful")
+	if floorAt < 0 || failAt >= floorAt || floorAt >= drainAt {
+		t.Errorf("preStop command %q must fail health, then sleep %d s, then drain (indexes fail=%d floor=%d drain=%d)", script, gatewayPreStopPropagationSeconds, failAt, floorAt, drainAt)
+	}
+	if int64(gatewayPreStopPropagationSeconds)*2 > gatewayTerminationGraceSeconds {
+		t.Errorf("propagation floor %d s leaves under half of the %d s termination grace for the drain", gatewayPreStopPropagationSeconds, gatewayTerminationGraceSeconds)
 	}
 	if strings.Contains(script, "&skip_exit") {
 		t.Error("preStop drain must not pass skip_exit: it suppresses the INBOUND listener stop")

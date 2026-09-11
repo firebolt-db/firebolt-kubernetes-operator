@@ -110,6 +110,16 @@ const (
 	// wake-agent's preStop sleep both derive from it.
 	gatewayTerminationGraceSeconds int64 = 15
 
+	// gatewayPreStopPropagationSeconds is how long the envoy preStop keeps
+	// accepting connections after failing its health check, before it drains
+	// the query listener. It covers the EndpointSlice and kube-proxy lag
+	// between a Pod entering termination and the Service ceasing to route to
+	// it; connections arriving in that lag would otherwise be refused.
+	// A few seconds is ample for that lag and leaves most of the termination
+	// grace for the drain itself. Must stay well below
+	// gatewayTerminationGraceSeconds.
+	gatewayPreStopPropagationSeconds = 5
+
 	// gatewayWakeAgentDrainSeconds keeps the agent alive while Envoy's
 	// preStop drains connections so held requests are not reset on rollout.
 	// Envoy's drain may run up to the Pod termination grace period, so the
@@ -2028,7 +2038,7 @@ func effectiveGatewayPodTemplate(
 		Lifecycle: &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"bash", "-c", gatewayPreStopScript(gatewayAdminPort)},
+					Command: []string{"bash", "-c", gatewayPreStopScript(gatewayAdminPort, gatewayPreStopPropagationSeconds)},
 				},
 			},
 		},
