@@ -53,4 +53,8 @@ During an Engine cutover or scale-down:
 
 The zero-downtime contract applies to traffic through the Gateway and to request bodies within the 2 MiB retry limit. Traffic that bypasses the Gateway is unsupported and receives none of these guarantees.
 
+## Graceful Gateway shutdown
+
+When a Gateway pod is replaced or scaled down, it fails its readiness check first and keeps accepting connections for a few seconds while the Service stops routing to it. It then stops accepting new connections, lets in-flight requests finish, and exits once no client connection remains or the 15-second termination window expires. A client connection that is idle at that point is closed by the pod's termination rather than by the drain.
+
 See [Engine rollouts](../../engine/engine-rollouts) for drain controls and [Gateway sizing](./gateway-sizing) for memory and concurrency planning.
