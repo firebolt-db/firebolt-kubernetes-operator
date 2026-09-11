@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -815,18 +816,17 @@ func TestBuildEnvoyConfigYAMLDFPNoSearchDomains(t *testing.T) {
 }
 
 // TestBuildEnvoyConfigYAMLRetryPolicy guards the retry contract:
-//   - We retry on connect-failure / refused-stream / reset (transport-level
-//     failures where the engine could not have observed the request).
+//   - We retry on connect-failure / refused-stream / reset-before-request,
+//     which establish that the engine has not processed the request.
 //   - We retry on retriable-headers, gated by present_match on
 //     X-Firebolt-Drained. The engine's shutdown fence sets that header
 //     before any executor / Storage Manager work runs, so the request is
-//     provably side-effect free; treating those 503s as retriable is the
-//     only way the gateway can return a successful response when a query
-//     lands on a pod between SIGTERM and the EndpointSlice update.
+//     safe to retry when it reaches a draining pod before discovery
+//     withdraws that pod. This does not cover ambiguous connection resets.
 //   - We do NOT retry on bare 5xx; that would risk replaying a write that
 //     the engine partially applied before failing.
-//   - previous_hosts retry-host predicate is preserved; without it the
-//     retry could land on the same draining pod and fail again.
+//   - previous_hosts is configured to prefer an untried endpoint. Host
+//     selection has a bounded attempt count and can reuse a prior endpoint.
 func TestBuildEnvoyConfigYAMLRetryPolicy(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
@@ -840,49 +840,30 @@ func TestBuildEnvoyConfigYAMLRetryPolicy(t *testing.T) {
 	retry := dfpRouteRetryPolicy(t, parsed)
 
 	retryOn, _ := retry["retry_on"].(string)
-	for _, want := range []string{"connect-failure", "refused-stream", "reset", "retriable-headers"} {
-		if !strings.Contains(retryOn, want) {
-			t.Errorf("retry_on %q is missing %q", retryOn, want)
-		}
-	}
-	for _, banned := range []string{"5xx", "gateway-error"} {
-		if strings.Contains(retryOn, banned) {
-			t.Errorf("retry_on %q must not include %q (would retry side-effecting 5xx)", retryOn, banned)
-		}
+	conditions := strings.Split(retryOn, ",")
+	slices.Sort(conditions)
+	wantConditions := []string{"connect-failure", "refused-stream", "reset-before-request", "retriable-headers"}
+	// Exact tokens exclude general reset and 5xx retries, which can replay
+	// requests the engine has already received or executed.
+	if !slices.Equal(conditions, wantConditions) {
+		t.Errorf("retry_on conditions = %q, want %q", conditions, wantConditions)
 	}
 
-	// retriable_headers must include X-Firebolt-Drained with present_match.
-	headers, ok := retry["retriable_headers"].([]any)
-	if !ok || len(headers) == 0 {
-		t.Fatalf("retriable_headers missing or not a list; got %T = %v", retry["retriable_headers"], retry["retriable_headers"])
-	}
-	foundDrained := false
-	for _, h := range headers {
-		hm, _ := h.(map[string]any)
-		if hm == nil {
-			continue
-		}
-		if name, _ := hm["name"].(string); strings.EqualFold(name, "X-Firebolt-Drained") {
-			if pm, _ := hm["present_match"].(bool); pm {
-				foundDrained = true
-			}
-		}
-	}
-	if !foundDrained {
-		t.Errorf("retriable_headers does not include X-Firebolt-Drained with present_match=true; got %v", headers)
+	// Do not allow additional header matchers or an inverted drained matcher
+	// to broaden retries to responses that may follow query execution.
+	wantHeaders := []any{map[string]any{"name": "X-Firebolt-Drained", "present_match": true}}
+	if !reflect.DeepEqual(retry["retriable_headers"], wantHeaders) {
+		t.Errorf("retriable_headers = %v, want only the pre-work drained marker", retry["retriable_headers"])
 	}
 
-	// previous_hosts predicate must be preserved.
+	// Pin the configured preference, not a promise of unique retry targets.
 	preds, _ := retry["retry_host_predicate"].([]any)
-	hasPrev := false
-	for _, p := range preds {
-		pm, _ := p.(map[string]any)
-		if name, _ := pm["name"].(string); strings.Contains(name, "previous_hosts") {
-			hasPrev = true
-		}
+	if len(preds) != 1 {
+		t.Fatalf("retry_host_predicate = %v, want only previous_hosts", preds)
 	}
-	if !hasPrev {
-		t.Error("retry_host_predicate missing previous_hosts; without it a retry can land on the same draining pod")
+	predicate, _ := preds[0].(map[string]any)
+	if predicate["name"] != "envoy.retry_host_predicates.previous_hosts" {
+		t.Errorf("retry_host_predicate name = %v, want previous_hosts", predicate["name"])
 	}
 }
 

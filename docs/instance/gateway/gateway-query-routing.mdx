@@ -37,7 +37,7 @@ Creating, scaling, or rolling an Engine does not restart the Gateway. Engine des
 
 ## Retry behavior
 
-The Gateway retries connection failures, refused streams, resets, and a shutdown response marked `X-Firebolt-Drained`. It does not retry arbitrary HTTP 5xx responses because the Engine might already have applied a request's side effects.
+The Gateway retries connection failures, refused streams, resets that occur before the request is sent, and a shutdown response marked `X-Firebolt-Drained`. It does not retry arbitrary HTTP 5xx responses because the Engine might already have applied a request's side effects.
 
 Requests with bodies up to 2 MiB can be replayed during a retry. Larger request bodies are forwarded without retry buffering, so a cutover-related failure is returned to the client. Split large ingest or multi-statement requests if they must tolerate Engine cutovers.
 

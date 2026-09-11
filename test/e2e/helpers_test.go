@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1870,7 +1871,7 @@ func execCurlQueryWithDeadline(
 		"connect=%{time_connect}s starttransfer=%{time_starttransfer}s total=%{time_total}s\n"
 
 	curlArgs := []string{
-		"-sSf",
+		"-sS",
 		"--connect-timeout", "2",
 		"--max-time", strconv.Itoa(maxTimeSeconds),
 		"-w", curlTimingFmt,
@@ -1892,7 +1893,38 @@ func execCurlQueryWithDeadline(
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("curl failed (exit %v): %s", err, strings.TrimSpace(stderrBuf.String()))
 	}
+	// HTTP errors are detected here rather than with curl -f, because -f
+	// discards the response body and the body is the only place an Envoy
+	// local reply ("no healthy upstream", "upstream connect error or
+	// disconnect/reset before headers") identifies itself. Transient 5xx
+	// diagnosis during blue-green depends on seeing it.
+	//
+	// This makes the -w line the ONLY HTTP-error detector, so its absence
+	// must fail closed: if the kubectl exec stream mangled stderr and the
+	// timings line never arrived, treating the run as a success would let a
+	// 503 body pass as a query result and silence the zero-failure specs.
+	stderr := strings.TrimSpace(stderrBuf.String())
+	m := regexp.MustCompile(`timings: code=(\d{3})`).FindStringSubmatch(stderr)
+	if m == nil {
+		return "", fmt.Errorf("curl exited 0 but no timings line on stderr; stderr: %q | body: %s",
+			stderr, bodySnippet(stdoutBuf.String()))
+	}
+	code, _ := strconv.Atoi(m[1]) // \d{3} guarantees a parseable integer
+	if code >= 400 {
+		return "", fmt.Errorf("HTTP %d: %s | body: %s", code, stderr, bodySnippet(stdoutBuf.String()))
+	}
 	return stdoutBuf.String(), nil
+}
+
+// bodySnippet collapses a response body onto one line and truncates it so an
+// error message carries enough of an Envoy local reply to identify it without
+// dumping a whole result set.
+func bodySnippet(body string) string {
+	body = strings.Join(strings.Fields(body), " ")
+	if len(body) > 200 {
+		body = body[:200]
+	}
+	return body
 }
 
 // kubectlArgs prepends --context if KIND_CLUSTER is set.
@@ -1969,6 +2001,10 @@ func ParseQueryResult(output string) (interface{}, error) {
 // categorizeQueryError extracts a short category from an error detail string.
 func categorizeQueryError(detail string) string {
 	switch {
+	case strings.Contains(detail, "no healthy upstream"):
+		return "503 no healthy upstream (envoy local reply)"
+	case strings.Contains(detail, "disconnect/reset before headers"):
+		return "503 upstream reset (envoy local reply)"
 	case strings.Contains(detail, "connection refused"):
 		return "connection refused"
 	case strings.Contains(detail, "timeout"):
