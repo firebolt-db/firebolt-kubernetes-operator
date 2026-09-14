@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.2...firebolt-operator-v0.17.3) (2026-09-14)
+
+
+### Dependencies
+
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260913062549.46f99a651d56 ([#257](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/257)) ([2864abe](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2864abeccb6e73a978495056ba7c08793b036fab))
+
 ## [0.17.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.1...firebolt-operator-v0.17.2) (2026-09-11)
 
 
