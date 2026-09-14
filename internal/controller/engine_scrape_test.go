@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,8 +44,7 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/metrics"
 )
 
-// fakeScraper drives the consumers (isPodDrained, scrapePodActiveQueries)
-// without standing up a network server.
+// fakeScraper drives the metric consumers without standing up a network server.
 type fakeScraper struct {
 	mode computev1alpha1.MetricScrapeMode
 	resp []byte
@@ -548,17 +549,57 @@ func TestIsPodDrained_FakeScraper(t *testing.T) {
 	}
 }
 
-func TestScrapePodActiveQueries_FakeScraper(t *testing.T) {
+func TestScrapePodAutoStopIdle_FakeScraper(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "engine-0", Namespace: "ns"},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.1"},
 	}
-	scraper := &fakeScraper{resp: []byte("firebolt_running_queries 4\nfirebolt_suspended_queries 1\n")}
-	n, err := scrapePodActiveQueries(context.Background(), scraper, pod)
-	if err != nil {
-		t.Fatalf("scrape: %v", err)
+
+	tests := []struct {
+		name    string
+		body    string
+		want    time.Duration
+		wantErr bool
+	}{
+		{
+			name: "fractional idle duration",
+			body: "firebolt_auto_stop_idle_seconds 12.75\n",
+			want: 12750 * time.Millisecond,
+		},
+		{
+			name: "active",
+			body: "firebolt_auto_stop_idle_seconds 0\n",
+			want: 0,
+		},
+		{name: "missing", body: "unrelated 1\n", wantErr: true},
+		{name: "negative", body: "firebolt_auto_stop_idle_seconds -1\n", wantErr: true},
+		{name: "not a number", body: "firebolt_auto_stop_idle_seconds NaN\n", wantErr: true},
+		{name: "infinite", body: "firebolt_auto_stop_idle_seconds +Inf\n", wantErr: true},
+		{name: "duration overflow", body: "firebolt_auto_stop_idle_seconds 1e20\n", wantErr: true},
 	}
-	if n != 5 {
-		t.Errorf("activeQueries: want 5 got %d", n)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := scrapePodAutoStopIdle(
+				context.Background(), &fakeScraper{resp: []byte(tt.body)}, pod)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error: want=%v got=%v", tt.wantErr, err)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got != tt.want {
+				t.Errorf("idle duration: want %v got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestMinimumIdleDuration(t *testing.T) {
+	shortest := time.Duration(math.MaxInt64)
+	for _, sample := range []time.Duration{30 * time.Second, 12 * time.Second, 20 * time.Second, 0} {
+		shortest = minimumIdleDuration(shortest, sample)
+	}
+	if shortest != 0 {
+		t.Fatalf("shortest idle duration: want 0 got %v", shortest)
 	}
 }

@@ -35,7 +35,7 @@ spec:
 | `activeReplicas` | Required when enabled | Replica count while active or scheduled. |
 | `idleReplicas` | `0` | Replica count after the idle timeout. Zero fully stops compute. |
 | `idleTimeout` | `30m` | Quiet period before scale-down. |
-| `pollInterval` | `1m` | Query-activity sampling interval. |
+| `pollInterval` | `1m` | Maximum interval between activity-metric checks. Near the idle deadline, the Firebolt Operator uses the remaining idle window with a one-second minimum delay. |
 | `schedule` | Empty | UTC windows that keep the Engine at `activeReplicas`. An end time before the start time crosses midnight. |
 
 You can place the policy on an EngineClass. If an Engine sets `spec.autoStop`, the entire Engine policy replaces the class policy; individual auto-stop fields are not merged.
@@ -44,7 +44,7 @@ When auto-stop is enabled, avoid managing `spec.replicas` with another controlle
 
 ## Scale-down behavior
 
-The Firebolt Operator treats running and suspended queries as activity. It does not scale down after a failed metrics scrape because unavailable metrics must not be interpreted as an idle Engine.
+Each Engine pod reports how long it has had no auto-stop-eligible work. The Firebolt Operator uses the shortest idle duration across the active generation, so activity on any pod blocks scale-down. It does not scale down after a failed scrape or when the metric is missing or invalid.
 
 An active schedule window keeps the Engine at `activeReplicas`. Outside schedule windows, an Engine scales to `idleReplicas` after the idle timeout.
 
@@ -52,7 +52,7 @@ Inspect the decision and timestamps in Engine status:
 
 | Field | Meaning |
 |---|---|
-| `status.lastActivityTime` | Most recent observed activity, or the first quiet observation that started the idle timer. |
+| `status.lastActivityTime` | Latest eligible activity derived from the Engine idle-duration metric. |
 | `status.lastScaledAt` | Most recent auto-stop replica change. |
 | `status.autoStopReason` | Current decision, such as `ScheduleActive`, `ActivityObserved`, `Idle`, `ScrapeFailed`, `WakeRequested`, or `Disabled`. |
 
@@ -83,11 +83,8 @@ Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Que
 
 Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
 
-## Sampling limitations
+## Poll timing
 
-Auto-stop samples activity once per `pollInterval`:
+The Engine retains a monotonic idle duration, so queries that start and finish between checks still reset the idle timer. The Firebolt Operator schedules the next check for the sooner of `pollInterval` or the remaining idle timeout, with a one-second minimum delay. Before scaling down, it scrapes again and moves the deadline when newer activity occurred.
 
-- A query shorter than the polling interval might not reset the idle timer.
-- Scale-down can occur up to one polling interval earlier than the configured `idleTimeout`.
-
-Choose a shorter polling interval when workloads consist primarily of brief queries, and account for the additional metrics traffic.
+A smaller `pollInterval` detects scrape failures and status changes sooner but does not make the idle deadline more precise.

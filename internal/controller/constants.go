@@ -224,6 +224,8 @@ const (
 	MetricRunningQueries = "firebolt_running_queries"
 	// MetricSuspendedQueries is the Prometheus metric name for suspended queries.
 	MetricSuspendedQueries = "firebolt_suspended_queries"
+	// MetricAutoStopIdleSeconds reports how long the engine pod has had no eligible query activity.
+	MetricAutoStopIdleSeconds = "firebolt_auto_stop_idle_seconds"
 
 	// ConfigMountPath is where the engine config.yaml is mounted in the container.
 	// With --server-config unset the engine falls back to <data-dir>/config.yaml,

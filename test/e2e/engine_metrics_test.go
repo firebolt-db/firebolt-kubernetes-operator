@@ -36,13 +36,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// The operator's drain and autoStop logic trusts the engine to report
-// in-flight work through firebolt_running_queries + firebolt_suspended_queries
-// on the pod metrics port (internal/controller/constants.go). Unit tests cover
-// the operator's side of that contract with faked metric bodies; this spec
-// pins the engine's side: the running+suspended sum — the exact quantity
-// isPodDrained and scrapePodActiveQueries consume — must rise while a query
-// is in flight and settle back to its baseline once the load stops.
+// The operator's drain logic trusts the engine to report in-flight work through
+// firebolt_running_queries + firebolt_suspended_queries on the pod metrics port.
+// Unit tests cover the operator's side with faked metric bodies; this spec pins
+// the engine's side: the running+suspended sum consumed by isPodDrained must
+// rise while a query is in flight and settle once the load stops.
 const (
 	engineMetricsPort = 9090
 
@@ -329,7 +327,7 @@ var _ = Describe("Firebolt Engine Metrics", func() {
 			Expect(maxObserved).To(BeNumerically(">", baseline),
 				"active queries (%s+%s) never rose above the idle baseline (%d) while queries were continuously in flight "+
 					"(compute-bound: %d completed, max %s=%d; streaming-heavy: %d completed, max %s=%d) -- "+
-					"the drain check and autoStop cannot see in-flight work.\nQuery-state gauges in the last mid-load scrape:\n%s",
+					"the drain check cannot see in-flight work.\nQuery-state gauges in the last mid-load scrape:\n%s",
 				metricRunningQueries, metricSuspendedQueries, baseline,
 				computeStats.succeeded, metricAnyStateQueries, computeStats.maxAnyState,
 				streamStats.succeeded, metricAnyStateQueries, streamStats.maxAnyState,
