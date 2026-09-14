@@ -38,6 +38,9 @@ const (
 	DefaultAutoStopIdleTimeout  = 30 * time.Minute
 	DefaultAutoStopPollInterval = 1 * time.Minute
 	DefaultAutoStopIdleReplicas = int32(0)
+	// MinimumAutoStopDeadlineRequeue prevents an untrusted idle-duration
+	// sample from forcing a hot reconcile loop near the idle deadline.
+	MinimumAutoStopDeadlineRequeue = time.Second
 	// DefaultAutoStopWakeTTL bounds how long an unrefreshed wake demand
 	// timestamp still triggers a scale-up. Generous enough to cover engine
 	// cold-start (image pull on a fresh node, blue-green creating phase)
@@ -300,8 +303,11 @@ func decideAutoStopWithEngineIdle(
 			idleTimeout = autoStop.IdleTimeout.Duration
 		}
 		remaining := idleTimeout - now.Sub(decisionStatus.LastActivityTime.Time)
-		if remaining > 0 && (decision.RequeueAfter == 0 || remaining < decision.RequeueAfter) {
-			decision.RequeueAfter = remaining
+		if remaining > 0 {
+			deadlineRequeue := max(remaining, MinimumAutoStopDeadlineRequeue)
+			if decision.RequeueAfter == 0 || deadlineRequeue < decision.RequeueAfter {
+				decision.RequeueAfter = deadlineRequeue
+			}
 		}
 	}
 

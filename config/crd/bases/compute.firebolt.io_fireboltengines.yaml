@@ -112,8 +112,8 @@ spec:
                     default: 1m
                     description: |-
                       PollInterval is the maximum interval between activity-metric scrapes. The
-                      operator schedules an additional check at the exact idle deadline when it
-                      is sooner. Defaults to 1 minute.
+                      operator schedules an additional check near the idle deadline when it is
+                      sooner, with a one-second minimum delay. Defaults to 1 minute.
                     type: string
                   schedule:
                     description: |-

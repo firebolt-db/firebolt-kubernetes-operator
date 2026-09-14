@@ -43,7 +43,7 @@
             },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check at the exact idle deadline when it\nis sooner. Defaults to 1 minute.",
+              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute.",
               "type": "string"
             },
             "schedule": {

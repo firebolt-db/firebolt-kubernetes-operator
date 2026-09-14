@@ -493,6 +493,36 @@ func TestDecideAutoStopWithEngineIdle_RequeuesAtExactDeadline(t *testing.T) {
 	}
 }
 
+func TestDecideAutoStopWithEngineIdle_ClampsDeadlineRequeue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		pollInterval time.Duration
+		want         time.Duration
+	}{
+		{name: "default poll", want: MinimumAutoStopDeadlineRequeue},
+		{name: "shorter configured poll", pollInterval: 250 * time.Millisecond, want: 250 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+			if tt.pollInterval > 0 {
+				spec.AutoStop.PollInterval = &metav1.Duration{Duration: tt.pollInterval}
+			}
+			idle := 30*time.Minute - time.Nanosecond
+			d := decideAutoStopWithEngineIdle(
+				spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{},
+				AutoStopObservation{}, &idle, fixedNow())
+
+			if d.RequeueAfter != tt.want {
+				t.Fatalf("requeue: want %v got %v", tt.want, d.RequeueAfter)
+			}
+		})
+	}
+}
+
 func TestDecideAutoStopWithEngineIdle_ScalesAtDeadline(t *testing.T) {
 	t.Parallel()
 

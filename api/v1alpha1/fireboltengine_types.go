@@ -160,8 +160,8 @@ type AutoStopSpec struct {
 	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
 
 	// PollInterval is the maximum interval between activity-metric scrapes. The
-	// operator schedules an additional check at the exact idle deadline when it
-	// is sooner. Defaults to 1 minute.
+	// operator schedules an additional check near the idle deadline when it is
+	// sooner, with a one-second minimum delay. Defaults to 1 minute.
 	// +kubebuilder:default="1m"
 	// +optional
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
