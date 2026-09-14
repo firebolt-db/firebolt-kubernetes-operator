@@ -82,6 +82,8 @@ The Firebolt Operator applies Engine changes with blue-green generations:
 
 The active generation remains available while the replacement starts. Plan cluster capacity for both generations to coexist during a rollout. See [Engine scaling](./engine/engine-scaling) and [Engine rollouts](./engine/engine-rollouts).
 
+Auto-stop reads the eligibility-filtered idle duration from every active-generation Engine pod. The shortest duration across the generation controls scale-down, so activity on any pod resets the Engine-wide idle clock. Missing or invalid metrics prevent scale-down. The Firebolt Operator schedules a check at the earliest possible idle deadline and revalidates before changing replicas, so newer activity moves the deadline without adding a polling-interval delay.
+
 ## Instance-wide security
 
 Authentication and listener TLS are configured on the Instance and apply consistently to its Engines:

@@ -443,6 +443,88 @@ func TestComputeAutoStopDecision_PollIntervalDefault(t *testing.T) {
 	}
 }
 
+func TestDecideAutoStopWithEngineIdle_RecordsShortQueryActivity(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+	stale := metav1.NewTime(fixedNow().Add(-time.Hour))
+	idle := 10 * time.Second
+	d := decideAutoStopWithEngineIdle(
+		spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{LastActivityTime: &stale},
+		AutoStopObservation{}, &idle, fixedNow())
+
+	if d.ScaleAction {
+		t.Fatal("recent engine activity must not scale down")
+	}
+	want := fixedNow().Add(-idle)
+	if d.NewLastActivityTime == nil || !d.NewLastActivityTime.Time.Equal(want) {
+		t.Fatalf("last activity: want %v got %v", want, d.NewLastActivityTime)
+	}
+}
+
+func TestDecideAutoStopWithEngineIdle_ZeroIdleUsesNow(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+	idle := time.Duration(0)
+	d := decideAutoStopWithEngineIdle(
+		spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{},
+		AutoStopObservation{}, &idle, fixedNow())
+
+	if d.ScaleAction || d.NewLastActivityTime == nil || !d.NewLastActivityTime.Time.Equal(fixedNow()) {
+		t.Fatalf("zero idle duration must refresh activity to now: %+v", d)
+	}
+}
+
+func TestDecideAutoStopWithEngineIdle_RequeuesAtExactDeadline(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+	idle := 29*time.Minute + 45*time.Second
+	d := decideAutoStopWithEngineIdle(
+		spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{},
+		AutoStopObservation{}, &idle, fixedNow())
+
+	if d.ScaleAction {
+		t.Fatal("engine is not idle for the full timeout")
+	}
+	if d.RequeueAfter != 15*time.Second {
+		t.Fatalf("requeue: want 15s got %v", d.RequeueAfter)
+	}
+}
+
+func TestDecideAutoStopWithEngineIdle_ScalesAtDeadline(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+	idle := 30 * time.Minute
+	d := decideAutoStopWithEngineIdle(
+		spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{},
+		AutoStopObservation{}, &idle, fixedNow())
+
+	if !d.ScaleAction || d.DesiredReplicas != 0 || d.Reason != AutoStopReasonIdle {
+		t.Fatalf("expected scale-down at idle deadline: %+v", d)
+	}
+}
+
+func TestDecideAutoStopWithEngineIdle_DoesNotUndoScrapeFailureGrace(t *testing.T) {
+	t.Parallel()
+
+	spec := &computev1alpha1.FireboltEngineSpec{Replicas: 3, AutoStop: enabledAutoStopSpec()}
+	grace := metav1.NewTime(fixedNow().Add(-5 * time.Minute))
+	idle := time.Hour
+	d := decideAutoStopWithEngineIdle(
+		spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{LastActivityTime: &grace},
+		AutoStopObservation{}, &idle, fixedNow())
+
+	if d.ScaleAction {
+		t.Fatal("an older engine observation must not erase scrape-failure grace")
+	}
+	if d.NewLastActivityTime != nil {
+		t.Fatalf("older observation must not move last activity backward: %v", d.NewLastActivityTime)
+	}
+}
+
 func TestScheduleActive_CrossesMidnight(t *testing.T) {
 	t.Parallel()
 

@@ -38,12 +38,12 @@
             },
             "idleTimeout": {
               "default": "30m",
-              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before it scales down to IdleReplicas. Defaults to\n30 minutes.",
+              "description": "IdleTimeout is how long the engine must report no eligible query activity\nbefore it scales down to IdleReplicas. Defaults to 30 minutes.",
               "type": "string"
             },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is how often the operator scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
+              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check at the exact idle deadline when it\nis sooner. Defaults to 1 minute.",
               "type": "string"
             },
             "schedule": {

@@ -135,15 +135,15 @@ spec:
                   idleTimeout:
                     default: 30m
                     description: |-
-                      IdleTimeout is how long the engine must observe zero in-flight and
-                      suspended queries before it scales down to IdleReplicas. Defaults to
-                      30 minutes.
+                      IdleTimeout is how long the engine must report no eligible query activity
+                      before it scales down to IdleReplicas. Defaults to 30 minutes.
                     type: string
                   pollInterval:
                     default: 1m
                     description: |-
-                      PollInterval is how often the operator scrapes engine metrics to
-                      re-evaluate idleness. Defaults to 1 minute.
+                      PollInterval is the maximum interval between activity-metric scrapes. The
+                      operator schedules an additional check at the exact idle deadline when it
+                      is sooner. Defaults to 1 minute.
                     type: string
                   schedule:
                     description: |-
