@@ -77,6 +77,17 @@ func TestParsePrometheusGaugeRejectsLabeledSeries(t *testing.T) {
 	}
 }
 
+func TestParsePrometheusValuePreservesFractions(t *testing.T) {
+	body := []byte("metric 12.75 1720000000000\n")
+	got, ok := parsePrometheusValue(body, "metric")
+	if !ok {
+		t.Fatal("expected metric to parse")
+	}
+	if got != 12.75 {
+		t.Errorf("value: want 12.75 got %v", got)
+	}
+}
+
 // TestGetTerminationGracePeriod_AlwaysDefault pins the invariant
 // that TGPS is operator-owned. Neither the engine spec nor any
 // pod template can change it — getTerminationGracePeriod always returns

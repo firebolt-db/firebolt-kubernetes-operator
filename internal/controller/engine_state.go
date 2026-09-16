@@ -532,6 +532,16 @@ func eventLastTime(ev *corev1.Event) time.Time {
 // so the drain check fails closed rather than silently matching a wrong
 // series.
 func parsePrometheusGauge(body []byte, name string) (int64, bool) {
+	v, ok := parsePrometheusValue(body, name)
+	if !ok {
+		return 0, false
+	}
+	return int64(v), true
+}
+
+// parsePrometheusValue pulls one unlabeled scalar sample from a Prometheus
+// text exposition. It accepts the optional sample timestamp form.
+func parsePrometheusValue(body []byte, name string) (float64, bool) {
 	prefix := name + " "
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -555,7 +565,7 @@ func parsePrometheusGauge(body []byte, name string) (int64, bool) {
 		if err != nil {
 			return 0, false
 		}
-		return int64(v), true
+		return v, true
 	}
 	return 0, false
 }
