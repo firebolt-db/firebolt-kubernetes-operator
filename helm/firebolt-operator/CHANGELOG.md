@@ -2,6 +2,13 @@
 
 appVersion: v0.1.1
 
+## [0.14.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.2...firebolt-operator-chart-0.14.3) (2026-09-16)
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.17.3 ([fb2c4db](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fb2c4db2e152e70d85a2ec288c6748a267037d3a))
+
 ## [0.14.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.1...firebolt-operator-chart-0.14.2) (2026-09-11)
 
 
