@@ -624,9 +624,10 @@ func scrapePodAutoStopIdle(
 	}
 
 	idleSeconds, ok := parsePrometheusValue(raw, MetricAutoStopIdleSeconds)
+	// float64 rounds MaxInt64 up to 2^63, so equality would overflow too.
 	maxSeconds := float64(math.MaxInt64) / float64(time.Second)
 	if !ok || math.IsNaN(idleSeconds) || math.IsInf(idleSeconds, 0) ||
-		idleSeconds < 0 || idleSeconds > maxSeconds {
+		idleSeconds < 0 || idleSeconds >= maxSeconds {
 		return 0, fmt.Errorf(
 			"auto-stop idle metric missing or invalid on pod %s", pod.Name)
 	}

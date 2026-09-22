@@ -576,6 +576,16 @@ func TestScrapePodAutoStopIdle_FakeScraper(t *testing.T) {
 		{name: "not a number", body: "firebolt_auto_stop_idle_seconds NaN\n", wantErr: true},
 		{name: "infinite", body: "firebolt_auto_stop_idle_seconds +Inf\n", wantErr: true},
 		{name: "duration overflow", body: "firebolt_auto_stop_idle_seconds 1e20\n", wantErr: true},
+		{
+			name:    "rounded duration boundary",
+			body:    "firebolt_auto_stop_idle_seconds 9223372036.854776\n",
+			wantErr: true,
+		},
+		{
+			name: "largest representable sample below boundary",
+			body: "firebolt_auto_stop_idle_seconds 9223372036.854774\n",
+			want: time.Duration(9223372036854774784),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
