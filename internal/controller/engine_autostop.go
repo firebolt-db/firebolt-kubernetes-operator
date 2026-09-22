@@ -140,10 +140,10 @@ type AutoStopDecision struct {
 //     a broken probe must never look like quiet enough to scale down.
 //  5. Quiet for >= IdleTimeout and replicas > IdleReplicas → scale down
 //     to IdleReplicas.
-//  6. Otherwise: no change, but anchor LastActivityTime on the first
-//     quiet observation so the idle clock starts ticking from a known
-//     point (a fresh engine gets one full IdleTimeout of grace before
-//     its first scale-down).
+//  6. Otherwise: no change. Callers without an idle-history observation get
+//     an initial LastActivityTime anchor. Production supplies the Engine's
+//     retained history through decideAutoStopWithEngineIdle before this call,
+//     or treats an unavailable sample as a scrape failure.
 func computeAutoStopDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
 	autoStop *computev1alpha1.AutoStopSpec,
@@ -440,7 +440,7 @@ type autoStopStepResult struct {
 }
 
 // runAutoStop is the runtime entry point: it scrapes the idle-duration metric,
-// invokes computeAutoStopDecision, and applies the decision to the
+// invokes decideAutoStopWithEngineIdle, and applies the decision to the
 // cluster. Returns a no-op result when autoStop is disabled or the
 // engine is mid-rollout.
 //

@@ -68,3 +68,7 @@ autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result is not a one-step
 # Loosen the cover back to a closure and this row goes green while the row above
 # stays red -- which is the point of having both.
 autostop-idle-reports-stopped.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
+# Successful quiet scrapes must retain Engine history, rather than anchoring
+# every observation at now. This proves the cover exercises the production
+# wrapper as well as the inner wake/scale decision.
+autostop-ignores-engine-idle.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor

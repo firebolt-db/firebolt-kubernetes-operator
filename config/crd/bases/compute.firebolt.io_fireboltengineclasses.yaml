@@ -120,8 +120,10 @@ spec:
                     type: integer
                   enabled:
                     default: false
-                    description: Enabled turns auto-stop on for this engine. Defaults
-                      to false.
+                    description: |-
+                      Enabled turns auto-stop on for this engine. Defaults to false.
+                      Enabling it uses the Engine's existing idle history, so an already-idle
+                      Engine can scale down on the first successful check without a fresh timeout.
                     type: boolean
                   idleReplicas:
                     default: 0

@@ -136,6 +136,8 @@ type EngineHostPathSpec struct {
 // +kubebuilder:validation:XValidation:rule="self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas : 0)",message="activeReplicas must be >= idleReplicas"
 type AutoStopSpec struct {
 	// Enabled turns auto-stop on for this engine. Defaults to false.
+	// Enabling it uses the Engine's existing idle history, so an already-idle
+	// Engine can scale down on the first successful check without a fresh timeout.
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 

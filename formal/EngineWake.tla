@@ -12,7 +12,7 @@
 \*   operator poller   - copies the agent's stamp into its own cache, filtered
 \*                       to engines at spec.replicas = 0, replacing the cache
 \*                       wholesale on every poll
-\*   engine reconciler - computeAutoStopDecision, which honours cached demand
+\*   engine reconciler - decideAutoStopWithEngineIdle, which honours cached demand
 \*                       only while it is fresh within `WakeTTL`
 \*
 \* plus an environment that owns the clock, the metric scrape, poll loss and
@@ -90,7 +90,15 @@
 \*     BEFORE the cap is consulted, which is why a shed request still registers
 \*     demand: DemandArrives stamps unconditionally and nothing here can shed.
 \*     The blue-green phase machine, which gates auto-stop to the terminal
-\*     phases, is FireboltEngine.tla's subject.
+\*     phases, is FireboltEngine.tla's subject. Exact deadline requeues have
+\*     Go unit coverage; Kubernetes timestamp serialization is outside this
+\*     bounded state model.
+\*
+\*   - A successful scrape retains the engine's last eligible activity even
+\*     when a query completed between polls. The decision uses the newer of
+\*     that observation and status.lastActivityTime, preserving scrape-failure
+\*     grace. A first successful observation needs no initialization timeout:
+\*     the engine already knows how long it has been idle.
 \*
 \*   - The three counterexample CONSTANTS below each remove one shipped guard, in
 \*     the same idiom as FireboltEngine.tla's five flags and
@@ -141,6 +149,7 @@ Activities == {"quiet", "busy", "scrapeFailed"}
 
 \* status.autoStopReason tokens this protocol can write. "Disabled" and
 \* "ScheduleActive" belong to the two branches deliberately left out of scope.
+\* "Initializing" is accepted as an initial legacy status, but never emitted.
 Reasons == {"Stopped", "WakeRequested", "ScrapeFailed", "ActivityObserved",
             "Idle", "Initializing"}
 
@@ -150,10 +159,11 @@ VARIABLES
     cache,         \* the OPERATOR's cached copy of it (NoStamp: none)
     replicas,      \* spec.replicas
     lastActivity,  \* status.lastActivityTime (NoStamp: unset)
+    engineLastActivity, \* engine history returned by a quiet scrape
     activity,      \* what the last metric scrape reported
     reason         \* status.autoStopReason, i.e. the last decision taken
 
-vars == <<now, stamp, cache, replicas, lastActivity, activity, reason>>
+vars == <<now, stamp, cache, replicas, lastActivity, engineLastActivity, activity, reason>>
 
 \* ---------------------------------------------------------------------------
 \* Derived predicates
@@ -173,7 +183,15 @@ WakeObserved == cache # NoStamp /\ (WakeIgnoresTTL \/ now - cache < WakeTTL)
 \* StoppedBeforeWake inverts that.
 WakeWins == WakeObserved /\ ~(StoppedBeforeWake /\ replicas = IdleReplicas)
 
-IdleElapsed == lastActivity # NoStamp /\ now - lastActivity >= IdleTimeout
+\* The wrapper records successful observations even when fresh wake demand
+\* wins. Parked engines are not scraped; failures only refresh the stamp when
+\* the failed-scrape branch is reached, after wake precedence.
+ObservedLastActivity ==
+    IF replicas = IdleReplicas \/ activity = "scrapeFailed" THEN NoStamp
+    ELSE IF activity = "busy" THEN now ELSE engineLastActivity
+EffectiveLastActivity ==
+    IF ObservedLastActivity > lastActivity THEN ObservedLastActivity ELSE lastActivity
+IdleElapsed == EffectiveLastActivity # NoStamp /\ now - EffectiveLastActivity >= IdleTimeout
 
 \* ---------------------------------------------------------------------------
 \* Initial state
@@ -188,6 +206,7 @@ Init ==
     /\ cache        = NoStamp
     /\ replicas     \in ReplicaLevels
     /\ lastActivity = NoStamp
+    /\ engineLastActivity = 0
     /\ activity     = "quiet"
     /\ reason       = IF replicas = IdleReplicas THEN "Stopped" ELSE "Initializing"
 
@@ -198,14 +217,18 @@ Init ==
 EnvTick ==
     /\ now < MaxTime
     /\ now' = now + 1
-    /\ UNCHANGED <<stamp, cache, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<stamp, cache, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* Only a running engine is scraped: runAutoStop skips the scrape entirely at
 \* zero replicas, so the observation stays "quiet" there.
-EnvScrapeObserves(a) ==
+\* A quiet sample may reveal activity completed between polls. The reported
+\* history is separate from the stored status stamp, including after failures.
+EnvScrapeObserves(a, last) ==
+    /\ last <= now
     /\ replicas > IdleReplicas
-    /\ activity # a
+    /\ activity # a \/ engineLastActivity # last
     /\ activity' = a
+    /\ engineLastActivity' = last
     /\ UNCHANGED <<now, stamp, cache, replicas, lastActivity, reason>>
 
 \* ---------------------------------------------------------------------------
@@ -219,14 +242,14 @@ EnvScrapeObserves(a) ==
 DemandArrives ==
     /\ stamp' = now
     /\ stamp' # stamp
-    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* The retention window elapses and the agent forgets the stamp.
 AgentPrunesDemand ==
     /\ stamp # NoStamp
     /\ now - stamp >= Retention
     /\ stamp' = NoStamp
-    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* The agent process restarts. Its demand map is entirely in memory, so the
 \* stamp goes with it. The operator's cache does NOT: it outlives the agent that
@@ -234,7 +257,7 @@ AgentPrunesDemand ==
 AgentRestarts ==
     /\ stamp # NoStamp
     /\ stamp' = NoStamp
-    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<now, cache, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* ---------------------------------------------------------------------------
 \* The operator's demand poller
@@ -249,7 +272,7 @@ PollObserves ==
                   THEN stamp
                   ELSE NoStamp
     /\ cache' # cache
-    /\ UNCHANGED <<now, stamp, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<now, stamp, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* A poll that reached no agent: listing gateway pods failed, or every scrape
 \* did. The engine's entry is missing from the fresh map, so the wholesale
@@ -259,10 +282,10 @@ PollObserves ==
 PollLosesCache ==
     /\ cache # NoStamp
     /\ cache' = NoStamp
-    /\ UNCHANGED <<now, stamp, replicas, lastActivity, activity, reason>>
+    /\ UNCHANGED <<now, stamp, replicas, lastActivity, activity, reason, engineLastActivity>>
 
 \* ---------------------------------------------------------------------------
-\* The engine reconciler: one action per arm of computeAutoStopDecision
+\* The engine reconciler: one action per decision, including retained idle history
 \* ---------------------------------------------------------------------------
 \*
 \* The arms are mutually exclusive and exhaustive, so exactly one is enabled in
@@ -278,21 +301,23 @@ ReconcileWake_ScaleUp ==
     /\ replicas # ActiveReplicas
     /\ replicas' = ActiveReplicas
     /\ reason'   = "WakeRequested"
-    /\ UNCHANGED <<now, stamp, cache, lastActivity, activity>>
+    /\ lastActivity' = EffectiveLastActivity
+    /\ UNCHANGED <<now, stamp, cache, activity, engineLastActivity>>
 
-\* Wake on an engine already at ActiveReplicas: report it, change nothing.
+\* Wake on an engine already at ActiveReplicas: retain successful idle history.
 ReconcileWake_Pinned ==
     /\ WakeWins
     /\ replicas = ActiveReplicas
     /\ reason' = "WakeRequested"
-    /\ UNCHANGED <<now, stamp, cache, replicas, lastActivity, activity>>
+    /\ lastActivity' = EffectiveLastActivity
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 \* Parked and nobody is asking: stay out of the way.
 ReconcileStopped ==
     /\ ~WakeWins
     /\ replicas = IdleReplicas
     /\ reason' = "Stopped"
-    /\ UNCHANGED <<now, stamp, cache, replicas, lastActivity, activity>>
+    /\ UNCHANGED <<now, stamp, cache, replicas, lastActivity, activity, engineLastActivity>>
 
 \* A failed scrape refreshes the idle clock exactly as observed activity does,
 \* so a scrape-failure window looks as un-idle to the next successful poll as a
@@ -303,7 +328,7 @@ ReconcileScrapeFailed ==
     /\ activity = "scrapeFailed"
     /\ lastActivity' = now
     /\ reason'       = "ScrapeFailed"
-    /\ UNCHANGED <<now, stamp, cache, replicas, activity>>
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 ReconcileActivity ==
     /\ ~WakeWins
@@ -311,18 +336,7 @@ ReconcileActivity ==
     /\ activity = "busy"
     /\ lastActivity' = now
     /\ reason'       = "ActivityObserved"
-    /\ UNCHANGED <<now, stamp, cache, replicas, activity>>
-
-\* First quiet observation on an engine with no idle anchor yet: there is
-\* nothing to measure against, so anchor and look again.
-ReconcileInitialize ==
-    /\ ~WakeWins
-    /\ replicas > IdleReplicas
-    /\ activity = "quiet"
-    /\ lastActivity = NoStamp
-    /\ lastActivity' = now
-    /\ reason'       = "Initializing"
-    /\ UNCHANGED <<now, stamp, cache, replicas, activity>>
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 \* Quiet for long enough: park the engine.
 ReconcileIdle_ScaleDown ==
@@ -332,17 +346,18 @@ ReconcileIdle_ScaleDown ==
     /\ IdleElapsed
     /\ replicas' = IdleReplicas
     /\ reason'   = "Idle"
-    /\ UNCHANGED <<now, stamp, cache, lastActivity, activity>>
+    /\ lastActivity' = EffectiveLastActivity
+    /\ UNCHANGED <<now, stamp, cache, activity, engineLastActivity>>
 
 \* Quiet, but not for long enough yet.
 ReconcileWarm ==
     /\ ~WakeWins
     /\ replicas > IdleReplicas
     /\ activity = "quiet"
-    /\ lastActivity # NoStamp
     /\ ~IdleElapsed
     /\ reason' = "ActivityObserved"
-    /\ UNCHANGED <<now, stamp, cache, replicas, lastActivity, activity>>
+    /\ lastActivity' = EffectiveLastActivity
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 \* ---------------------------------------------------------------------------
 \* Next-state relation
@@ -350,7 +365,7 @@ ReconcileWarm ==
 
 Next ==
     \/ EnvTick
-    \/ \E a \in Activities : EnvScrapeObserves(a)
+    \/ \E a \in Activities, last \in Times : EnvScrapeObserves(a, last)
     \/ DemandArrives
     \/ AgentPrunesDemand
     \/ AgentRestarts
@@ -361,7 +376,6 @@ Next ==
     \/ ReconcileStopped
     \/ ReconcileScrapeFailed
     \/ ReconcileActivity
-    \/ ReconcileInitialize
     \/ ReconcileIdle_ScaleDown
     \/ ReconcileWarm
 
@@ -374,6 +388,7 @@ TypeOK ==
     /\ stamp \in Stamps
     /\ cache \in Stamps
     /\ lastActivity \in Stamps
+    /\ engineLastActivity \in 0..now
     \* No view of the past is dated in the future: the agent stamps at `now`,
     \* the operator copies what the agent has, and the reconciler anchors the
     \* idle clock at `now`.

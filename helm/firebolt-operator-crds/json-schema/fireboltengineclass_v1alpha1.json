@@ -26,7 +26,7 @@
             },
             "enabled": {
               "default": false,
-              "description": "Enabled turns auto-stop on for this engine. Defaults to false.",
+              "description": "Enabled turns auto-stop on for this engine. Defaults to false.\nEnabling it uses the Engine's existing idle history, so an already-idle\nEngine can scale down on the first successful check without a fresh timeout.",
               "type": "boolean"
             },
             "idleReplicas": {

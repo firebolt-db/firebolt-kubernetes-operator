@@ -47,6 +47,9 @@ computePhase	internal/controller/instance_controller.go	formal/FireboltInstance.
 stepSigningKeyRotation	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
 promoteSigningKey	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
 signingKeysForRender	internal/controller/instance_auth.go	formal/SigningKeyRotation.tla	internal/controller/rotation_tla_states_data_test.go
+# The wrapper and its inner decision share the production entry-point cover.
+# Deadline requeue precision has Go unit coverage; serialization is outside the model.
+decideAutoStopWithEngineIdle	internal/controller/engine_autostop.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
 computeAutoStopDecision	internal/controller/engine_autostop.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
 pollOnce	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go
 replace	internal/controller/wake_demand.go	formal/EngineWake.tla	internal/controller/wake_tla_states_data_test.go

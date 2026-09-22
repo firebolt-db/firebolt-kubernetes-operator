@@ -48,6 +48,8 @@ Each Engine pod reports how long it has had no auto-stop-eligible work. The Fire
 
 An active schedule window keeps the Engine at `activeReplicas`. Outside schedule windows, an Engine scales to `idleReplicas` after the idle timeout.
 
+Enabling or re-enabling auto-stop uses the Engine's existing idle history. If the Engine has already been idle for `idleTimeout`, the first successful check can scale it down; enabling auto-stop does not start a fresh timeout.
+
 Inspect the decision and timestamps in Engine status:
 
 | Field | Meaning |
