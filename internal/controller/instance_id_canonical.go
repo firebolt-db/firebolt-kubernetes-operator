@@ -217,17 +217,9 @@ func resolvedMetadataImage(instance *computev1alpha1.FireboltInstance) string {
 func (r *FireboltInstanceReconciler) resolvedBoundEngineImage(
 	ctx context.Context, engine *computev1alpha1.FireboltEngine,
 ) (string, error) {
-	var classInfo *FireboltEngineClassInfo
-	if engine.Spec.EngineClassRef != nil && *engine.Spec.EngineClassRef != "" {
-		class := &computev1alpha1.FireboltEngineClass{}
-		key := client.ObjectKey{Namespace: engine.Namespace, Name: *engine.Spec.EngineClassRef}
-		if err := r.Get(ctx, key, class); err != nil {
-			if errors.IsNotFound(err) {
-				return "", fmt.Errorf("cannot resolve engine %q image: FireboltEngineClass %q not found", engine.Name, *engine.Spec.EngineClassRef)
-			}
-			return "", fmt.Errorf("getting FireboltEngineClass %q for engine %q: %w", key.Name, engine.Name, err)
-		}
-		classInfo = newFireboltEngineClassInfo(class)
+	classInfo, err := r.resolvedBoundEngineClassInfo(ctx, engine)
+	if err != nil {
+		return "", err
 	}
 
 	// Resolve the Preset through the same fail-closed path the engine
@@ -244,6 +236,38 @@ func (r *FireboltInstanceReconciler) resolvedBoundEngineImage(
 	classInfo = overlayPresetOnClass(presetInfo, classInfo)
 	image, _ := effectiveEngineImage(&engine.Spec, classInfo)
 	return image, nil
+}
+
+// resolvedBoundEngineClassInfo resolves spec.engineClassRef the way the
+// engine reconciler does: the FireboltEngineClass in the engine's
+// namespace first, then the cluster-scoped ClusterFireboltEngineClass of
+// the same name. Engines bound to the shared SKU catalog have no
+// namespaced class at all, so stopping at the first miss would report
+// ImageResolveFailed for every one of them and never lowercase the id.
+func (r *FireboltInstanceReconciler) resolvedBoundEngineClassInfo(
+	ctx context.Context, engine *computev1alpha1.FireboltEngine,
+) (*FireboltEngineClassInfo, error) {
+	if engine.Spec.EngineClassRef == nil || *engine.Spec.EngineClassRef == "" {
+		return nil, nil
+	}
+	ref := *engine.Spec.EngineClassRef
+	class := &computev1alpha1.FireboltEngineClass{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: engine.Namespace, Name: ref}, class)
+	if err == nil {
+		return newFireboltEngineClassInfo(class), nil
+	}
+	if !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("getting FireboltEngineClass %q for engine %q: %w", ref, engine.Name, err)
+	}
+	cc := &computev1alpha1.ClusterFireboltEngineClass{}
+	if err := r.Get(ctx, client.ObjectKey{Name: ref}, cc); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, fmt.Errorf("cannot resolve engine %q image: FireboltEngineClass %s/%s not found, ClusterFireboltEngineClass %s not found",
+				engine.Name, engine.Namespace, ref, ref)
+		}
+		return nil, fmt.Errorf("getting ClusterFireboltEngineClass %q for engine %q: %w", ref, engine.Name, err)
+	}
+	return newClusterFireboltEngineClassInfo(cc), nil
 }
 
 func imageMeetsCanonicalFloor(image string) bool {
