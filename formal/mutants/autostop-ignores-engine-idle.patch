@@ -1,0 +1,12 @@
+diff --git a/internal/controller/engine_autostop.go b/internal/controller/engine_autostop.go
+--- a/internal/controller/engine_autostop.go
++++ b/internal/controller/engine_autostop.go
+@@ -283,7 +283,7 @@ func decideAutoStopWithEngineIdle(
+ 	decisionStatus := *status
+ 	var observedLastActivity *metav1.Time
+ 	if idleDuration != nil {
+-		observed := now.Add(-*idleDuration)
++		observed := now
+ 		observedMeta := metav1.NewTime(observed)
+ 		if status.LastActivityTime == nil || observedMeta.After(status.LastActivityTime.Time) {
+ 			decisionStatus.LastActivityTime = &observedMeta

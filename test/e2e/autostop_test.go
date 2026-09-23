@@ -30,10 +30,9 @@ import (
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
 )
 
-// First end-to-end coverage for autoStop. Everything below rides the same
-// query-liveness scrape as the drain check (running+suspended gauges via
-// ApiserverProxy), so this spec exercises the operator's idleness signal
-// against a real engine: continuous load must pin the engine at
+// AutoStop scrapes the Engine's retained idle-duration metric via
+// ApiserverProxy. This spec exercises that signal against a real engine:
+// continuous load must pin the engine at
 // activeReplicas past the idle timeout, quiet must scale it to
 // idleReplicas=0 (phase stopped), and a stopped engine must stay stopped
 // while nothing is asking for it. Wake itself is not covered here — see the

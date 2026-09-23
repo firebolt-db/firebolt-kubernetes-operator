@@ -19,7 +19,7 @@ sidebarTitle: FireboltEngine CRD reference
 | `spec.drainCheckInterval` | No | `5s` | Poll interval for old-pod drain status. Inherited from the class when unset. |
 | `spec.storage` | No | `emptyDir` | Per-pod data volume (distinct from `customEngineConfig.storage`). One of `persistentVolumeClaim`, `emptyDir`, or `hostPath`. Unset defaults to `emptyDir`. Inherited from Preset, then the class, when this engine names no backend. Changes force a new generation. |
 | `spec.customEngineConfig` | No | - | Deep-merged into engine `config.yaml` beneath Preset and class config (engine keys win). Operator-owned paths are stripped. Changes force a new generation. |
-| `spec.autoStop` | No | disabled | When `enabled`, auto-stop owns `spec.replicas`. Inherited whole-struct from the class when unset. |
+| `spec.autoStop` | No | disabled | When `enabled`, auto-stop owns `spec.replicas` and uses existing Engine idle history; enabling it does not start a fresh timeout. Inherited whole-struct from the class when unset. |
 | `spec.metadataEndpointOverride` | No | - | Override instance-derived metadata endpoint. |
 
 ## Firebolt Operator-owned fields on engine templates

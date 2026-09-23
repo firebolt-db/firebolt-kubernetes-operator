@@ -21,20 +21,19 @@ package controller
 //
 // For every reachable state in the TLC state graph of formal/EngineWake.tla
 // (regenerated via `make formal-gen`), this test materializes the inputs
-// computeAutoStopDecision reads, runs it once, applies the decision exactly as
+// decideAutoStopWithEngineIdle reads, runs it once, applies the decision exactly as
 // runAutoStop does, and verifies the resulting state is one the model reaches
 // from the starting state in EXACTLY ONE reconciler step.
 //
 // One step is what makes this binding tight, and it is available here for a
-// reason the other three covers cannot use: computeAutoStopDecision is one call
+// reason the other three covers cannot use: decideAutoStopWithEngineIdle is one call
 // and its arms are mutually exclusive, so the model has exactly one reconciler
 // successor per state. The engine, instance and rotation covers assert
 // membership in the TRANSITIVE closure instead, because one whole reconcile pass
 // there legitimately performs several model sub-steps at once. Taking the
 // transitive set here would accept the successor's successor as well, and in this
 // model that is visible in the projection: it would pass a scale-down that
-// reported Stopped rather than Idle, and a first quiet observation that reported
-// ActivityObserved rather than Initializing.
+// reported Stopped rather than Idle.
 //
 // What this binds that the existing rapid harness
 // (engine_autostop_property_test.go) does not: that harness draws inputs
@@ -109,13 +108,15 @@ var tlaWakeReasons = map[string]string{
 	"Initializing":     AutoStopReasonInitializing,
 }
 
-// tlaWakeSim is one materialized TLA+ state: everything computeAutoStopDecision
+// tlaWakeSim is one materialized TLA+ state: everything decideAutoStopWithEngineIdle
 // reads, plus the two status fields it writes.
 type tlaWakeSim struct {
-	spec     *computev1alpha1.FireboltEngineSpec
-	autoStop *computev1alpha1.AutoStopSpec
-	status   *computev1alpha1.FireboltEngineStatus
-	obs      AutoStopObservation
+	spec       *computev1alpha1.FireboltEngineSpec
+	autoStop   *computev1alpha1.AutoStopSpec
+	status     *computev1alpha1.FireboltEngineStatus
+	obs        AutoStopObservation
+	activity   string
+	engineIdle time.Duration
 }
 
 // tlaWakeStamp converts a model age in ticks to an instant, or nil for the
@@ -171,41 +172,47 @@ func materializeTLAWakeState(t *testing.T, s tlaWakeState) *tlaWakeSim {
 
 	obs := AutoStopObservation{WakeRequestedAt: tlaWakeStamp(s.WakeAge)}
 	switch s.Activity {
-	case "quiet":
-		// Zero-valued, which is also what runAutoStop leaves the observation as
-		// for a parked engine: it does not scrape at zero replicas.
-	case "busy":
-		obs.ActiveQueries = 1
+	case "quiet", "busy":
+		// Successful scrapes enter through idleDuration, not ActiveQueries.
 	case "scrapeFailed":
-		// scrapeActiveQueries returns (0, true) on every failure path, so a
-		// failed scrape never carries a query count.
 		obs.ScrapeFailed = true
 	default:
 		t.Fatalf("unmappable model activity %q", s.Activity)
 	}
 
-	return &tlaWakeSim{spec: spec, autoStop: autoStop, status: status, obs: obs}
+	return &tlaWakeSim{
+		spec: spec, autoStop: autoStop, status: status, obs: obs,
+		activity: s.Activity, engineIdle: time.Duration(s.EngineIdleAge) * tlaWakeTick,
+	}
+}
+
+// idleDuration mirrors runAutoStop: parked engines are not scraped, failures
+// have no usable sample, and busy engines report zero idle duration. The model
+// keeps engine history separately so it can change between successful polls.
+func (m *tlaWakeSim) idleDuration() *time.Duration {
+	if m.spec.Replicas == 0 || m.obs.ScrapeFailed {
+		return nil
+	}
+	idle := m.engineIdle
+	if m.activity == "busy" {
+		idle = 0
+	}
+	return &idle
 }
 
 // project extracts the model's observable variables back out of the sim.
 func (m *tlaWakeSim) project() tlaWakeState {
-	activity := "quiet"
-	switch {
-	case m.obs.ScrapeFailed:
-		activity = "scrapeFailed"
-	case m.obs.ActiveQueries > 0:
-		activity = "busy"
-	}
 	var last *time.Time
 	if m.status.LastActivityTime != nil {
 		last = &m.status.LastActivityTime.Time
 	}
 	return tlaWakeState{
-		Replicas: int(m.spec.Replicas),
-		WakeAge:  tlaWakeAge(m.obs.WakeRequestedAt),
-		IdleAge:  tlaWakeAge(last),
-		Activity: activity,
-		Reason:   m.status.AutoStopReason,
+		Replicas:      int(m.spec.Replicas),
+		WakeAge:       tlaWakeAge(m.obs.WakeRequestedAt),
+		IdleAge:       tlaWakeAge(last),
+		EngineIdleAge: int(m.engineIdle / tlaWakeTick),
+		Activity:      m.activity,
+		Reason:        m.status.AutoStopReason,
 	}
 }
 
@@ -267,9 +274,9 @@ var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
 		if m.spec.Replicas > 0 {
 			return
 		}
-		if m.obs.ActiveQueries != 0 || m.obs.ScrapeFailed {
+		if m.activity != "quiet" || m.obs.ScrapeFailed {
 			t.Fatalf("Inv_ScrapeOnlyWhenRunning: replicas=0 but observation carries "+
-				"activeQueries=%d scrapeFailed=%t", m.obs.ActiveQueries, m.obs.ScrapeFailed)
+				"activity=%s scrapeFailed=%t", m.activity, m.obs.ScrapeFailed)
 		}
 	},
 
@@ -336,7 +343,7 @@ func TestWakeInvariantsMatchSpec(t *testing.T) {
 
 // tlaWakeExpectedCases pins the size of the state cover; see the reasoning on
 // the equivalent constant in engine_tla_state_test.go.
-const tlaWakeExpectedCases = 166
+const tlaWakeExpectedCases = 620
 
 func TestTLAWakeStateCover(t *testing.T) {
 	if len(tlaWakeStateCases) != tlaWakeExpectedCases {
@@ -346,8 +353,8 @@ func TestTLAWakeStateCover(t *testing.T) {
 	for i := range tlaWakeStateCases {
 		tc := tlaWakeStateCases[i]
 		start := tlaWakeStatePool[tc.Start]
-		name := fmt.Sprintf("case-%03d/replicas=%d/wakeAge=%d/idleAge=%d/%s/%s",
-			i, start.Replicas, start.WakeAge, start.IdleAge, start.Activity, start.Reason)
+		name := fmt.Sprintf("case-%03d/replicas=%d/wakeAge=%d/idleAge=%d/engineIdleAge=%d/%s/%s",
+			i, start.Replicas, start.WakeAge, start.IdleAge, start.EngineIdleAge, start.Activity, start.Reason)
 		t.Run(name, func(t *testing.T) {
 			m := materializeTLAWakeState(t, start)
 
@@ -358,7 +365,7 @@ func TestTLAWakeStateCover(t *testing.T) {
 			}
 			checkWakeInvariants(t, m)
 
-			m.apply(computeAutoStopDecision(m.spec, m.autoStop, m.status, m.obs, tlaWakeNow))
+			m.apply(decideAutoStopWithEngineIdle(m.spec, m.autoStop, m.status, m.obs, m.idleDuration(), tlaWakeNow))
 
 			checkWakeInvariants(t, m)
 

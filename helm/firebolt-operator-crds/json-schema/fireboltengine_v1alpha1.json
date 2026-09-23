@@ -26,7 +26,7 @@
             },
             "enabled": {
               "default": false,
-              "description": "Enabled turns auto-stop on for this engine. Defaults to false.",
+              "description": "Enabled turns auto-stop on for this engine. Defaults to false.\nEnabling it uses the Engine's existing idle history, so an already-idle\nEngine can scale down on the first successful check without a fresh timeout.",
               "type": "boolean"
             },
             "idleReplicas": {
@@ -38,12 +38,12 @@
             },
             "idleTimeout": {
               "default": "30m",
-              "description": "IdleTimeout is how long the engine must observe zero in-flight and\nsuspended queries before it scales down to IdleReplicas. Defaults to\n30 minutes.",
+              "description": "IdleTimeout is how long the engine must report no eligible query activity\nbefore it scales down to IdleReplicas. Defaults to 30 minutes.",
               "type": "string"
             },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is how often the operator scrapes engine metrics to\nre-evaluate idleness. Defaults to 1 minute.",
+              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute.",
               "type": "string"
             },
             "schedule": {
@@ -7558,7 +7558,7 @@
           "type": "integer"
         },
         "lastActivityTime": {
-          "description": "LastActivityTime is the timestamp of the most recent auto-stop\nobservation that recorded in-flight or suspended queries. The engine\nscales down once now() - LastActivityTime exceeds\nspec.autoStop.idleTimeout. Cleared when auto-stop is disabled.",
+          "description": "LastActivityTime is derived from the Engine's auto-stop idle-duration\nmetric. The engine scales down once now() - LastActivityTime reaches\nspec.autoStop.idleTimeout. Cleared when auto-stop is disabled.",
           "format": "date-time",
           "type": "string"
         },

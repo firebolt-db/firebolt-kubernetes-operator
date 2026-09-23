@@ -303,8 +303,8 @@ var tlaActionCoverageLedger = []tlaActionCoverage{
 		Spec: "EngineWake.tla",
 		Reason: "the Go side of this spec is one pure function, not a harness with " +
 			"an action vocabulary: wake_tla_state_test.go calls " +
-			"computeAutoStopDecision directly against a materialized state. Its " +
-			"eight Reconcile* disjuncts are the arms of that one function and are " +
+			"decideAutoStopWithEngineIdle against a materialized state. Its " +
+			"seven Reconcile* disjuncts are the arms of that one function and are " +
 			"covered by the state cover collectively; its environment disjuncts " +
 			"(the clock, the poller, the agent) are things no Go code in this " +
 			"package performs. Covering the action set would mean writing a rapid " +

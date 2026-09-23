@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -37,6 +38,9 @@ const (
 	DefaultAutoStopIdleTimeout  = 30 * time.Minute
 	DefaultAutoStopPollInterval = 1 * time.Minute
 	DefaultAutoStopIdleReplicas = int32(0)
+	// MinimumAutoStopDeadlineRequeue prevents an untrusted idle-duration
+	// sample from forcing a hot reconcile loop near the idle deadline.
+	MinimumAutoStopDeadlineRequeue = time.Second
 	// DefaultAutoStopWakeTTL bounds how long an unrefreshed wake demand
 	// timestamp still triggers a scale-up. Generous enough to cover engine
 	// cold-start (image pull on a fresh node, blue-green creating phase)
@@ -68,9 +72,9 @@ const (
 // cycle, sourced from a metric scrape over the active generation's pods
 // and from wake demand reported by the gateways' wake agents.
 type AutoStopObservation struct {
-	// ActiveQueries is the sum of firebolt_running_queries +
-	// firebolt_suspended_queries across the active generation. Set to 0
-	// when the engine has zero replicas (no pods to scrape).
+	// ActiveQueries is the point-in-time activity input used by the pure
+	// decision model. Production reconciliation derives activity from the
+	// Engine's retained idle-duration metric instead.
 	ActiveQueries int64
 
 	// ScrapeFailed indicates the metric scrape itself failed (network
@@ -136,10 +140,10 @@ type AutoStopDecision struct {
 //     a broken probe must never look like quiet enough to scale down.
 //  5. Quiet for >= IdleTimeout and replicas > IdleReplicas → scale down
 //     to IdleReplicas.
-//  6. Otherwise: no change, but anchor LastActivityTime on the first
-//     quiet observation so the idle clock starts ticking from a known
-//     point (a fresh engine gets one full IdleTimeout of grace before
-//     its first scale-down).
+//  6. Otherwise: no change. Callers without an idle-history observation get
+//     an initial LastActivityTime anchor. Production supplies the Engine's
+//     retained history through decideAutoStopWithEngineIdle before this call,
+//     or treats an unavailable sample as a scrape failure.
 func computeAutoStopDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
 	autoStop *computev1alpha1.AutoStopSpec,
@@ -268,6 +272,48 @@ func decisionWithScale(current, desired int32, reason string, requeue time.Durat
 	}
 }
 
+func decideAutoStopWithEngineIdle(
+	spec *computev1alpha1.FireboltEngineSpec,
+	autoStop *computev1alpha1.AutoStopSpec,
+	status *computev1alpha1.FireboltEngineStatus,
+	obs AutoStopObservation,
+	idleDuration *time.Duration,
+	now time.Time,
+) AutoStopDecision {
+	decisionStatus := *status
+	var observedLastActivity *metav1.Time
+	if idleDuration != nil {
+		observed := now.Add(-*idleDuration)
+		observedMeta := metav1.NewTime(observed)
+		if status.LastActivityTime == nil || observedMeta.After(status.LastActivityTime.Time) {
+			decisionStatus.LastActivityTime = &observedMeta
+			observedLastActivity = &observedMeta
+		}
+	}
+
+	decision := computeAutoStopDecision(spec, autoStop, &decisionStatus, obs, now)
+	if observedLastActivity != nil {
+		decision.NewLastActivityTime = observedLastActivity
+	}
+
+	if idleDuration != nil && decision.Reason == AutoStopReasonActivity &&
+		decisionStatus.LastActivityTime != nil {
+		idleTimeout := DefaultAutoStopIdleTimeout
+		if autoStop.IdleTimeout != nil && autoStop.IdleTimeout.Duration > 0 {
+			idleTimeout = autoStop.IdleTimeout.Duration
+		}
+		remaining := idleTimeout - now.Sub(decisionStatus.LastActivityTime.Time)
+		if remaining > 0 {
+			deadlineRequeue := max(remaining, MinimumAutoStopDeadlineRequeue)
+			if decision.RequeueAfter == 0 || deadlineRequeue < decision.RequeueAfter {
+				decision.RequeueAfter = deadlineRequeue
+			}
+		}
+	}
+
+	return decision
+}
+
 // scheduleActive reports whether `now` falls inside any of the configured
 // always-on windows, evaluated in UTC. An empty window list returns false.
 //
@@ -393,8 +439,8 @@ type autoStopStepResult struct {
 	RequeueAfter time.Duration
 }
 
-// runAutoStop is the runtime entry point: it scrapes activity metrics,
-// invokes computeAutoStopDecision, and applies the decision to the
+// runAutoStop is the runtime entry point: it scrapes the idle-duration metric,
+// invokes decideAutoStopWithEngineIdle, and applies the decision to the
 // cluster. Returns a no-op result when autoStop is disabled or the
 // engine is mid-rollout.
 //
@@ -446,13 +492,17 @@ func (r *FireboltEngineReconciler) runAutoStop(
 	obs := AutoStopObservation{
 		WakeRequestedAt: r.wakeDemand().LastDemand(engine.Namespace, engine.Name),
 	}
+	var idleDuration *time.Duration
 	if engine.Spec.Replicas > 0 {
-		active, failed := r.scrapeActiveQueries(ctx, engine)
-		obs.ActiveQueries = active
+		idle, failed := r.scrapeAutoStopIdle(ctx, engine)
 		obs.ScrapeFailed = failed
+		if !failed {
+			idleDuration = &idle
+		}
 	}
 
-	decision := computeAutoStopDecision(&engine.Spec, autoStop, &engine.Status, obs, time.Now())
+	decision := decideAutoStopWithEngineIdle(
+		&engine.Spec, autoStop, &engine.Status, obs, idleDuration, time.Now())
 
 	result := autoStopStepResult{
 		Decision:     decision,
@@ -502,17 +552,17 @@ func (r *FireboltEngineReconciler) runAutoStop(
 	return result, nil
 }
 
-// scrapeActiveQueries sums firebolt_running_queries + firebolt_suspended_queries
-// across the active generation's running pods. Returns (sum, scrapeFailed):
-// scrapeFailed=true means the result is unreliable and the autoStop should
-// treat this poll as "activity observed" rather than scaling down.
+// scrapeAutoStopIdle returns the shortest eligibility-filtered idle duration
+// reported by the active generation. A zero value from any pod blocks
+// scale-down, and the shortest non-zero value identifies the most recent
+// activity across the generation.
 //
 // We treat "spec.replicas > 0 but no running pods yet" as scrapeFailed for the
 // same reason: a half-rolled generation must not be misread as quiet.
-func (r *FireboltEngineReconciler) scrapeActiveQueries(
+func (r *FireboltEngineReconciler) scrapeAutoStopIdle(
 	ctx context.Context,
 	engine *computev1alpha1.FireboltEngine,
-) (int64, bool) {
+) (time.Duration, bool) {
 	log := logf.FromContext(ctx).WithValues("engine", engine.Name, "component", "autoStop")
 	if engine.Status.ActiveGeneration < 0 {
 		return 0, true
@@ -533,43 +583,53 @@ func (r *FireboltEngineReconciler) scrapeActiveQueries(
 	// Build once per poll; see checkDrainComplete for the rationale.
 	scraper := r.newPodMetricScraper(ctx, engine)
 
-	var total int64
 	sawRunning := false
+	shortestIdle := time.Duration(math.MaxInt64)
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
-		sawRunning = true
-		n, err := scrapePodActiveQueries(ctx, scraper, pod)
+		podIdle, err := scrapePodAutoStopIdle(ctx, scraper, pod)
 		if err != nil {
 			log.Info("Pod scrape failed, treating poll as activity",
 				"pod", pod.Name, "error", err.Error())
 			return 0, true
 		}
-		total += n
+		shortestIdle = minimumIdleDuration(shortestIdle, podIdle)
+		sawRunning = true
 	}
 	if !sawRunning {
 		return 0, true
 	}
-	return total, false
+	return shortestIdle, false
 }
 
-// scrapePodActiveQueries returns firebolt_running_queries +
-// firebolt_suspended_queries for a pod via the supplied scraper.
-// Mirrors isPodDrained so both probes share the same reachability and
-// transport story.
-func scrapePodActiveQueries(ctx context.Context, scraper podMetricScraper, pod *corev1.Pod) (int64, error) {
+func minimumIdleDuration(current, sample time.Duration) time.Duration {
+	if sample < current {
+		return sample
+	}
+	return current
+}
+
+func scrapePodAutoStopIdle(
+	ctx context.Context,
+	scraper podMetricScraper,
+	pod *corev1.Pod,
+) (time.Duration, error) {
 	raw, err := scraper.Scrape(ctx, pod)
 	if err != nil {
-		return 0, fmt.Errorf("scraping metrics from pod %s (mode=%s): %w", pod.Name, scraper.Mode(), err)
+		return 0, fmt.Errorf(
+			"scraping metrics from pod %s (mode=%s): %w", pod.Name, scraper.Mode(), err)
 	}
 
-	running, runningOK := parsePrometheusGauge(raw, MetricRunningQueries)
-	suspended, suspendedOK := parsePrometheusGauge(raw, MetricSuspendedQueries)
-	if !runningOK || !suspendedOK {
-		return 0, fmt.Errorf("activity metrics missing from pod %s (running=%t suspended=%t)",
-			pod.Name, runningOK, suspendedOK)
+	idleSeconds, ok := parsePrometheusValue(raw, MetricAutoStopIdleSeconds)
+	// float64 rounds MaxInt64 up to 2^63, so equality would overflow too.
+	maxSeconds := float64(math.MaxInt64) / float64(time.Second)
+	if !ok || math.IsNaN(idleSeconds) || math.IsInf(idleSeconds, 0) ||
+		idleSeconds < 0 || idleSeconds >= maxSeconds {
+		return 0, fmt.Errorf(
+			"auto-stop idle metric missing or invalid on pod %s", pod.Name)
 	}
-	return running + suspended, nil
+	return time.Duration(idleSeconds * float64(time.Second)), nil
 }

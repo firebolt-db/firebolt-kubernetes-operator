@@ -35,20 +35,20 @@ import (
 )
 
 // Continuous query load for the specs that assert the operator does NOT act on
-// a busy engine — the drain hold and the autoStop busy-hold. Both watch a signal
-// derived from the same query-liveness gauges, so both need load with no gaps in
-// it, and both were written with a load generator that could not provide that.
+// a busy engine — the drain hold and the autoStop busy-hold. Drain watches
+// point-in-time query gauges, while autoStop watches the Engine's retained idle
+// duration. Both tests still need to establish their premise that load remains
+// continuously in flight.
 //
 // The load loop runs INSIDE the client pod under a single long-lived kubectl
 // exec, and that is the entire point. Re-issuing a query from the test process
 // costs a kubectl-exec round trip — API-server SPDY handshake plus a container
 // process spawn — during which no query is running on the engine and
-// firebolt_running_queries is legitimately 0. The operator samples that gauge
-// instantaneously, so a scrape landing in one of those holes correctly concludes
-// the engine is idle: the drain releases its generation, or autoStop scales down.
-// Both specs then fail on behaviour that is correct against what the operator
-// actually observed. Two overlapping workers, which is what both specs used
-// before, only lower the odds of both being in a hole at the same instant; they
+// firebolt_running_queries is legitimately 0. A drain scrape landing in one of
+// those holes can therefore release its generation. AutoStop retains the gap in
+// its idle-duration metric and remains protected by the configured timeout, but
+// its under-load test should still exercise continuous activity. Two overlapping
+// workers only lower the odds of both being in a hole at the same instant; they
 // cannot remove them, and a contended runner widens every hole. In-pod,
 // re-issuing costs a local process spawn and loadWorkers of them overlap.
 //

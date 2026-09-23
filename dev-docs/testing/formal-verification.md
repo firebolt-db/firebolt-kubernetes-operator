@@ -11,7 +11,7 @@ The Firebolt Operator combines TLA+ model checking with generated Go state-cover
 | [`FireboltEngine.tla`](../../formal/FireboltEngine.tla) | Six-phase blue-green lifecycle, orphaned-generation keep set, and the instance / class / Preset scheduling gates | `engine_tla_states_data_test.go` |
 | [`FireboltInstance.tla`](../../formal/FireboltInstance.tla) | Component readiness rollup and Instance phase | `instance_tla_states_data_test.go` |
 | [`SigningKeyRotation.tla`](../../formal/SigningKeyRotation.tla) | Fleet-safe JWT signing-key rotation | `rotation_tla_states_data_test.go` |
-| [`EngineWake.tla`](../../formal/EngineWake.tla) | Wake demand, auto-stop ordering, and demand freshness | `wake_tla_states_data_test.go` |
+| [`EngineWake.tla`](../../formal/EngineWake.tla) | Wake demand, retained Engine idle history, auto-stop ordering, and demand freshness | `wake_tla_states_data_test.go` |
 | [`WakeAgentHold.tla`](../../formal/WakeAgentHold.tla) | Wake-agent waiter identity and release ordering | No Go binding; covered by TLC and wake-agent unit tests |
 
 The stateful pod-template merge comparator (including the FireboltEngineClass and FireboltEnginePreset overlays), drain probes and timeouts, and the Go implementation of wake-agent waiter bookkeeping are explicitly outside the current model-to-Go bindings. A Preset or class spec edit is modeled as a `specVer` increment; the fail-closed Preset gate is the `presetReady` boolean, symmetric to `classReady`. Both flags (with `instanceReady`) form `RenderGatesOpen`, which guards terminal and creating actions only. Init (`uninitialized` to `creating`) is ungated. Consult `formal/model-scope.tsv` before describing a change as model-covered.
@@ -50,6 +50,8 @@ make formal-verify
 `formal-gen` regenerates the fixtures. `formal-verify` regenerates them and fails when the committed output is stale. Do not hand-edit a generated `*_tla_states_data_test.go` file.
 
 The state-cover tests call the real compute functions from every projected reachable input state and require their outputs to remain within the model's permitted successor relation or reconciler closure, depending on the model.
+
+The wake cover calls `decideAutoStopWithEngineIdle`, the same decision entry point as `runAutoStop`. Engine idle history and the stored activity timestamp are independent inputs, so the cover checks activity between polls, immediate scale-down on a first expired observation, and preservation of scrape-failure grace. Exact deadline requeues are covered by Go unit tests; Kubernetes timestamp serialization is outside this model.
 
 ### Property-based tests
 

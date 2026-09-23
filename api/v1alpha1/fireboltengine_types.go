@@ -130,12 +130,14 @@ type EngineHostPathSpec struct {
 //
 // The engine scales up to ActiveReplicas when a Schedule window is open or a
 // wake-up is requested, and scales down to IdleReplicas after IdleTimeout with
-// no query activity. Idleness is observed via the same Prometheus gauges
-// (firebolt_running_queries + firebolt_suspended_queries) that drive the
-// blue-green drain check, so no additional probe protocol is needed.
+// no eligible query activity. Each engine pod reports its current idle
+// duration; the shortest duration across the active generation controls
+// scale-down. Missing or invalid metrics prevent scale-down.
 // +kubebuilder:validation:XValidation:rule="self.activeReplicas >= (has(self.idleReplicas) ? self.idleReplicas : 0)",message="activeReplicas must be >= idleReplicas"
 type AutoStopSpec struct {
 	// Enabled turns auto-stop on for this engine. Defaults to false.
+	// Enabling it uses the Engine's existing idle history, so an already-idle
+	// Engine can scale down on the first successful check without a fresh timeout.
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 
@@ -153,15 +155,15 @@ type AutoStopSpec struct {
 	// +optional
 	IdleReplicas *int32 `json:"idleReplicas,omitempty"`
 
-	// IdleTimeout is how long the engine must observe zero in-flight and
-	// suspended queries before it scales down to IdleReplicas. Defaults to
-	// 30 minutes.
+	// IdleTimeout is how long the engine must report no eligible query activity
+	// before it scales down to IdleReplicas. Defaults to 30 minutes.
 	// +kubebuilder:default="30m"
 	// +optional
 	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
 
-	// PollInterval is how often the operator scrapes engine metrics to
-	// re-evaluate idleness. Defaults to 1 minute.
+	// PollInterval is the maximum interval between activity-metric scrapes. The
+	// operator schedules an additional check near the idle deadline when it is
+	// sooner, with a one-second minimum delay. Defaults to 1 minute.
 	// +kubebuilder:default="1m"
 	// +optional
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
@@ -491,9 +493,8 @@ type FireboltEngineStatus struct {
 	// +optional
 	LastReconciled *metav1.Time `json:"lastReconciled,omitempty"`
 
-	// LastActivityTime is the timestamp of the most recent auto-stop
-	// observation that recorded in-flight or suspended queries. The engine
-	// scales down once now() - LastActivityTime exceeds
+	// LastActivityTime is derived from the Engine's auto-stop idle-duration
+	// metric. The engine scales down once now() - LastActivityTime reaches
 	// spec.autoStop.idleTimeout. Cleared when auto-stop is disabled.
 	// +optional
 	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
