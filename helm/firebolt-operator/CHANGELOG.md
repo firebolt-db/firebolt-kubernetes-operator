@@ -2,6 +2,20 @@
 
 appVersion: v0.1.1
 
+## [0.14.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.2...firebolt-operator-chart-0.14.3) (2026-09-25)
+
+
+### Bug Fixes
+
+* **autostop:** consume engine idle duration (FB-4043) ([#261](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/261)) ([f0ea669](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f0ea6699d31632f9fb2903613e7c01d2127331a9))
+
+
+### Dependencies
+
+* **deps:** bump the kubernetes group across 1 directory with 4 updates ([#259](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/259)) ([a2af289](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a2af289071ce4f69e19daf0f47976342724d9c56))
+* **deps:** set chart appVersion to v0.17.3 ([fb2c4db](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fb2c4db2e152e70d85a2ec288c6748a267037d3a))
+* **deps:** set chart appVersion to v0.17.4 ([a2ba532](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a2ba532b6f8b233ed5d7f712d8a14f019b589118))
+
 ## [0.14.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.1...firebolt-operator-chart-0.14.2) (2026-09-11)
 
 
