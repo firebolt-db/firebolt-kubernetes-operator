@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.0...firebolt-operator-crds-chart-0.9.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **autostop:** consume engine idle duration (FB-4043) ([#261](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/261)) ([f0ea669](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f0ea6699d31632f9fb2903613e7c01d2127331a9))
+
+
+### Dependencies
+
+* **deps:** bump the kubernetes group across 1 directory with 4 updates ([#259](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/259)) ([a2af289](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a2af289071ce4f69e19daf0f47976342724d9c56))
+
 ## [0.9.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.8.0...firebolt-operator-crds-chart-0.9.0) (2026-09-04)
 
 
