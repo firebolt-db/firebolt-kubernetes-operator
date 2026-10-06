@@ -134,6 +134,13 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		wakeFresh = referenceTime.Sub(stamp) < DefaultAutoStopWakeTTL
 	}
 
+	if rapid.Bool().Draw(t, "hasAcceptedWake") {
+		age := rapid.IntRange(0, int(2*DefaultAutoStopWakeTTL.Seconds())).Draw(t, "acceptedWakeAgeSec")
+		stamp := metav1.NewTime(referenceTime.Add(-time.Duration(age) * time.Second))
+		status.LastWakeDemandTime = &stamp
+		wakeFresh = wakeFresh || referenceTime.Sub(stamp.Time) < DefaultAutoStopWakeTTL
+	}
+
 	obs := AutoStopObservation{
 		ActiveQueries:   active,
 		ScrapeFailed:    scrapeFailed,
@@ -278,9 +285,12 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		if dec.Reason != AutoStopReasonWakeRequested {
 			t.Fatalf("fresh WakeRequestedAt, Reason = %q, want %q", dec.Reason, AutoStopReasonWakeRequested)
 		}
-		if dec.DesiredReplicas != in.activeReplicas {
-			t.Fatalf("fresh WakeRequestedAt, DesiredReplicas = %d, want %d",
-				dec.DesiredReplicas, in.activeReplicas)
+		want := in.activeReplicas
+		if in.status.LastWakeDemandTime != nil && in.spec.Replicas > 0 {
+			want = in.spec.Replicas
+		}
+		if dec.DesiredReplicas != want {
+			t.Fatalf("fresh wake, DesiredReplicas = %d, want %d", dec.DesiredReplicas, want)
 		}
 		return
 	}

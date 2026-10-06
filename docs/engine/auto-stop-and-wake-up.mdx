@@ -66,6 +66,8 @@ With Helm value `wakeAgent.enabled=true` (the default) and the Firebolt Operator
 2. The Firebolt Operator sets the Engine to `activeReplicas`.
 3. The held request proceeds after Engine endpoints become ready and the Gateway's Envoy confirms, through a local probe of the Engine's `/health/ready`, that it can route to them.
 
+After accepting wake demand, the Firebolt Operator prevents idle scale-down for five minutes from the original demand timestamp. The protection survives a Firebolt Operator restart and gives the Gateway time to hand off its held query. Repeated observations of the same demand do not extend it. Normal idle evaluation resumes when protection expires.
+
 The first query pays the full Engine cold-start time, which can take tens of seconds when images or volumes must be prepared. Set the client timeout accordingly. If the Gateway reaches its held-request capacity, additional requests receive `503` with `Retry-After` while wake-up continues.
 
 Wake-up applies to any zero-replica Engine with auto-stop enabled, including one whose replica count was set to zero manually. To keep an Engine stopped, disable auto-stop as well:

@@ -499,6 +499,13 @@ type FireboltEngineStatus struct {
 	// +optional
 	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
 
+	// LastWakeDemandTime is the accepted gateway demand timestamp. Its five-minute
+	// lifetime protects startup and query handoff from idle scale-down, including
+	// after a demand-cache eviction or operator restart. Re-observing the same
+	// timestamp does not extend protection. Cleared when auto-stop is disabled.
+	// +optional
+	LastWakeDemandTime *metav1.Time `json:"lastWakeDemandTime,omitempty"`
+
 	// LastScaledAt is the timestamp of the most recent auto-stop-driven
 	// mutation of spec.replicas. Distinguishes auto-stop scale events from
 	// user edits in audit trails.

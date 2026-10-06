@@ -763,6 +763,10 @@ func (in *FireboltEngineStatus) DeepCopyInto(out *FireboltEngineStatus) {
 		in, out := &in.LastActivityTime, &out.LastActivityTime
 		*out = (*in).DeepCopy()
 	}
+	if in.LastWakeDemandTime != nil {
+		in, out := &in.LastWakeDemandTime, &out.LastWakeDemandTime
+		*out = (*in).DeepCopy()
+	}
 	if in.LastScaledAt != nil {
 		in, out := &in.LastScaledAt, &out.LastScaledAt
 		*out = (*in).DeepCopy()

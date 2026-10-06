@@ -72,3 +72,4 @@ autostop-idle-reports-stopped.patch	TestTLAWakeStateCover	result is not a one-st
 # every observation at now. This proves the cover exercises the production
 # wrapper as well as the inner wake/scale decision.
 autostop-ignores-engine-idle.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
+autostop-forgets-accepted-wake.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor

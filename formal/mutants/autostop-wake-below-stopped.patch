@@ -1,26 +1,42 @@
 diff --git a/internal/controller/engine_autostop.go b/internal/controller/engine_autostop.go
-index 337d66a..5011833 100644
 --- a/internal/controller/engine_autostop.go
 +++ b/internal/controller/engine_autostop.go
-@@ -177,10 +177,6 @@ func computeAutoStopDecision(
+@@ -177,6 +177,19 @@
  	// either. Users who want an engine to stay down set
  	// autoStop.enabled: false, which returns at the top of this function
  	// before wake is ever consulted.
--	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
--		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
--	}
--
- 	if scheduleActive(as.Schedule, now) {
- 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
- 	}
-@@ -193,6 +189,10 @@ func computeAutoStopDecision(
- 		}
- 	}
- 
-+	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
-+		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
++
++	if scheduleActive(as.Schedule, now) {
++		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
 +	}
 +
++	if spec.Replicas == 0 {
++		return AutoStopDecision{
++			DesiredReplicas: 0,
++			Reason:          AutoStopReasonStopped,
++			RequeueAfter:    pollInterval,
++		}
++	}
++
+ 	// Accepted demand outlives the poller's cache, which deliberately drops
+ 	// running engines. Use the original stamp so a replay cannot renew the TTL.
+ 	wake := obs.WakeRequestedAt
+@@ -200,18 +213,6 @@
+ 			decision.NewLastWakeDemandTime = &stamp
+ 		}
+ 		return decision
+-	}
+-
+-	if scheduleActive(as.Schedule, now) {
+-		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
+-	}
+-
+-	if spec.Replicas == 0 {
+-		return AutoStopDecision{
+-			DesiredReplicas: 0,
+-			Reason:          AutoStopReasonStopped,
+-			RequeueAfter:    pollInterval,
+-		}
+ 	}
+ 
  	if obs.ScrapeFailed {
- 		// Refresh LastActivityTime alongside the no-scale decision: a
- 		// scrape-failure window must look just as un-idle to the next
