@@ -90,6 +90,8 @@ Accepted Gateway wake demand and its protection deadline are stored together in 
 
 Wake protection is a bounded grace period of `6 × idleTimeout` from the accepted demand timestamp, not an acknowledgement that query handoff completed. It can retain idle Engine capacity after the triggering request finishes. Active schedules still own the replica target, and activity or failed scrapes still refresh the idle clock during protection.
 
+**Known handoff race:** Auto-stop skips creation and other rollout transitions, so a request timeout or protection expiry does not cancel startup. Once the Engine becomes stable, expired protection permits idle scale-down even if a query is still waiting at the Gateway. New queries update the Gateway's demand timestamp, but the Firebolt Operator polls demand only for Engines with desired replicas zero; arrivals during startup do not continuously extend protection. Each query also has an independent Gateway hold deadline (120 seconds by default). Slow startup or delayed routing can therefore cause query failures and repeated wake/stop cycles. See [slow-start and multiple-query timelines](./engine/auto-stop-and-wake-up#known-race-slow-startup-and-delayed-query-handoff) for the ordering and limits of this bounded protection.
+
 ## Instance-wide security
 
 Authentication and listener TLS are configured on the Instance and apply consistently to its Engines:
