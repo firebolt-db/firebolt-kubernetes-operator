@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -93,6 +94,8 @@ func TestAcceptedWakeExpiresWithoutReplay(t *testing.T) {
 	engine := wakeHandoffEngine(now)
 	stamp := metav1.NewTime(now)
 	engine.Status.LastWakeDemandTime = &stamp
+	until := metav1.NewTime(stamp.Add(wakeProtectionDuration(engine.Spec.AutoStop.IdleTimeout.Duration)))
+	engine.Status.WakeProtectionUntil = &until
 	engine.Spec.Replicas = 1
 	for _, age := range []time.Duration{time.Minute, wakeProtectionDuration(25*time.Second) - time.Second} {
 		idle := time.Hour + age
@@ -128,6 +131,8 @@ func TestAcceptedWakePreservesUserResize(t *testing.T) {
 	engine := wakeHandoffEngine(now)
 	stamp := metav1.NewTime(now)
 	engine.Status.LastWakeDemandTime = &stamp
+	until := metav1.NewTime(stamp.Add(wakeProtectionDuration(engine.Spec.AutoStop.IdleTimeout.Duration)))
+	engine.Status.WakeProtectionUntil = &until
 	engine.Spec.Replicas = 3
 	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
 		AutoStopObservation{}, now.Add(time.Minute))
@@ -143,7 +148,7 @@ func TestWakeProtectionOutlastsGatewayHold(t *testing.T) {
 }
 
 func TestWakePersistenceBeforeScale(t *testing.T) {
-	for _, failure := range []string{"status", "pruned status", "conflict", "spec"} {
+	for _, failure := range []string{"status", "pruned status", "pruned deadline", "conflict", "spec"} {
 		t.Run(failure, func(t *testing.T) {
 			ctx := context.Background()
 			now := time.Now().UTC().Truncate(time.Second)
@@ -166,6 +171,9 @@ func TestWakePersistenceBeforeScale(t *testing.T) {
 						if err := c.Update(ctx, fresh); err != nil {
 							return err
 						}
+					}
+					if failure == "pruned deadline" {
+						obj.(*computev1alpha1.FireboltEngine).Status.WakeProtectionUntil = nil
 					}
 					if failure == "pruned status" {
 						obj.(*computev1alpha1.FireboltEngine).Status.LastWakeDemandTime = nil
@@ -198,13 +206,13 @@ func TestWakePersistenceBeforeScale(t *testing.T) {
 				t.Fatalf("failed acceptance changed replicas: got %d, want %d", engine.Spec.Replicas, wantReplicas)
 			}
 			if failure != "spec" {
-				if engine.Status.LastWakeDemandTime != nil {
+				if failure != "pruned deadline" && engine.Status.LastWakeDemandTime != nil {
 					t.Fatal("failed status write persisted demand")
 				}
 				return
 			}
 			// Restart after acceptance but before the replica write. No gateway cache survives.
-			if engine.Status.LastWakeDemandTime == nil {
+			if engine.Status.LastWakeDemandTime == nil || engine.Status.WakeProtectionUntil == nil {
 				t.Fatal("spec failure lost accepted demand")
 			}
 			restarted := &FireboltEngineReconciler{Client: base, Scheme: scheme, MetricsRecorder: metrics.NoOpEngineRecorder{}}
@@ -238,6 +246,8 @@ func TestAcceptedWakeHonorsSchedule(t *testing.T) {
 	engine.Spec.Replicas = 1
 	stamp := metav1.NewTime(now)
 	engine.Status.LastWakeDemandTime = &stamp
+	until := metav1.NewTime(stamp.Add(wakeProtectionDuration(engine.Spec.AutoStop.IdleTimeout.Duration)))
+	engine.Status.WakeProtectionUntil = &until
 	engine.Spec.AutoStop.ActiveReplicas = 3
 	engine.Spec.AutoStop.Schedule = scheduleWindowCovering(now)
 	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status, AutoStopObservation{}, now.Add(time.Minute))
@@ -254,6 +264,8 @@ func TestAcceptedWakeRetainsActivityGrace(t *testing.T) {
 			engine.Spec.Replicas = 1
 			stamp := metav1.NewTime(now)
 			engine.Status.LastWakeDemandTime = &stamp
+			until := metav1.NewTime(stamp.Add(wakeProtectionDuration(engine.Spec.AutoStop.IdleTimeout.Duration)))
+			engine.Status.WakeProtectionUntil = &until
 			observedAt := now.Add(wakeProtectionDuration(25*time.Second) - time.Second)
 			obs := AutoStopObservation{ScrapeFailed: failed}
 			if !failed {
@@ -292,9 +304,154 @@ func TestAcceptedWakeProtectionOutlivesDemandFreshness(t *testing.T) {
 	engine.Spec.AutoStop.IdleTimeout = &metav1.Duration{Duration: 2 * time.Minute}
 	stamp := metav1.NewTime(now)
 	engine.Status.LastWakeDemandTime = &stamp
+	until := metav1.NewTime(stamp.Add(wakeProtectionDuration(engine.Spec.AutoStop.IdleTimeout.Duration)))
+	engine.Status.WakeProtectionUntil = &until
 	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
 		AutoStopObservation{}, now.Add(DefaultAutoStopWakeTTL+time.Minute))
 	if decision.ScaleAction || decision.DesiredReplicas != 1 {
 		t.Fatalf("freshness expiry truncated accepted protection: %+v", decision)
+	}
+}
+
+// Exercise accepted state through the API-shaped status rather than manufacturing
+// a deadline from the policy under test.
+func TestAcceptedWakeDeadlineSurvivesPolicyChanges(t *testing.T) {
+	for _, configured := range []time.Duration{time.Second, 2 * time.Minute} {
+		t.Run(configured.String(), func(t *testing.T) {
+			now := referenceTime
+			engine := wakeHandoffEngine(now)
+			accepted := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+				AutoStopObservation{WakeRequestedAt: &now}, now)
+			engine.Status.LastWakeDemandTime = accepted.NewLastWakeDemandTime
+			engine.Status.WakeProtectionUntil = accepted.NewWakeProtectionUntil
+			wantDeadline := now.Add(150 * time.Second)
+			if accepted.NewWakeProtectionUntil == nil || !accepted.NewWakeProtectionUntil.Time.Equal(wantDeadline) {
+				t.Fatalf("incorrect acceptance deadline: %+v", accepted)
+			}
+			// A policy update and restart before the replica write must still retry
+			// the accepted wake, even when the new timeout is much shorter.
+			engine = engine.DeepCopy()
+			engine.Spec.AutoStop.IdleTimeout.Duration = configured
+			decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+				AutoStopObservation{}, now.Add(time.Minute))
+			if decision.DesiredReplicas != 1 || !decision.ScaleAction {
+				t.Fatalf("policy edit lost pending accepted wake: %+v", decision)
+			}
+			engine.Spec.Replicas = 1
+			for _, at := range []time.Time{now.Add(time.Minute), wantDeadline.Add(-time.Second)} {
+				decision = computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+					AutoStopObservation{WakeRequestedAt: &now}, at)
+				if decision.ScaleAction || decision.NewLastWakeDemandTime != nil || decision.NewWakeProtectionUntil != nil {
+					t.Fatalf("policy edit or replay changed active protection: %+v", decision)
+				}
+			}
+			decision = computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+				AutoStopObservation{}, wantDeadline)
+			if !decision.ScaleAction || decision.DesiredReplicas != 0 {
+				t.Fatalf("policy edit extended protection: %+v", decision)
+			}
+			engine.Spec.Replicas = 0
+			for _, at := range []time.Time{wantDeadline.Add(time.Second), now.Add(10 * time.Minute)} {
+				decision = computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+					AutoStopObservation{WakeRequestedAt: &now}, at)
+				if decision.ScaleAction || decision.NewWakeProtectionUntil != nil {
+					t.Fatalf("expired wake revived: %+v", decision)
+				}
+			}
+			fresh := now.Add(11 * time.Minute)
+			decision = computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+				AutoStopObservation{WakeRequestedAt: &fresh}, fresh)
+			if !decision.ScaleAction || decision.NewWakeProtectionUntil == nil ||
+				!decision.NewWakeProtectionUntil.Time.Equal(fresh.Add(6*configured)) {
+				t.Fatalf("fresh demand did not use updated policy: %+v", decision)
+			}
+		})
+	}
+}
+
+func TestWakeDeadlineSurvivesStatusSerialization(t *testing.T) {
+	now := referenceTime
+	engine := wakeHandoffEngine(now)
+	engine.Spec.AutoStop.IdleTimeout.Duration = 1100 * time.Millisecond
+	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+		AutoStopObservation{WakeRequestedAt: &now}, now)
+	engine.Status.LastWakeDemandTime = decision.NewLastWakeDemandTime
+	engine.Status.WakeProtectionUntil = decision.NewWakeProtectionUntil
+	data, err := json.Marshal(engine.Status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored computev1alpha1.FireboltEngineStatus
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.WakeProtectionUntil.Equal(decision.NewWakeProtectionUntil) ||
+		!restored.WakeProtectionUntil.Time.Equal(now.Add(7*time.Second)) {
+		t.Fatalf("fractional timeout deadline changed on persistence: %s", data)
+	}
+}
+
+func TestWakeRecoversAfterDeadlinePruning(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%v", cached), func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Now().UTC().Truncate(time.Second)
+			engine := wakeHandoffEngine(now)
+			scheme := wakeTestScheme(t)
+			base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(engine).
+				WithStatusSubresource(engine).Build()
+			pruning := interceptor.NewClient(base, interceptor.Funcs{
+				SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+					obj.(*computev1alpha1.FireboltEngine).Status.WakeProtectionUntil = nil
+					return c.SubResource(sub).Update(ctx, obj, opts...)
+				},
+			})
+			tracker := &WakeDemandTracker{}
+			tracker.replace(map[demandKey]time.Time{{namespace: "ns", engine: "engine"}: now})
+			r := &FireboltEngineReconciler{Client: pruning, Scheme: scheme, WakeDemand: tracker,
+				MetricsRecorder: metrics.NoOpEngineRecorder{}}
+			// Repeated attempts against an incomplete schema must keep failing closed.
+			for range 2 {
+				if _, err := r.runAutoStop(ctx, engine, nil); err == nil {
+					t.Fatal("incomplete acceptance silently consumed demand")
+				}
+				if err := base.Get(ctx, client.ObjectKeyFromObject(engine), engine); err != nil {
+					t.Fatal(err)
+				}
+				if engine.Spec.Replicas != 0 || engine.Status.LastWakeDemandTime == nil || engine.Status.WakeProtectionUntil != nil {
+					t.Fatalf("unexpected partially persisted state: %+v", engine)
+				}
+			}
+			if !cached {
+				tracker = &WakeDemandTracker{}
+			}
+			// The corrected schema and replacement reconciler must finish acceptance.
+			r = &FireboltEngineReconciler{Client: base, Scheme: scheme, WakeDemand: tracker,
+				MetricsRecorder: metrics.NoOpEngineRecorder{}}
+			if _, err := r.runAutoStop(ctx, engine, nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := base.Get(ctx, client.ObjectKeyFromObject(engine), engine); err != nil {
+				t.Fatal(err)
+			}
+			if engine.Spec.Replicas != 1 || engine.Status.WakeProtectionUntil == nil ||
+				!engine.Status.WakeProtectionUntil.Time.Equal(now.Add(150*time.Second)) {
+				t.Fatalf("recovery lost or renewed the original wake: %+v", engine)
+			}
+		})
+	}
+}
+
+func TestIncompleteWakeStillRequiresFreshDemand(t *testing.T) {
+	now := referenceTime
+	for _, age := range []time.Duration{-time.Second, DefaultAutoStopWakeTTL, time.Hour} {
+		engine := wakeHandoffEngine(now)
+		stamp := metav1.NewTime(now.Add(-age))
+		engine.Status.LastWakeDemandTime = &stamp
+		decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+			AutoStopObservation{}, now)
+		if decision.ScaleAction || decision.NewWakeProtectionUntil != nil {
+			t.Fatalf("invalid partial record accepted at age %s: %+v", age, decision)
+		}
 	}
 }

@@ -139,15 +139,18 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		age := rapid.IntRange(0, int(2*DefaultAutoStopWakeTTL.Seconds())).Draw(t, "acceptedWakeAgeSec")
 		stamp := metav1.NewTime(referenceTime.Add(-time.Duration(age) * time.Second))
 		status.LastWakeDemandTime = &stamp
+		acceptedIdle := time.Duration(rapid.IntRange(1, 600).Draw(t, "idleSecondsAtAcceptance")) * time.Second
+		until := metav1.NewTime(stamp.Add(6 * acceptedIdle))
+		status.WakeProtectionUntil = &until
 		wakeFresh = wakeFresh && (wakeAt != nil && wakeAt.After(stamp.Time))
 	}
 
-	accepted := status.LastWakeDemandTime
+	deadline := status.WakeProtectionUntil
 	if wakeFresh {
-		stamp := metav1.NewTime(*wakeAt)
-		accepted = &stamp
+		until := metav1.NewTime(wakeAt.Add(6 * idle))
+		deadline = &until
 	}
-	protected := accepted != nil && referenceTime.Sub(accepted.Time) < wakeProtectionDuration(idle)
+	protected := deadline != nil && referenceTime.Before(deadline.Time)
 
 	obs := AutoStopObservation{
 		ActiveQueries:   active,

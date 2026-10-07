@@ -499,12 +499,18 @@ type FireboltEngineStatus struct {
 	// +optional
 	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
 
-	// LastWakeDemandTime is the accepted gateway demand timestamp. For six times
-	// the configured idle timeout it prevents idle scale-down, including
-	// after a demand-cache eviction or operator restart. Re-observing the same
-	// timestamp does not extend protection. Cleared when auto-stop is disabled.
+	// LastWakeDemandTime is the accepted gateway demand timestamp. Re-observing
+	// the same timestamp cannot renew protection. Cleared when auto-stop is disabled.
 	// +optional
 	LastWakeDemandTime *metav1.Time `json:"lastWakeDemandTime,omitempty"`
+
+	// WakeProtectionUntil is LastWakeDemandTime plus six times the effective
+	// idle timeout at acceptance, rounded up to whole seconds. Persisted
+	// with the demand before scaling;
+	// subsequent policy changes do not alter this deadline. Cleared when
+	// auto-stop is disabled.
+	// +optional
+	WakeProtectionUntil *metav1.Time `json:"wakeProtectionUntil,omitempty"`
 
 	// LastScaledAt is the timestamp of the most recent auto-stop-driven
 	// mutation of spec.replicas. Distinguishes auto-stop scale events from

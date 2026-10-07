@@ -709,11 +709,12 @@ func TestRunAutoStop_DisabledClearsStaleStatus(t *testing.T) {
 			// AutoStop deliberately nil — represents "feature disabled".
 		},
 		Status: computev1alpha1.FireboltEngineStatus{
-			Phase:              computev1alpha1.PhaseStable,
-			LastActivityTime:   &stale,
-			LastScaledAt:       &scaledAt,
-			LastWakeDemandTime: &stale,
-			AutoStopReason:     AutoStopReasonActivity, // stale token from a prior active cycle
+			Phase:               computev1alpha1.PhaseStable,
+			LastActivityTime:    &stale,
+			LastScaledAt:        &scaledAt,
+			LastWakeDemandTime:  &stale,
+			WakeProtectionUntil: &stale,
+			AutoStopReason:      AutoStopReasonActivity, // stale token from a prior active cycle
 		},
 	}
 
@@ -740,7 +741,7 @@ func TestRunAutoStop_DisabledClearsStaleStatus(t *testing.T) {
 	if got.Status.LastActivityTime != nil {
 		t.Errorf("LastActivityTime: want nil, got %v", got.Status.LastActivityTime)
 	}
-	if got.Status.LastWakeDemandTime != nil {
+	if got.Status.LastWakeDemandTime != nil || got.Status.WakeProtectionUntil != nil {
 		t.Fatal("disabled auto-stop retained wake protection")
 	}
 	if got.Status.LastScaledAt == nil || !got.Status.LastScaledAt.Equal(&scaledAt) {

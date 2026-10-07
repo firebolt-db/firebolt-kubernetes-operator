@@ -170,9 +170,13 @@ func materializeTLAWakeState(t *testing.T, s tlaWakeState) *tlaWakeSim {
 		status.LastActivityTime = &stamp
 	}
 
+	// The model holds IdleTimeout constant. Policy changes are covered by
+	// TestAcceptedWakeDeadlineSurvivesPolicyChanges and the rapid harness.
 	if accepted := tlaWakeStamp(s.AcceptedWakeAge); accepted != nil {
 		stamp := metav1.NewTime(*accepted)
 		status.LastWakeDemandTime = &stamp
+		until := metav1.NewTime(stamp.Add(wakeProtectionDuration(tlaWakeIdleTimeout)))
+		status.WakeProtectionUntil = &until
 	}
 	obs := AutoStopObservation{WakeRequestedAt: tlaWakeStamp(s.WakeAge)}
 	switch s.Activity {
@@ -235,6 +239,7 @@ func (m *tlaWakeSim) project() tlaWakeState {
 func (m *tlaWakeSim) apply(decision AutoStopDecision) {
 	if decision.NewLastWakeDemandTime != nil {
 		m.status.LastWakeDemandTime = decision.NewLastWakeDemandTime
+		m.status.WakeProtectionUntil = decision.NewWakeProtectionUntil
 	}
 	if decision.ScaleAction {
 		m.spec.Replicas = decision.DesiredReplicas

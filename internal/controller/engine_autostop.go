@@ -119,8 +119,10 @@ type AutoStopDecision struct {
 	// status.lastActivityTime. Nil means leave the existing value alone.
 	NewLastActivityTime *metav1.Time
 
-	// NewLastWakeDemandTime must be persisted before changing replicas.
-	NewLastWakeDemandTime *metav1.Time
+	// NewLastWakeDemandTime and NewWakeProtectionUntil must be persisted
+	// together before changing replicas.
+	NewLastWakeDemandTime  *metav1.Time
+	NewWakeProtectionUntil *metav1.Time
 }
 
 // computeAutoStopDecision is the pure decision function. It is independent
@@ -168,16 +170,27 @@ func computeAutoStopDecision(
 	}
 	protection := wakeProtectionDuration(idleTimeout)
 	wake := status.LastWakeDemandTime
-	newDemand := obs.WakeRequestedAt != nil && !obs.WakeRequestedAt.After(now) &&
-		now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL &&
-		(wake == nil || obs.WakeRequestedAt.After(wake.Time))
+	deadline := status.WakeProtectionUntil
+	demand := freshWakeDemand(status, obs.WakeRequestedAt, now)
+	newDemand := demand != nil
 	if newDemand {
-		stamp := metav1.NewTime(*obs.WakeRequestedAt)
+		stamp := metav1.NewTime(*demand)
 		wake = &stamp
 		// Acceptance is independent of the capacity policy chosen below.
-		defer func() { result.NewLastWakeDemandTime = &stamp }()
+		expires := stamp.Add(protection)
+		// metav1.Time is persisted at whole-second precision. Round up so a
+		// fractional idle timeout neither loses grace nor fails read-back validation.
+		if expires.Nanosecond() != 0 {
+			expires = expires.Truncate(time.Second).Add(time.Second)
+		}
+		until := metav1.NewTime(expires)
+		deadline = &until
+		defer func() {
+			result.NewLastWakeDemandTime = &stamp
+			result.NewWakeProtectionUntil = &until
+		}()
 	}
-	protected := wake != nil && !wake.After(now) && now.Sub(wake.Time) < protection
+	protected := wake != nil && deadline != nil && !wake.After(now) && now.Before(deadline.Time)
 
 	if scheduleActive(as.Schedule, now) {
 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
@@ -227,7 +240,7 @@ func computeAutoStopDecision(
 	// schedule target or the activity/failure bookkeeping above.
 	if protected {
 		return decisionWithScale(spec.Replicas, spec.Replicas, AutoStopReasonWakeRequested,
-			min(pollInterval, protection-now.Sub(wake.Time)))
+			min(pollInterval, deadline.Sub(now)))
 	}
 
 	if status.LastActivityTime == nil {
@@ -250,6 +263,25 @@ func computeAutoStopDecision(
 		Reason:          AutoStopReasonActivity,
 		RequeueAfter:    pollInterval,
 	}
+}
+
+// freshWakeDemand returns a request that still needs durable acceptance.
+func freshWakeDemand(status *computev1alpha1.FireboltEngineStatus, demand *time.Time, now time.Time) *time.Time {
+	wake := status.LastWakeDemandTime
+	deadline := status.WakeProtectionUntil
+	// A schema can retain the demand while pruning its deadline. That pair
+	// was never accepted: retry the original fresh request, even after cache
+	// eviction or restart. A complete pair remains the replay watermark.
+	if deadline == nil && wake != nil && (demand == nil || demand.Before(wake.Time)) {
+		demand = &wake.Time
+	}
+	fresh := demand != nil && !demand.After(now) &&
+		now.Sub(*demand) < DefaultAutoStopWakeTTL &&
+		(wake == nil || demand.After(wake.Time) || (deadline == nil && demand.Equal(wake.Time)))
+	if fresh {
+		return demand
+	}
+	return nil
 }
 
 // Saturate durations too large to multiply without overflowing time.Duration.
@@ -486,6 +518,10 @@ func (r *FireboltEngineReconciler) runAutoStop(
 			engine.Status.LastWakeDemandTime = nil
 			statusDirty = true
 		}
+		if engine.Status.WakeProtectionUntil != nil {
+			engine.Status.WakeProtectionUntil = nil
+			statusDirty = true
+		}
 		if statusDirty {
 			if err := r.updateStatus(ctx, engine); err != nil {
 				return autoStopStepResult{}, fmt.Errorf("autoStop: clearing stale status: %w", err)
@@ -526,10 +562,12 @@ func (r *FireboltEngineReconciler) runAutoStop(
 	// stale spec: the replica update must still conflict with concurrent edits.
 	if decision.NewLastWakeDemandTime != nil {
 		engine.Status.LastWakeDemandTime = decision.NewLastWakeDemandTime
+		engine.Status.WakeProtectionUntil = decision.NewWakeProtectionUntil
 		if err := r.Status().Update(ctx, engine); err != nil {
 			return result, fmt.Errorf("autoStop: persisting wake demand: %w", err)
 		}
-		if !engine.Status.LastWakeDemandTime.Equal(decision.NewLastWakeDemandTime) {
+		if !engine.Status.LastWakeDemandTime.Equal(decision.NewLastWakeDemandTime) ||
+			!engine.Status.WakeProtectionUntil.Equal(decision.NewWakeProtectionUntil) {
 			return result, errors.New("autoStop: wake demand was not persisted; update the FireboltEngine CRD")
 		}
 	}
