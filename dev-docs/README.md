@@ -19,6 +19,7 @@ If a development page disagrees with code or published documentation, update or 
 | Path | Purpose |
 | --- | --- |
 | [`architecture/engine-scaling.md`](architecture/engine-scaling.md) | Blue-green scaling rationale, reconciler code map, resources, and change-impact guide |
+| [`architecture/engine-wake.md`](architecture/engine-wake.md) | Wake-up workflow, component interactions, and the race between query delivery and idle shutdown |
 | [`architecture/admission-and-controller-validation.md`](architecture/admission-and-controller-validation.md) | Admission, CEL, and controller-side invariant enforcement |
 | [`architecture/engine-retirement-and-query-safety.md`](architecture/engine-retirement-and-query-safety.md) | Query-safety contract during engine retirement: guarantees, accepted limits, drain sequence, rejected alternatives |
 | [`process/release-process.md`](process/release-process.md) | Release component ownership and coupling invariants |
