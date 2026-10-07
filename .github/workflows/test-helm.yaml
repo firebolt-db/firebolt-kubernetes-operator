@@ -181,7 +181,9 @@ jobs:
         run: make helm-test-crds KIND_CLUSTER="${KIND_CLUSTER}"
 
       - name: Build operator image and Helm upgrade (branch chart + binary)
-        run: make local-deploy KIND_CLUSTER="${KIND_CLUSTER}"
+        run: |
+          go test -tags latest,wakehandofftest ./internal/wakeagent -count=1
+          make local-deploy KIND_CLUSTER="${KIND_CLUSTER}" GO_BUILD_TAGS=latest,wakehandofftest
         env:
           GOPRIVATE: github.com/firebolt-db/*
 
@@ -200,6 +202,8 @@ jobs:
         # image, inside the gateway pod, where Envoy's loopback call can reach
         # it. The Go e2e suite runs the operator in-process and cannot.
         run: make helm-test-wake KIND_CLUSTER="${KIND_CLUSTER}"
+        env:
+          VERIFY_WAKE_HANDOFF: "1"
 
       - name: Verify website quickstart bundle
         run: make helm-test-website KIND_CLUSTER="${KIND_CLUSTER}"

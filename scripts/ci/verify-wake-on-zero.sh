@@ -478,6 +478,12 @@ if ! grep -q "42" <<<"$query_output"; then
   exit 1
 fi
 
+# CI-only: requires a wakehandofftest image and the 25s/5s test policy.
+if [[ "${VERIFY_WAKE_HANDOFF:-0}" == "1" ]]; then
+  python3 "${SCRIPT_DIR}/verify-wake-handoff_test.py"
+  python3 "${SCRIPT_DIR}/verify-wake-handoff.py" "$NAMESPACE" --engine "$ENGINE_NAME"
+fi
+
 echo "=== verify-wake-on-zero PASSED ==="
 echo "Health probes on the parked engine's gateway were answered without waking"
 echo "it. A query to the stopped engine was held by the gateway, the operator"

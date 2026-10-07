@@ -171,11 +171,12 @@ func (c *Config) applyDefaults() {
 
 // Agent is the assembled sidecar.
 type Agent struct {
-	cfg       Config
-	demand    *demandTracker
-	readiness *readinessTracker
-	capacity  *capacityLimiter
-	prober    *routeProber
+	cfg         Config
+	demand      *demandTracker
+	readiness   *readinessTracker
+	capacity    *capacityLimiter
+	prober      *routeProber
+	handoffTest handoffTestBarrier
 }
 
 // New builds an Agent with its collaborators wired but nothing started.
@@ -301,6 +302,7 @@ func (a *Agent) holdMux() http.Handler {
 
 func (a *Agent) demandMux() http.Handler {
 	mux := http.NewServeMux()
+	a.handoffTest.register(mux, a.readiness)
 	mux.HandleFunc("/demand", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = w.Write([]byte(a.demand.Render()))
@@ -361,6 +363,17 @@ func (a *Agent) handleHold(w http.ResponseWriter, r *http.Request) {
 	defer a.readiness.DoneWaiting(engine, ready)
 	timer := time.NewTimer(a.cfg.HoldTimeout)
 	defer timer.Stop()
+
+	// The CI-only barrier is armed before the request. Normal builds inline
+	// a no-op; CI waits still obey this hold's original deadline and context.
+	switch a.handoffTest.wait(r.Context(), engine, timer.C) {
+	case routeWaitDeadline:
+		a.answerHoldDeadline(w, engine)
+		return
+	case routeWaitClientGone:
+		return
+	case routeWaitRoutable:
+	}
 
 	select {
 	case <-ready:

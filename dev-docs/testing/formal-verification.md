@@ -110,3 +110,28 @@ To add a model that binds to Go:
 7. Add a pinned Go mutant when a small implementation mutation can demonstrate that the new state cover fails for the intended reason.
 
 If a model is intentionally TLC-only, record why no Go binding exists. Avoid implying conformance between the specification and implementation when no executable binding enforces it.
+
+### Wake protection boundaries
+
+The wake model holds the idle timeout constant. Its Go binding constructs the
+persisted deadline from that constant. Timeout edits, incomplete status records,
+and timestamp serialization are covered by the wake-handoff Go tests; the rapid
+harness varies the accepted and current timeouts independently.
+
+The Helm CI wake check also runs `scripts/ci/verify-wake-handoff.py` against the
+chart-deployed Firebolt Operator. The Helm job builds with
+`GO_BUILD_TAGS=latest,wakehandofftest` and opts into the delayed test with
+`VERIFY_WAKE_HANDOFF=1` on `make helm-test-wake`. Without that opt-in, the target
+runs ordinary wake verification against a normal image and retains its
+`IDLE_TIMEOUT` and `POLL_INTERVAL` overrides. The delayed test requires `25s`
+and `5s`, respectively. Arming waits for the selected wake-agent to be synced
+and observe no ready endpoints; Engine status alone is insufficient. The test
+then sends one query, waits for the Engine to become stable and ready, and
+delays release for 40 seconds with a 25-second idle timeout. Normal builds have
+no control endpoint; the armed barrier still observes the original request
+deadline and cancellation. Kubernetes
+metadata generation must record only the initial scale-up, so a down/up cycle
+between samples fails the check. The same query must return 200 without retries.
+The `--expect-stop` option is a local negative control for a binary with wake
+protection disabled. The test releases the barrier on exit. Port-forward startup is bounded to
+15 seconds, and its child process is terminated and reaped on every exit path.
