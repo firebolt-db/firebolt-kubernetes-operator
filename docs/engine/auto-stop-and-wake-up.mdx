@@ -66,11 +66,13 @@ With Helm value `wakeAgent.enabled=true` (the default) and the Firebolt Operator
 2. The Firebolt Operator sets the Engine to `activeReplicas`.
 3. The held request proceeds after Engine endpoints become ready and the Gateway's Envoy confirms, through a local probe of the Engine's `/health/ready`, that it can route to them.
 
-After accepting wake demand, the Firebolt Operator prevents idle scale-down for six times the configured idle timeout from the original demand timestamp. The protection survives a Firebolt Operator restart and gives the Gateway time to hand off its held query. The deadline uses the effective idle timeout at acceptance and is rounded up to whole seconds. Later timeout changes and repeated observations of the same demand leave it unchanged; a fresh demand uses the updated timeout. Normal idle evaluation resumes when protection expires.
+After accepting wake demand, the Firebolt Operator temporarily protects the Engine from idle scale-down so the Gateway can deliver its waiting query. Protection is based on the configured idle timeout and survives Firebolt Operator restarts. Active schedules and activity tracking continue normally during protection.
 
-Wake protection is a bounded grace period of `6 × idleTimeout` from the accepted demand timestamp, not an acknowledgement that query handoff completed. It can retain idle Engine capacity after the triggering request finishes. The 25-second idle timeout used in wake testing gives 150 seconds of protection, allowing 30 seconds beyond the Gateway's 120-second hold deadline. Smaller idle timeouts also shorten protection; this is not a guarantee that every cold start can finish. Active schedules still own the replica target, and activity or failed scrapes still refresh the idle clock during protection.
+<Warning>
+If an Engine takes longer than expected to become available, wake protection can expire before the Gateway delivers a waiting query. Idle scale-down can then race with query delivery, causing the query to fail.
+</Warning>
 
-The first query pays the full Engine cold-start time, which can take tens of seconds when images or volumes must be prepared. Set the client timeout accordingly. If the Gateway reaches its held-request capacity, additional requests receive `503` with `Retry-After` while wake-up continues.
+If the Gateway reaches its held-request capacity, additional requests receive `503` with `Retry-After` while wake-up continues.
 
 Wake-up applies to any zero-replica Engine with auto-stop enabled, including one whose replica count was set to zero manually. To keep an Engine stopped, disable auto-stop as well:
 
@@ -88,61 +90,6 @@ The Gateway answers its `/healthz` endpoint itself, before any wake handling, so
 Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
 
 Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
-
-## Known race: slow startup and delayed query handoff
-
-<Warning>
-Wake protection does not guarantee delivery of every waiting query. If startup or Gateway handoff outlasts the protection deadline, idle scale-down can race with delivery of a query that is still waiting at the Gateway. Subsequent queries during startup do not reliably extend protection.
-</Warning>
-
-Three independent rules determine the outcome:
-
-- **Request deadline:** Each held query has its own 120-second Gateway timeout by default. If the Engine still has no ready endpoints at that deadline, the query receives `503`. A later query does not extend an earlier query's deadline. Client timeouts can end requests sooner.
-- **Protection deadline:** `status.lastWakeDemandTime` records the accepted Gateway demand timestamp. `status.wakeProtectionUntil` is that timestamp plus `6 × idleTimeout`, using the policy at acceptance. The clock starts at demand, not when the Engine becomes ready. Reobserving the same demand or changing the idle timeout does not move the stored deadline.
-- **Creation lifecycle:** Auto-stop decisions run only in `Stable` or `Stopped`. They are skipped during creation and other rollout transitions. Neither a query timeout nor protection expiry cancels startup or deletes the Engine CR. Once the Engine is stable, an expired protection window allows normal idle scale-down again.
-
-### One query and a 180-second startup
-
-This example uses `idleTimeout: 25s`, giving 150 seconds of protection, and the default 120-second Gateway hold timeout. Assume demand is accepted promptly, no schedule is active, and the Engine becomes ready and stable at about 180 seconds. These times illustrate the ordering, not exact reconciliation timing.
-
-```text
-Time    Gateway / query Q1                 Firebolt Operator / Engine
-------  --------------------------------  -----------------------------------
-  0s    Q1 arrives; last[E] = 0s; held     Accept demand; persist protection
-                                          deadline = 150s; replicas 0 -> 1
-120s    No ready endpoints: Q1 gets 503    Creation continues
-150s    Q1 has already finished            Protection expires; creation continues
-180s    Ready endpoints become available   Engine reaches Stable
-180s+                                     Auto-stop resumes; idle scale-down
-                                          is allowed if idle criteria are met
-```
-
-Expiry is not itself a stop command. After the Engine reaches `Stable`, scale-down depends on the activity metrics, stored activity timestamp, and schedule. A successful scrape reporting sufficient inactivity can cause scale-down before any query arrives. Observed activity or a failed scrape refreshes the idle clock; an active schedule keeps its configured replica target.
-
-### Subsequent queries during startup
-
-While the Engine is unready, each new query updates the wake-agent's in-memory `last[E]` to its arrival time. Each admitted query waits independently; this is not a durable query queue. The Firebolt Operator collects wake demand only for Engines whose **desired** `spec.replicas` is zero. Once replicas become nonzero, the demand cache is evicted on polling, and newer Gateway timestamps during startup do not continuously renew the persisted protection window. Repeated queries are therefore not a keepalive for a starting Engine.
-
-Using the same startup and protection window:
-
-```text
-Time    Gateway                            Firebolt Operator / Engine
-------  ---------------------------------  ----------------------------------
-  0s    Q1 arrives; last[E] = 0s            Accept wake; replicas 0 -> 1;
-                                           protection deadline = 150s
- 90s    Q2 arrives; last[E] = 90s           Creation continues; no renewal
-120s    Q1 reaches its deadline: 503       Creation continues
-150s                                       Protection expires during creation
-160s    Q3 arrives; last[E] = 160s          Creation continues; no renewal
-180s    Q2 and Q3 are still waiting        Engine ready/stable; idle scale-down
-        and can proceed when routable     can race with their delivery
-210s    Q2's deadline, if still held
-280s    Q3's deadline, if still held
-```
-
-If Q2 or Q3 reaches the Engine and its activity becomes visible before an idle scale-down decision, normal activity tracking keeps the Engine running. If idle scale-down wins, a waiting query can fail. If the Engine returns to zero replicas, a newer Gateway demand may be accepted on a later poll while still within the five-minute demand freshness limit, causing another wake. That does not resurrect a request that already failed, and can lead to repeated wake/stop cycles under unfavorable timing.
-
-The multiplier of six provides a bounded startup and handoff allowance; it is not proof that every cold start fits. The delayed-handoff regression validates delivery within that allowance, not arbitrary startup durations. A longer client timeout alone cannot overcome the Gateway hold deadline, and extending the Gateway hold alone does not extend Engine protection. When evaluating slow starts, account for both deadlines and the possible handoff race after protection expires.
 
 ## Poll timing
 
