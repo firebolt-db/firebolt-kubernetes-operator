@@ -1012,7 +1012,7 @@ def wake_project(state: State) -> StateKey:
     downstream of it.
 
     Soundness of the ages: every reconciler guard reads `now` only via
-    `now - max(cache, accepted) < WakeTTL` and the newer of stored and observed activity.
+    fresh unaccepted demand and `now - accepted < 6 * IdleTimeout` and the newer of stored and observed activity.
     The observed age is zero for busy scrapes and `now - engineLastActivity`
     for quiet ones. The resulting stored age is the minimum of the two ages
     (or zero on scrape failure). So the projected successor of a state is a

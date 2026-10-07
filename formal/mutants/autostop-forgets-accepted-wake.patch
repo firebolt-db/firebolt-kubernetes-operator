@@ -1,12 +1,12 @@
 diff --git a/internal/controller/engine_autostop.go b/internal/controller/engine_autostop.go
 --- a/internal/controller/engine_autostop.go
 +++ b/internal/controller/engine_autostop.go
-@@ -183,7 +183,7 @@
- 	if wake != nil && wake.After(now) {
- 		wake = nil
+@@ -167,7 +167,7 @@
+ 		idleTimeout = as.IdleTimeout.Duration
  	}
--	if status.LastWakeDemandTime != nil && !status.LastWakeDemandTime.After(now) &&
-+	if false && status.LastWakeDemandTime != nil && !status.LastWakeDemandTime.After(now) &&
- 		(wake == nil || status.LastWakeDemandTime.After(*wake)) {
- 		wake = &status.LastWakeDemandTime.Time
- 	}
+ 	protection := wakeProtectionDuration(idleTimeout)
+-	wake := status.LastWakeDemandTime
++	var wake *metav1.Time
+ 	newDemand := obs.WakeRequestedAt != nil && !obs.WakeRequestedAt.After(now) &&
+ 		now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL &&
+ 		(wake == nil || obs.WakeRequestedAt.After(wake.Time))

@@ -19,6 +19,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -92,7 +94,7 @@ func TestAcceptedWakeExpiresWithoutReplay(t *testing.T) {
 	stamp := metav1.NewTime(now)
 	engine.Status.LastWakeDemandTime = &stamp
 	engine.Spec.Replicas = 1
-	for _, age := range []time.Duration{time.Minute, DefaultAutoStopWakeTTL - time.Second} {
+	for _, age := range []time.Duration{time.Minute, wakeProtectionDuration(25*time.Second) - time.Second} {
 		idle := time.Hour + age
 		decision := decideAutoStopWithEngineIdle(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
 			AutoStopObservation{WakeRequestedAt: &now}, &idle, now.Add(age))
@@ -100,8 +102,8 @@ func TestAcceptedWakeExpiresWithoutReplay(t *testing.T) {
 			t.Fatalf("replayed wake changed replicas or renewed protection at %v: %+v", age, decision)
 		}
 	}
-	expired := now.Add(DefaultAutoStopWakeTTL)
-	idle := time.Hour + DefaultAutoStopWakeTTL
+	expired := now.Add(wakeProtectionDuration(25 * time.Second))
+	idle := time.Hour + wakeProtectionDuration(25*time.Second)
 	decision := decideAutoStopWithEngineIdle(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
 		AutoStopObservation{}, &idle, expired)
 	if !decision.ScaleAction || decision.DesiredReplicas != 0 || decision.Reason != AutoStopReasonIdle {
@@ -135,7 +137,7 @@ func TestAcceptedWakePreservesUserResize(t *testing.T) {
 }
 
 func TestWakeProtectionOutlastsGatewayHold(t *testing.T) {
-	if DefaultAutoStopWakeTTL <= wakeagent.DefaultHoldTimeout {
+	if wakeProtectionDuration(25*time.Second) <= wakeagent.DefaultHoldTimeout {
 		t.Fatal("wake protection must outlast the gateway's hold deadline")
 	}
 }
@@ -227,5 +229,72 @@ func TestFutureWakeCannotCreateProtection(t *testing.T) {
 		AutoStopObservation{WakeRequestedAt: &future}, now)
 	if decision.ScaleAction || decision.NewLastWakeDemandTime != nil {
 		t.Fatalf("future demand created an unbounded protection window: %+v", decision)
+	}
+}
+
+func TestAcceptedWakeHonorsSchedule(t *testing.T) {
+	now := referenceTime
+	engine := wakeHandoffEngine(now)
+	engine.Spec.Replicas = 1
+	stamp := metav1.NewTime(now)
+	engine.Status.LastWakeDemandTime = &stamp
+	engine.Spec.AutoStop.ActiveReplicas = 3
+	engine.Spec.AutoStop.Schedule = scheduleWindowCovering(now)
+	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status, AutoStopObservation{}, now.Add(time.Minute))
+	if decision.DesiredReplicas != 3 || !decision.ScaleAction || decision.Reason != AutoStopReasonScheduleActive {
+		t.Fatalf("wake protection suppressed scheduled capacity: %+v", decision)
+	}
+}
+
+func TestAcceptedWakeRetainsActivityGrace(t *testing.T) {
+	for _, failed := range []bool{true, false} {
+		t.Run(fmt.Sprintf("scrapeFailed=%v", failed), func(t *testing.T) {
+			now := referenceTime
+			engine := wakeHandoffEngine(now)
+			engine.Spec.Replicas = 1
+			stamp := metav1.NewTime(now)
+			engine.Status.LastWakeDemandTime = &stamp
+			observedAt := now.Add(wakeProtectionDuration(25*time.Second) - time.Second)
+			obs := AutoStopObservation{ScrapeFailed: failed}
+			if !failed {
+				obs.ActiveQueries = 1
+			}
+			decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status, obs, observedAt)
+			if decision.NewLastActivityTime == nil || !decision.NewLastActivityTime.Time.Equal(observedAt) {
+				t.Fatalf("wake protection suppressed activity grace: %+v", decision)
+			}
+			engine.Status.LastActivityTime = decision.NewLastActivityTime
+			expiredAt := now.Add(wakeProtectionDuration(25 * time.Second))
+			idle := wakeProtectionDuration(25 * time.Second)
+			decision = decideAutoStopWithEngineIdle(&engine.Spec, engine.Spec.AutoStop, &engine.Status, AutoStopObservation{}, &idle, expiredAt)
+			if decision.ScaleAction || decision.DesiredReplicas != 1 {
+				t.Fatalf("expiry erased activity grace: %+v", decision)
+			}
+		})
+	}
+}
+
+func TestWakeProtectionScalesWithIdleTimeout(t *testing.T) {
+	for _, idle := range []time.Duration{time.Second, 25 * time.Second, 10 * time.Minute} {
+		if got := wakeProtectionDuration(idle); got != 6*idle {
+			t.Fatalf("idle=%s protection=%s", idle, got)
+		}
+	}
+	if wakeProtectionDuration(time.Duration(math.MaxInt64)) != time.Duration(math.MaxInt64) {
+		t.Fatal("protection overflowed")
+	}
+}
+
+func TestAcceptedWakeProtectionOutlivesDemandFreshness(t *testing.T) {
+	now := referenceTime
+	engine := wakeHandoffEngine(now)
+	engine.Spec.Replicas = 1
+	engine.Spec.AutoStop.IdleTimeout = &metav1.Duration{Duration: 2 * time.Minute}
+	stamp := metav1.NewTime(now)
+	engine.Status.LastWakeDemandTime = &stamp
+	decision := computeAutoStopDecision(&engine.Spec, engine.Spec.AutoStop, &engine.Status,
+		AutoStopObservation{}, now.Add(DefaultAutoStopWakeTTL+time.Minute))
+	if decision.ScaleAction || decision.DesiredReplicas != 1 {
+		t.Fatalf("freshness expiry truncated accepted protection: %+v", decision)
 	}
 }

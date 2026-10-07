@@ -42,13 +42,11 @@ const (
 	// MinimumAutoStopDeadlineRequeue prevents an untrusted idle-duration
 	// sample from forcing a hot reconcile loop near the idle deadline.
 	MinimumAutoStopDeadlineRequeue = time.Second
-	// DefaultAutoStopWakeTTL bounds how long an unrefreshed wake demand
-	// timestamp triggers scale-up and protects the resulting wake from idle
-	// scale-down. Generous enough to cover engine
-	// cold-start (image pull on a fresh node, blue-green creating phase)
-	// while short enough that an abandoned request does not pin the engine
-	// indefinitely after the gateway gives up.
+	// DefaultAutoStopWakeTTL limits the age of a previously unaccepted demand.
 	DefaultAutoStopWakeTTL = 5 * time.Minute
+	// WakeProtectionMultiplier allows startup and handoff beyond two idle windows.
+	// A 25-second idle timeout gives 150 seconds, exceeding the 120-second hold.
+	WakeProtectionMultiplier = 6
 )
 
 // AutoStop reason tokens written to status.autoStopReason. Constants
@@ -133,20 +131,18 @@ type AutoStopDecision struct {
 //
 //  1. AutoStop disabled or unset → no decision (DesiredReplicas left at
 //     spec.Replicas, Reason=Disabled).
-//  2. Fresh cached or durably accepted wake demand → wake a stopped engine
-//     and protect running capacity for the remainder of the demand TTL.
-//  3. An active schedule window → pin replicas at ActiveReplicas.
-//  4. A stopped engine without demand → stay stopped.
-//  5. Scrape failure or activity → refresh LastActivityTime, do not scale.
-//  6. Quiet for IdleTimeout → scale down to IdleReplicas.
-//  7. Otherwise retain replicas, anchoring a missing activity timestamp.
+//  2. An active schedule window owns the replica target.
+//  3. Fresh demand wakes a stopped engine; otherwise it stays stopped.
+//  4. Scrape failure or activity refreshes LastActivityTime.
+//  5. Accepted wake demand vetoes idle scale-down until its protection expires.
+//  6. Otherwise evaluate ordinary idle policy.
 func computeAutoStopDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
 	autoStop *computev1alpha1.AutoStopSpec,
 	status *computev1alpha1.FireboltEngineStatus,
 	obs AutoStopObservation,
 	now time.Time,
-) AutoStopDecision {
+) (result AutoStopDecision) {
 	if autoStop == nil || !autoStop.Enabled {
 		return AutoStopDecision{
 			DesiredReplicas: spec.Replicas,
@@ -164,49 +160,33 @@ func computeAutoStopDecision(
 		idleReplicas = *as.IdleReplicas
 	}
 
-	// Wake demand: a gateway saw a query for this engine while it was
-	// down, so scale up to ActiveReplicas. Honored above schedule because
-	// either path lands at the same target (ActiveReplicas), but reporting
-	// WakeRequested is more informative for operators looking at status.
-	//
-	// Deliberately above the spec.Replicas == 0 branch below, and this is
-	// load-bearing: an auto-stopped engine IS an engine at zero replicas,
-	// so checking "stopped" first would make wake impossible. The cost is
-	// that the decision function cannot distinguish an engine autoStop
-	// parked from one a user zeroed by hand, and a query will restart
-	// either. Users who want an engine to stay down set
-	// autoStop.enabled: false, which returns at the top of this function
-	// before wake is ever consulted.
 	// Accepted demand outlives the poller's cache, which deliberately drops
-	// running engines. Use the original stamp so a replay cannot renew the TTL.
-	wake := obs.WakeRequestedAt
-	if wake != nil && wake.After(now) {
-		wake = nil
+	// running engines. Use the original stamp so a replay cannot renew protection.
+	idleTimeout := DefaultAutoStopIdleTimeout
+	if as.IdleTimeout != nil && as.IdleTimeout.Duration > 0 {
+		idleTimeout = as.IdleTimeout.Duration
 	}
-	if status.LastWakeDemandTime != nil && !status.LastWakeDemandTime.After(now) &&
-		(wake == nil || status.LastWakeDemandTime.After(*wake)) {
-		wake = &status.LastWakeDemandTime.Time
+	protection := wakeProtectionDuration(idleTimeout)
+	wake := status.LastWakeDemandTime
+	newDemand := obs.WakeRequestedAt != nil && !obs.WakeRequestedAt.After(now) &&
+		now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL &&
+		(wake == nil || obs.WakeRequestedAt.After(wake.Time))
+	if newDemand {
+		stamp := metav1.NewTime(*obs.WakeRequestedAt)
+		wake = &stamp
+		// Acceptance is independent of the capacity policy chosen below.
+		defer func() { result.NewLastWakeDemandTime = &stamp }()
 	}
-	if wake != nil && now.Sub(*wake) < DefaultAutoStopWakeTTL {
-		desired := as.ActiveReplicas
-		if status.LastWakeDemandTime != nil && spec.Replicas > 0 {
-			// Protection prevents idle scale-down; it must not undo a user's resize.
-			desired = spec.Replicas
-		}
-		decision := decisionWithScale(spec.Replicas, desired, AutoStopReasonWakeRequested,
-			min(pollInterval, DefaultAutoStopWakeTTL-now.Sub(*wake)))
-		if status.LastWakeDemandTime == nil || wake.After(status.LastWakeDemandTime.Time) {
-			stamp := metav1.NewTime(*wake)
-			decision.NewLastWakeDemandTime = &stamp
-		}
-		return decision
-	}
+	protected := wake != nil && !wake.After(now) && now.Sub(wake.Time) < protection
 
 	if scheduleActive(as.Schedule, now) {
 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
 	}
 
 	if spec.Replicas == 0 {
+		if newDemand || protected {
+			return decisionWithScale(0, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
+		}
 		return AutoStopDecision{
 			DesiredReplicas: 0,
 			Reason:          AutoStopReasonStopped,
@@ -243,9 +223,11 @@ func computeAutoStopDecision(
 		}
 	}
 
-	idleTimeout := DefaultAutoStopIdleTimeout
-	if as.IdleTimeout != nil && as.IdleTimeout.Duration > 0 {
-		idleTimeout = as.IdleTimeout.Duration
+	// A bounded grace period vetoes idle shutdown, without suppressing the
+	// schedule target or the activity/failure bookkeeping above.
+	if protected {
+		return decisionWithScale(spec.Replicas, spec.Replicas, AutoStopReasonWakeRequested,
+			min(pollInterval, protection-now.Sub(wake.Time)))
 	}
 
 	if status.LastActivityTime == nil {
@@ -268,6 +250,14 @@ func computeAutoStopDecision(
 		Reason:          AutoStopReasonActivity,
 		RequeueAfter:    pollInterval,
 	}
+}
+
+// Saturate durations too large to multiply without overflowing time.Duration.
+func wakeProtectionDuration(idleTimeout time.Duration) time.Duration {
+	if idleTimeout > time.Duration(math.MaxInt64)/WakeProtectionMultiplier {
+		return time.Duration(math.MaxInt64)
+	}
+	return WakeProtectionMultiplier * idleTimeout
 }
 
 // wakeDemand returns the configured demand source, or a no-op when unset.

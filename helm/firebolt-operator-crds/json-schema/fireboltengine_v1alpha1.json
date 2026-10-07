@@ -7792,7 +7792,7 @@
           "type": "string"
         },
         "lastWakeDemandTime": {
-          "description": "LastWakeDemandTime is the accepted gateway demand timestamp. Its five-minute\nlifetime protects startup and query handoff from idle scale-down, including\nafter a demand-cache eviction or operator restart. Re-observing the same\ntimestamp does not extend protection. Cleared when auto-stop is disabled.",
+          "description": "LastWakeDemandTime is the accepted gateway demand timestamp. For six times\nthe configured idle timeout it prevents idle scale-down, including\nafter a demand-cache eviction or operator restart. Re-observing the same\ntimestamp does not extend protection. Cleared when auto-stop is disabled.",
           "format": "date-time",
           "type": "string"
         },

@@ -13,7 +13,7 @@
 \*                       to engines at spec.replicas = 0, replacing the cache
 \*                       wholesale on every poll
 \*   engine reconciler - decideAutoStopWithEngineIdle, which honours cached demand
-\*                       and persists accepted demand for the remainder of `WakeTTL`
+\*                       and persists accepted demand for the remainder of six idle timeouts
 \*
 \* plus an environment that owns the clock, the metric scrape, poll loss and
 \* agent restarts.
@@ -53,9 +53,9 @@
 \* ---------------------------------------------------------------------------
 \*
 \*   - Time is a bounded counter advanced by EnvTick, and freshness is
-\*     `now - stamp < WakeTTL` over that domain. The three durations that matter
-\*     are modelled at their real RATIO, not their real magnitude:
-\*     IdleTimeout < WakeTTL < Retention, so a quiet engine can reach its idle
+\*     `now - stamp < WakeTTL` over that domain. The bounded configuration checks
+\*     IdleTimeout < WakeTTL < Retention < 6 * IdleTimeout. Go regression tests
+\*     also cover protection shorter than demand freshness. A quiet engine can reach its idle
 \*     deadline while the original query still needs wake protection. What
 \*     the protocol depends on is that the agent keeps a stamp for longer than
 \*     the operator will act on it, so a stamp can be re-observed after it has
@@ -87,8 +87,9 @@
 \*
 \*   - What is deliberately NOT here. autoStop.enabled = FALSE returns before
 \*     anything in this protocol runs, so modelling it adds a variable and no
-\*     hazard. A schedule window is a pure function of the wall clock that lands
-\*     on the same target as a wake and interacts with nothing else. The hold
+\*     hazard. Schedules own the replica target ahead of wake protection. Their
+\*     interaction is covered by Go regression and property tests, not this model.
+\*     The hold
 \*     capacity limiter is out of scope beyond the fact that demand is stamped
 \*     BEFORE the cap is consulted, which is why a shed request still registers
 \*     demand: DemandArrives stamps unconditionally and nothing here can shed.
@@ -182,9 +183,10 @@ StampFresh == stamp # NoStamp /\ now - stamp < WakeTTL
 \* Fresh at the operator: what computeAutoStopDecision tests. WakeIgnoresTTL
 \* removes the age test, which is the whole content of the guard.
 CacheFresh   == cache # NoStamp /\ now - cache < WakeTTL
-AcceptedFresh == accepted # NoStamp /\ now - accepted < WakeTTL
-EffectiveWake == IF ~ForgetAcceptedWake /\ accepted > cache THEN accepted ELSE cache
-WakeObserved == EffectiveWake # NoStamp /\ (WakeIgnoresTTL \/ now - EffectiveWake < WakeTTL)
+AcceptedFresh == accepted # NoStamp /\ now - accepted < 6 * IdleTimeout
+NewDemand == cache # NoStamp /\ cache > accepted /\ (WakeIgnoresTTL \/ now - cache < WakeTTL)
+EffectiveWake == IF NewDemand THEN cache ELSE IF ForgetAcceptedWake THEN NoStamp ELSE accepted
+WakeObserved == NewDemand \/ (EffectiveWake # NoStamp /\ now - EffectiveWake < 6 * IdleTimeout)
 
 \* Whether the wake branch is reached at all. In the shipped precedence it sits
 \* above the stopped early return, so it is reached at every replica count;
@@ -192,8 +194,7 @@ WakeObserved == EffectiveWake # NoStamp /\ (WakeIgnoresTTL \/ now - EffectiveWak
 WakeWins == WakeObserved /\ ~(StoppedBeforeWake /\ replicas = IdleReplicas)
 
 \* The wrapper records successful observations even when fresh wake demand
-\* wins. Parked engines are not scraped; failures only refresh the stamp when
-\* the failed-scrape branch is reached, after wake precedence.
+\* wins. Parked engines are not scraped; failures refresh the stamp even during wake protection.
 ObservedLastActivity ==
     IF replicas = IdleReplicas \/ activity = "scrapeFailed" THEN NoStamp
     ELSE IF activity = "busy" THEN now ELSE engineLastActivity
@@ -307,7 +308,7 @@ PollLosesCache ==
 \* load-bearing -- see StoppedBeforeWake.
 ReconcileWake_ScaleUp ==
     /\ WakeWins
-    /\ replicas # ActiveReplicas
+    /\ replicas = IdleReplicas
     /\ replicas' = ActiveReplicas
     /\ reason'   = "WakeRequested"
     /\ accepted' = IF EffectiveWake > accepted THEN EffectiveWake ELSE accepted
@@ -317,7 +318,8 @@ ReconcileWake_ScaleUp ==
 \* Wake on an engine already at ActiveReplicas: retain successful idle history.
 ReconcileWake_Pinned ==
     /\ WakeWins
-    /\ replicas = ActiveReplicas
+    /\ replicas > IdleReplicas
+    /\ activity # "scrapeFailed"
     /\ reason' = "WakeRequested"
     /\ accepted' = IF EffectiveWake > accepted THEN EffectiveWake ELSE accepted
     /\ lastActivity' = EffectiveLastActivity
@@ -334,12 +336,12 @@ ReconcileStopped ==
 \* so a scrape-failure window looks as un-idle to the next successful poll as a
 \* window full of queries would.
 ReconcileScrapeFailed ==
-    /\ ~WakeWins
     /\ replicas > IdleReplicas
     /\ activity = "scrapeFailed"
     /\ lastActivity' = now
     /\ reason'       = "ScrapeFailed"
-    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity, accepted>>
+    /\ accepted' = IF WakeWins /\ EffectiveWake > accepted THEN EffectiveWake ELSE accepted
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 ReconcileActivity ==
     /\ ~WakeWins
@@ -347,7 +349,8 @@ ReconcileActivity ==
     /\ activity = "busy"
     /\ lastActivity' = now
     /\ reason'       = "ActivityObserved"
-    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity, accepted>>
+    /\ accepted' = IF WakeWins /\ EffectiveWake > accepted THEN EffectiveWake ELSE accepted
+    /\ UNCHANGED <<now, stamp, cache, replicas, activity, engineLastActivity>>
 
 \* Quiet for long enough: park the engine.
 ReconcileIdle_ScaleDown ==
@@ -418,21 +421,11 @@ TypeOK ==
 Inv_ScrapeOnlyWhenRunning ==
     replicas = IdleReplicas => activity = "quiet"
 
-\* THE poller property. While the operator holds actionable demand, the engine
-\* it belongs to is either parked or was itself woken by that demand.
-\*
-\* The agent stamps demand for any engine with no ready endpoints, which
-\* includes a RUNNING engine during a node drain or a rolling restart. The
-\* poller's filter to engines at spec.replicas = 0 is what keeps such a stamp
-\* out of the cache; without it the wake branch -- which sits above the idle
-\* check -- would pin a hand-sized engine at ActiveReplicas for the TTL, scaling
-\* it DOWN in the middle of its own outage and freezing its idle timer.
-\*
-\* The freshness qualifier is not a weakening: an expired entry in the cache is
-\* inert, and the reconciler is what refuses it. What must never happen is the
-\* operator holding demand it WOULD act on against an engine that is running.
+\* A fresh cached stamp belongs to a parked engine or has already been
+\* accepted by its wake. The reason may advance to activity or scrape failure
+\* while the poller's older snapshot is still cached.
 Inv_DemandOnlyForStoppedEngines ==
-    CacheFresh => (replicas = IdleReplicas \/ reason = "WakeRequested")
+    CacheFresh => (replicas = IdleReplicas \/ accepted >= cache)
 
 \* At completed decision boundaries, cache loss cannot stop a protected wake.
 \* The status-before-spec crash boundary is covered by the Go runtime tests.

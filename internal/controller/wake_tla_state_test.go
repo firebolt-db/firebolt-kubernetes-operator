@@ -252,7 +252,7 @@ var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
 	"Inv_AcceptedWakeProtected": func(t *testing.T, m *tlaWakeSim) {
 		t.Helper()
 		if stamp := m.status.LastWakeDemandTime; stamp != nil &&
-			tlaWakeNow.Sub(stamp.Time) < DefaultAutoStopWakeTTL && m.spec.Replicas == 0 {
+			tlaWakeNow.Sub(stamp.Time) < wakeProtectionDuration(tlaWakeIdleTimeout) && m.spec.Replicas == 0 {
 			t.Fatal("Inv_AcceptedWakeProtected: cache eviction stopped a protected wake")
 		}
 	},
@@ -302,19 +302,15 @@ var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
 		}
 	},
 
-	// The poller's filter, read from the decision function's side: while the
-	// operator holds demand it WOULD act on, the engine is either parked or was
-	// itself woken by that demand. A fresh stamp against a running engine that
-	// was not woken means the filter to spec.replicas == 0 leaked, and the next
-	// decision pins that engine at activeReplicas -- scaling a hand-sized
-	// engine down in the middle of its own outage.
+	// Cached demand belongs to a stopped engine or its durably accepted wake.
 	"Inv_DemandOnlyForStoppedEngines": func(t *testing.T, m *tlaWakeSim) {
 		t.Helper()
 		if m.obs.WakeRequestedAt == nil ||
 			tlaWakeNow.Sub(*m.obs.WakeRequestedAt) >= DefaultAutoStopWakeTTL {
 			return
 		}
-		if m.spec.Replicas == 0 || m.status.AutoStopReason == AutoStopReasonWakeRequested {
+		if m.spec.Replicas == 0 || (m.status.LastWakeDemandTime != nil &&
+			!m.status.LastWakeDemandTime.Time.Before(*m.obs.WakeRequestedAt)) {
 			return
 		}
 		t.Fatalf("Inv_DemandOnlyForStoppedEngines: fresh wake demand (age %s) against a "+
@@ -365,7 +361,7 @@ func TestWakeInvariantsMatchSpec(t *testing.T) {
 
 // tlaWakeExpectedCases pins the size of the state cover; see the reasoning on
 // the equivalent constant in engine_tla_state_test.go.
-const tlaWakeExpectedCases = 950
+const tlaWakeExpectedCases = 7500
 
 func TestTLAWakeStateCover(t *testing.T) {
 	if len(tlaWakeStateCases) != tlaWakeExpectedCases {

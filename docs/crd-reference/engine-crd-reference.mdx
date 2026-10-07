@@ -98,7 +98,7 @@ the full class-side allowlist.
 | `status.readyReplicas` | Pods of the active generation that are running and passing their readiness probe. Observed, not desired: it trails `spec.replicas` while a generation comes up, and reads `0` for a stopped Engine or one whose first generation has not cut over yet. During a blue-green rollout it stays with the generation still serving and steps to the new one at cutover, so a roll does not appear here as capacity dropping away; pods of a generation coming up or draining are not counted. |
 | `status.lastReconciled` | Time of the most recent reconciliation. |
 | `status.lastActivityTime` | Most recent Engine activity used by auto-stop. |
-| `status.lastWakeDemandTime` | Accepted Gateway demand timestamp; protects the wake for five minutes without extending on replay. Cleared when auto-stop is disabled. |
+| `status.lastWakeDemandTime` | Accepted Gateway demand timestamp; prevents idle shutdown for six times the configured idle timeout without extending on replay. Cleared when auto-stop is disabled. |
 | `status.lastScaledAt` | Most recent auto-stop replica change. |
 | `status.autoStopReason` | Most recent auto-stop decision. |
 | `status.appliedPresetName` | Name of the `FireboltEnginePreset` last applied to the serving generation. Empty when that generation was rendered without a Preset, or when no generation is serving yet. |

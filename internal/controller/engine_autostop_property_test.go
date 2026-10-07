@@ -76,6 +76,7 @@ type autoStopInput struct {
 	pollInterval      time.Duration
 	scheduleActiveNow bool
 	wakeFresh         bool
+	wakeProtected     bool
 }
 
 func drawAutoStopInput(t *rapid.T) autoStopInput {
@@ -138,8 +139,15 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		age := rapid.IntRange(0, int(2*DefaultAutoStopWakeTTL.Seconds())).Draw(t, "acceptedWakeAgeSec")
 		stamp := metav1.NewTime(referenceTime.Add(-time.Duration(age) * time.Second))
 		status.LastWakeDemandTime = &stamp
-		wakeFresh = wakeFresh || referenceTime.Sub(stamp.Time) < DefaultAutoStopWakeTTL
+		wakeFresh = wakeFresh && (wakeAt != nil && wakeAt.After(stamp.Time))
 	}
+
+	accepted := status.LastWakeDemandTime
+	if wakeFresh {
+		stamp := metav1.NewTime(*wakeAt)
+		accepted = &stamp
+	}
+	protected := accepted != nil && referenceTime.Sub(accepted.Time) < wakeProtectionDuration(idle)
 
 	obs := AutoStopObservation{
 		ActiveQueries:   active,
@@ -156,6 +164,7 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		pollInterval:      poll,
 		scheduleActiveNow: scheduleActiveNow,
 		wakeFresh:         wakeFresh,
+		wakeProtected:     protected,
 	}
 }
 
@@ -280,21 +289,6 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		return
 	}
 
-	// Rule 2: wake stamp wins over everything except disabled.
-	if in.wakeFresh {
-		if dec.Reason != AutoStopReasonWakeRequested {
-			t.Fatalf("fresh WakeRequestedAt, Reason = %q, want %q", dec.Reason, AutoStopReasonWakeRequested)
-		}
-		want := in.activeReplicas
-		if in.status.LastWakeDemandTime != nil && in.spec.Replicas > 0 {
-			want = in.spec.Replicas
-		}
-		if dec.DesiredReplicas != want {
-			t.Fatalf("fresh wake, DesiredReplicas = %d, want %d", dec.DesiredReplicas, want)
-		}
-		return
-	}
-
 	// Rule 3: schedule active wins over idle / stopped.
 	if in.scheduleActiveNow {
 		if dec.Reason != AutoStopReasonScheduleActive {
@@ -303,6 +297,13 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		if dec.DesiredReplicas != in.activeReplicas {
 			t.Fatalf("scheduleActive, DesiredReplicas = %d, want %d",
 				dec.DesiredReplicas, in.activeReplicas)
+		}
+		return
+	}
+
+	if (in.wakeFresh || in.wakeProtected) && in.spec.Replicas == 0 {
+		if dec.DesiredReplicas != in.activeReplicas || dec.Reason != AutoStopReasonWakeRequested {
+			t.Fatalf("fresh demand failed to wake stopped engine: %+v", dec)
 		}
 		return
 	}
@@ -346,6 +347,13 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		if dec.NewLastActivityTime == nil || !dec.NewLastActivityTime.Time.Equal(referenceTime) {
 			t.Fatalf("ActiveQueries>0, NewLastActivityTime = %+v, want now",
 				dec.NewLastActivityTime)
+		}
+		return
+	}
+
+	if in.wakeProtected {
+		if dec.DesiredReplicas != in.spec.Replicas || dec.Reason != AutoStopReasonWakeRequested {
+			t.Fatalf("fresh demand failed to protect running capacity: %+v", dec)
 		}
 		return
 	}
