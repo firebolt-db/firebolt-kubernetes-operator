@@ -45,21 +45,17 @@ rotation-anchors-retain-at-demotion.patch	TestTLARotationStateCover	result not i
 # cover now also exercises the function, and the row keeps naming the rapid
 # harness because proving THAT harness can fail is what it is for.
 #
-# Determinism: the property harness fails on any draw with autoStop enabled
-# and a wake stamp present (~25% of draws), so a default run misses the
-# mutant with probability ~0.75^100 ~= 3e-13. Measured locally: caught in
-# 100/100 runs. No pinned rapid seed is needed; if the harness's draw
-# distribution changes, re-measure before relaxing this row.
-#
-# The example-based autostop unit tests catch this mutation too. The row
-# names the rapid harness anyway because its purpose is to prove THAT harness
-# can fail; the runner executes only the named test.
-autostop-wake-honors-expired-demand.patch	TestComputeAutoStopDecision_Properties	want "WakeRequested"|Reason = "WakeRequested"
+# The wake_freshness property exercises fresh, boundary, expired, and future
+# demand for stopped and running Engines on every draw. Capacity and idle
+# policy vary, but schedules, activity, and existing protection cannot mask
+# acceptance. Detection therefore does not depend on a random seed or local
+# rapid failure captures. The interactions property retains broad sampling.
+autostop-wake-honors-expired-demand.patch	TestComputeAutoStopDecision_Properties/wake_freshness	wake freshness:
 # The wake check moved BELOW the stopped early return: the one precedence rule
 # without which wake-on-zero cannot work at all, since an auto-stopped engine IS
 # an engine at zero replicas. EngineWakeNaiveStoppedFirst.cfg pins the same
 # inversion in the model, where it violates WakeIsNotLost.
-autostop-wake-below-stopped.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
+autostop-wake-below-stopped.patch	TestTLAWakeStateCover	Inv_AcceptedWakeProtected|result is not a one-step reconciler successor
 # A scale-down that reports Stopped instead of Idle. The replica count is right
 # and only the reason token is wrong, so this catches nothing about the scaling
 # and everything about the wake cover's STRICTNESS: it is caught only because
@@ -72,3 +68,4 @@ autostop-idle-reports-stopped.patch	TestTLAWakeStateCover	result is not a one-st
 # every observation at now. This proves the cover exercises the production
 # wrapper as well as the inner wake/scale decision.
 autostop-ignores-engine-idle.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor
+autostop-forgets-accepted-wake.patch	TestTLAWakeStateCover	result is not a one-step reconciler successor

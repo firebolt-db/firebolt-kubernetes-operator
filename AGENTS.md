@@ -79,6 +79,7 @@ GINKGO_FOCUS="your test description" make test-e2e
 | *(none)* | Unit tests only. Crash points compile as no-ops. Embeds `defaults.dev.env`. |
 | `e2e` | Enables E2E test files. Activates real crash-point injection. |
 | `e2e,heavy` | Same as `e2e` but uses the heavy query configuration. |
+| `wakehandofftest` | CI-only wake-agent handoff barrier for the Helm wake regression. Never enable for release images. |
 | `latest` | Swaps embedded defaults to `defaults.latest.env`. Combine with `e2e` for the latest-variant E2E run. |
 
 The rows above describe the raw Go build tags. The build tooling defaults the variant to **latest**: `IMAGE_VARIANT` defaults to `latest` in the `Makefile`, `Dockerfile.ci`, `scripts/load-e2e-images.sh`, and `scripts/ci/verify-quickstart-full.sh`, so `make build` / `make docker-build` / `make test-e2e` (and the released operator image and Helm chart) embed `defaults.latest.env` by default and add the `latest` tag. Set `IMAGE_VARIANT=dev` to build the `dev` variant. A bare `go build` / `go test` with no tag still embeds `defaults.dev.env`.

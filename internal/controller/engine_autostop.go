@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -41,12 +42,11 @@ const (
 	// MinimumAutoStopDeadlineRequeue prevents an untrusted idle-duration
 	// sample from forcing a hot reconcile loop near the idle deadline.
 	MinimumAutoStopDeadlineRequeue = time.Second
-	// DefaultAutoStopWakeTTL bounds how long an unrefreshed wake demand
-	// timestamp still triggers a scale-up. Generous enough to cover engine
-	// cold-start (image pull on a fresh node, blue-green creating phase)
-	// while short enough that an abandoned request does not pin the engine
-	// indefinitely after the gateway gives up.
+	// DefaultAutoStopWakeTTL limits the age of a previously unaccepted demand.
 	DefaultAutoStopWakeTTL = 5 * time.Minute
+	// WakeProtectionMultiplier allows startup and handoff beyond two idle windows.
+	// A 25-second idle timeout gives 150 seconds, exceeding the 120-second hold.
+	WakeProtectionMultiplier = 6
 )
 
 // AutoStop reason tokens written to status.autoStopReason. Constants
@@ -99,7 +99,7 @@ type AutoStopObservation struct {
 
 // AutoStopDecision is the output of computeAutoStopDecision and is
 // applied by the reconciler: DesiredReplicas may be patched onto
-// spec.replicas, NewLastActivityTime may be written to status.
+// spec.replicas; activity and accepted wake timestamps may be written to status.
 type AutoStopDecision struct {
 	// DesiredReplicas is the value spec.replicas should converge to. Equal
 	// to the current replica count when no scale change is needed.
@@ -118,6 +118,11 @@ type AutoStopDecision struct {
 	// NewLastActivityTime, when non-nil, is the value to write to
 	// status.lastActivityTime. Nil means leave the existing value alone.
 	NewLastActivityTime *metav1.Time
+
+	// NewLastWakeDemandTime and NewWakeProtectionUntil must be persisted
+	// together before changing replicas.
+	NewLastWakeDemandTime  *metav1.Time
+	NewWakeProtectionUntil *metav1.Time
 }
 
 // computeAutoStopDecision is the pure decision function. It is independent
@@ -128,29 +133,18 @@ type AutoStopDecision struct {
 //
 //  1. AutoStop disabled or unset → no decision (DesiredReplicas left at
 //     spec.Replicas, Reason=Disabled).
-//  2. A Schedule window is active → pin replicas at ActiveReplicas regardless
-//     of activity. Schedule wins over both idle and stopped paths so an
-//     "always-on during business hours" policy can wake a parked engine.
-//  3. Engine is stopped (replicas=0) and no schedule window is active →
-//     no scale change. Wake-up via gateway is handled separately in
-//     commit 3 by an annotation read; the autoStop's job here is to
-//     stay out of the way.
-//  4. Scrape failed or activity observed → refresh LastActivityTime, do
-//     not scale. ScrapeFailed is grouped with Activity intentionally:
-//     a broken probe must never look like quiet enough to scale down.
-//  5. Quiet for >= IdleTimeout and replicas > IdleReplicas → scale down
-//     to IdleReplicas.
-//  6. Otherwise: no change. Callers without an idle-history observation get
-//     an initial LastActivityTime anchor. Production supplies the Engine's
-//     retained history through decideAutoStopWithEngineIdle before this call,
-//     or treats an unavailable sample as a scrape failure.
+//  2. An active schedule window owns the replica target.
+//  3. Fresh demand wakes a stopped engine; otherwise it stays stopped.
+//  4. Scrape failure or activity refreshes LastActivityTime.
+//  5. Accepted wake demand vetoes idle scale-down until its protection expires.
+//  6. Otherwise evaluate ordinary idle policy.
 func computeAutoStopDecision(
 	spec *computev1alpha1.FireboltEngineSpec,
 	autoStop *computev1alpha1.AutoStopSpec,
 	status *computev1alpha1.FireboltEngineStatus,
 	obs AutoStopObservation,
 	now time.Time,
-) AutoStopDecision {
+) (result AutoStopDecision) {
 	if autoStop == nil || !autoStop.Enabled {
 		return AutoStopDecision{
 			DesiredReplicas: spec.Replicas,
@@ -168,28 +162,44 @@ func computeAutoStopDecision(
 		idleReplicas = *as.IdleReplicas
 	}
 
-	// Wake demand: a gateway saw a query for this engine while it was
-	// down, so scale up to ActiveReplicas. Honored above schedule because
-	// either path lands at the same target (ActiveReplicas), but reporting
-	// WakeRequested is more informative for operators looking at status.
-	//
-	// Deliberately above the spec.Replicas == 0 branch below, and this is
-	// load-bearing: an auto-stopped engine IS an engine at zero replicas,
-	// so checking "stopped" first would make wake impossible. The cost is
-	// that the decision function cannot distinguish an engine autoStop
-	// parked from one a user zeroed by hand, and a query will restart
-	// either. Users who want an engine to stay down set
-	// autoStop.enabled: false, which returns at the top of this function
-	// before wake is ever consulted.
-	if obs.WakeRequestedAt != nil && now.Sub(*obs.WakeRequestedAt) < DefaultAutoStopWakeTTL {
-		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
+	// Accepted demand outlives the poller's cache, which deliberately drops
+	// running engines. Use the original stamp so a replay cannot renew protection.
+	idleTimeout := DefaultAutoStopIdleTimeout
+	if as.IdleTimeout != nil && as.IdleTimeout.Duration > 0 {
+		idleTimeout = as.IdleTimeout.Duration
 	}
+	protection := wakeProtectionDuration(idleTimeout)
+	wake := status.LastWakeDemandTime
+	deadline := status.WakeProtectionUntil
+	demand := freshWakeDemand(status, obs.WakeRequestedAt, now)
+	newDemand := demand != nil
+	if newDemand {
+		stamp := metav1.NewTime(*demand)
+		wake = &stamp
+		// Acceptance is independent of the capacity policy chosen below.
+		expires := stamp.Add(protection)
+		// metav1.Time is persisted at whole-second precision. Round up so a
+		// fractional idle timeout neither loses grace nor fails read-back validation.
+		if expires.Nanosecond() != 0 {
+			expires = expires.Truncate(time.Second).Add(time.Second)
+		}
+		until := metav1.NewTime(expires)
+		deadline = &until
+		defer func() {
+			result.NewLastWakeDemandTime = &stamp
+			result.NewWakeProtectionUntil = &until
+		}()
+	}
+	protected := wake != nil && deadline != nil && !wake.After(now) && now.Before(deadline.Time)
 
 	if scheduleActive(as.Schedule, now) {
 		return decisionWithScale(spec.Replicas, as.ActiveReplicas, AutoStopReasonScheduleActive, pollInterval)
 	}
 
 	if spec.Replicas == 0 {
+		if newDemand || protected {
+			return decisionWithScale(0, as.ActiveReplicas, AutoStopReasonWakeRequested, pollInterval)
+		}
 		return AutoStopDecision{
 			DesiredReplicas: 0,
 			Reason:          AutoStopReasonStopped,
@@ -226,9 +236,11 @@ func computeAutoStopDecision(
 		}
 	}
 
-	idleTimeout := DefaultAutoStopIdleTimeout
-	if as.IdleTimeout != nil && as.IdleTimeout.Duration > 0 {
-		idleTimeout = as.IdleTimeout.Duration
+	// A bounded grace period vetoes idle shutdown, without suppressing the
+	// schedule target or the activity/failure bookkeeping above.
+	if protected {
+		return decisionWithScale(spec.Replicas, spec.Replicas, AutoStopReasonWakeRequested,
+			min(pollInterval, deadline.Sub(now)))
 	}
 
 	if status.LastActivityTime == nil {
@@ -251,6 +263,33 @@ func computeAutoStopDecision(
 		Reason:          AutoStopReasonActivity,
 		RequeueAfter:    pollInterval,
 	}
+}
+
+// freshWakeDemand returns a request that still needs durable acceptance.
+func freshWakeDemand(status *computev1alpha1.FireboltEngineStatus, demand *time.Time, now time.Time) *time.Time {
+	wake := status.LastWakeDemandTime
+	deadline := status.WakeProtectionUntil
+	// A schema can retain the demand while pruning its deadline. That pair
+	// was never accepted: retry the original fresh request, even after cache
+	// eviction or restart. A complete pair remains the replay watermark.
+	if deadline == nil && wake != nil && (demand == nil || demand.Before(wake.Time)) {
+		demand = &wake.Time
+	}
+	fresh := demand != nil && !demand.After(now) &&
+		now.Sub(*demand) < DefaultAutoStopWakeTTL &&
+		(wake == nil || demand.After(wake.Time) || (deadline == nil && demand.Equal(wake.Time)))
+	if fresh {
+		return demand
+	}
+	return nil
+}
+
+// Saturate durations too large to multiply without overflowing time.Duration.
+func wakeProtectionDuration(idleTimeout time.Duration) time.Duration {
+	if idleTimeout > time.Duration(math.MaxInt64)/WakeProtectionMultiplier {
+		return time.Duration(math.MaxInt64)
+	}
+	return WakeProtectionMultiplier * idleTimeout
 }
 
 // wakeDemand returns the configured demand source, or a no-op when unset.
@@ -475,6 +514,14 @@ func (r *FireboltEngineReconciler) runAutoStop(
 			engine.Status.LastActivityTime = nil
 			statusDirty = true
 		}
+		if engine.Status.LastWakeDemandTime != nil {
+			engine.Status.LastWakeDemandTime = nil
+			statusDirty = true
+		}
+		if engine.Status.WakeProtectionUntil != nil {
+			engine.Status.WakeProtectionUntil = nil
+			statusDirty = true
+		}
 		if statusDirty {
 			if err := r.updateStatus(ctx, engine); err != nil {
 				return autoStopStepResult{}, fmt.Errorf("autoStop: clearing stale status: %w", err)
@@ -509,11 +556,27 @@ func (r *FireboltEngineReconciler) runAutoStop(
 		RequeueAfter: decision.RequeueAfter,
 	}
 
+	// Persist protection before scale-up. A failed spec write can then retry
+	// from durable demand even if the poller or operator loses its cache.
+	// Do not retry a status conflict using a fresh resourceVersion with this
+	// stale spec: the replica update must still conflict with concurrent edits.
+	if decision.NewLastWakeDemandTime != nil {
+		engine.Status.LastWakeDemandTime = decision.NewLastWakeDemandTime
+		engine.Status.WakeProtectionUntil = decision.NewWakeProtectionUntil
+		if err := r.Status().Update(ctx, engine); err != nil {
+			return result, fmt.Errorf("autoStop: persisting wake demand: %w", err)
+		}
+		if !engine.Status.LastWakeDemandTime.Equal(decision.NewLastWakeDemandTime) ||
+			!engine.Status.WakeProtectionUntil.Equal(decision.NewWakeProtectionUntil) {
+			return result, errors.New("autoStop: wake demand was not persisted; update the FireboltEngine CRD")
+		}
+	}
+
 	// Order matters: r.Update writes the spec subresource and then
 	// deserializes the API server's response back into the engine
 	// pointer. The response carries the previously-stored Status, so
 	// any in-memory Status fields set BEFORE r.Update would be silently
-	// clobbered. Always do the spec write first, THEN apply autoStop
+	// clobbered. After persisting wake demand, do the spec write before other
 	// status mutations, THEN r.updateStatus to persist them.
 	if decision.ScaleAction {
 		log.Info("AutoStop scaling spec.replicas",

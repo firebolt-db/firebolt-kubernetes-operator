@@ -50,12 +50,70 @@ import (
 var referenceTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
 func TestComputeAutoStopDecision_Properties(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		in := drawAutoStopInput(t)
-		dec := computeAutoStopDecision(in.spec, in.spec.AutoStop, in.status, in.obs, referenceTime)
+	t.Run("wake_freshness", func(t *testing.T) {
+		rapid.Check(t, func(t *rapid.T) {
+			active := int32(rapid.IntRange(1, 10).Draw(t, "activeReplicas"))
+			// Even demand just inside the freshness limit remains protected.
+			idle := time.Duration(rapid.IntRange(1, 120).Draw(t, "idleMinutes")) * time.Minute
+			idleReplicas := int32(0)
+			policy := &computev1alpha1.AutoStopSpec{
+				Enabled: true, ActiveReplicas: active, IdleReplicas: &idleReplicas,
+				IdleTimeout: &metav1.Duration{Duration: idle},
+			}
+			// Exercise every boundary on every draw. Schedules, activity, and
+			// accepted protection must not mask demand acceptance in this check.
+			for _, tc := range []struct {
+				name   string
+				age    time.Duration
+				accept bool
+			}{
+				{name: "now", age: 0, accept: true},
+				{name: "just_fresh", age: DefaultAutoStopWakeTTL - time.Nanosecond, accept: true},
+				{name: "at_limit", age: DefaultAutoStopWakeTTL},
+				{name: "expired", age: DefaultAutoStopWakeTTL + time.Nanosecond},
+				{name: "future", age: -time.Nanosecond},
+			} {
+				for _, replicas := range []int32{0, active + 1} {
+					stamp := referenceTime.Add(-tc.age)
+					lastActivity := metav1.NewTime(referenceTime.Add(-2 * idle))
+					status := &computev1alpha1.FireboltEngineStatus{LastActivityTime: &lastActivity}
+					spec := &computev1alpha1.FireboltEngineSpec{Replicas: replicas, AutoStop: policy}
+					dec := computeAutoStopDecision(spec, policy, status,
+						AutoStopObservation{WakeRequestedAt: &stamp}, referenceTime)
+					if tc.accept {
+						if dec.NewLastWakeDemandTime == nil || !dec.NewLastWakeDemandTime.Time.Equal(stamp) ||
+							dec.NewWakeProtectionUntil == nil || !dec.NewWakeProtectionUntil.After(referenceTime) {
+							t.Fatalf("wake freshness: %s replicas=%d did not accept fresh demand: %+v", tc.name, replicas, dec)
+						}
+					} else if dec.NewLastWakeDemandTime != nil || dec.NewWakeProtectionUntil != nil {
+						t.Fatalf("wake freshness: %s replicas=%d accepted ineligible demand: %+v", tc.name, replicas, dec)
+					}
+					wantReplicas, wantReason := int32(0), AutoStopReasonStopped
+					if tc.accept {
+						wantReplicas, wantReason = replicas, AutoStopReasonWakeRequested
+						if replicas == 0 {
+							wantReplicas = active
+						}
+					} else if replicas > 0 {
+						wantReason = AutoStopReasonIdle
+					}
+					if dec.DesiredReplicas != wantReplicas || dec.Reason != wantReason ||
+						dec.ScaleAction != (replicas != wantReplicas) {
+						t.Fatalf("wake freshness: %s replicas=%d got %+v, want replicas=%d reason=%s",
+							tc.name, replicas, dec, wantReplicas, wantReason)
+					}
+				}
+			}
+		})
+	})
+	t.Run("interactions", func(t *testing.T) {
+		rapid.Check(t, func(t *rapid.T) {
+			in := drawAutoStopInput(t)
+			dec := computeAutoStopDecision(in.spec, in.spec.AutoStop, in.status, in.obs, referenceTime)
 
-		assertAutoStopWellFormed(t, in, dec)
-		assertAutoStopPrecedence(t, in, dec)
+			assertAutoStopWellFormed(t, in, dec)
+			assertAutoStopPrecedence(t, in, dec)
+		})
 	})
 }
 
@@ -76,6 +134,7 @@ type autoStopInput struct {
 	pollInterval      time.Duration
 	scheduleActiveNow bool
 	wakeFresh         bool
+	wakeProtected     bool
 }
 
 func drawAutoStopInput(t *rapid.T) autoStopInput {
@@ -134,6 +193,23 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		wakeFresh = referenceTime.Sub(stamp) < DefaultAutoStopWakeTTL
 	}
 
+	if rapid.Bool().Draw(t, "hasAcceptedWake") {
+		age := rapid.IntRange(0, int(2*DefaultAutoStopWakeTTL.Seconds())).Draw(t, "acceptedWakeAgeSec")
+		stamp := metav1.NewTime(referenceTime.Add(-time.Duration(age) * time.Second))
+		status.LastWakeDemandTime = &stamp
+		acceptedIdle := time.Duration(rapid.IntRange(1, 600).Draw(t, "idleSecondsAtAcceptance")) * time.Second
+		until := metav1.NewTime(stamp.Add(6 * acceptedIdle))
+		status.WakeProtectionUntil = &until
+		wakeFresh = wakeFresh && (wakeAt != nil && wakeAt.After(stamp.Time))
+	}
+
+	deadline := status.WakeProtectionUntil
+	if wakeFresh {
+		until := metav1.NewTime(wakeAt.Add(6 * idle))
+		deadline = &until
+	}
+	protected := deadline != nil && referenceTime.Before(deadline.Time)
+
 	obs := AutoStopObservation{
 		ActiveQueries:   active,
 		ScrapeFailed:    scrapeFailed,
@@ -149,6 +225,7 @@ func drawAutoStopInput(t *rapid.T) autoStopInput {
 		pollInterval:      poll,
 		scheduleActiveNow: scheduleActiveNow,
 		wakeFresh:         wakeFresh,
+		wakeProtected:     protected,
 	}
 }
 
@@ -273,18 +350,6 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		return
 	}
 
-	// Rule 2: wake stamp wins over everything except disabled.
-	if in.wakeFresh {
-		if dec.Reason != AutoStopReasonWakeRequested {
-			t.Fatalf("fresh WakeRequestedAt, Reason = %q, want %q", dec.Reason, AutoStopReasonWakeRequested)
-		}
-		if dec.DesiredReplicas != in.activeReplicas {
-			t.Fatalf("fresh WakeRequestedAt, DesiredReplicas = %d, want %d",
-				dec.DesiredReplicas, in.activeReplicas)
-		}
-		return
-	}
-
 	// Rule 3: schedule active wins over idle / stopped.
 	if in.scheduleActiveNow {
 		if dec.Reason != AutoStopReasonScheduleActive {
@@ -293,6 +358,13 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		if dec.DesiredReplicas != in.activeReplicas {
 			t.Fatalf("scheduleActive, DesiredReplicas = %d, want %d",
 				dec.DesiredReplicas, in.activeReplicas)
+		}
+		return
+	}
+
+	if (in.wakeFresh || in.wakeProtected) && in.spec.Replicas == 0 {
+		if dec.DesiredReplicas != in.activeReplicas || dec.Reason != AutoStopReasonWakeRequested {
+			t.Fatalf("fresh demand failed to wake stopped engine: %+v", dec)
 		}
 		return
 	}
@@ -336,6 +408,13 @@ func assertAutoStopPrecedence(t *rapid.T, in autoStopInput, dec AutoStopDecision
 		if dec.NewLastActivityTime == nil || !dec.NewLastActivityTime.Time.Equal(referenceTime) {
 			t.Fatalf("ActiveQueries>0, NewLastActivityTime = %+v, want now",
 				dec.NewLastActivityTime)
+		}
+		return
+	}
+
+	if in.wakeProtected {
+		if dec.DesiredReplicas != in.spec.Replicas || dec.Reason != AutoStopReasonWakeRequested {
+			t.Fatalf("fresh demand failed to protect running capacity: %+v", dec)
 		}
 		return
 	}

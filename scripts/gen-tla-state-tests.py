@@ -910,7 +910,7 @@ package controller
 // the inputs and outputs decideAutoStopWithEngineIdle can be driven through and
 // observed by.
 //
-// The three timestamps are projected as AGES in model ticks rather than as
+// The timestamps are projected as AGES in model ticks rather than as
 // instants, because the decision function only ever reads them as an age
 // against `now`: the wake TTL and the idle timeout are both `now - stamp`
 // comparisons. That collapses every (now, stamp) pair with the same difference
@@ -923,6 +923,7 @@ package controller
 type tlaWakeState struct {
 \tReplicas int
 \tWakeAge  int // -1: the operator holds no demand for this engine
+\tAcceptedWakeAge int // -1: no durably accepted wake demand
 \tIdleAge  int // -1: status.lastActivityTime is unset
 \tEngineIdleAge int // retained engine idle duration in ticks; used by quiet scrapes
 \tActivity string
@@ -1011,7 +1012,7 @@ def wake_project(state: State) -> StateKey:
     downstream of it.
 
     Soundness of the ages: every reconciler guard reads `now` only via
-    `now - cache < WakeTTL` and the newer of stored and observed activity.
+    fresh unaccepted demand and `now - accepted < 6 * IdleTimeout` and the newer of stored and observed activity.
     The observed age is zero for busy scrapes and `now - engineLastActivity`
     for quiet ones. The resulting stored age is the minimum of the two ages
     (or zero on scrape failure). So the projected successor of a state is a
@@ -1028,6 +1029,7 @@ def wake_project(state: State) -> StateKey:
     return (
         int(str(state["replicas"])),
         age(state["cache"]),
+        age(state["accepted"]),
         age(state["lastActivity"]),
         age(state["engineLastActivity"]),
         state["activity"],
@@ -1058,11 +1060,12 @@ def wake_go_state_lit(key: StateKey, _ctx: Ctx) -> str:
     """Positional tlaWakeState composite literal. The outer type is elided
     because the literal sits inside `[]tlaWakeState{ … }` (the pool). Field
     order MUST match the tlaWakeState struct in WAKE_HEADER."""
-    replicas, wake_age, idle_age, engine_idle_age, activity, reason = key
+    replicas, wake_age, accepted_age, idle_age, engine_idle_age, activity, reason = key
     return (
         "{"
         f"{replicas}, "
         f"{wake_age}, "
+        f"{accepted_age}, "
         f"{idle_age}, "
         f"{engine_idle_age}, "
         f"{go_str(activity)}, "

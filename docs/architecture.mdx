@@ -86,6 +86,10 @@ Auto-stop reads the eligibility-filtered idle duration from every active-generat
 
 The first successful check uses the Engine's existing idle history, including when you re-enable auto-stop. It can scale down an already-idle Engine immediately. A failed check refreshes the stored activity timestamp; an older Engine observation cannot erase that grace period.
 
+The Firebolt Operator stores accepted Gateway wake demand and its protection deadline in Engine status before increasing replicas. This temporary protection is based on the configured idle timeout and survives Firebolt Operator restarts. Active schedules and activity tracking continue normally; idle scale-down resumes after protection expires.
+
+If an Engine takes longer than expected to become available, protection can expire before a waiting query reaches it. Idle scale-down can then race with query delivery and cause the query to fail. See [Auto-stop and wake-up](./engine/auto-stop-and-wake-up).
+
 ## Instance-wide security
 
 Authentication and listener TLS are configured on the Instance and apply consistently to its Engines:

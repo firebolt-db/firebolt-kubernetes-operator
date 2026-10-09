@@ -63,8 +63,8 @@ import (
 
 // The model's clock, mapped onto real durations.
 //
-// EngineWake.cfg sets WakeTTL = 2 ticks and IdleTimeout = 2 ticks, so one tick
-// is half the production wake TTL and the idle timeout is two of them. The
+// EngineWake.cfg sets WakeTTL = 2 ticks and IdleTimeout = 1 tick, so one tick
+// is half the production wake TTL and the idle timeout is one of them. The
 // mapping is deliberately derived from DefaultAutoStopWakeTTL rather than
 // written out as a duration: the model's freshness test is `age < WakeTTL` and
 // the production one is `now.Sub(stamp) < DefaultAutoStopWakeTTL`, and they have
@@ -78,7 +78,7 @@ import (
 // that straddle the boundary.
 const (
 	tlaWakeTTLTicks         = 2
-	tlaWakeIdleTimeoutTicks = 2
+	tlaWakeIdleTimeoutTicks = 1
 	tlaWakeTick             = DefaultAutoStopWakeTTL / tlaWakeTTLTicks
 	tlaWakeIdleTimeout      = tlaWakeIdleTimeoutTicks * tlaWakeTick
 )
@@ -170,6 +170,14 @@ func materializeTLAWakeState(t *testing.T, s tlaWakeState) *tlaWakeSim {
 		status.LastActivityTime = &stamp
 	}
 
+	// The model holds IdleTimeout constant. Policy changes are covered by
+	// TestAcceptedWakeDeadlineSurvivesPolicyChanges and the rapid harness.
+	if accepted := tlaWakeStamp(s.AcceptedWakeAge); accepted != nil {
+		stamp := metav1.NewTime(*accepted)
+		status.LastWakeDemandTime = &stamp
+		until := metav1.NewTime(stamp.Add(wakeProtectionDuration(tlaWakeIdleTimeout)))
+		status.WakeProtectionUntil = &until
+	}
 	obs := AutoStopObservation{WakeRequestedAt: tlaWakeStamp(s.WakeAge)}
 	switch s.Activity {
 	case "quiet", "busy":
@@ -202,28 +210,37 @@ func (m *tlaWakeSim) idleDuration() *time.Duration {
 
 // project extracts the model's observable variables back out of the sim.
 func (m *tlaWakeSim) project() tlaWakeState {
+	var accepted *time.Time
+	if m.status.LastWakeDemandTime != nil {
+		accepted = &m.status.LastWakeDemandTime.Time
+	}
 	var last *time.Time
 	if m.status.LastActivityTime != nil {
 		last = &m.status.LastActivityTime.Time
 	}
 	return tlaWakeState{
-		Replicas:      int(m.spec.Replicas),
-		WakeAge:       tlaWakeAge(m.obs.WakeRequestedAt),
-		IdleAge:       tlaWakeAge(last),
-		EngineIdleAge: int(m.engineIdle / tlaWakeTick),
-		Activity:      m.activity,
-		Reason:        m.status.AutoStopReason,
+		Replicas:        int(m.spec.Replicas),
+		WakeAge:         tlaWakeAge(m.obs.WakeRequestedAt),
+		AcceptedWakeAge: tlaWakeAge(accepted),
+		IdleAge:         tlaWakeAge(last),
+		EngineIdleAge:   int(m.engineIdle / tlaWakeTick),
+		Activity:        m.activity,
+		Reason:          m.status.AutoStopReason,
 	}
 }
 
 // apply writes a decision back exactly as runAutoStop does: the replica patch
-// when the decision asks for one, then the two status fields.
+// after durable wake acceptance, then the remaining status fields.
 //
 // The order matters in production for a reason that does not apply here (the
 // spec Update's response clobbers in-memory status), but keeping the same order
 // keeps this a transcription of the caller rather than a second opinion about
 // what the decision means.
 func (m *tlaWakeSim) apply(decision AutoStopDecision) {
+	if decision.NewLastWakeDemandTime != nil {
+		m.status.LastWakeDemandTime = decision.NewLastWakeDemandTime
+		m.status.WakeProtectionUntil = decision.NewWakeProtectionUntil
+	}
 	if decision.ScaleAction {
 		m.spec.Replicas = decision.DesiredReplicas
 	}
@@ -237,6 +254,13 @@ func (m *tlaWakeSim) apply(decision AutoStopDecision) {
 // counterpart. Keys are checked against the generated tlaWakeRequiredInvariants
 // by TestWakeInvariantsMatchSpec, in both directions.
 var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
+	"Inv_AcceptedWakeProtected": func(t *testing.T, m *tlaWakeSim) {
+		t.Helper()
+		if stamp := m.status.LastWakeDemandTime; stamp != nil &&
+			tlaWakeNow.Sub(stamp.Time) < wakeProtectionDuration(tlaWakeIdleTimeout) && m.spec.Replicas == 0 {
+			t.Fatal("Inv_AcceptedWakeProtected: cache eviction stopped a protected wake")
+		}
+	},
 	// Partial in Go, as in the other harnesses: the spec's TypeOK asserts
 	// membership in bounded sets that are a model artifact (the clock domain).
 	// What carries over is that every value the decision function reads or
@@ -259,6 +283,9 @@ var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
 			t.Fatalf("TypeOK: wake demand is stamped in the future (%s > %s)",
 				m.obs.WakeRequestedAt, tlaWakeNow)
 		}
+		if m.status.LastWakeDemandTime != nil && m.status.LastWakeDemandTime.After(tlaWakeNow) {
+			t.Fatalf("TypeOK: accepted wake is dated in the future: %s", m.status.LastWakeDemandTime)
+		}
 		if m.status.LastActivityTime != nil && m.status.LastActivityTime.After(tlaWakeNow) {
 			t.Fatalf("TypeOK: lastActivityTime is in the future (%s > %s)",
 				m.status.LastActivityTime, tlaWakeNow)
@@ -280,19 +307,15 @@ var wakeInvariants = map[string]func(t *testing.T, m *tlaWakeSim){
 		}
 	},
 
-	// The poller's filter, read from the decision function's side: while the
-	// operator holds demand it WOULD act on, the engine is either parked or was
-	// itself woken by that demand. A fresh stamp against a running engine that
-	// was not woken means the filter to spec.replicas == 0 leaked, and the next
-	// decision pins that engine at activeReplicas -- scaling a hand-sized
-	// engine down in the middle of its own outage.
+	// Cached demand belongs to a stopped engine or its durably accepted wake.
 	"Inv_DemandOnlyForStoppedEngines": func(t *testing.T, m *tlaWakeSim) {
 		t.Helper()
 		if m.obs.WakeRequestedAt == nil ||
 			tlaWakeNow.Sub(*m.obs.WakeRequestedAt) >= DefaultAutoStopWakeTTL {
 			return
 		}
-		if m.spec.Replicas == 0 || m.status.AutoStopReason == AutoStopReasonWakeRequested {
+		if m.spec.Replicas == 0 || (m.status.LastWakeDemandTime != nil &&
+			!m.status.LastWakeDemandTime.Time.Before(*m.obs.WakeRequestedAt)) {
 			return
 		}
 		t.Fatalf("Inv_DemandOnlyForStoppedEngines: fresh wake demand (age %s) against a "+
@@ -343,7 +366,7 @@ func TestWakeInvariantsMatchSpec(t *testing.T) {
 
 // tlaWakeExpectedCases pins the size of the state cover; see the reasoning on
 // the equivalent constant in engine_tla_state_test.go.
-const tlaWakeExpectedCases = 620
+const tlaWakeExpectedCases = 7500
 
 func TestTLAWakeStateCover(t *testing.T) {
 	if len(tlaWakeStateCases) != tlaWakeExpectedCases {

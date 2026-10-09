@@ -7791,6 +7791,11 @@
           "format": "date-time",
           "type": "string"
         },
+        "lastWakeDemandTime": {
+          "description": "LastWakeDemandTime is the accepted gateway demand timestamp. Re-observing\nthe same timestamp cannot renew protection. Cleared when auto-stop is disabled.",
+          "format": "date-time",
+          "type": "string"
+        },
         "observedAuthHash": {
           "description": "ObservedAuthHash is the auth content-hash (see the internal\nauthHash function) that this engine's current, stable generation\nwas last confirmed to match \u2014 copied from the running\nStatefulSet's own drift-detection annotation once a reconcile finds\nno drift. Empty when auth is disabled or no generation has\nstabilized yet.\n\nThis exists so the instance controller can tell, for its own\nsigning-key rotation state machine, whether every engine in an\nInstance has actually rolled onto a given signing-keys set \u2014\nwithout the instance controller needing to read engine\nStatefulSets directly or recompute engine-side rendering rules\nitself. It is intentionally the same hash already used to decide\nwhether an engine needs a new generation (see stsMatchesSpec /\nannotationsMatchSpec), just surfaced here as this engine's own\nobserved value of it.",
           "type": "string"
@@ -7819,6 +7824,11 @@
         "readyReplicas": {
           "description": "ReadyReplicas is how many pods of activeGeneration are running and\npassing their readiness probe. It is observed, not desired: it counts\nwhat serves traffic right now, so it trails spec.replicas while a\ngeneration comes up and reads 0 for a stopped engine or one whose first\ngeneration has not cut over yet.\n\nDuring a blue-green rollout it stays with the generation that is still\nserving and steps to the new one at cutover, so a roll does not show up\nhere as capacity briefly dropping away. Pods of a generation that is\ncoming up or draining are not counted.\nDeliberately serialized even at zero, unlike most optional status\nfields: zero is a real observation here (stopped, or nothing serving\nyet) and must stay distinguishable from the field being absent, which\nmeans an operator too old to report it at all. With omitempty a client\nreading the field cannot tell those apart. currentGeneration and\nactiveGeneration serialize zero for the same reason.",
           "type": "integer"
+        },
+        "wakeProtectionUntil": {
+          "description": "WakeProtectionUntil is LastWakeDemandTime plus six times the effective\nidle timeout at acceptance, rounded up to whole seconds. Persisted\nwith the demand before scaling;\nsubsequent policy changes do not alter this deadline. Cleared when\nauto-stop is disabled.",
+          "format": "date-time",
+          "type": "string"
         }
       },
       "required": [
