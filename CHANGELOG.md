@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.5](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.4...firebolt-operator-v0.17.5) (2026-10-09)
+
+
+### Bug Fixes
+
+* **autostop:** consume engine idle duration (FB-4043) ([#261](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/261)) ([f0ea669](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f0ea6699d31632f9fb2903613e7c01d2127331a9))
+* **controller:** preserve wake demand through query handoff (FB-4574) ([#281](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/281)) ([c02f383](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c02f3831554cf7b69501a346907b93ec37ebc5e9))
+* **controller:** resolve cluster-scoped engine classes in the spec.id canonicalize check (FB-3978) ([#240](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/240)) ([0c9e549](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0c9e5497dca22eba227ae48ae02585fcee08d2ab))
+
+
+### Dependencies
+
+* **deps:** bump github.com/cert-manager/cert-manager from 1.21.1 to 1.21.2 ([#271](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/271)) ([7451404](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7451404ce053849b48cf9e044e205da6fd3ca8b5))
+* **deps:** bump github.com/onsi/ginkgo/v2 from 2.32.1 to 2.32.2 in the ginkgo-gomega group across 1 directory ([#270](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/270)) ([6399706](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6399706e5157e62ab1c1c1c4929ddbbc2c86158b))
+* **deps:** bump github.com/prometheus/client_model from 0.6.2 to 0.6.3 in the prometheus group across 1 directory ([#258](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/258)) ([5db9cd3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5db9cd369a4a52c3709582bcdaef09c4331e1756))
+* **deps:** bump golang from 1.27.0 to 1.27.1 ([#230](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/230)) ([af3bb79](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/af3bb79748be7621a95d121e6b6e76c89935ac60))
+* **deps:** bump google.golang.org/grpc from 1.82.1 to 1.83.2 ([#246](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/246)) ([f29011d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f29011d5c20335419883f9758463b852a035a2d4))
+* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260927210425.e91cd5bd17f8 ([#276](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/276)) ([e152984](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e1529849073f708bea3db9e7d6ddb2f435e957da))
+* **deps:** bump the ginkgo-gomega group with 2 updates ([#277](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/277)) ([fe9eb64](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fe9eb644ec36383676799e28c57c32058b043efb))
+* **deps:** bump the kubernetes group across 1 directory with 4 updates ([#259](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/259)) ([a2af289](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a2af289071ce4f69e19daf0f47976342724d9c56))
+
 ## [0.17.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.3...firebolt-operator-v0.17.4) (2026-09-22)
 
 
