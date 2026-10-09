@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.1...firebolt-operator-crds-chart-0.9.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **controller:** preserve wake demand through query handoff (FB-4574) ([#281](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/281)) ([c02f383](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c02f3831554cf7b69501a346907b93ec37ebc5e9))
+
 ## [0.9.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.0...firebolt-operator-crds-chart-0.9.1) (2026-09-25)
 
 
