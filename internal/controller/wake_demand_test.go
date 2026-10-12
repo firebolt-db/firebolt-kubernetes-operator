@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	computev1alpha1 "github.com/firebolt-db/firebolt-kubernetes-operator/api/v1alpha1"
@@ -271,6 +273,40 @@ func TestPollOnceClearsCacheWhenNothingIsStopped(t *testing.T) {
 
 	if got := tr.LastDemand("ns", "up"); got != nil {
 		t.Errorf("LastDemand() = %v after the engine came up, want nil", got)
+	}
+}
+
+// Scrapes fan out: a poll over several slow agents must take about one
+// scrape timeout, not one per agent. The handler holds every response until
+// all agents have been asked, so a sequential poll would see each scrape
+// time out in turn and the whole poll take pods × wakeDemandScrapeTimeout.
+func TestPollOnceScrapesAgentsConcurrently(t *testing.T) {
+	const pods = 4
+	var arrived sync.WaitGroup
+	arrived.Add(pods)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		arrived.Done()
+		arrived.Wait()
+		fmt.Fprintf(w, "%s{engine=%q} %d\n", wakeagent.MetricLastDemand, "down", 1_700_000_000)
+	}))
+	defer srv.Close()
+	host, port := splitHostPort(t, srv.Listener.Addr().String())
+
+	objs := []client.Object{stoppedEngine("ns", "down", 0)}
+	for i := range pods {
+		objs = append(objs, gatewayPod(fmt.Sprintf("gw-%d", i), host, corev1.PodRunning))
+	}
+	c := fake.NewClientBuilder().WithScheme(wakeTestScheme(t)).WithObjects(objs...).Build()
+
+	tr := &WakeDemandTracker{Client: c, DemandPort: port}
+	start := time.Now()
+	tr.pollOnce(context.Background())
+	if elapsed := time.Since(start); elapsed >= wakeDemandScrapeTimeout {
+		t.Fatalf("pollOnce took %v over %d slow agents, want well under one scrape timeout (%v)",
+			elapsed, pods, wakeDemandScrapeTimeout)
+	}
+	if got := tr.LastDemand("ns", "down"); got == nil {
+		t.Fatal("LastDemand() = nil, want demand from the concurrently scraped agents")
 	}
 }
 

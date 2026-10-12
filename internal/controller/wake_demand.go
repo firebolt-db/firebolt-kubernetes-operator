@@ -57,7 +57,15 @@ const maxDemandResponseBytes = 1 << 20
 // wakeDemandScrapeTimeout bounds a single agent scrape. Short: an agent
 // that cannot answer promptly is one whose demand we will pick up on the
 // next tick anyway.
-const wakeDemandScrapeTimeout = 3 * time.Second
+const wakeDemandScrapeTimeout = 2 * time.Second
+
+// maxConcurrentDemandScrapes caps how many agents one poll has in flight.
+// Scrapes fan out so that unresponsive gateway pods — a namespace whose
+// NetworkPolicy drops the operator's traffic, a wedged sidecar — cost one
+// scrape timeout per batch instead of one per pod. Sequential scraping let
+// a few dozen such pods hold the cluster-wide poll past the wake hold
+// window, so every other namespace's wake was lost with it.
+const maxConcurrentDemandScrapes = 32
 
 // WakeDemandSource reports when the gateway last saw a request for an
 // engine that had no ready endpoints.
@@ -206,6 +214,9 @@ func (t *WakeDemandTracker) pollOnce(ctx context.Context) {
 	}
 
 	fresh := make(map[demandKey]time.Time)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrentDemandScrapes)
 	for _, ns := range namespaces {
 		pods, err := t.gatewayPods(ctx, ns)
 		if err != nil {
@@ -214,33 +225,40 @@ func (t *WakeDemandTracker) pollOnce(ctx context.Context) {
 		}
 		for i := range pods {
 			pod := &pods[i]
-			body, err := t.scrapeAgent(ctx, pod, t.scrapeMode(ctx, pod))
-			if err != nil {
-				log.V(1).Info("scraping wake agent failed",
-					"namespace", ns, "pod", pod.Name, "error", err.Error())
-				continue
-			}
-			// Gateway replicas each hold their own view, so the demand
-			// for an engine is the most recent stamp any of them saw.
-			for engine, ts := range parseWakeDemand(string(body)) {
-				key := demandKey{namespace: ns, engine: engine}
-				// Only engines that are actually stopped. The agent
-				// stamps demand whenever an engine has no ready
-				// endpoints, which also covers a running engine during
-				// a node drain or a rolling restart — and auto-stop
-				// honors wake above the idle check, so an unfiltered
-				// stamp would pin such an engine at activeReplicas,
-				// scaling a manually-sized engine DOWN in the middle of
-				// its outage and freezing its idle timer for the TTL.
-				if !stopped.has(key) {
-					continue
+			sem <- struct{}{}
+			wg.Go(func() {
+				defer func() { <-sem }()
+				body, err := t.scrapeAgent(ctx, pod, t.scrapeMode(ctx, pod))
+				if err != nil {
+					log.V(1).Info("scraping wake agent failed",
+						"namespace", ns, "pod", pod.Name, "error", err.Error())
+					return
 				}
-				if prev, ok := fresh[key]; !ok || ts.After(prev) {
-					fresh[key] = ts
+				mu.Lock()
+				defer mu.Unlock()
+				// Gateway replicas each hold their own view, so the demand
+				// for an engine is the most recent stamp any of them saw.
+				for engine, ts := range parseWakeDemand(string(body)) {
+					key := demandKey{namespace: ns, engine: engine}
+					// Only engines that are actually stopped. The agent
+					// stamps demand whenever an engine has no ready
+					// endpoints, which also covers a running engine during
+					// a node drain or a rolling restart — and auto-stop
+					// honors wake above the idle check, so an unfiltered
+					// stamp would pin such an engine at activeReplicas,
+					// scaling a manually-sized engine DOWN in the middle of
+					// its outage and freezing its idle timer for the TTL.
+					if !stopped.has(key) {
+						continue
+					}
+					if prev, ok := fresh[key]; !ok || ts.After(prev) {
+						fresh[key] = ts
+					}
 				}
-			}
+			})
 		}
 	}
+	wg.Wait()
 	t.replace(fresh)
 }
 
@@ -373,8 +391,8 @@ var wakeDemandHTTPClient = &http.Client{
 	CheckRedirect: refuseRedirects,
 	Transport: &http.Transport{
 		DisableKeepAlives:     true,
-		DialContext:           (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
-		ResponseHeaderTimeout: 2 * time.Second,
+		DialContext:           (&net.Dialer{Timeout: time.Second}).DialContext,
+		ResponseHeaderTimeout: time.Second,
 	},
 }
 
