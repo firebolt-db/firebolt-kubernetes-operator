@@ -2,6 +2,13 @@
 
 appVersion: v0.1.1
 
+## [0.14.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.3...firebolt-operator-chart-0.14.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* **engine:** cap spec.replicas and autoStop.activeReplicas at 256 (FB-4770) ([#285](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/285)) ([625594a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/625594a24e1fa596b8f147bb917de35cb533bd5c))
+
 ## [0.14.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.2...firebolt-operator-chart-0.14.3) (2026-10-09)
 
 
