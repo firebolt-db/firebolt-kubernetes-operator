@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.6](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.5...firebolt-operator-v0.17.6) (2026-10-12)
+
+
+### Bug Fixes
+
+* **controller:** fan out wake-demand scrapes so slow agents do not stall the poll (FB-4771) ([#286](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/286)) ([06b703f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/06b703f1050755d22a5f5c0cfcaf2153127df2ee))
+* **engine:** cap spec.replicas and autoStop.activeReplicas at 256 (FB-4770) ([#285](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/285)) ([625594a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/625594a24e1fa596b8f147bb917de35cb533bd5c))
+
+
+### Dependencies
+
+* **deps:** bump the go group with 6 updates ([#283](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/283)) ([ca5bd1e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ca5bd1e99daeb9ef1c2e568821d08baf9ee0f230))
+
 ## [0.17.5](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.4...firebolt-operator-v0.17.5) (2026-10-09)
 
 
