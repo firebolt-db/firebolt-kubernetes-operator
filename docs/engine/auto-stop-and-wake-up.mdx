@@ -4,7 +4,7 @@ description: Stop idle Engines and wake them when Gateway traffic arrives.
 sidebarTitle: Auto-stop and wake-up
 ---
 
-Auto-stop is an activity-based on/off policy. It moves an Engine between `activeReplicas` and `idleReplicas`; it does not add replicas in proportion to query volume.
+Auto-stop reduces an idle Engine to `idleReplicas` and restores it to `activeReplicas` when an active schedule or a query-triggered wake requires it. It does not add replicas in proportion to query volume.
 
 ## Configure auto-stop
 
@@ -38,7 +38,7 @@ spec:
 | `pollInterval` | `1m` | Maximum interval between activity-metric checks. Near the idle deadline, the Firebolt Operator uses the remaining idle window with a one-second minimum delay. |
 | `schedule` | Empty | UTC windows that keep the Engine at `activeReplicas`. An end time before the start time crosses midnight. |
 
-You can place the policy on an EngineClass. If an Engine sets `spec.autoStop`, the entire Engine policy replaces the class policy; individual auto-stop fields are not merged.
+You can place the policy on an EngineClass. If an Engine sets `spec.autoStop`, the entire Engine policy replaces the class policy. Individual auto-stop fields are not merged.
 
 When auto-stop is enabled, avoid managing `spec.replicas` with another controller. The Firebolt Operator writes that field to enforce the configured active and idle levels.
 
@@ -48,7 +48,7 @@ Each Engine pod reports how long it has had no auto-stop-eligible work. The Fire
 
 An active schedule window keeps the Engine at `activeReplicas`. Outside schedule windows, an Engine scales to `idleReplicas` after the idle timeout.
 
-Enabling or re-enabling auto-stop uses the Engine's existing idle history. If the Engine has already been idle for `idleTimeout`, the first successful check can scale it down; enabling auto-stop does not start a fresh timeout.
+Enabling or re-enabling auto-stop uses the Engine's existing idle history. If the Engine has already been idle for `idleTimeout`, the first successful check can scale it down. Enabling auto-stop does not start a fresh timeout.
 
 Inspect the decision and timestamps in Engine status:
 
@@ -60,7 +60,7 @@ Inspect the decision and timestamps in Engine status:
 
 ## Wake a stopped Engine with the Gateway
 
-With Helm value `wakeAgent.enabled=true` (the default) and the Firebolt Operator-managed Gateway ServiceAccount, a query sent through the Instance Gateway can wake an Engine at zero replicas:
+Gateway wake-up starts a stopped Engine when a query arrives and holds the query while the Engine becomes available. It requires auto-stop to be enabled on the Engine and `wakeAgent.enabled=true` in the Helm values, which is the default. The Gateway must use the ServiceAccount managed by the Firebolt Operator.
 
 1. The Gateway holds the request while the Engine has no ready endpoints.
 2. The Firebolt Operator sets the Engine to `activeReplicas`.
@@ -85,11 +85,11 @@ spec:
 
 Wake-up works only for queries sent through the Instance Gateway. Traffic that bypasses the Gateway is unsupported and cannot wake a stopped Engine because the Engine Service has no endpoints.
 
-The Gateway answers its `/healthz` endpoint itself, before any wake handling, so health checks and uptime monitors pointed at the Gateway never wake a stopped Engine. A query string on that path is ignored, not routed: `/healthz`, `/healthz?`, and `/healthz?anything=value` are answered identically, and none of them registers wake demand or reaches an Engine. Any other path, including `/healthz/`, is treated as an Engine request, so one that names a stopped Engine wakes it.
+The Gateway handles requests to its `/healthz` endpoint without contacting an Engine. Use this endpoint for health checks that should not wake stopped Engines.
 
-Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected; a query for a stopped Engine returns `503`.
+Set `wakeAgent.enabled=false` in the Helm values to disable Gateway wake-up. Queries to running Engines are unaffected. A query for a stopped Engine returns `503`.
 
-Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required; annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
+Setting `spec.gateway.template.spec.serviceAccountName` also disables wake-on-zero for that Gateway, because the Firebolt Operator does not attach its wake-agent RBAC to a user-managed identity. Leave `serviceAccountName` unset when wake-on-zero is required. Annotations on the Firebolt Operator-managed ServiceAccount remain available for workload-identity integrations.
 
 ## Poll timing
 

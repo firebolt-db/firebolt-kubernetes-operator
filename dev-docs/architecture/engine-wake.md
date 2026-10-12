@@ -28,7 +28,7 @@ flowchart LR
     E -->|Result through Gateway| C
 ```
 
-The Gateway holds the query; the Firebolt Operator sees only that someone requested the Engine. It does not receive SQL or manage a queue of queries.
+The Gateway holds the query. The Firebolt Operator sees only that someone requested the Engine. It does not receive SQL or manage a queue of queries.
 
 ## Timeouts and deadlines used in this guide
 
@@ -36,15 +36,15 @@ A **timeout** is a duration. A **deadline** is the point in time when that durat
 
 | Term used below | Code or configuration | Meaning |
 | --- | --- | --- |
-| **Hold timeout / hold deadline** | Wake-agent `Config.HoldTimeout`; `DefaultHoldTimeout = 120s`; agent flag `--hold-timeout` | One timer per admitted query, started in `handleHold` after hold admission. Waiting for Engine readiness and checking routing consume this same timer. The hold deadline is its start time plus `HoldTimeout`. |
+| **Hold timeout / hold deadline** | Wake-agent `Config.HoldTimeout` (default: `DefaultHoldTimeout = 120s`, agent flag: `--hold-timeout`) | One timer per admitted query, started in `handleHold` after hold admission. Waiting for Engine readiness and checking routing consume this same timer. The hold deadline is its start time plus `HoldTimeout`. |
 | **Agent-call timeout** | `gatewayWakeHoldTimeoutMillis = 125_000` | How long Envoy's call to the wake-agent may take. Starts when Envoy calls the agent, slightly before the agent starts the hold timer. It is longer so the agent can return its own decision first. |
 | **Stream idle timeout** | `gatewayStreamIdleTimeoutSeconds = 300` | Envoy's separate limit on stream inactivity. It is not the Engine idle timeout or a fresh routing-check budget. |
-| **Engine idle timeout** | Effective `autoStop.idleTimeout`; `DefaultAutoStopIdleTimeout = 30m` | How much Engine inactivity permits idle scale-down, subject to schedules and wake protection. |
-| **Wake protection window / wake protection deadline** | `WakeProtectionMultiplier = 6`; `status.wakeProtectionUntil` | The window is six times the effective Engine idle timeout at acceptance. Its deadline is measured from `status.lastWakeDemandTime`, not from readiness or a query's hold-timer start. |
+| **Engine idle timeout** | Effective `autoStop.idleTimeout` (default: `DefaultAutoStopIdleTimeout = 30m`) | How much Engine inactivity permits idle scale-down, subject to schedules and wake protection. |
+| **Wake protection window / wake protection deadline** | `WakeProtectionMultiplier = 6` and `status.wakeProtectionUntil` | The window is six times the effective Engine idle timeout at acceptance. Its deadline is measured from `status.lastWakeDemandTime`, not from readiness or a query's hold-timer start. |
 | **Demand freshness limit** | `DefaultAutoStopWakeTTL = 5m` | Demand must be less than this age and not in the future when accepted. This is an acceptance check, not a query timeout or the protection window. |
 | **Client timeout** | Set by the caller | Independently limits how long the client waits. The client can leave before any of the above limits is reached. |
 
-The values come from [wake-agent configuration and `handleHold`](../../internal/wakeagent/agent.go), [Gateway timeout constants](../../internal/controller/instance_gateway.go), and [auto-stop policy](../../internal/controller/engine_autostop.go). The agent flag is defined in [the wake-agent command](../../cmd/wakeagent.go). Changing `--hold-timeout` alone does not change Envoy's agent-call timeout; keep the outer timeouts longer than the hold timeout.
+The values come from [wake-agent configuration and `handleHold`](../../internal/wakeagent/agent.go), [Gateway timeout constants](../../internal/controller/instance_gateway.go), and [auto-stop policy](../../internal/controller/engine_autostop.go). The agent flag is defined in [the wake-agent command](../../cmd/wakeagent.go). Changing `--hold-timeout` alone does not change Envoy's agent-call timeout. Keep the outer timeouts longer than the hold timeout.
 
 ## A normal wake-up, step by step
 
@@ -57,7 +57,7 @@ sequenceDiagram
     participant E as Engine
     C->>G: Send query
     G->>W: Can this Engine receive it?
-    W->>W: Record demand; wait for availability
+    W->>W: Record demand and wait for availability
     Note over C,G: Original request stays open
     O->>W: Check for wake demand
     W-->>O: Latest request time
@@ -79,7 +79,7 @@ sequenceDiagram
 2. Otherwise, the wake-agent records the request time and waits. The Firebolt Operator regularly checks these records. With multiple Gateways, it uses the newest request time reported for that Engine.
 3. Before starting the Engine, the Firebolt Operator saves the accepted request time (`status.lastWakeDemandTime`) and wake protection deadline (`status.wakeProtectionUntil`) in the Engine's stored status. This lets protection survive a Firebolt Operator restart.
 4. The Engine starts through its normal lifecycle. Once its desired replica count is nonzero, the Firebolt Operator stops collecting wake demand for it. Becoming nonzero means startup was requested, not that the Engine is ready.
-5. The wake-agent observes availability and checks routing through the Gateway before releasing the query. The routing check shares the query's original **hold deadline** (`Config.HoldTimeout`); it does not start a new hold timer. If the hold timeout is 120 seconds and readiness takes 100 seconds after that timer starts, only 20 seconds remain for routing checks. When the hold deadline is reached, the agent allows forwarding if the Engine has ready endpoints, even if routing has not been confirmed. That forwarding attempt can fail. Without ready endpoints, the Gateway returns `503` to the client.
+5. The wake-agent observes availability and checks routing through the Gateway before releasing the query. The routing check shares the query's original **hold deadline** (`Config.HoldTimeout`). It does not start a new hold timer. If the hold timeout is 120 seconds and readiness takes 100 seconds after that timer starts, only 20 seconds remain for routing checks. When the hold deadline is reached, the agent allows forwarding if the Engine has ready endpoints, even if routing has not been confirmed. That forwarding attempt can fail. Without ready endpoints, the Gateway returns `503` to the client.
 6. Query activity keeps the Engine running under normal idle tracking. After the wake protection deadline (`status.wakeProtectionUntil`) passes, an Engine that remains idle can stop.
 
 ## What wake protection means
@@ -89,7 +89,7 @@ The two settings answer different questions:
 - **Engine idle timeout (`autoStop.idleTimeout`):** How long can the Engine be inactive before idle shutdown is allowed?
 - **Wake protection (`status.wakeProtectionUntil`):** How long should accepted wake demand prevent idle shutdown while the Gateway has an opportunity to deliver its query?
 
-The wake protection window is **six times the effective Engine idle timeout** (`WakeProtectionMultiplier * idleTimeout`), measured from `status.lastWakeDemandTime`. It starts at demand, not when the Engine becomes ready. Six provides an allowance for startup and delivery; it is not a guarantee that every wake-up fits within the window. Longer idle timeouts therefore also keep a newly woken Engine protected longer.
+The wake protection window is **six times the effective Engine idle timeout** (`WakeProtectionMultiplier * idleTimeout`), measured from `status.lastWakeDemandTime`. It starts at demand, not when the Engine becomes ready. Six provides an allowance for startup and delivery, but it is not a guarantee that every wake-up fits within the window. Longer idle timeouts therefore also keep a newly woken Engine protected longer.
 
 The Firebolt Operator remembers two fields:
 
@@ -106,7 +106,7 @@ Protection only prevents idle shutdown. Scheduled capacity changes still apply, 
 
 ## When several queries arrive
 
-Each query has its own hold deadline (`Config.HoldTimeout`). A new arrival updates the Gateway's latest request time, but it does not extend an earlier query's hold deadline. When the Engine becomes available, multiple waiting queries can proceed; there is no promise that they execute in arrival order.
+Each query has its own hold deadline (`Config.HoldTimeout`). A new arrival updates the Gateway's latest request time, but it does not extend an earlier query's hold deadline. When the Engine becomes available, multiple waiting queries can proceed. There is no promise that they execute in arrival order.
 
 This is a set of open requests, not a durable queue. More queries do not create more Engine replicas: wake-up requests the configured active capacity.
 
@@ -122,13 +122,13 @@ sequenceDiagram
     participant O as Firebolt Operator
     participant E as Engine
     G->>G: Hold a query and record demand
-    O->>O: Accept wake; save wakeProtectionUntil
+    O->>O: Accept wake and save wakeProtectionUntil
     O->>E: Start Engine
     Note over O,E: Startup outlasts the wake protection window
     O->>O: wakeProtectionUntil passes
     Note over O,E: Creation continues after wake protection expires
     E-->>O: Engine becomes stable
-    Note over G,E: A query is still waiting; Engine may appear idle
+    Note over G,E: A query is still waiting while the Engine may appear idle
     alt Delivery and activity observation happen first
         G->>E: Forward waiting query
         E-->>O: Query activity observed
@@ -147,12 +147,12 @@ The waiting query in this diagram may be a later arrival. The original triggerin
 | Point in the workflow | Only the original query | More queries arrive while the Engine starts |
 | --- | --- | --- |
 | Startup begins | Original request waits. | Each request has its own hold deadline. |
-| Original query reaches its hold deadline with no ready endpoints | It fails; creation continues. | It fails; newer requests can still be waiting. |
-| Wake protection deadline passes during startup | Creation continues. | Creation continues; newer arrivals do not continuously renew protection. |
+| Original query reaches its hold deadline with no ready endpoints | The query fails, but creation continues. | The query fails, but newer requests can still be waiting. |
+| Wake protection deadline passes during startup | Creation continues. | Creation continues. Newer arrivals do not continuously renew protection. |
 | Engine becomes stable | It may have no remaining query to serve. | Waiting queries can proceed, but delivery can race with idle shutdown. |
 | Engine stops again | Reobserving the same accepted demand cannot renew protection. | Newer, still-fresh demand can cause another wake after replicas return to zero. |
 
-Auto-stop does not make scale-down decisions while creation or another rollout transition is in progress. Neither a query reaching its hold deadline nor the Engine reaching its wake protection deadline cancels creation. Passing `status.wakeProtectionUntil` allows normal idle decisions once the Engine is stable; it is not itself a command to stop or delete the Engine.
+Auto-stop does not make scale-down decisions while creation or another rollout transition is in progress. Neither a query reaching its hold deadline nor the Engine reaching its wake protection deadline cancels creation. Passing `status.wakeProtectionUntil` allows normal idle decisions once the Engine is stable. It is not itself a command to stop or delete the Engine.
 
 A repeated wake does not restore a failed request. Under unfavorable timing, later demand can produce repeated wake/stop cycles. Extending the client timeout does not extend `Config.HoldTimeout`. Increasing `Config.HoldTimeout` does not extend `status.wakeProtectionUntil`, and also requires checking the separate Envoy agent-call and stream idle timeouts.
 
@@ -162,10 +162,10 @@ A repeated wake does not restore a failed request. Under unfavorable timing, lat
 | --- | --- |
 | A client leaves while waiting | Its wait ends, but recorded demand remains. Startup can continue even if all clients leave. |
 | The Gateway has no capacity to hold another request | The request is rejected with an unavailable response. Its arrival normally still records demand, so wake-up can continue. |
-| A Gateway restarts | Its open requests and in-memory demand are lost; they are not replayed automatically. |
+| A Gateway restarts | Its open requests and in-memory demand are lost. They are not replayed automatically. |
 | The Firebolt Operator restarts | Accepted wake protection survives in Engine status. The Gateway continues owning its waiting requests. |
 | The wake-agent is unavailable or has not loaded readiness information | The Gateway attempts ordinary routing. This does not guarantee that an unavailable Engine wakes or that the query succeeds. |
-| The Engine becomes unavailable again just before delivery | A query can still fail; readiness observation does not reserve capacity or guarantee execution. |
+| The Engine becomes unavailable again just before delivery | A query can still fail. Readiness observation does not reserve capacity or guarantee execution. |
 
 ## Where to look in the code
 
