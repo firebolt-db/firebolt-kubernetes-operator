@@ -4,7 +4,9 @@ description: Stop idle Engines and wake them when Gateway traffic arrives.
 sidebarTitle: Auto-stop and wake-up
 ---
 
-Auto-stop reduces an idle Engine to `idleReplicas` and restores it to `activeReplicas` when an active schedule or a query-triggered wake requires it. An Engine is declared idle when there is no monitored Engine activity and scale down is blocked during the wake protection period. It does not add replicas in proportion to query volume.
+Auto-stop stops an Engine after a period of inactivity and starts it again when a query arrives at the Gateway or a schedule window opens. By default, a stopped Engine runs zero replicas. To keep a smaller number of replicas running while idle, set `idleReplicas`. When the Engine wakes, it scales back to `activeReplicas`.
+
+An Engine counts as idle when there is no monitored activity. After a wake, scale-down is blocked for the wake protection period. Auto-stop is not autoscaling: the Engine runs at either `idleReplicas` or `activeReplicas`, never anything in between, and query volume doesn't change the replica count.
 
 ## Configure auto-stop
 
