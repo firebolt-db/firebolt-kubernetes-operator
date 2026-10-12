@@ -21,6 +21,7 @@
             "activeReplicas": {
               "description": "ActiveReplicas is the replica count the engine runs at while active\n(during a Schedule window or following a wake-up). Required when Enabled\nis true.",
               "format": "int32",
+              "maximum": 256,
               "minimum": 1,
               "type": "integer"
             },
@@ -138,6 +139,7 @@
         "replicas": {
           "description": "Replicas is the number of engine nodes. Set to 0 to stop the\nengine: the operator tears down the active generation (honoring\nspec.rollout for drain behavior) and leaves the CR in the\nStopped phase. Setting replicas back to a non-zero value resumes\nthe engine via a new blue-green generation.",
           "format": "int32",
+          "maximum": 256,
           "minimum": 0,
           "type": "integer"
         },
