@@ -86,6 +86,7 @@ spec:
                       (during a Schedule window or following a wake-up). Required when Enabled
                       is true.
                     format: int32
+                    maximum: 256
                     minimum: 1
                     type: integer
                   enabled:
@@ -266,6 +267,7 @@ spec:
                   Stopped phase. Setting replicas back to a non-zero value resumes
                   the engine via a new blue-green generation.
                 format: int32
+                maximum: 256
                 minimum: 0
                 type: integer
               requirePreset:

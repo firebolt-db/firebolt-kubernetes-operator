@@ -21,6 +21,7 @@
             "activeReplicas": {
               "description": "ActiveReplicas is the replica count the engine runs at while active\n(during a Schedule window or following a wake-up). Required when Enabled\nis true.",
               "format": "int32",
+              "maximum": 256,
               "minimum": 1,
               "type": "integer"
             },

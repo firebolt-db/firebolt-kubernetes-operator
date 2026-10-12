@@ -116,6 +116,7 @@ spec:
                       (during a Schedule window or following a wake-up). Required when Enabled
                       is true.
                     format: int32
+                    maximum: 256
                     minimum: 1
                     type: integer
                   enabled:

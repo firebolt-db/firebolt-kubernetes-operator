@@ -57,6 +57,8 @@ func resourceBoundsTestScheme(t *testing.T) *runtime.Scheme {
 // fixture instance) so Reconcile reaches the bounds gate. The
 // resources block is supplied by the caller; tests vary it across
 // over-bound, within-bound, and empty cases.
+//
+//nolint:unparam // same as boundsTestInstance: every caller pins its own ns constant for readability.
 func boundsTestEngine(name, ns, instanceRef string, resources corev1.ResourceRequirements) *computev1alpha1.FireboltEngine {
 	return &computev1alpha1.FireboltEngine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -464,5 +466,59 @@ func TestEngineReconcile_PresetResourceBoundsExceeded(t *testing.T) {
 	}
 	if len(stsList.Items) > 0 {
 		t.Errorf("StatefulSets = %d, want 0 (bounds gate must short-circuit before applyEngineState)", len(stsList.Items))
+	}
+}
+
+// TestEngineReconcile_ReplicasAboveMaxRefused pins the FB-4770 guard: an
+// engine stored with spec.replicas above MaxEngineReplicas (from before the
+// CRD bound existed) must surface Ready=False/ResourceBoundsExceeded and
+// render nothing, instead of letting buildConfigMap allocate one node entry
+// per replica and OOM the operator.
+func TestEngineReconcile_ReplicasAboveMaxRefused(t *testing.T) {
+	sch := resourceBoundsTestScheme(t)
+	const (
+		ns       = "ns-a"
+		instName = "parent"
+		engName  = "toomany"
+	)
+
+	instance := boundsTestInstance(instName, ns)
+	engine := boundsTestEngine(engName, ns, instName, corev1.ResourceRequirements{})
+	engine.Spec.Replicas = 100_000_000
+	cli := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(instance, engine).
+		WithStatusSubresource(&computev1alpha1.FireboltEngine{}, &computev1alpha1.FireboltInstance{}).
+		Build()
+
+	r := &FireboltEngineReconciler{
+		Client:          cli,
+		Scheme:          sch,
+		MetricsRecorder: enginemetrics.NoOpEngineRecorder{},
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: engName, Namespace: ns},
+	}); err != nil {
+		t.Fatalf("Reconcile: unexpected error: %v", err)
+	}
+
+	updated := &computev1alpha1.FireboltEngine{}
+	if err := cli.Get(context.Background(), types.NamespacedName{Name: engName, Namespace: ns}, updated); err != nil {
+		t.Fatalf("Get engine: %v", err)
+	}
+	cond := apimeta.FindStatusCondition(updated.Status.Conditions, computev1alpha1.ConditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonResourceBoundsExceeded {
+		t.Fatalf("Ready = %+v, want False/%s", cond, reasonResourceBoundsExceeded)
+	}
+	if !strings.Contains(cond.Message, "spec.replicas") || !strings.Contains(cond.Message, "256") {
+		t.Errorf("Ready.Message = %q, want it to name spec.replicas and the maximum 256", cond.Message)
+	}
+
+	var cmList corev1.ConfigMapList
+	if err := cli.List(context.Background(), &cmList, client.InNamespace(ns)); err != nil {
+		t.Fatalf("List ConfigMaps: %v", err)
+	}
+	if len(cmList.Items) > 0 {
+		t.Errorf("ConfigMaps rendered: %d, want none", len(cmList.Items))
 	}
 }

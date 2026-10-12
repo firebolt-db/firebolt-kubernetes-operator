@@ -441,6 +441,15 @@ func (r *FireboltEngineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if boundsErrs := r.validateMergedEngineResources(engine, resolvedClass, presetInfo); len(boundsErrs) > 0 {
 			return r.handleResourceBoundsViolation(ctx, engine, boundsErrs)
 		}
+
+		// The CRD caps spec.replicas, but an object stored before that bound
+		// existed still reaches here; buildConfigMap allocates one node entry
+		// per replica, so an unbounded count OOMs the operator (FB-4770).
+		if engine.Spec.Replicas > computev1alpha1.MaxEngineReplicas {
+			return r.handleResourceBoundsViolation(ctx, engine, field.ErrorList{field.Invalid(
+				field.NewPath("spec", "replicas"), engine.Spec.Replicas,
+				fmt.Sprintf("must be at most %d", computev1alpha1.MaxEngineReplicas))})
+		}
 	}
 
 	result := computeEngineReconcile(

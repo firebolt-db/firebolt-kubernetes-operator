@@ -118,6 +118,12 @@ type EngineHostPathSpec struct {
 	Type *corev1.HostPathType `json:"type,omitempty"`
 }
 
+// MaxEngineReplicas bounds spec.replicas and autoStop.activeReplicas. The
+// CRD markers repeat it as a literal because markers cannot reference Go
+// constants; the controller refuses to render above it for objects stored
+// before the CRD bound existed (FB-4770).
+const MaxEngineReplicas = 256
+
 // AutoStopSpec configures automatic stop and wake-up for a FireboltEngine.
 //
 // When Enabled is true the operator owns spec.replicas and drives it between
@@ -145,6 +151,7 @@ type AutoStopSpec struct {
 	// (during a Schedule window or following a wake-up). Required when Enabled
 	// is true.
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=256
 	ActiveReplicas int32 `json:"activeReplicas"`
 
 	// IdleReplicas is the replica count the engine scales down to once
@@ -332,6 +339,7 @@ type FireboltEngineSpec struct {
 	// Stopped phase. Setting replicas back to a non-zero value resumes
 	// the engine via a new blue-green generation.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=256
 	Replicas int32 `json:"replicas"`
 
 	// Template is the pod template the operator merges with its
