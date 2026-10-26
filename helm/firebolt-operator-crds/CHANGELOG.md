@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.2...firebolt-operator-crds-chart-0.9.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **engine:** cap spec.replicas and autoStop.activeReplicas at 256 (FB-4770) ([#285](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/285)) ([625594a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/625594a24e1fa596b8f147bb917de35cb533bd5c))
+
 ## [0.9.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.1...firebolt-operator-crds-chart-0.9.2) (2026-10-09)
 
 
