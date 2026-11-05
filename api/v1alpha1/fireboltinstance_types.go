@@ -1020,6 +1020,9 @@ type FireboltInstanceSpec struct {
 	// this field is immutable except for a case-only rewrite: the controller
 	// lowercases an existing uppercase Crockford ULID after engine and
 	// metadata images meet the canonicalize floor.
+	// Explicit IDs must be 26-character Crockford Base32 ULIDs with a first
+	// character in 0-7. Both cases are accepted to preserve older image pins;
+	// use lowercase for current images. Empty values allow automatic generation.
 	//
 	// The CEL rule allows the one-time "" -> <ulid> transition because when
 	// the mutating webhook is disabled (local dev, kind, some E2E setups),
@@ -1030,6 +1033,7 @@ type FireboltInstanceSpec struct {
 	// also allowed so the controller can persist the lowercase encoding
 	// without opening the field to any other edit.
 	// +optional
+	// +kubebuilder:validation:Pattern=`^([0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25})?$`
 	// +kubebuilder:validation:XValidation:rule="oldSelf == '' || self == oldSelf || self.lowerAscii() == oldSelf.lowerAscii()",message="spec.id is immutable once set except for case"
 	ID string `json:"id,omitempty"`
 

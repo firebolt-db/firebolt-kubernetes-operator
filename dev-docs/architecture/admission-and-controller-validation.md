@@ -19,6 +19,7 @@ The implementation should share validation functions between webhook and control
 | Input or operation | Admission behavior | Controller behavior |
 | --- | --- | --- |
 | Empty `FireboltInstance.spec.id` | Mutating webhook generates a Crockford ULID (`MintInstanceID`: lowercase, or uppercase on a build whose canonicalize floor is empty) | First reconcile generates the same encoding and updates the CR |
+| Malformed non-empty `FireboltInstance.spec.id` | CRD pattern rejects invalid length, alphabet, and 128-bit overflow, including with webhooks disabled | No automatic identity replacement; the field remains immutable except for case |
 | Uppercase Crockford `FireboltInstance.spec.id` | CEL allows a case-only Update | Controller lowercases the field once metadata and every bound engine image meet the canonicalize floor; otherwise leaves the CR unchanged and reports `InstanceIDCanonical=False/ImageBelowFloor` |
 | Instance authentication | `ValidateAuth` rejects invalid combinations | `ensureAuth` re-runs `ValidateAuth` and reports `AuthReady=False/AuthSpecInvalid` |
 | Instance TLS | `ValidateTLS` rejects invalid listener, CA, CRL, and protected-Secret combinations | Engine and gateway TLS reconcilers re-run `ValidateTLS` and report `TLSSpecInvalid` |
@@ -31,6 +32,8 @@ The implementation should share validation functions between webhook and control
 | Missing EngineClass reference | Engine webhook rejects the write | Engine resolution emits Warning `EngineClassNotFound` and retries with backoff |
 | Engine pod template | Shared rules reject owned paths | `validateEngineTemplates` reports `TemplateRejected` and skips StatefulSet rendering |
 | Engine-container resource bounds | Engine webhook applies configured maximums | Reconciler uses the same `EngineResourceBounds` value and reports `ResourceBoundsExceeded` |
+
+The Instance ID schema accepts empty values for defaulting and valid ULIDs in either case for the image-gated migration. The format check does not replace an already stored malformed ID or make it usable by the engine. Such objects still require an explicit recovery plan that preserves metadata identity; changing the ID is not an in-place repair. On API servers with CRD validation ratcheting enabled, unrelated updates can retain an unchanged malformed ID; older API servers can reject those updates after the CRD upgrade.
 
 The Instance ID transition has a CEL rule that allows the controller's empty-to-generated update and a case-only rewrite, and prevents any other mutation. Webhook plus controller alone cannot close the race between two writers changing an immutable identity field.
 
