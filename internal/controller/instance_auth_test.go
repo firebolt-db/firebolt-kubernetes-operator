@@ -115,7 +115,7 @@ func TestBuildSigningCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testing.
 		t.Errorf("Spec.SecretName = %q, want %q (Certificate and Secret share a name)", cert.Spec.SecretName, wantName)
 	}
 	if cert.Spec.CommonName == "" {
-		t.Error("Spec.CommonName is empty; packdb requires a non-empty subject/SAN")
+		t.Error("Spec.CommonName is empty; the engine requires a non-empty subject/SAN")
 	}
 	if len(cert.Spec.CommonName) > 64 {
 		t.Errorf("Spec.CommonName is %d chars, want <=64 (RFC 5280 ub-common-name; cert-manager warns "+
@@ -133,10 +133,10 @@ func TestBuildSigningCertificate_DefaultsToECDSAP384PKCS8NeverRotate(t *testing.
 		t.Errorf("Size = %d, want 384 (unset CertManagerSpec.Size resolves to the CRD default)", pk.Size)
 	}
 	if pk.Encoding != certmanagerv1.PKCS8 {
-		t.Errorf("Encoding = %q, want PKCS8 (verified compatible with packdb's PEM_read_bio_PrivateKey)", pk.Encoding)
+		t.Errorf("Encoding = %q, want PKCS8 (verified compatible with the engine's PEM_read_bio_PrivateKey)", pk.Encoding)
 	}
 	if pk.RotationPolicy != certmanagerv1.RotationPolicyNever {
-		t.Errorf("RotationPolicy = %q, want Never (packdb only reads signing keys at startup)", pk.RotationPolicy)
+		t.Errorf("RotationPolicy = %q, want Never (the engine only reads signing keys at startup)", pk.RotationPolicy)
 	}
 
 	if cert.Spec.Duration == nil || cert.Spec.Duration.Duration != DefaultCertDurationSigning {
@@ -1057,7 +1057,7 @@ func TestEnsureSigningKeys_Bootstrap_WaitsForSecretThenBecomesActive(t *testing.
 // NAMED key carrying the new curve rather than accept the stale key as ready.
 // TestEnsureSigningKeys_AlgSizeDriftDoesNotMint verifies that a change to the
 // signing algorithm/size is NOT migrated in place by minting a fresh key.
-// packdb exposes one global signing_algorithm and cannot
+// The engine exposes one global signing_algorithm and cannot
 // serve two key curves at once, so such a change is rejected at admission
 // (validateImmutableSigningKey) rather than migrated. Were the webhook
 // bypassed, the controller must fail static — keep the existing active key —

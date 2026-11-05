@@ -64,11 +64,11 @@ spec:
                     default: false
                     description: |-
                       Enabled turns on authentication for every engine in this Instance.
-                      When false, engines run in packdb's unauthenticated mode and every
+                      When false, engines run in the engine's unauthenticated mode and every
                       connection is treated as the admin. Local, OIDC, and
                       PreferredAuthorizationServer below are only meaningful when Enabled
                       is true; the validating webhook rejects setting them while Enabled
-                      is false, matching packdb's own config validation (instance.auth's
+                      is false, matching the engine's own config validation (instance.auth's
                       admin and oidc fields must be absent when instance.auth.enabled is
                       false).
                     type: boolean
@@ -81,13 +81,13 @@ spec:
                       admin:
                         description: |-
                           Admin configures the Instance admin account. Required when auth is
-                          enabled — packdb rejects a config with auth.enabled=true and no
+                          enabled — the engine rejects a config with auth.enabled=true and no
                           admin block.
                         properties:
                           name:
                             default: firebolt
                             description: |-
-                              Name is the admin username. Defaults to "firebolt" — packdb's own
+                              Name is the admin username. Defaults to "firebolt" — the engine's own
                               default — so omitting it matches engine behavior when auth is
                               first enabled.
                             type: string
@@ -129,19 +129,19 @@ spec:
                       clockSkewTolerance:
                         description: |-
                           ClockSkewTolerance is the permitted clock drift when validating
-                          time-based JWT claims. Defaults to packdb's own default (30s) when
+                          time-based JWT claims. Defaults to the engine's own default (30s) when
                           empty.
                         type: string
                       maxTokenAge:
                         description: |-
                           MaxTokenAge bounds how old a token's iat claim may be, independent
-                          of TokenExpiry. Defaults to packdb's own default (1d) when empty.
+                          of TokenExpiry. Defaults to the engine's own default (1d) when empty.
                         type: string
                       passwordLogin:
                         default: admin_only
                         description: |-
                           PasswordLogin controls whether password login is available to any
-                          user or only the admin account. Defaults to admin_only (packdb's
+                          user or only the admin account. Defaults to admin_only (the engine's
                           own default).
                         enum:
                         - admin_only
@@ -157,7 +157,7 @@ spec:
                           signing-key default.
 
                           Immutable once set (enforced by the API server via the transition rule
-                          below, so it holds even if the validating webhook is bypassed): packdb
+                          below, so it holds even if the validating webhook is bypassed): the engine
                           exposes one global signing_algorithm and derives every key's curve from
                           it, so it can never hold two curves at once. Changing it in place would
                           roll engines onto a signing_algorithm their mounted key no longer matches
@@ -178,7 +178,7 @@ spec:
                       signingKeys:
                         description: |-
                           SigningKeys controls how the operator provisions the signing
-                          keypair. Required when auth is enabled: packdb's own dev-autogen
+                          keypair. Required when auth is enabled: the engine's own dev-autogen
                           fallback (used when signing_keys is empty) mints a different key
                           per engine process, which breaks cross-engine token validation in
                           any multi-engine deployment — exactly the topology this operator
@@ -190,7 +190,7 @@ spec:
                               generate the signing keypair.
 
                               The key size is immutable once set (enforced by the API server, so it
-                              holds even if the validating webhook is bypassed): packdb derives every
+                              holds even if the validating webhook is bypassed): the engine derives every
                               signing key's curve from the single global signingAlgorithm and cannot
                               serve two curves at once, so a size change cannot be migrated in place.
                               The rule is scoped to this signing-only field, leaving TLS listener key
@@ -275,7 +275,7 @@ spec:
                               signing_keys[] as validation-only after it stops signing new
                               tokens, before the operator drops it from every engine's rendered
                               config and deletes its Certificate/Secret. Must be at least
-                              instance.auth.local.maxTokenAge (packdb default: 1 day) plus
+                              instance.auth.local.maxTokenAge (engine default: 1 day) plus
                               however long a full engine fleet rollout realistically takes: a
                               token signed in the last instant the old key was active must fully
                               expire before the key that could validate it disappears.
@@ -300,7 +300,7 @@ spec:
                       tokenExpiry:
                         description: |-
                           TokenExpiry is how long issued access tokens remain valid, as a Go
-                          duration string (e.g. "1h"). Defaults to packdb's own default (1h)
+                          duration string (e.g. "1h"). Defaults to the engine's own default (1h)
                           when empty.
                         type: string
                     required:
@@ -318,23 +318,23 @@ spec:
                           clockSkewTolerance:
                             description: |-
                               ClockSkewTolerance is the permitted clock drift when validating
-                              time-based claims on OIDC-issued tokens. Defaults to packdb's own
+                              time-based claims on OIDC-issued tokens. Defaults to the engine's own
                               default (30s) when empty.
                             type: string
                           maxTokenAge:
                             description: |-
                               MaxTokenAge bounds how old an OIDC token's iat claim may be.
-                              Defaults to packdb's own default (1d) when empty.
+                              Defaults to the engine's own default (1d) when empty.
                             type: string
                         type: object
                       providers:
                         description: |-
                           Providers lists the trusted OIDC identity providers. Must be
-                          non-empty when OIDC is configured at all — packdb rejects a
+                          non-empty when OIDC is configured at all — the engine rejects a
                           present oidc block with an empty providers list.
                         items:
                           description: |-
-                            OIDCProviderSpec configures one trusted OIDC identity provider. packdb
+                            OIDCProviderSpec configures one trusted OIDC identity provider. The engine
                             validates bearer tokens against this provider's published keys — it is
                             a JWT validator, not an OAuth2 client: there is no client ID/secret,
                             redirect URI, or authorization-code flow here, because the engine never
@@ -344,14 +344,14 @@ spec:
 
                             A provider names the server clients authenticate at either as the flat
                             DiscoveryURL below or as Target — exactly one, never both, matching
-                            packdb, which refuses to start otherwise. The CEL rule enforces that at
+                            the engine, which refuses to start otherwise. The CEL rule enforces that at
                             the API server so it holds even with the validating webhook disabled.
                           properties:
                             audience:
                               description: |-
                                 Audience is the expected "aud" claim on tokens from this provider.
                                 Defaults to the Instance's canonical issuer URL when empty
-                                (packdb's own default).
+                                (the engine's own default).
                               type: string
                             discovery:
                               description: |-
@@ -362,14 +362,14 @@ spec:
                                   description: |-
                                     RefreshInterval is how often the engine re-fetches the provider's
                                     /.well-known/openid-configuration document, as a Go duration
-                                    string. Defaults to packdb's own default (1d) when empty.
+                                    string. Defaults to the engine's own default (1d) when empty.
                                   type: string
                               type: object
                             discoveryURL:
                               description: |-
                                 DiscoveryURL is the provider's OpenID Connect discovery endpoint
                                 (typically ending in /.well-known/openid-configuration). Must be
-                                an https:// URL — packdb requires TLS for every outbound OIDC
+                                an https:// URL — the engine requires TLS for every outbound OIDC
                                 fetch except loopback.
 
                                 Sugar for a Target carrying only this URL, and the shape every
@@ -404,7 +404,7 @@ spec:
                                 defaultRoles:
                                   description: |-
                                     DefaultRoles lists the roles granted to an auto-provisioned user.
-                                    Defaults to ["public"] (packdb's own default) when empty.
+                                    Defaults to ["public"] (the engine's own default) when empty.
                                   items:
                                     type: string
                                   type: array
@@ -421,7 +421,7 @@ spec:
                                 cacheTTL:
                                   description: |-
                                     CacheTTL is how long a fetched JWKS document is cached before being
-                                    re-fetched, as a Go duration string. Defaults to packdb's own
+                                    re-fetched, as a Go duration string. Defaults to the engine's own
                                     default (1h) when empty.
                                   type: string
                               type: object
@@ -430,7 +430,7 @@ spec:
                                 Name is this provider's machine identifier, used in the
                                 ?auth=<name> connection parameter and as the authorization server
                                 name clients select. Must not start with "_" — that prefix is
-                                reserved by packdb for Firebolt-managed authorization servers (the
+                                reserved by the engine for Firebolt-managed authorization servers (the
                                 embedded server is named "_local").
                               minLength: 1
                               pattern: ^[^_].*$
@@ -443,13 +443,13 @@ spec:
                                 claim:
                                   description: |-
                                     Claim is the token claim whose value is looked up in Map. Defaults
-                                    to packdb's own default ("role") when empty.
+                                    to the engine's own default ("role") when empty.
                                   minLength: 1
                                   type: string
                                 map:
                                   description: |-
                                     Map lists the claim-value-to-role entries. A claim value may appear
-                                    at most once: packdb refuses a value naming two roles rather than
+                                    at most once: the engine refuses a value naming two roles rather than
                                     guess an order to apply them in. Declared as a keyed list so the
                                     API server enforces that itself, which the validating webhook —
                                     disabled in the shipped chart — cannot be relied on to do.
@@ -493,7 +493,7 @@ spec:
                                 discoveryURL:
                                   description: |-
                                     DiscoveryURL is this server's OpenID Connect / RFC 8414 discovery
-                                    endpoint. Must be an https:// URL — packdb requires TLS for every
+                                    endpoint. Must be an https:// URL — the engine requires TLS for every
                                     outbound OIDC fetch except loopback.
                                   minLength: 1
                                   pattern: ^https://.+
@@ -506,7 +506,7 @@ spec:
                                     clients, for identity providers whose discovery document omits
                                     token_endpoint_auth_methods_supported and would otherwise leave a
                                     client on the RFC 8414 default. Left as a free-form string rather
-                                    than an enum, matching packdb, so a method this operator has never
+                                    than an enum, matching the engine, so a method this operator has never
                                     heard of stays expressible.
                                   type: string
                               required:

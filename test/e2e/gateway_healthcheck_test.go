@@ -38,12 +38,9 @@ import (
 	"github.com/firebolt-db/firebolt-kubernetes-operator/internal/controller"
 )
 
-// drainEjectionEnabled gates the drain-ejection step below.
-// Both required conditions are met as of ENGINE_TAG release-4.32.0-pre.0.20260423061425.6d49af2e16b4:
-//  1. Engine exposes GET /health/ready on port 3473, returning 200 normally
-//     and 503 on SIGTERM (so Envoy can distinguish healthy from draining):
-//     https://github.com/firebolt-analytics/packdb/commit/e130589baddfd64a63720ae1eb294137940d1c7b
-//  2. expected_statuses removed from the health_check in instance_gateway.go.
+// drainEjectionEnabled gates the drain-ejection step below. The engine returns
+// 200 from GET /health/ready while serving and 503 on SIGTERM. The gateway health
+// check must accept only the serving response so draining pods are ejected.
 const drainEjectionEnabled = true
 
 var _ = Describe("Envoy Gateway Health Checks", func() {

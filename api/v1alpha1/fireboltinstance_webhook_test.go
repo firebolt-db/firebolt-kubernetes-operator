@@ -126,7 +126,7 @@ func TestValidateUpdate_AllowsSameID(t *testing.T) {
 
 // TestValidateUpdate_ImmutableFields covers the immutability rules: the JWT
 // signing algorithm and signing-key size are immutable while auth stays
-// enabled (packdb cannot serve two key curves at once), and the engine TLS
+// enabled (the engine cannot serve two key curves at once), and the engine TLS
 // issuer is immutable while engine TLS stays enabled (reissuing under a new CA
 // would break the gateway's trust anchor mid-roll). A change made across a
 // disable/re-enable is permitted (fresh key material, no overlap).
@@ -775,7 +775,7 @@ func validAdminSpec() AdminSpec {
 // under test.
 func validTwoHopProvider() OIDCProviderSpec {
 	return OIDCProviderSpec{
-		Name: "firehq",
+		Name: "example-idp",
 		Target: &OIDCTargetSpec{
 			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
 			TokenEndpointAuthMethod: "client_secret_post",
@@ -1083,7 +1083,7 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "local jwt durations in packdb's Go-style+days grammar are valid",
+			name: "local jwt durations in the engine's Go-style+days grammar are valid",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local: &LocalAuthSpec{
@@ -1103,7 +1103,7 @@ func TestValidateAuth(t *testing.T) {
 				Local: &LocalAuthSpec{
 					Admin:       validAdminSpec(),
 					SigningKeys: validSigningKeys(),
-					TokenExpiry: "1hr", // not a valid Go/packdb duration unit
+					TokenExpiry: "1hr", // not a valid Go/engine duration unit
 				},
 			},
 			wantError: true,
@@ -1123,7 +1123,7 @@ func TestValidateAuth(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "oidc provider jwks.cacheTTL and discovery.refreshInterval accept packdb's days unit",
+			name: "oidc provider jwks.cacheTTL and discovery.refreshInterval accept the engine's days unit",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
@@ -1139,7 +1139,7 @@ func TestValidateAuth(t *testing.T) {
 		},
 		{
 			name: "oidc provider discovery.refreshInterval of zero is rejected " +
-				"(packdb's AuthConfig::Validate rejects non-positive refresh_interval)",
+				"(engine validation rejects non-positive refresh_interval)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
@@ -1177,12 +1177,12 @@ func TestValidateAuth(t *testing.T) {
 		},
 		{
 			name: "flat discoveryURL alongside exchange is accepted " +
-				"(packdb resolves the trusted issuer as exchange-else-target-else-flat)",
+				"(the engine resolves the trusted issuer as exchange-else-target-else-flat)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
 				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
-					Name:            "firehq",
+					Name:            "example-idp",
 					DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
 					Exchange:        &OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
 					UsernameMapping: "{{ sub }}",
@@ -1192,12 +1192,12 @@ func TestValidateAuth(t *testing.T) {
 		},
 		{
 			name: "provider setting both discoveryURL and target is rejected " +
-				"(packdb's AuthConfig::Validate refuses to start on it)",
+				"(engine validation refuses to start on it)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
 				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
-					Name:            "firehq",
+					Name:            "example-idp",
 					DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
 					Target:          &OIDCTargetSpec{DiscoveryURL: "https://idp.example.com/.well-known/openid-configuration"},
 					UsernameMapping: "{{ sub }}",
@@ -1211,7 +1211,7 @@ func TestValidateAuth(t *testing.T) {
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
 				OIDC: &OIDCAuthSpec{Providers: []OIDCProviderSpec{{
-					Name:            "firehq",
+					Name:            "example-idp",
 					Exchange:        &OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
 					UsernameMapping: "{{ sub }}",
 				}}},
@@ -1220,7 +1220,7 @@ func TestValidateAuth(t *testing.T) {
 		},
 		{
 			name: "duplicate oidc provider names are rejected " +
-				"(packdb's IssuerRegistry::registerRemote throws on the second registration)",
+				"(the engine issuer registry throws on the second registration)",
 			auth: &AuthSpec{
 				Enabled: true,
 				Local:   &LocalAuthSpec{Admin: validAdminSpec(), SigningKeys: validSigningKeys()},
@@ -1616,14 +1616,14 @@ func TestValidateTLS(t *testing.T) {
 	}
 }
 
-// TestParsePackdbDuration pins down the grammar against packdb's actual
-// duration parser (src/Common/Configuration/Unit/Duration.cpp): Go's
+// TestParseEngineDuration pins down the grammar against the engine's actual
+// duration parser: Go's
 // time.ParseDuration grammar plus a "d" (days) unit that Go's standard
-// library doesn't support, and — like packdb's multi-component tokenizer — "d"
+// library doesn't support, and — like the engine's multi-component tokenizer — "d"
 // combined with the standard units in any order (e.g. "1d12h"). Every duration
-// default in packdb's own schema (application-config.schema.json) uses "d" for
+// default in the engine's own schema (application-config.schema.json) uses "d" for
 // values of a day or more (e.g. instance.auth.local.jwt.max_token_age "1d").
-func TestParsePackdbDuration(t *testing.T) {
+func TestParseEngineDuration(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
@@ -1650,18 +1650,18 @@ func TestParsePackdbDuration(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parsePackdbDuration(tc.in)
+			got, err := parseEngineDuration(tc.in)
 			if tc.wantErr {
 				if err == nil {
-					t.Errorf("parsePackdbDuration(%q) = %v, want error", tc.in, got)
+					t.Errorf("parseEngineDuration(%q) = %v, want error", tc.in, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parsePackdbDuration(%q): unexpected error: %v", tc.in, err)
+				t.Fatalf("parseEngineDuration(%q): unexpected error: %v", tc.in, err)
 			}
 			if got != tc.want {
-				t.Errorf("parsePackdbDuration(%q) = %v, want %v", tc.in, got, tc.want)
+				t.Errorf("parseEngineDuration(%q) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -1991,7 +1991,7 @@ func resourceMustParse(s string) resource.Quantity {
 // direct regression for the negative-duration finding: even if a non-positive
 // MaxTokenAge reached validateSigningKeyRotation (it is now rejected upstream
 // by validatePositiveDurationField, but this cross-check must not depend on
-// that), the retain-duration floor must fall back to packdbDefaultMaxTokenAge
+// that), the retain-duration floor must fall back to engineDefaultMaxTokenAge
 // rather than adopt the bad value — otherwise a "-1d" floor would approve a
 // retainDuration far shorter than a real token's lifetime.
 func TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor(t *testing.T) {

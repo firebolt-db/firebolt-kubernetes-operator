@@ -1840,7 +1840,7 @@ func (r *FireboltEngineReconciler) resolveInstanceInfo(ctx context.Context, engi
 		// Read the current generation's serving-certificate Secret once. It drives
 		// two independent signals below: its tls.crt is the serving-cert
 		// drift fingerprint (a cert-manager re-issuance of the served leaf must
-		// roll a new generation, since packdb reads the cert only at startup), and
+		// roll a new generation, since the engine reads the cert only at startup), and
 		// its ca.crt is the trust-bundle cutover gate. A NotFound is
 		// benign — the fresh generation's cert is not written yet, or engine TLS
 		// was just enabled — leaving both signals at their empty/vacuous default.

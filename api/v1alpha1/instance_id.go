@@ -24,7 +24,7 @@ import (
 )
 
 // CanonicalInstanceIDImageFloor is the engine and metadata tag at which
-// lowercase FireboltInstance.spec.id is required: the first packdb build
+// lowercase FireboltInstance.spec.id is required: the first engine build
 // that reads spec.id as the metadata account ID in the lowercase
 // Crockford encoding. It matches the ENGINE_TAG / METADATA_TAG pins in
 // config/images/defaults.latest.env, and both must move together — an

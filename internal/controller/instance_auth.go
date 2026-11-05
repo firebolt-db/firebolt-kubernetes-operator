@@ -78,7 +78,7 @@ var AuthSigningKeyID = signingKeyID(1)
 //
 // Unlike the TLS listeners this certificate is NEVER presented in a handshake —
 // it exists only so cert-manager mints and stores a keypair — so its notAfter has
-// no bearing on anything packdb does; packdb reads tls.key and nothing else.
+// no bearing on anything the engine does; the engine reads tls.key and nothing else.
 // The lifetime was 100 years, which many real CAs refuse to issue outright. A
 // bounded default is issuable everywhere and costs nothing, because a renewal here
 // is invisible to the fleet: under authSigningRotationPolicy (Never) cert-manager
@@ -603,13 +603,13 @@ func (r *FireboltInstanceReconciler) applySigningCertificate(ctx context.Context
 // for JWT signing. CommonName only needs to be a non-empty, syntactically
 // valid subject; nothing validates it against a hostname.
 //
-// PrivateKey.Encoding is pinned to PKCS8: packdb loads signing keys with
-// OpenSSL's generic PEM_read_bio_PrivateKey (SigningKeyManager.cpp),
+// PrivateKey.Encoding is pinned to PKCS8: the engine loads signing keys with
+// OpenSSL's generic PEM_read_bio_PrivateKey,
 // which parses PKCS1, SEC1, and PKCS8 transparently, but PKCS8 is the
 // only one of the three that uses the same PEM header ("PRIVATE KEY")
 // for both RSA and ECDSA — so a policy switch between the two algorithms
 // here never trips a different, algorithm-specific parse path on the
-// engine side. Verified against packdb source at plan time, not assumed.
+// engine side.
 //
 // PrivateKey.RotationPolicy is pinned to Never, and Duration is set to
 // authSigningCertDuration, so cert-manager does not renew this
@@ -713,7 +713,7 @@ func (r *FireboltInstanceReconciler) stepSigningKeyRotation(ctx context.Context,
 		// API server by CEL transition rules on LocalAuthSpec.SigningAlgorithm
 		// and on SigningKeyPolicy.CertManager (see fireboltinstance_types.go),
 		// and again in the validating webhook (validateImmutableSigningKey) for
-		// a clearer message. packdb's single global signing_algorithm cannot
+		// a clearer message. The engine's single global signing_algorithm cannot
 		// represent two curves at once (the closed config schema has no per-key
 		// algorithm field), so an in-place change is unsupportable — it is
 		// rejected at admission rather than migrated by minting a new key, which

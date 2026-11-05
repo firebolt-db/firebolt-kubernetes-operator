@@ -61,7 +61,7 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 		testCancel()
 	})
 
-	wantLabels := map[string]string{"app": "packdb"}
+	wantLabels := map[string]string{"app": "engine"}
 	wantAnnotations := map[string]string{"karpenter.sh/do-not-disrupt": "true"}
 
 	// A container is included to mirror real usage. It is not required by
@@ -75,7 +75,7 @@ var _ = Describe("CRD pod-template metadata round-trip", func() {
 
 	expectMetaSurvives := func(meta metav1.ObjectMeta) {
 		GinkgoHelper()
-		Expect(meta.Labels).To(HaveKeyWithValue("app", "packdb"),
+		Expect(meta.Labels).To(HaveKeyWithValue("app", "engine"),
 			"template.metadata.labels was pruned by the apiserver — check that scripts/patch-crd-template-metadata.py ran during `make manifests` and injected x-kubernetes-preserve-unknown-fields on the embedded ObjectMeta")
 		Expect(meta.Annotations).To(HaveKeyWithValue("karpenter.sh/do-not-disrupt", "true"),
 			"template.metadata.annotations was pruned by the apiserver — check that scripts/patch-crd-template-metadata.py ran during `make manifests` and injected x-kubernetes-preserve-unknown-fields on the embedded ObjectMeta")

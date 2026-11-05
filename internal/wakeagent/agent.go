@@ -68,7 +68,7 @@ const (
 
 	// DefaultHoldTimeout bounds how long a single request is parked before
 	// the agent gives up and returns 503. Sized to cover an engine cold
-	// start (image pull on a fresh node plus packdb startup) without
+	// start (image pull on a fresh node plus engine startup) without
 	// pinning a connection indefinitely when the engine never arrives.
 	DefaultHoldTimeout = 120 * time.Second
 

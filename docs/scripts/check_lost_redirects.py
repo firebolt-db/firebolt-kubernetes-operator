@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Flag removed/renamed docs pages that lack a redirect.
 
-These docs are aggregated into the packdb Mintlify site, where packdb keeps a
+These docs are aggregated into the main Mintlify site, which keeps a
 ``known_pages.json`` gate that refuses to drop a previously published URL
 without a redirect. Redirects for *these* pages must be authored here -- in
 this repo's ``docs.json`` ``redirects`` array, in the same slug namespace as
-the pages (leading slash, no ``self-managed/...`` prefix). The packdb
+the pages (leading slash, no ``self-managed/...`` prefix). Documentation
 aggregation prefixes and propagates them into the global site automatically.
 
-This guard mirrors packdb's check so the requirement surfaces at authoring
+This guard mirrors the publication check so the requirement surfaces at authoring
 time, in the PR that removes the page, rather than as a downstream CI failure.
 
 Usage:
@@ -46,7 +46,7 @@ def check_lost_redirects(
             slugs.add(src)
         else:
             # A single authored redirect covers both the bare slug and its
-            # trailing-slash variant (packdb's gate tracks both); aggregation
+            # trailing-slash variant (the publication gate tracks both); aggregation
             # emits both source forms downstream.
             redirect_pages.add(r["source"])
             if r["source"].startswith("/") and not r["source"].endswith("/"):
@@ -73,7 +73,7 @@ def check_lost_redirects(
                 f"Add a redirect for it to docs.json (e.g. "
                 f'{{"source": "{page}", "destination": "/<new-page>", "permanent": false}}), '
                 f"then run 'make -C docs check-lost-redirects-regenerate'. "
-                f"packdb aggregation prefixes and propagates this redirect into the published site."
+                f"Documentation aggregation prefixes and propagates this redirect into the published site."
             )
 
     new_known_pages = known_pages | existing_pages | redirect_pages

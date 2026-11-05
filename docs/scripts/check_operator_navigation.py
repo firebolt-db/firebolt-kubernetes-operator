@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate operator docs.json against packdb Self-Managed nesting rules after aggregation."""
+"""Validate operator docs.json against published Self-Managed nesting rules after aggregation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 from check_group_structure import GroupStructureError, check_group_structure
 
-# Must match packdb docs/multirepo-aggregate-repos.yaml target for this repo.
+# Must match the publication destination for this repository.
 AGGREGATE_PREFIX = "self-managed/firebolt-operator"
 
 # Representative native Self-Managed entry so the operator group is checked in
@@ -83,7 +83,7 @@ def main() -> int:
     except GroupStructureError as exc:
         print(f"Navigation structure error: {exc}", file=sys.stderr)
         print(
-            f"\nPaths are checked as they appear after packdb aggregation "
+            f"\nPaths are checked as they appear after documentation aggregation "
             f"(prefix '{AGGREGATE_PREFIX}/') under Documentation → Self-Managed → Firebolt Operator.",
             file=sys.stderr,
         )

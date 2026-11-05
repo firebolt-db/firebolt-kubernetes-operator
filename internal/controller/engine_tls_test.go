@@ -33,7 +33,7 @@ import (
 )
 
 // TestBuildGenEngineTLSCertificate_SANs covers the per-generation
-// engine cert must carry SANs that packdb's HTTPS startup verification and the
+// engine cert must carry SANs that the engine's HTTPS startup verification and the
 // gateway can actually match — the per-gen pod wildcard (full .svc.cluster.local
 // suffix), the routing Service, and localhost — which the old instance-wide
 // namespace wildcard could not.
@@ -128,7 +128,7 @@ func TestBuildConfigMap_TLSEnabled_RendersExpectedShape(t *testing.T) {
 		t.Errorf("tls.private_key_file = %v, want %v", tlsCfg["private_key_file"], wantKeyPath)
 	}
 	if _, present := endpoints["postgres"]; present {
-		t.Errorf("endpoints.postgres present; packdb rejects tls on a postgres listener and the operator "+
+		t.Errorf("endpoints.postgres present; the engine rejects tls on a postgres listener and the operator "+
 			"does not expose one: %v", endpoints["postgres"])
 	}
 }

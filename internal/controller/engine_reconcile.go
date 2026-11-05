@@ -141,7 +141,7 @@ type ResolvedAuthInfo struct {
 	// SigningKeys is the Instance's currently-provisioned signing keys,
 	// active (JWT-issuing) key first — copied from
 	// FireboltInstance.Status.Auth.SigningKeys. Every engine in the
-	// Instance renders and mounts this exact same set: packdb's embedded
+	// Instance renders and mounts this exact same set: the engine's embedded
 	// authorization server on each engine both issues and validates
 	// JWTs, so all engines must agree on signing_keys byte-for-byte (see
 	// AuthSpec's doc comment).
@@ -151,7 +151,7 @@ type ResolvedAuthInfo struct {
 	// (spec.auth.local.admin.password.name) observed when this info was
 	// resolved. Folded into authHash so an in-place password rotation — same
 	// Secret name/key, new bytes, hence a new ResourceVersion — rolls every
-	// engine's StatefulSet. packdb reads password_file only at startup, so
+	// the engine's StatefulSet. The engine reads password_file only at startup, so
 	// without this a rotated password would never take effect. This is the
 	// ResourceVersion, deliberately NOT a hash of the password bytes: hashing
 	// secret material would trip weak-sensitive-data-hashing static analysis
@@ -409,7 +409,7 @@ func computeStable(
 	}
 
 	// Roll a new generation when THIS generation's serving certificate
-	// has been re-issued in place out from under the running pods. packdb reads
+	// has been re-issued in place out from under the running pods. The engine reads
 	// its certificate only at process start, and the drift hash checked by
 	// stsMatchesSpec is generation-independent (anchor name + key policy), so a
 	// cert-manager re-issuance of the per-generation leaf — an issuer-capped
@@ -708,14 +708,14 @@ func buildGenResources(
 }
 
 // buildGenEngineTLSCertificate returns the per-generation engine-listener TLS
-// server Certificate. Its SANs are what let packdb's HTTPS startup
+// server Certificate. Its SANs are what let the engine's HTTPS startup
 // verification succeed, which the old single instance-wide wildcard could not:
 //
 //   - "*.<gen-headless>.<ns>.svc.cluster.local": every pod of this generation,
 //     regardless of replica count. A per-generation wildcard is scale-safe (a
 //     within-generation scale-up needs no reissue) and covers exactly the
 //     node hostnames buildConfigMap renders into engine.nodes[].host, which
-//     packdb uses for SNI and certificate verification between nodes.
+//     the engine uses for SNI and certificate verification between nodes.
 //   - "<engine>-service.<ns>.svc.cluster.local": the stable routing Service the
 //     gateway (and external clients) connect to. The gateway verifies engine
 //     certs against the issuer CA and suffix-matches this SAN.
@@ -777,7 +777,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	nodes := make([]map[string]interface{}, spec.Replicas)
 	for i := int32(0); i < spec.Replicas; i++ {
 		podName := fmt.Sprintf("%s-%d", stsName, i)
-		// Full FQDN (…svc.cluster.local), not the short …svc form: packdb uses
+		// Full FQDN (…svc.cluster.local), not the short …svc form: the engine uses
 		// these node hosts for its HTTPS startup verification (SNI + cert SAN
 		// match), and the per-generation engine TLS certificate's SAN is the
 		// full-suffix wildcard *.<gen-headless>.<ns>.svc.cluster.local
@@ -801,8 +801,7 @@ func buildConfigMap(spec *computev1alpha1.FireboltEngineSpec, engineName, namesp
 	// The margin covers container runtime teardown after the process exits.
 	shutdownWait := engineShutdownWaitSeconds(gracePeriod)
 	// Canonical document seeded with operator-managed defaults, shaped to
-	// the structured YAML schema consumed by FireboltCoreServer (packdb
-	// `DB::Config::ApplicationConfig`). The user contribution
+	// structured YAML schema consumed by the engine. The user contribution
 	// (effectiveCustomEngineConfig: the referenced class's customEngineConfig
 	// deep-merged underneath the engine's own) is merged into this at the
 	// root, so users may add/override keys in any top-level section
@@ -879,9 +878,9 @@ func authSigningKeyPrivateKeyPath(id string) string {
 	return AuthSigningMountPathBase + "/" + id + "/" + corev1.TLSPrivateKeyKey
 }
 
-// engineTLSCertPath returns the in-container path packdb reads as its
+// engineTLSCertPath returns the in-container path the engine reads as its
 // listener certificate_file. This is NOT the raw mounted tls.crt but the
-// startup-assembled leaf+CA bundle (EngineTLSBundlePath): packdb reuses
+// startup-assembled leaf+CA bundle (EngineTLSBundlePath): the engine reuses
 // certificate_file as the CA bundle for its own HTTPS startup checks
 // (FireboltCoreHealthChecker), so with a CA-backed issuer that splits the
 // chain across tls.crt (leaf) and ca.crt (issuer) the leaf alone cannot be
@@ -901,10 +900,8 @@ func engineTLSKeyPath() string {
 // (spec.tls.engine enabled and its certificate provisioned).
 //
 // This renders exactly one http listener: tcp on EngineHTTPQueryPort with
-// tls configured. packdb's EndpointConfig::ApplyToLegacyConfig wipes the
-// built-in plaintext http_port default the instant ANY
-// endpoints.http.listeners entry is rendered (see
-// src/Core/Application/Configuration/EndpointConfig.cpp) — there is no
+// tls configured. The engine clears the built-in plaintext http_port default
+// whenever an endpoints.http.listeners entry is rendered. There is no
 // way to render "TLS in addition to the existing plaintext default" short
 // of also declaring a second, explicit plaintext listener. This operator
 // intentionally does NOT do that: engine TLS is all-or-nothing by design
@@ -915,15 +912,14 @@ func engineTLSKeyPath() string {
 // sidecar's loopback connection — must switch to TLS in the same change
 // that enables this (see buildEnvoyConfigYAML and EngineWebBackendURL).
 //
-// No postgres listener is rendered: packdb's PostgresConfig::Validate
-// rejects tls on a postgres listener outright, and the operator does not
+// No postgres listener is rendered: the engine rejects TLS on a postgres
+// listener, and the operator does not
 // expose a postgres endpoint at all today.
 //
 // The kubelet health/readiness probe (HealthPort, 8122) is NOT affected
-// by any of this: verified directly against packdb source
-// (FireboltCoreServer.cpp) that the health-check TCP server is bound
-// from its own "health_check_port" legacy config key, entirely separate
-// from EndpointConfig/http_port/https_port — so it stays plaintext
+// by any of this: the health-check TCP server is bound from its own
+// "health_check_port" config key, separate from the query listeners,
+// so it stays plaintext
 // regardless of engine TLS.
 func renderEndpointsConfig() map[string]interface{} {
 	return map[string]interface{}{
@@ -950,13 +946,12 @@ func authAdminPasswordPath(secretKey string) string {
 }
 
 // renderAuthConfig builds the instance.auth.* section of the rendered
-// config.yaml from the resolved auth info. packdb's config schema is
-// closed (additionalProperties: false) and its own Validate() enforces
-// strict conditional rules (packdb src/PackDB/Auth/AuthConfig.cpp), so
+// config.yaml from the resolved auth info. The engine's config schema is
+// closed (additionalProperties: false) and enforces conditional auth rules, so
 // this function mirrors those rules exactly:
 //
 //   - admin is always present: ResolvedAuthInfo only exists when auth is
-//     enabled, and packdb requires admin whenever enabled=true.
+//     enabled, and the engine requires admin whenever enabled=true.
 //   - oidc is present only when auth.Spec.OIDC is set.
 //   - admin.password_file is the only admin-password field ever rendered
 //     (never password_value/password_env), so the plaintext password
@@ -967,7 +962,7 @@ func authAdminPasswordPath(secretKey string) string {
 //     disabled.
 //   - duration/algorithm/name fields the CRD leaves optional (empty
 //     string in Go) are omitted from the map entirely rather than
-//     rendered as "", so packdb applies its own built-in default instead
+//     rendered as "", so the engine applies its own built-in default instead
 //     of receiving an empty value it would reject.
 func renderAuthConfig(auth *ResolvedAuthInfo) map[string]interface{} {
 	spec := auth.Spec
@@ -1019,7 +1014,7 @@ func renderSigningKeys(keys []computev1alpha1.SigningKeyStatus) []map[string]int
 }
 
 // renderOIDCConfig builds instance.auth.oidc from the CRD's OIDCAuthSpec.
-// Field-for-field mapping onto packdb's oidc/oidc.providers[] shape (see
+// Field-for-field mapping onto the engine's oidc/oidc.providers[] shape (see
 // renderAuthConfig's doc comment for the closed-schema/omit-when-empty
 // rules this also follows).
 func renderOIDCConfig(oidc *computev1alpha1.OIDCAuthSpec) map[string]interface{} {
@@ -1073,7 +1068,7 @@ func renderOIDCConfig(oidc *computev1alpha1.OIDCAuthSpec) map[string]interface{}
 }
 
 // renderRoleMapping renders a provider's role_mapping block. The map is a
-// list of single-entry objects, not a string-keyed object, because packdb's
+// list of single-entry objects, not a string-keyed object, because the engine's
 // configuration framework has no map-entry type.
 func renderRoleMapping(rm *computev1alpha1.RoleMappingSpec) map[string]interface{} {
 	entries := make([]map[string]interface{}, len(rm.Map))
@@ -1097,7 +1092,7 @@ func renderLocalJWT(local *computev1alpha1.LocalAuthSpec) map[string]interface{}
 }
 
 // renderOIDCJWT renders instance.auth.oidc.jwt. Unlike the embedded
-// server's jwt block, packdb's oidc.jwt has no token_expiry — an OIDC
+// server's jwt block, the engine's oidc.jwt has no token_expiry — an OIDC
 // provider issues its own tokens, the engine only validates them.
 func renderOIDCJWT(jwt *computev1alpha1.OIDCJWTSpec) map[string]interface{} {
 	if jwt == nil {
@@ -1112,7 +1107,7 @@ func renderOIDCJWT(jwt *computev1alpha1.OIDCJWTSpec) map[string]interface{} {
 // setIfNonEmpty sets m[key] = value only when value is non-empty. Used
 // throughout the auth renderers to omit CRD-optional string fields
 // (represented as Go's zero value "") entirely, rather than rendering an
-// empty string packdb's config loader could reject.
+// empty string the engine's config loader could reject.
 func setIfNonEmpty(m map[string]interface{}, key, value string) {
 	if value != "" {
 		m[key] = value
@@ -1121,8 +1116,8 @@ func setIfNonEmpty(m map[string]interface{}, key, value string) {
 
 // singleFieldConfig returns a one-key map when value is non-empty, or an
 // empty (but non-nil) map when it's empty — used for jwks.cache_ttl and
-// discovery.refresh_interval, each of packdb's single-field sub-blocks.
-// An empty map still renders as `{}` in the resulting YAML, which packdb
+// discovery.refresh_interval, each of the engine's single-field sub-blocks.
+// An empty map still renders as `{}` in the resulting YAML, which the engine
 // accepts (every field in these sub-blocks is DEFAULTED).
 func singleFieldConfig(key, value string) map[string]interface{} {
 	out := map[string]interface{}{}
@@ -2873,7 +2868,7 @@ func customEngineConfigHash(spec *computev1alpha1.FireboltEngineSpec, classInfo 
 // state before advancing to the next one.
 //
 // It must hash the full Spec, not just the fields renderAuthConfig maps
-// to Secret-backed paths — packdb only reads config.yaml at startup, so
+// to Secret-backed paths — the engine only reads config.yaml at startup, so
 // any auth field change (e.g. an OIDC discovery_url, password_login
 // policy, or signing_algorithm) is invisible to every other drift check
 // and needs a new generation to ever take effect. It must ALSO include

@@ -21,7 +21,7 @@ Path depth is validated for the published `self-managed/firebolt-operator/` loca
 2. Update [`docs.json`](docs.json) navigation when adding, removing, or regrouping pages.
 3. When **renaming or removing** a page, add a redirect to the [`docs.json`](docs.json) `redirects` array (source slug → new slug, leading slash, no prefix) and run `make -C docs check-lost-redirects-regenerate` to refresh [`known_pages.json`](known_pages.json). The publishing pipeline applies these redirects so old URLs keep working. Skipping this fails `make docs-check`.
 4. Validate locally: `make docs-check`.
-5. Open a **same-repo** pull request. [docs-sync.yml](../.github/workflows/docs-sync.yml) requests a documentation preview and reports its progress on the pull request.
+5. Open a **same-repo** pull request. [docs-sync.yaml](../.github/workflows/docs-sync.yaml) requests a documentation preview and reports its progress on the pull request.
 
 Fork PRs do not receive previews because the workflow requires `head.repo == base.repo`.
 

@@ -30,7 +30,7 @@ import (
 )
 
 // An OIDC provider must name the server clients authenticate at exactly
-// once — as the flat discoveryURL or as target. packdb refuses to start on a
+// once — as the flat discoveryURL or as target. The engine refuses to start on a
 // provider that names it twice or not at all, which takes every engine in the
 // Instance down, so the invariant is a CRD CEL rule and holds even with the
 // validating webhook disabled (the shipped Helm default). This suite runs
@@ -82,7 +82,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 
 	It("admits a two-hop provider naming target and exchange", func() {
 		inst := mkInstance("cel-provider-two-hop", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			Target:          target(),
 			Exchange:        exchange(),
 			UsernameMapping: "{{ sub }}",
@@ -107,7 +107,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 
 	It("rejects a provider setting both discoveryURL and target", func() {
 		inst := mkInstance("cel-provider-both", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
 			Target:          target(),
 			UsernameMapping: "{{ sub }}",
@@ -119,7 +119,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 
 	It("rejects a provider naming no server, even when it sets an exchange", func() {
 		inst := mkInstance("cel-provider-neither", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			Exchange:        exchange(),
 			UsernameMapping: "{{ sub }}",
 		})
@@ -130,7 +130,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 
 	It("admits a flat discoveryURL alongside an exchange, the two-hop shape without a pin", func() {
 		inst := mkInstance("cel-provider-flat-exchange", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
 			Exchange:        exchange(),
 			UsernameMapping: "{{ sub }}",
@@ -141,7 +141,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 
 	It("admits a roleMapping that omits claim, leaving the engine to default it", func() {
 		inst := mkInstance("cel-provider-no-claim", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			Target:          target(),
 			Exchange:        exchange(),
 			UsernameMapping: "{{ sub }}",
@@ -158,7 +158,7 @@ var _ = Describe("FireboltInstance OIDC provider server choice (CEL, webhook-fre
 	// validating webhook is disabled in the shipped chart and cannot.
 	It("rejects a roleMapping repeating a claim value", func() {
 		inst := mkInstance("cel-provider-dup-claim-value", computev1alpha1.OIDCProviderSpec{
-			Name:            "firehq",
+			Name:            "example-idp",
 			Target:          target(),
 			Exchange:        exchange(),
 			UsernameMapping: "{{ sub }}",
