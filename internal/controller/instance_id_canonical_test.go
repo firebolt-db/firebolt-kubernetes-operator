@@ -135,9 +135,9 @@ func TestBelowFloorMessageNamesDigestPin(t *testing.T) {
 }
 
 // TestIsUppercaseCrockfordULID_RejectsNonCrockford pins the ParseStrict
-// requirement: ulid.Parse checks only the 26-byte length, and spec.id has
-// no CRD pattern, so a same-length user-supplied id must not be treated
-// as a ULID and lowercased.
+// requirement: ulid.Parse checks only the 26-byte length. A malformed ID
+// stored before CRD format validation must not be treated as a ULID and
+// lowercased.
 func TestIsUppercaseCrockfordULID_RejectsNonCrockford(t *testing.T) {
 	for _, id := range []string{
 		"0Customer-Account-ID-12345", // 26 chars, not base32

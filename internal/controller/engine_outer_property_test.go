@@ -479,7 +479,7 @@ func TestEngineOuterStateMachine(t *testing.T) {
 				Namespace: ns,
 			},
 			Spec: computev1alpha1.FireboltInstanceSpec{
-				ID:       fmt.Sprintf("test-account-%s", ns),
+				ID:       computev1alpha1.MintInstanceID(),
 				Metadata: computev1alpha1.MetadataSpec{},
 				Gateway:  computev1alpha1.GatewaySpec{},
 			},

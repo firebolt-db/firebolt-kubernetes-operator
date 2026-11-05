@@ -16,7 +16,7 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `spec.id` | No | (auto-generated ULID) | Stable unique identifier for the instance, used as the metadata account ID. Newly minted values are lowercase Crockford ULIDs (uppercase only on an operator build that has no canonicalize floor compiled in). Immutable once set except for a case-only rewrite: the Firebolt Operator lowercases an existing uppercase Crockford ULID after engine and metadata images meet the canonicalize floor. |
+| `spec.id` | No | (auto-generated ULID) | Stable unique identifier for the instance, used as the metadata account ID. Explicit values must be valid ULIDs; see [Instance IDs](#instance-ids). Newly minted values are lowercase Crockford ULIDs (uppercase only on an operator build that has no canonicalize floor compiled in). Immutable once set except for a case-only rewrite: the Firebolt Operator lowercases an existing uppercase Crockford ULID after engine and metadata images meet the canonicalize floor. |
 | `spec.metadataNG` | No | `false` | **Experimental.** Use the metadata-ng configuration and UID/GID. The image remains user-selected. |
 | `spec.metadata` | **Yes** | - | Metadata service configuration (can be empty `{}` for defaults) |
 | `spec.metadata.postgres` | No | (internal) | External PostgreSQL connection. If omitted, the Firebolt Operator deploys an internal PostgreSQL StatefulSet. |
@@ -81,6 +81,25 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 | `spec.tls.gateway.dnsNames` | No | (in-cluster Service names) | Extra Gateway certificate SANs the Firebolt Operator cannot derive itself, such as an externally-visible hostname. Engine certificate names are derived automatically. |
 
 \* Required when the parent field is set.
+
+## Instance IDs
+
+Omit `spec.id` to generate an ID automatically. An explicit non-empty value must
+be a 26-character Crockford Base32 ULID, with the first character in `0–7` and no
+`i`, `l`, `o`, or `u` in either case. The API server enforces this even when
+admission webhooks are disabled.
+
+Use lowercase for current engine images. Uppercase and mixed-case ULIDs remain
+accepted so instances pinned to older images can retain their identity. The
+operator lowercases them after metadata and every bound engine image meet the
+canonicalize floor.
+
+Installing the CRD does not repair malformed IDs already stored in the cluster.
+On clusters with [validation ratcheting](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#validation-ratcheting),
+unrelated updates can retain an unchanged malformed ID; without it, those updates
+can be rejected. Ratcheting is enabled by default from Kubernetes 1.30. Identity
+remains immutable except for case: replacing an account ID requires an explicit
+recovery plan for its metadata and data.
 
 ## Firebolt Operator-owned fields on component templates
 
