@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.3...firebolt-operator-crds-chart-0.9.4) (2026-11-05)
+
+
+### Bug Fixes
+
+* **api:** reject malformed instance ULIDs ([cfc27b5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cfc27b559f34b057d510e1999db49cde84100e61))
+
 ## [0.9.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.2...firebolt-operator-crds-chart-0.9.3) (2026-10-26)
 
 
