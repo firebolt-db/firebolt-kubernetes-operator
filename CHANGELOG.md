@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.8](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.7...firebolt-operator-v0.17.8) (2026-11-05)
+
+
+### Bug Fixes
+
+* **api:** reject malformed instance ULIDs ([cfc27b5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cfc27b559f34b057d510e1999db49cde84100e61))
+
 ## [0.17.7](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.6...firebolt-operator-v0.17.7) (2026-10-26)
 
 
