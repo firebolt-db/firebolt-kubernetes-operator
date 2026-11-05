@@ -49,7 +49,7 @@ import (
 // privateKey.rotationPolicy: Never — so the serving private key was never
 // regenerated, cert-manager's renewal never fired (its default renewBefore is a
 // third of the duration), and a leaked key stayed valid for a century with no
-// revocation path. The original justification was that packdb reads its
+// revocation path. The original justification was that the engine reads its
 // certificate only at process startup, so an uncoordinated renewal would sit
 // unused in the Secret.
 //

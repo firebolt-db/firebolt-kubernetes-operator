@@ -27,70 +27,50 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// testdata/packdb-application-config.schema.json is a point-in-time copy of
-// packdb's src/Core/Application/application-config.schema.json, captured at
-// packdb commit ce2d88d4aad60862b44cfeb232fec5330ad68d21 (2026-09-02). This
-// file is the auth/TLS work's most exhaustive check on rendered auth config: it is
-// additionalProperties:false at every level, so validating buildConfigMap's
-// full output against it catches any unknown/misplaced key — the class of
-// bug that crashes every engine at startup — deterministically, without
-// booting the engine binary.
+// testdata/engine-application-config.schema.json is a snapshot of the engine's
+// application configuration schema captured on 2026-09-02. It rejects unknown
+// properties at every level, so checking buildConfigMap's output catches
+// unknown or misplaced keys without starting the engine.
 //
-// Two caveats, both discovered reading packdb source directly (not just
-// this schema) and worth keeping in mind when this file is next updated:
-//
-//  1. This schema is generated FROM packdb's compiled config-entry struct
-//     tree (src/Common/Configuration/DocGen.cpp) for documentation
-//     purposes; the running engine does NOT load or evaluate this JSON
-//     Schema file itself. The underlying guarantee this test cares about
-//     ("an unknown key is rejected") is separately, actually enforced by
-//     hand-written traversal code in
-//     src/Common/Configuration/ChangeParser.cpp, which walks the same
-//     struct tree this schema was generated from — so a conformance pass
-//     here is strong evidence the config loads, but it is not literally
-//     the code path the engine executes.
-//  2. This schema says nothing about packdb's own semantic (non-shape)
-//     validation — e.g. "admin requires exactly one of
-//     password_value/password_env/password_file", "OIDC provider names
-//     must not start with _", "preferred_authorization_server must name a
-//     configured server". Those live in AuthConfig::Validate()
-//     (src/PackDB/Auth/AuthConfig.cpp) and are separately mirrored by
-//     ValidateAuth (api/v1alpha1/fireboltinstance_webhook.go) — read and
-//     cross-checked against that C++ function directly while building
-//     this test, not derived from the schema.
-const packdbSchemaPath = "testdata/packdb-application-config.schema.json"
+// The schema describes the engine's configuration structure; the engine uses
+// its own parser rather than evaluating this JSON Schema at runtime. Passing
+// these tests checks the shape of the config, not every startup constraint.
+// Semantic auth rules (such as mutually exclusive password sources and valid
+// authorization server names) are separately checked by ValidateAuth in
+// api/v1alpha1/fireboltinstance_webhook.go.
+const engineSchemaPath = "testdata/engine-application-config.schema.json"
 
-// packdbSchemaKeywords is every JSON-Schema keyword the vendored file
+// engineSchemaKeywords is every JSON-Schema keyword the vendored file
 // actually uses (confirmed by walking it and collecting every keyword seen
-// at a schema-node position). packdbSchemaNode below implements exactly
+// at a schema-node position). engineSchemaNode below implements exactly
 // this subset — not the general JSON Schema specification — because that's
-// all this file needs. TestPackdbSchemaOnlyUsesSupportedKeywords guards the
+// all this file needs. TestEngineSchemaOnlyUsesSupportedKeywords guards the
 // assumption: if a future re-vendor introduces something like "oneOf" or
 // "pattern", that test fails loudly instead of this validator silently
 // under-validating.
-var packdbSchemaKeywords = map[string]bool{
+var engineSchemaKeywords = map[string]bool{
 	"$id": true, "$schema": true, "title": true, "description": true, "default": true,
 	"type": true, "properties": true, "additionalProperties": true, "required": true, "items": true,
 }
 
-// packdbSchemaNode is a minimal JSON-Schema-subset representation covering
-// exactly the keywords packdbSchemaKeywords lists that affect validation
+// engineSchemaNode is a minimal JSON-Schema-subset representation covering
+// exactly the keywords engineSchemaKeywords lists that affect validation
 // (type/properties/additionalProperties/required/items — the rest are
 // metadata this validator doesn't need to interpret). additionalProperties
 // is typed as *bool, not schema-or-bool, because the vendored schema never
 // uses the object-valued form (confirmed while building this test).
-type packdbSchemaNode struct {
+type engineSchemaNode struct {
 	Type                 string                      `json:"type"`
-	Properties           map[string]packdbSchemaNode `json:"properties"`
+	Properties           map[string]engineSchemaNode `json:"properties"`
 	AdditionalProperties *bool                       `json:"additionalProperties"`
 	Required             []string                    `json:"required"`
-	Items                *packdbSchemaNode           `json:"items"`
+	Items                *engineSchemaNode           `json:"items"`
 }
 
 // validate checks value against n, appending one human-readable message per
 // violation to violations. path is the dotted/indexed location for
 // error messages (e.g. "instance.auth.oidc.providers[0].name").
-func (n packdbSchemaNode) validate(path string, value interface{}, violations *[]string) {
+func (n engineSchemaNode) validate(path string, value interface{}, violations *[]string) {
 	switch n.Type {
 	case "object":
 		obj, ok := value.(map[string]interface{})
@@ -141,40 +121,40 @@ func (n packdbSchemaNode) validate(path string, value interface{}, violations *[
 	case "":
 		// No type constraint at this schema node.
 	default:
-		*violations = append(*violations, fmt.Sprintf("%s: unsupported schema type %q (packdbSchemaNode gap, "+
+		*violations = append(*violations, fmt.Sprintf("%s: unsupported schema type %q (engineSchemaNode gap, "+
 			"not a real violation — extend the validator)", path, n.Type))
 	}
 }
 
-// loadPackdbSchema reads and parses the vendored schema file.
-func loadPackdbSchema(t *testing.T) packdbSchemaNode {
+// loadEngineSchema reads and parses the vendored schema file.
+func loadEngineSchema(t *testing.T) engineSchemaNode {
 	t.Helper()
-	raw, err := os.ReadFile(packdbSchemaPath)
+	raw, err := os.ReadFile(engineSchemaPath)
 	if err != nil {
-		t.Fatalf("reading %s: %v", packdbSchemaPath, err)
+		t.Fatalf("reading %s: %v", engineSchemaPath, err)
 	}
-	var root packdbSchemaNode
+	var root engineSchemaNode
 	if err := json.Unmarshal(raw, &root); err != nil {
-		t.Fatalf("parsing %s: %v", packdbSchemaPath, err)
+		t.Fatalf("parsing %s: %v", engineSchemaPath, err)
 	}
 	return root
 }
 
-// TestPackdbSchemaOnlyUsesSupportedKeywords guards packdbSchemaNode's
+// TestEngineSchemaOnlyUsesSupportedKeywords guards engineSchemaNode's
 // central assumption: that the vendored schema uses only the keyword
 // subset it implements. If a future re-vendor of
-// testdata/packdb-application-config.schema.json introduces a keyword
-// like "oneOf", "pattern", or "enum", packdbSchemaNode would silently
+// testdata/engine-application-config.schema.json introduces a keyword
+// like "oneOf", "pattern", or "enum", engineSchemaNode would silently
 // ignore it rather than validate it — this test turns that into a loud,
 // specific failure instead.
-func TestPackdbSchemaOnlyUsesSupportedKeywords(t *testing.T) {
-	raw, err := os.ReadFile(packdbSchemaPath)
+func TestEngineSchemaOnlyUsesSupportedKeywords(t *testing.T) {
+	raw, err := os.ReadFile(engineSchemaPath)
 	if err != nil {
-		t.Fatalf("reading %s: %v", packdbSchemaPath, err)
+		t.Fatalf("reading %s: %v", engineSchemaPath, err)
 	}
 	var root map[string]interface{}
 	if err := json.Unmarshal(raw, &root); err != nil {
-		t.Fatalf("parsing %s: %v", packdbSchemaPath, err)
+		t.Fatalf("parsing %s: %v", engineSchemaPath, err)
 	}
 
 	// walkSchemaNode visits a schema-node position (a dict whose OWN keys
@@ -186,8 +166,8 @@ func TestPackdbSchemaOnlyUsesSupportedKeywords(t *testing.T) {
 	var walkSchemaNode func(node map[string]interface{})
 	walkSchemaNode = func(node map[string]interface{}) {
 		for k, v := range node {
-			if !packdbSchemaKeywords[k] {
-				t.Errorf("schema uses unsupported keyword %q; extend packdbSchemaNode/packdbSchemaKeywords "+
+			if !engineSchemaKeywords[k] {
+				t.Errorf("schema uses unsupported keyword %q; extend engineSchemaNode/engineSchemaKeywords "+
 					"to cover it before trusting conformance results", k)
 				continue
 			}
@@ -217,7 +197,7 @@ func TestPackdbSchemaOnlyUsesSupportedKeywords(t *testing.T) {
 }
 
 // renderedConfigDoc renders a full config.yaml via buildConfigMap and
-// decodes it back to a generic map, the same shape packdbSchemaNode.validate
+// decodes it back to a generic map, the same shape engineSchemaNode.validate
 // walks.
 func renderedConfigDoc(t *testing.T, instanceInfo InstanceInfo) map[string]interface{} {
 	t.Helper()
@@ -229,12 +209,12 @@ func renderedConfigDoc(t *testing.T, instanceInfo InstanceInfo) map[string]inter
 	return doc
 }
 
-// TestBuildConfigMap_ConformsToPackdbSchema validates buildConfigMap's
+// TestBuildConfigMap_ConformsToEngineSchema validates buildConfigMap's
 // rendered config.yaml — disabled, native (local) auth, and OIDC auth —
-// against the vendored packdb schema. See this file's top-level doc
+// against the vendored engine schema. See this file's top-level doc
 // comment for what a pass here does and does not prove.
-func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
-	schema := loadPackdbSchema(t)
+func TestBuildConfigMap_ConformsToEngineSchema(t *testing.T) {
+	schema := loadEngineSchema(t)
 
 	oidcInfo := testInstanceInfoWithAuth()
 	oidcInfo.Auth.Spec.PreferredAuthorizationServer = "okta"
@@ -263,9 +243,9 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 	// A two-hop provider, kept separate from the oidc case above because it
 	// exercises the opposite spelling: servers named under target/exchange
 	// with no flat discovery_url. role_mapping is deliberately absent — see
-	// TestRoleMapping_NotYetInVendoredPackdbSchema.
+	// TestRoleMapping_NotYetInVendoredEngineSchema.
 	twoHopInfo := testInstanceInfoWithAuth()
-	twoHopInfo.Auth.Spec.PreferredAuthorizationServer = "firehq"
+	twoHopInfo.Auth.Spec.PreferredAuthorizationServer = "example-idp"
 	twoHopInfo.Auth.Spec.OIDC = &computev1alpha1.OIDCAuthSpec{
 		Providers: []computev1alpha1.OIDCProviderSpec{conformanceTwoHopProvider()},
 	}
@@ -301,7 +281,7 @@ func TestBuildConfigMap_ConformsToPackdbSchema(t *testing.T) {
 // vendored schema knows about set.
 func conformanceTwoHopProvider() computev1alpha1.OIDCProviderSpec {
 	return computev1alpha1.OIDCProviderSpec{
-		Name:  "firehq",
+		Name:  "example-idp",
 		Title: "Firebolt",
 		Target: &computev1alpha1.OIDCTargetSpec{
 			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
@@ -315,18 +295,18 @@ func conformanceTwoHopProvider() computev1alpha1.OIDCProviderSpec {
 	}
 }
 
-// TestRoleMapping_NotYetInVendoredPackdbSchema pins a deliberate, known gap:
+// TestRoleMapping_NotYetInVendoredEngineSchema pins a deliberate, known gap:
 // spec.auth.oidc.providers[].roleMapping renders a role_mapping key that the
 // engine does not yet accept, so an instance that sets it against an engine
 // built before that key exists fails to start. The field ships ahead of the
 // engine so the two-hop config a control plane injects is expressible in one
 // piece rather than in two releases.
 //
-// This asserts the gap rather than skipping it: when the key lands in packdb
+// This asserts the gap rather than skipping it: when the key lands in the engine
 // and this schema is re-vendored, this test fails, which is the signal to
 // delete it and fold role_mapping into the conformance cases above.
-func TestRoleMapping_NotYetInVendoredPackdbSchema(t *testing.T) {
-	schema := loadPackdbSchema(t)
+func TestRoleMapping_NotYetInVendoredEngineSchema(t *testing.T) {
+	schema := loadEngineSchema(t)
 
 	info := testInstanceInfoWithAuth()
 	provider := conformanceTwoHopProvider()
@@ -341,8 +321,8 @@ func TestRoleMapping_NotYetInVendoredPackdbSchema(t *testing.T) {
 	var violations []string
 	schema.validate("<root>", renderedConfigDoc(t, info), &violations)
 	if len(violations) == 0 {
-		t.Fatal("vendored packdb schema now accepts role_mapping: fold it into " +
-			"TestBuildConfigMap_ConformsToPackdbSchema and delete this test")
+		t.Fatal("vendored engine schema now accepts role_mapping: fold it into " +
+			"TestBuildConfigMap_ConformsToEngineSchema and delete this test")
 	}
 	for _, v := range violations {
 		if !strings.Contains(v, "role_mapping") {
@@ -351,12 +331,12 @@ func TestRoleMapping_NotYetInVendoredPackdbSchema(t *testing.T) {
 	}
 }
 
-// TestPackdbSchemaValidator_CatchesUnknownField is a discriminating check
+// TestEngineSchemaValidator_CatchesUnknownField is a discriminating check
 // on the validator itself: it must actually reject a config that violates
-// additionalProperties:false, or TestBuildConfigMap_ConformsToPackdbSchema
+// additionalProperties:false, or TestBuildConfigMap_ConformsToEngineSchema
 // passing would prove nothing.
-func TestPackdbSchemaValidator_CatchesUnknownField(t *testing.T) {
-	schema := loadPackdbSchema(t)
+func TestEngineSchemaValidator_CatchesUnknownField(t *testing.T) {
+	schema := loadEngineSchema(t)
 	doc := renderedConfigDoc(t, testInstanceInfoWithAuth())
 
 	instance, ok := doc["instance"].(map[string]interface{})

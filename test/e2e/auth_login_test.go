@@ -50,7 +50,7 @@ import (
 // byte-identical signing keys, so a token minted by one validates on another —
 // went untested.
 //
-// The contract is packdb's specs/authentication.md §8.2 and §10.13: POST
+// The engine's login endpoint accepts POST
 // /oauth/token, grant_type=client_credentials, username as client_id, password
 // as client_secret, and a REQUIRED RFC 8707 resource parameter naming the
 // Instance.
@@ -111,7 +111,6 @@ func curlHTTP(ctx context.Context, pod, caPath string, curlArgs ...string) (body
 }
 
 // fireboltDiscovery is the subset of /.well-known/firebolt this suite reads.
-// Field names follow packdb's specs/metadata-discovery.md §3.
 type fireboltDiscovery struct {
 	Instance struct {
 		ID   string `json:"id"`

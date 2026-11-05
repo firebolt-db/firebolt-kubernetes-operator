@@ -898,8 +898,7 @@ func DeleteFireboltEngineClass(ctx context.Context, name string) error {
 // mode — the engine refuses to start with managed storage on a local fs,
 // and `storage.managed_table_bucket_name` maps internally to the
 // `firebolt.managed_storage.bucket_name_override` signal that toggles it
-// into object-storage mode (engine
-// src/Core/Application/Configuration/StorageConfig.cpp).
+// into object-storage mode.
 //
 // Floci is zero-auth (it accepts any SigV4-signed request), but the engine still
 // signs its requests, so the engine pod must carry AWS_ACCESS_KEY_ID /

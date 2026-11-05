@@ -5,7 +5,7 @@
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20261025203222.b00c195f2eaf ([#278](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/278)) ([97f4237](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/97f423775dbe4dca3bac69054732699bc606df9b))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20261025203222.b00c195f2eaf ([#278](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/278)) ([97f4237](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/97f423775dbe4dca3bac69054732699bc606df9b))
 
 ## [0.17.6](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.5...firebolt-operator-v0.17.6) (2026-10-25)
 
@@ -39,7 +39,7 @@
 * **deps:** bump github.com/prometheus/client_model from 0.6.2 to 0.6.3 in the prometheus group across 1 directory ([#258](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/258)) ([5db9cd3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/5db9cd369a4a52c3709582bcdaef09c4331e1756))
 * **deps:** bump golang from 1.27.0 to 1.27.1 ([#230](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/230)) ([af3bb79](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/af3bb79748be7621a95d121e6b6e76c89935ac60))
 * **deps:** bump google.golang.org/grpc from 1.82.1 to 1.83.2 ([#246](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/246)) ([f29011d](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f29011d5c20335419883f9758463b852a035a2d4))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260927210425.e91cd5bd17f8 ([#276](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/276)) ([e152984](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e1529849073f708bea3db9e7d6ddb2f435e957da))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260927210425.e91cd5bd17f8 ([#276](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/276)) ([e152984](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e1529849073f708bea3db9e7d6ddb2f435e957da))
 * **deps:** bump the ginkgo-gomega group with 2 updates ([#277](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/277)) ([fe9eb64](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fe9eb644ec36383676799e28c57c32058b043efb))
 * **deps:** bump the kubernetes group across 1 directory with 4 updates ([#259](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/259)) ([a2af289](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/a2af289071ce4f69e19daf0f47976342724d9c56))
 
@@ -48,14 +48,14 @@
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260919171525.9ed9aa5797b1 ([#269](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/269)) ([0d10e99](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0d10e9912b422e3f0f8652b9e3051306b6618c2f))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260919171525.9ed9aa5797b1 ([#269](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/269)) ([0d10e99](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0d10e9912b422e3f0f8652b9e3051306b6618c2f))
 
 ## [0.17.3](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.2...firebolt-operator-v0.17.3) (2026-09-14)
 
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260913062549.46f99a651d56 ([#257](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/257)) ([2864abe](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2864abeccb6e73a978495056ba7c08793b036fab))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260913062549.46f99a651d56 ([#257](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/257)) ([2864abe](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2864abeccb6e73a978495056ba7c08793b036fab))
 
 ## [0.17.2](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.1...firebolt-operator-v0.17.2) (2026-09-11)
 
@@ -118,7 +118,7 @@
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260907054900.7676b5def2cd ([#225](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/225)) ([c47c9b7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c47c9b7267c080f21ed7c314508aa22338a3e895))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260907054900.7676b5def2cd ([#225](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/225)) ([c47c9b7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c47c9b7267c080f21ed7c314508aa22338a3e895))
 
 ## [0.14.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.14.0...firebolt-operator-v0.14.1) (2026-09-04)
 
@@ -160,8 +160,8 @@
 ### Dependencies
 
 * **deps:** bump golang from 1.26.6 to 1.27.0 ([#203](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/203)) ([fb44622](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/fb446220882cdf6217335266808436c94a07be96))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260830212212.426f0e955f24 ([1fef24f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1fef24fe565b7412a5498db4c3c1d5dfc83585d8))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260831081410.a005be0f9030 ([#204](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/204)) ([34284c2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/34284c22a43dc3ec0776ee67f0e81a7b27dff549))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260830212212.426f0e955f24 ([1fef24f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1fef24fe565b7412a5498db4c3c1d5dfc83585d8))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260831081410.a005be0f9030 ([#204](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/204)) ([34284c2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/34284c22a43dc3ec0776ee67f0e81a7b27dff549))
 * **deps:** bump the kubernetes group with 4 updates ([#202](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/202)) ([e1f609a](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e1f609a02f557a7ff7b697355d40ca89c03ed022))
 
 ## [0.11.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.10.2...firebolt-operator-v0.11.0) (2026-08-29)
@@ -230,7 +230,7 @@
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260815074041.524de236b514 ([f06d70b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f06d70b3862e922be3afbf1c3b2208a447fb47b8))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260815074041.524de236b514 ([f06d70b](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f06d70b3862e922be3afbf1c3b2208a447fb47b8))
 
 ## [0.8.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.8.0...firebolt-operator-v0.8.1) (2026-08-14)
 
@@ -292,8 +292,8 @@
 * **deps:** bump github.com/go-logr/logr from 1.4.3 to 1.4.4 ([#117](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/117)) ([d57c786](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/d57c786789d8f1ed112a54bfb9fc1d41d1900134))
 * **deps:** bump github.com/oklog/ulid/v2 from 2.1.1 to 2.1.2 ([#115](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/115)) ([01469c5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/01469c51ecad98ac7aafbe1d9faca7c1d3e27663))
 * **deps:** bump github.com/prometheus/client_golang from 1.23.2 to 1.24.1 in the prometheus group across 1 directory ([#114](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/114)) ([c3abba2](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c3abba2c40c572c1547c1a2ca316d8dc596226f9))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260803130231.8ec167d19785 ([40df5e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40df5e311bb2df4a888e581037c4a8e2e3b39898))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20260808171517.d7585f66d216 ([#127](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/127)) ([2a67b1f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2a67b1f1c71de2473ff796f41a6b9e7a2f2553fa))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260803130231.8ec167d19785 ([40df5e3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/40df5e311bb2df4a888e581037c4a8e2e3b39898))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20260808171517.d7585f66d216 ([#127](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/127)) ([2a67b1f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/2a67b1f1c71de2473ff796f41a6b9e7a2f2553fa))
 * **deps:** bump the kubernetes group across 1 directory with 4 updates ([#113](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/113)) ([7a2a42c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/7a2a42c8a494abe359e5f2b0092163a8c5953994))
 
 ## [0.6.0](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.5.1...firebolt-operator-v0.6.0) (2026-07-28)
@@ -349,7 +349,7 @@
 ### Dependencies
 
 * **deps:** bump golang from 1.26.4 to 1.26.5 ([#85](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/85)) ([75f008e](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/75f008e15aecd6f880d8bcbbcdcce3356166046f))
-* **deps:** bump packdb engine/metadata to 5.0.1-0.20260727005216.d09b51086f14 ([96d5881](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96d58814a48268778ca207ff6e9b1fced7a0c9ae))
+* **deps:** bump engine/metadata to 5.0.1-0.20260727005216.d09b51086f14 ([96d5881](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/96d58814a48268778ca207ff6e9b1fced7a0c9ae))
 
 ## [0.4.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.4.0...firebolt-operator-v0.4.1) (2026-07-21)
 
@@ -394,7 +394,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* **storage:** the generated config requires a post-FB-1684 engine (packdb #23716). The operator ships version-matched with the engine, so this is the release boundary rather than an in-place break.
+* **storage:** the generated config requires a post-FB-1684 engine (engine #23716). The operator ships version-matched with the engine, so this is the release boundary rather than an in-place break.
 
 ### Features
 
@@ -404,8 +404,8 @@
 ### Dependencies
 
 * **deps:** bump golang.org/x/net from 0.53.0 to 0.55.0 ([#43](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/43)) ([bb7ca12](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/bb7ca1238b09bf9c2406fbafc34de56d090deeee))
-* **deps:** bump packdb engine/metadata to 5.0.1-0.20260709071413.53735f172429 ([41d5fba](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/41d5fbad51a81ccf7a46ddcd4f08279fe7ef126a))
-* **deps:** bump packdb engine/metadata to 5.0.1-0.20260713060957.513515666721 ([#49](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/49)) ([64e14f3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/64e14f34ba9ee05e7c8c16c02f9de5bf3e059d69))
+* **deps:** bump engine/metadata to 5.0.1-0.20260709071413.53735f172429 ([41d5fba](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/41d5fbad51a81ccf7a46ddcd4f08279fe7ef126a))
+* **deps:** bump engine/metadata to 5.0.1-0.20260713060957.513515666721 ([#49](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/49)) ([64e14f3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/64e14f34ba9ee05e7c8c16c02f9de5bf3e059d69))
 * **deps:** bump the ginkgo-gomega group across 1 directory with 2 updates ([#41](https://github.com/firebolt-db/firebolt-kubernetes-operator/issues/41)) ([6c9b2c8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/6c9b2c881124fe4a5d29d8850c268304ee7b12e7))
 
 ## [0.2.1](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.2.0...firebolt-operator-v0.2.1) (2026-06-24)

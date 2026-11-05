@@ -128,7 +128,7 @@ func TestBuildConfigMap_AuthEnabled_OmitsEmptyOptionalFields(t *testing.T) {
 	// LocalAuthSpec.PasswordLogin/TokenExpiry/MaxTokenAge/ClockSkewTolerance
 	// are all left at their Go zero value ("") in testResolvedAuthInfo, so
 	// none of them — nor local.jwt itself — should appear in the rendered
-	// config: packdb applies its own built-in defaults for anything absent,
+	// config: the engine applies its own built-in defaults for anything absent,
 	// but would reject an explicit empty-string value.
 	root := renderConfigWithInstanceInfo(t, testInstanceInfoWithAuth())
 	instance := nestedMap(t, root, "instance")
@@ -388,7 +388,7 @@ func TestStsMatchesSpec_AuthDrift(t *testing.T) {
 		// preferred_authorization_server (and every other rendered field
 		// that isn't a Secret name — signing_algorithm, password_login,
 		// JWT durations, the whole OIDC block) changes what config.yaml
-		// contains but touches no volume/mount. Since packdb reads
+		// contains but touches no volume/mount. Since the engine reads
 		// config.yaml only at startup, this MUST still roll a new
 		// generation, or the engine runs stale auth config forever.
 		original := testInstanceInfoWithAuth()
@@ -577,7 +577,7 @@ func TestResolveInstanceInfo_AuthReadyAndSecretsPresentPopulatesAuth(t *testing.
 // validate only what exchange minted.
 func twoHopProvider() computev1alpha1.OIDCProviderSpec {
 	return computev1alpha1.OIDCProviderSpec{
-		Name:  "firehq",
+		Name:  "example-idp",
 		Title: "Firebolt",
 		Target: &computev1alpha1.OIDCTargetSpec{
 			DiscoveryURL:            "https://idp.example.com/.well-known/openid-configuration",
@@ -616,7 +616,7 @@ func TestBuildConfigMap_OIDCTwoHopProviderRendersTargetAndExchange(t *testing.T)
 	provider := renderSoleProvider(t, twoHopProvider())
 
 	// A two-hop provider names its servers only under target/exchange. A flat
-	// discovery_url alongside them is what packdb refuses to start on.
+	// discovery_url alongside them is what the engine refuses to start on.
 	if _, present := provider["discovery_url"]; present {
 		t.Errorf("providers[0].discovery_url present on a target/exchange provider: %v", provider["discovery_url"])
 	}
@@ -648,7 +648,7 @@ func TestBuildConfigMap_OIDCTargetOmitsUnsetAuthMethod(t *testing.T) {
 
 // A flat-discoveryURL provider keeps rendering byte-identically to what it
 // rendered before target/exchange existed: no empty target/exchange objects,
-// which packdb would reject as a provider naming two servers.
+// which the engine would reject as a provider naming two servers.
 func TestBuildConfigMap_OIDCFlatProviderRendersUnchanged(t *testing.T) {
 	provider := renderSoleProvider(t, computev1alpha1.OIDCProviderSpec{
 		Name:            "okta",
@@ -667,7 +667,7 @@ func TestBuildConfigMap_OIDCFlatProviderRendersUnchanged(t *testing.T) {
 }
 
 // role_mapping's map renders as a sequence of {value, role} objects, not a
-// value-keyed object: packdb's configuration framework has no map-entry type.
+// value-keyed object: the engine's configuration framework has no map-entry type.
 func TestBuildConfigMap_OIDCRoleMappingRendersAsSequence(t *testing.T) {
 	p := twoHopProvider()
 	p.RoleMapping.Map = append(p.RoleMapping.Map, computev1alpha1.RoleMappingEntrySpec{Value: "auditor", Role: "reader"})
@@ -714,7 +714,7 @@ func TestBuildConfigMap_OIDCRoleMappingOmitsUnsetClaim(t *testing.T) {
 // exchange-else-target-else-flat, so it must not gain an invented target.
 func TestBuildConfigMap_OIDCFlatProviderWithExchange(t *testing.T) {
 	provider := renderSoleProvider(t, computev1alpha1.OIDCProviderSpec{
-		Name:            "firehq",
+		Name:            "example-idp",
 		DiscoveryURL:    "https://idp.example.com/.well-known/openid-configuration",
 		Exchange:        &computev1alpha1.OIDCExchangeSpec{DiscoveryURL: "https://exchange.example.com/.well-known/oauth-authorization-server"},
 		UsernameMapping: "{{ sub }}",

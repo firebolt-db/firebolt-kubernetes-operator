@@ -33,7 +33,7 @@ test:
 
 .PHONY: check-navigation
 check-navigation:
-	@echo "Checking navigation path depth (post-packdb aggregation rules)..."
+	@echo "Checking navigation path depth (publication aggregation rules)..."
 	$(PYTHON) scripts/check_operator_navigation.py
 	@echo "☑ Navigation path depth is valid"
 	@echo "Checking for MDX files missing from navigation..."
@@ -42,7 +42,7 @@ check-navigation:
 
 .PHONY: check-lost-redirects
 check-lost-redirects:
-	@echo "Checking removed pages have redirects (propagated into packdb)..."
+	@echo "Checking removed pages have redirects (propagated into the published site)..."
 	$(PYTHON) scripts/check_lost_redirects.py
 	@echo "☑ No removed pages without a redirect"
 

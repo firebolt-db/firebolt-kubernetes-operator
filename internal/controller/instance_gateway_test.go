@@ -1169,7 +1169,7 @@ func TestBuildEnvoyConfigYAML_EngineTLSReady_TransportSocketConfigured(t *testin
 // fmt.Sprintf template — don't clobber each other or drift out of
 // positional alignment with the rest of the argument list when someone
 // edits the template later. Mirrors the auth-and-engine-tls combined case
-// in TestBuildConfigMap_ConformsToPackdbSchema on the engine-config side.
+// in TestBuildConfigMap_ConformsToEngineSchema on the engine-config side.
 func TestBuildEnvoyConfigYAML_BothEngineAndGatewayTLSReady_BothTransportSocketsConfigured(t *testing.T) {
 	got := buildEnvoyConfigYAML(&computev1alpha1.FireboltInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},

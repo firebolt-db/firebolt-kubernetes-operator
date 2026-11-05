@@ -380,23 +380,23 @@ type CertManagerSpec struct {
 
 // PasswordLoginPolicy controls whether password-based login is available
 // to any authenticated user or only to the admin account. Mirrors
-// packdb's instance.auth.password_login; meaningful only once OIDC is
+// the engine's instance.auth.password_login; meaningful only once OIDC is
 // also configured (a native-only deployment always allows the admin to
 // log in with a password).
 // +kubebuilder:validation:Enum=admin_only;any_user
 type PasswordLoginPolicy string
 
-// PasswordLoginAdminOnly and PasswordLoginAnyUser enumerate packdb's
+// PasswordLoginAdminOnly and PasswordLoginAnyUser enumerate the engine's
 // password-login policies.
 const (
 	PasswordLoginAdminOnly PasswordLoginPolicy = "admin_only"
 	PasswordLoginAnyUser   PasswordLoginPolicy = "any_user"
 )
 
-// AdminSpec configures the Instance admin account. packdb re-syncs this
+// AdminSpec configures the Instance admin account. The engine re-syncs this
 // user's name and password from config on every engine startup.
 type AdminSpec struct {
-	// Name is the admin username. Defaults to "firebolt" — packdb's own
+	// Name is the admin username. Defaults to "firebolt" — the engine's own
 	// default — so omitting it matches engine behavior when auth is
 	// first enabled.
 	// +kubebuilder:default=firebolt
@@ -418,14 +418,14 @@ type AdminSpec struct {
 // JWT signing keypair used by the embedded ("_local") authorization
 // server on every engine. Signing keys are entirely operator-generated —
 // the CRD does not accept user-supplied key material — because every
-// engine in an Instance must share byte-identical signing_keys (packdb's
-// SigningKeyManager validates tokens minted by any peer engine, looked up
+// engine in an Instance must share byte-identical signing_keys (the engine's
+// token validation accepts tokens minted by any peer engine, looked up
 // by kid, so every key any engine could have signed with must be present
 // on every other engine), and an operator-generated Secret is the only
 // way to guarantee that across a fleet.
 //
 // Every Certificate this policy produces has cert-manager auto-renew
-// disabled: packdb reads signing keys only at process startup, so an
+// disabled: the engine reads signing keys only at process startup, so an
 // uncoordinated renewal would make one engine sign with a key its peers
 // can't yet validate. When RotationInterval is set, the operator performs
 // its own coordinated rotation instead (see AuthStatus's doc comment for
@@ -437,7 +437,7 @@ type SigningKeyPolicy struct {
 	// generate the signing keypair.
 	//
 	// The key size is immutable once set (enforced by the API server, so it
-	// holds even if the validating webhook is bypassed): packdb derives every
+	// holds even if the validating webhook is bypassed): the engine derives every
 	// signing key's curve from the single global signingAlgorithm and cannot
 	// serve two curves at once, so a size change cannot be migrated in place.
 	// The rule is scoped to this signing-only field, leaving TLS listener key
@@ -461,7 +461,7 @@ type SigningKeyPolicy struct {
 	// signing_keys[] as validation-only after it stops signing new
 	// tokens, before the operator drops it from every engine's rendered
 	// config and deletes its Certificate/Secret. Must be at least
-	// instance.auth.local.maxTokenAge (packdb default: 1 day) plus
+	// instance.auth.local.maxTokenAge (engine default: 1 day) plus
 	// however long a full engine fleet rollout realistically takes: a
 	// token signed in the last instant the old key was active must fully
 	// expire before the key that could validate it disappears.
@@ -473,22 +473,22 @@ type SigningKeyPolicy struct {
 }
 
 // LocalAuthSpec configures the embedded ("_local") authorization server:
-// packdb's native username/password login plus the JWT signing/validation
+// the engine's native username/password login plus the JWT signing/validation
 // parameters every engine uses regardless of whether OIDC is also
 // configured. These fields are grouped together here for operator users
-// even though packdb itself spreads them across
+// even though the engine itself spreads them across
 // instance.auth.{password_login,admin} and instance.auth.local.* — the
 // operator maps between the two shapes at render time.
 type LocalAuthSpec struct {
 	// PasswordLogin controls whether password login is available to any
-	// user or only the admin account. Defaults to admin_only (packdb's
+	// user or only the admin account. Defaults to admin_only (the engine's
 	// own default).
 	// +kubebuilder:default=admin_only
 	// +optional
 	PasswordLogin PasswordLoginPolicy `json:"passwordLogin,omitempty"`
 
 	// Admin configures the Instance admin account. Required when auth is
-	// enabled — packdb rejects a config with auth.enabled=true and no
+	// enabled — the engine rejects a config with auth.enabled=true and no
 	// admin block.
 	Admin AdminSpec `json:"admin"`
 
@@ -499,7 +499,7 @@ type LocalAuthSpec struct {
 	// signing-key default.
 	//
 	// Immutable once set (enforced by the API server via the transition rule
-	// below, so it holds even if the validating webhook is bypassed): packdb
+	// below, so it holds even if the validating webhook is bypassed): the engine
 	// exposes one global signing_algorithm and derives every key's curve from
 	// it, so it can never hold two curves at once. Changing it in place would
 	// roll engines onto a signing_algorithm their mounted key no longer matches
@@ -512,24 +512,24 @@ type LocalAuthSpec struct {
 	SigningAlgorithm string `json:"signingAlgorithm,omitempty"`
 
 	// TokenExpiry is how long issued access tokens remain valid, as a Go
-	// duration string (e.g. "1h"). Defaults to packdb's own default (1h)
+	// duration string (e.g. "1h"). Defaults to the engine's own default (1h)
 	// when empty.
 	// +optional
 	TokenExpiry string `json:"tokenExpiry,omitempty"`
 
 	// MaxTokenAge bounds how old a token's iat claim may be, independent
-	// of TokenExpiry. Defaults to packdb's own default (1d) when empty.
+	// of TokenExpiry. Defaults to the engine's own default (1d) when empty.
 	// +optional
 	MaxTokenAge string `json:"maxTokenAge,omitempty"`
 
 	// ClockSkewTolerance is the permitted clock drift when validating
-	// time-based JWT claims. Defaults to packdb's own default (30s) when
+	// time-based JWT claims. Defaults to the engine's own default (30s) when
 	// empty.
 	// +optional
 	ClockSkewTolerance string `json:"clockSkewTolerance,omitempty"`
 
 	// SigningKeys controls how the operator provisions the signing
-	// keypair. Required when auth is enabled: packdb's own dev-autogen
+	// keypair. Required when auth is enabled: the engine's own dev-autogen
 	// fallback (used when signing_keys is empty) mints a different key
 	// per engine process, which breaks cross-engine token validation in
 	// any multi-engine deployment — exactly the topology this operator
@@ -540,17 +540,17 @@ type LocalAuthSpec struct {
 
 // OIDCJWTSpec configures the JWT validation parameters shared by every
 // OIDC provider on this Instance. Distinct from LocalAuthSpec's JWT
-// fields: packdb's instance.auth.oidc.jwt has no token_expiry, because an
+// fields: the engine's instance.auth.oidc.jwt has no token_expiry, because an
 // OIDC provider issues its own tokens — the engine only validates them.
 type OIDCJWTSpec struct {
 	// ClockSkewTolerance is the permitted clock drift when validating
-	// time-based claims on OIDC-issued tokens. Defaults to packdb's own
+	// time-based claims on OIDC-issued tokens. Defaults to the engine's own
 	// default (30s) when empty.
 	// +optional
 	ClockSkewTolerance string `json:"clockSkewTolerance,omitempty"`
 
 	// MaxTokenAge bounds how old an OIDC token's iat claim may be.
-	// Defaults to packdb's own default (1d) when empty.
+	// Defaults to the engine's own default (1d) when empty.
 	// +optional
 	MaxTokenAge string `json:"maxTokenAge,omitempty"`
 }
@@ -565,7 +565,7 @@ type JITProvisioningSpec struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// DefaultRoles lists the roles granted to an auto-provisioned user.
-	// Defaults to ["public"] (packdb's own default) when empty.
+	// Defaults to ["public"] (the engine's own default) when empty.
 	// +optional
 	DefaultRoles []string `json:"defaultRoles,omitempty"`
 }
@@ -574,7 +574,7 @@ type JITProvisioningSpec struct {
 // Set.
 type OIDCJWKSSpec struct {
 	// CacheTTL is how long a fetched JWKS document is cached before being
-	// re-fetched, as a Go duration string. Defaults to packdb's own
+	// re-fetched, as a Go duration string. Defaults to the engine's own
 	// default (1h) when empty.
 	// +optional
 	CacheTTL string `json:"cacheTTL,omitempty"`
@@ -585,7 +585,7 @@ type OIDCJWKSSpec struct {
 type OIDCDiscoverySpec struct {
 	// RefreshInterval is how often the engine re-fetches the provider's
 	// /.well-known/openid-configuration document, as a Go duration
-	// string. Defaults to packdb's own default (1d) when empty.
+	// string. Defaults to the engine's own default (1d) when empty.
 	// +optional
 	RefreshInterval string `json:"refreshInterval,omitempty"`
 }
@@ -603,7 +603,7 @@ type OIDCDiscoverySpec struct {
 // in the client's own out-of-band configuration, never in engine config.
 type OIDCTargetSpec struct {
 	// DiscoveryURL is this server's OpenID Connect / RFC 8414 discovery
-	// endpoint. Must be an https:// URL — packdb requires TLS for every
+	// endpoint. Must be an https:// URL — the engine requires TLS for every
 	// outbound OIDC fetch except loopback.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^https://.+`
@@ -615,7 +615,7 @@ type OIDCTargetSpec struct {
 	// clients, for identity providers whose discovery document omits
 	// token_endpoint_auth_methods_supported and would otherwise leave a
 	// client on the RFC 8414 default. Left as a free-form string rather
-	// than an enum, matching packdb, so a method this operator has never
+	// than an enum, matching the engine, so a method this operator has never
 	// heard of stays expressible.
 	// +optional
 	TokenEndpointAuthMethod string `json:"tokenEndpointAuthMethod,omitempty"`
@@ -659,17 +659,17 @@ type RoleMappingEntrySpec struct {
 // beside JITProvisioning rather than inside it. The table is closed: a
 // claim value with no entry grants nothing.
 //
-// Map is a list rather than a string-keyed object because packdb's
+// Map is a list rather than a string-keyed object because the engine's
 // configuration framework has no map-entry type.
 type RoleMappingSpec struct {
 	// Claim is the token claim whose value is looked up in Map. Defaults
-	// to packdb's own default ("role") when empty.
+	// to the engine's own default ("role") when empty.
 	// +kubebuilder:validation:MinLength=1
 	// +optional
 	Claim string `json:"claim,omitempty"`
 
 	// Map lists the claim-value-to-role entries. A claim value may appear
-	// at most once: packdb refuses a value naming two roles rather than
+	// at most once: the engine refuses a value naming two roles rather than
 	// guess an order to apply them in. Declared as a keyed list so the
 	// API server enforces that itself, which the validating webhook —
 	// disabled in the shipped chart — cannot be relied on to do.
@@ -679,7 +679,7 @@ type RoleMappingSpec struct {
 	Map []RoleMappingEntrySpec `json:"map"`
 }
 
-// OIDCProviderSpec configures one trusted OIDC identity provider. packdb
+// OIDCProviderSpec configures one trusted OIDC identity provider. The engine
 // validates bearer tokens against this provider's published keys — it is
 // a JWT validator, not an OAuth2 client: there is no client ID/secret,
 // redirect URI, or authorization-code flow here, because the engine never
@@ -689,14 +689,14 @@ type RoleMappingSpec struct {
 //
 // A provider names the server clients authenticate at either as the flat
 // DiscoveryURL below or as Target — exactly one, never both, matching
-// packdb, which refuses to start otherwise. The CEL rule enforces that at
+// the engine, which refuses to start otherwise. The CEL rule enforces that at
 // the API server so it holds even with the validating webhook disabled.
 // +kubebuilder:validation:XValidation:rule="has(self.discoveryURL) != has(self.target)",message="set exactly one of discoveryURL or target: the flat discoveryURL is sugar for target.discoveryURL"
 type OIDCProviderSpec struct {
 	// Name is this provider's machine identifier, used in the
 	// ?auth=<name> connection parameter and as the authorization server
 	// name clients select. Must not start with "_" — that prefix is
-	// reserved by packdb for Firebolt-managed authorization servers (the
+	// reserved by the engine for Firebolt-managed authorization servers (the
 	// embedded server is named "_local").
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[^_].*$`
@@ -709,7 +709,7 @@ type OIDCProviderSpec struct {
 
 	// DiscoveryURL is the provider's OpenID Connect discovery endpoint
 	// (typically ending in /.well-known/openid-configuration). Must be
-	// an https:// URL — packdb requires TLS for every outbound OIDC
+	// an https:// URL — the engine requires TLS for every outbound OIDC
 	// fetch except loopback.
 	//
 	// Sugar for a Target carrying only this URL, and the shape every
@@ -737,7 +737,7 @@ type OIDCProviderSpec struct {
 
 	// Audience is the expected "aud" claim on tokens from this provider.
 	// Defaults to the Instance's canonical issuer URL when empty
-	// (packdb's own default).
+	// (the engine's own default).
 	// +optional
 	Audience string `json:"audience,omitempty"`
 
@@ -777,14 +777,14 @@ type OIDCAuthSpec struct {
 	JWT *OIDCJWTSpec `json:"jwt,omitempty"`
 
 	// Providers lists the trusted OIDC identity providers. Must be
-	// non-empty when OIDC is configured at all — packdb rejects a
+	// non-empty when OIDC is configured at all — the engine rejects a
 	// present oidc block with an empty providers list.
 	// +kubebuilder:validation:MinItems=1
 	Providers []OIDCProviderSpec `json:"providers"`
 }
 
 // AuthSpec configures authentication for every engine in this Instance.
-// Auth is an Instance-wide policy, not a per-Engine one: packdb's embedded
+// Auth is an Instance-wide policy, not a per-Engine one: the engine's embedded
 // authorization server on each engine both issues and validates JWTs, so
 // every engine must run with byte-identical instance.auth.* — including
 // the same signing keys — or a token minted by one engine fails
@@ -798,11 +798,11 @@ type OIDCAuthSpec struct {
 // +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.local)",message="spec.auth.local is required when spec.auth.enabled is true"
 type AuthSpec struct {
 	// Enabled turns on authentication for every engine in this Instance.
-	// When false, engines run in packdb's unauthenticated mode and every
+	// When false, engines run in the engine's unauthenticated mode and every
 	// connection is treated as the admin. Local, OIDC, and
 	// PreferredAuthorizationServer below are only meaningful when Enabled
 	// is true; the validating webhook rejects setting them while Enabled
-	// is false, matching packdb's own config validation (instance.auth's
+	// is false, matching the engine's own config validation (instance.auth's
 	// admin and oidc fields must be absent when instance.auth.enabled is
 	// false).
 	// +kubebuilder:default=false
@@ -1084,11 +1084,11 @@ type FireboltInstanceSpec struct {
 type SigningKeyPhase string
 
 const (
-	// SigningKeyActive is the key packdb's embedded server currently
+	// SigningKeyActive is the key the engine's embedded server currently
 	// signs new tokens with. Exactly one key is Active at a time.
 	SigningKeyActive SigningKeyPhase = "Active"
 	// SigningKeyValidationOnly is a retained key still rendered into
-	// signing_keys[] so packdb continues to validate tokens signed with
+	// signing_keys[] so the engine continues to validate tokens signed with
 	// it, but not used to sign new ones. A key passes through this phase
 	// twice in one rotation: briefly right after creation (before every
 	// engine has it and it is safe to promote), and again after being

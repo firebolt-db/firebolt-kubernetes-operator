@@ -1507,7 +1507,7 @@ func TestAuthHash_StableAcrossRotationPolicyChange(t *testing.T) {
 // TestAuthHash_ChangesWithAdminSecretVersion covers an
 // in-place admin-password rotation keeps the Secret name/key identical but
 // bumps its ResourceVersion, and authHash must fold that in so every engine
-// rolls onto the new password (packdb reads password_file only at startup).
+// rolls onto the new password (the engine reads password_file only at startup).
 func TestAuthHash_ChangesWithAdminSecretVersion(t *testing.T) {
 	auth := &computev1alpha1.AuthSpec{
 		Enabled: true,
@@ -2468,7 +2468,7 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 		spec := testSpec()
 		setSpecTemplateMeta(spec, func(m *metav1.ObjectMeta) {
 			m.Labels = map[string]string{
-				"app":         "packdb",
+				"app":         "engine",
 				"environment": "prod",
 				"team":        "control-plane",
 			}
@@ -2483,8 +2483,8 @@ func TestBuildStatefulSet_PodLabels(t *testing.T) {
 			t.Errorf("expected %s label = %q, got %q", LabelGeneration, "1", labels[LabelGeneration])
 		}
 		// User labels must be present.
-		if labels["app"] != "packdb" {
-			t.Errorf("expected user label app = packdb, got %q", labels["app"])
+		if labels["app"] != "engine" {
+			t.Errorf("expected user label app = engine, got %q", labels["app"])
 		}
 		if labels["environment"] != "prod" {
 			t.Errorf("expected user label environment = prod, got %q", labels["environment"])
@@ -2999,7 +2999,7 @@ func TestBuildConfigMap_NoCustomConfig_DefaultsApplied(t *testing.T) {
 	}
 	// Node hosts must be full FQDNs (…svc.cluster.local), which is what the
 	// per-generation engine TLS cert's wildcard SAN matches. A
-	// short .svc suffix would fail packdb's HTTPS startup verification.
+	// short .svc suffix would fail the engine's HTTPS startup verification.
 	for i, n := range nodes {
 		host, _ := n.(map[string]interface{})["host"].(string)
 		if !strings.HasSuffix(host, ".svc.cluster.local") {

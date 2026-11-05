@@ -255,7 +255,7 @@ const (
 	EngineTLSMountPath = "/secrets/tls/engine"
 	// EngineTLSBundlePath is the writable path (under the runtime emptyDir
 	// mounted at /run/firebolt) where EngineStartupScript assembles the
-	// leaf+CA bundle packdb reads as its listener certificate_file — see
+	// leaf+CA bundle the engine reads as its listener certificate_file — see
 	// engineTLSCertPath and the engine listener contract. It must NOT live under
 	// EngineTLSMountPath, which is a read-only Secret mount.
 	EngineTLSBundlePath = "/run/firebolt/engine-tls-bundle.crt"
@@ -434,7 +434,7 @@ set -euo pipefail
 if [ -z "${POD_INDEX:-}" ]; then
   POD_INDEX="${HOSTNAME##*-}"
 fi
-# Engine TLS: packdb uses the listener certificate_file as BOTH the
+# Engine TLS: the engine uses the listener certificate_file as BOTH the
 # served chain and its own client-side CA bundle for HTTPS startup checks, so it
 # must carry the leaf AND the issuing CA. A CA-backed cert-manager issuer splits
 # these across tls.crt (leaf) and ca.crt (issuer), so assemble a combined bundle
@@ -447,18 +447,8 @@ fi
 exec /opt/firebolt/firebolt server --node "$POD_INDEX" --data-dir /var/lib/firebolt
 `
 
-// EngineHTTPQueryPort is packdb's http-query listener port (confirmed
-// against packdb's own default, programs/firebolt-core/FireboltCoreConfig.h
-// kHttpPort). Unauthenticated/plaintext today; once spec.tls.engine is
-// enabled this is the same port renumbered to TLS-only (packdb's
-// ApplyToLegacyConfig replaces the plaintext http_port default entirely
-// the instant any endpoints.http.listeners entry is rendered — see
-// buildConfigMap's renderEngineTLSListener). Extracted as a named
-// constant (rather than the three separate inline "3473" literals this
-// replaces) because a fourth call site — the TLS listener render — would
-// otherwise need to restate it; GetServicePorts's doc comment already
-// flagged the lack of a compile-time link to instance_gateway.go's Lua
-// :authority rewrite, which still hardcodes "3473" as its own literal.
+// EngineHTTPQueryPort is the engine's query listener port. Enabling
+// spec.tls.engine replaces plaintext with TLS on this same port.
 const EngineHTTPQueryPort int32 = 3473
 
 // GetServicePorts returns the externally-meaningful service ports for a

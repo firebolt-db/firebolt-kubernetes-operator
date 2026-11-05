@@ -30,10 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// localAuthServerName is the authorization server name packdb reserves
-// for its embedded ("_local") server. Mirrors packdb's
-// DB::Auth::kLocalAuthServerName (AuthConfig.h) — kept in sync manually
-// since the operator does not vendor packdb's C++ sources.
+// localAuthServerName is the name the engine reserves for its embedded
+// authorization server.
 const localAuthServerName = "_local"
 
 // FireboltInstanceDefaulter defaults FireboltInstance resources.
@@ -122,7 +120,7 @@ func authLocalEnabled(inst *FireboltInstance) bool {
 }
 
 // validateImmutableSigningKey freezes the JWT signing algorithm and the signing
-// key size while auth stays enabled. packdb exposes a single global
+// key size while auth stays enabled. The engine exposes a single global
 // signing_algorithm and derives each key's curve from it (the config schema has
 // no per-key algorithm field), so it can never serve two curves at once —
 // changing either in place would roll engines onto a signing_algorithm their
@@ -138,7 +136,7 @@ func validateImmutableSigningKey(oldInst, newInst *FireboltInstance) field.Error
 	var errs field.ErrorList
 	if oldLocal.SigningAlgorithm != newLocal.SigningAlgorithm {
 		errs = append(errs, field.Invalid(base.Child("signingAlgorithm"), newLocal.SigningAlgorithm,
-			"is immutable while auth is enabled: packdb uses one global signing algorithm and "+
+			"is immutable while auth is enabled: the engine uses one global signing algorithm and "+
 				"cannot serve two key curves at once, so changing it in place would break token "+
 				"validation. Disable auth (or recreate the Instance) to change it."))
 	}
@@ -264,7 +262,7 @@ func ValidateTLS(inst *FireboltInstance) field.ErrorList {
 
 	// Bring-your-own Secret is not viable for the engine listener: the operator
 	// issues per-generation certificates whose SANs cover the engine pods'
-	// blue-green hostnames (…svc.cluster.local), which packdb verifies at
+	// blue-green hostnames (…svc.cluster.local), which the engine verifies at
 	// startup, and a static user Secret cannot cover the unbounded per-generation
 	// hostname set. Engine TLS must therefore use cert-manager (certManager).
 	// secretRef remains supported on spec.tls.gateway.
@@ -369,9 +367,9 @@ func forbidProtectedSecretRef(
 			"key material into a pod that has no business holding it", ref.Name))}
 }
 
-// ValidateAuth mirrors packdb's instance.auth validation rules
-// (AuthConfig::Validate) so misconfiguration is rejected at admission
-// time instead of crashing every engine at startup against packdb's
+// ValidateAuth mirrors the engine's instance.auth validation rules
+// so misconfiguration is rejected at admission
+// time instead of crashing every engine at startup against the engine's
 // closed (additionalProperties: false) config schema. See AuthSpec's doc
 // comment for why auth is validated once per Instance rather than per
 // Engine.
@@ -396,7 +394,7 @@ func ValidateAuth(inst *FireboltInstance) field.ErrorList {
 	return validateAuthEnabled(auth, base)
 }
 
-// validateAuthDisabled enforces packdb's rule that instance.auth.admin
+// validateAuthDisabled enforces the engine's rule that instance.auth.admin
 // and instance.auth.oidc — and, by extension, our Local wrapper around
 // admin — must be absent when instance.auth.enabled is false, along with
 // preferred_authorization_server.
@@ -417,7 +415,7 @@ func validateAuthDisabled(auth *AuthSpec, base *field.Path) field.ErrorList {
 	return errs
 }
 
-// validateAuthEnabled enforces packdb's rules for instance.auth.enabled=true:
+// validateAuthEnabled enforces the engine's rules for instance.auth.enabled=true:
 // an admin block with an explicit password Secret reference (the operator
 // never generates one) and a signing-key provisioning policy are both
 // required, and the configured JWT signing algorithm must match the
@@ -428,8 +426,8 @@ func validateAuthDisabled(auth *AuthSpec, base *field.Path) field.ErrorList {
 // (kubebuilder MinItems/Pattern markers on OIDCAuthSpec/OIDCProviderSpec).
 // Provider duration fields (JWKS cache TTL, discovery refresh interval) are
 // NOT structurally constrained by the CRD schema — a malformed or
-// non-positive value passes admission today and only fails at packdb's own
-// config load (AuthConfig::Validate rejects a non-positive
+// non-positive value passes admission today and only fails at the engine's own
+// config load (engine validation rejects a non-positive
 // discovery.refresh_interval; the config parser rejects an unparseable
 // duration string for any of them) — so those are validated here.
 func validateAuthEnabled(auth *AuthSpec, base *field.Path) field.ErrorList {
@@ -437,7 +435,7 @@ func validateAuthEnabled(auth *AuthSpec, base *field.Path) field.ErrorList {
 
 	if auth.Local == nil {
 		errs = append(errs, field.Required(base.Child("local"),
-			"required when spec.auth.enabled is true: packdb requires an admin account whenever auth is enabled"))
+			"required when spec.auth.enabled is true: the engine requires an admin account whenever auth is enabled"))
 	} else {
 		errs = append(errs, validateLocalAuth(auth.Local, base.Child("local"))...)
 	}
@@ -470,7 +468,7 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 	if local.SigningKeys == nil {
 		errs = append(errs, field.Required(base.Child("signingKeys"),
 			"required when spec.auth.enabled is true: every engine in a multi-engine Instance must share "+
-				"identical signing keys, which packdb's own dev-autogen fallback cannot guarantee"))
+				"identical signing keys, which the engine's own dev-autogen fallback cannot guarantee"))
 	} else {
 		if err := validateSigningAlgorithmCompatibility(local, base); err != nil {
 			errs = append(errs, err)
@@ -482,7 +480,7 @@ func validateLocalAuth(local *LocalAuthSpec, base *field.Path) field.ErrorList {
 	}
 
 	// tokenExpiry and maxTokenAge must be positive, not merely parseable: a
-	// zero/negative token lifetime is meaningless to packdb, and a negative
+	// zero/negative token lifetime is meaningless to the engine, and a negative
 	// maxTokenAge would additionally corrupt validateSigningKeyRotation's
 	// retain-duration floor (a "-1d" would lower it below any real token's
 	// lifetime, defeating the rotation-safety check).
@@ -525,7 +523,7 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 	for i := range oidc.Providers {
 		p := &oidc.Providers[i]
 		providerPath := base.Child("providers").Index(i)
-		// packdb's IssuerRegistry::registerRemote throws when a second provider
+		// The engine issuer registry fails when a second provider
 		// with the same name is registered, which prevents every affected engine
 		// from starting. The CRD cannot express uniqueness across list items, and
 		// validatePreferredAuthorizationServer already assumes names are unique,
@@ -543,11 +541,11 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 			}
 		}
 		if p.Discovery != nil {
-			// Positive, not just parseable: packdb's AuthConfig::Validate
+			// Positive, not just parseable: engine validation
 			// rejects a zero/negative discovery.refresh_interval outright
 			// (the discovery-document refresh task would never run,
 			// permanently leaving the provider unresolved) — the one
-			// duration field packdb validates for more than parseability.
+			// duration field the engine validates for more than parseability.
 			if err := validatePositiveDurationField(
 				providerPath.Child("discovery", "refreshInterval"), p.Discovery.RefreshInterval,
 			); err != nil {
@@ -559,14 +557,14 @@ func validateOIDCAuth(oidc *OIDCAuthSpec, base *field.Path, adminName string) fi
 	return errs
 }
 
-// validateProviderServers mirrors packdb's AuthConfig::Validate: a provider
+// validateProviderServers mirrors engine validation: a provider
 // must name the server clients authenticate at exactly once, as the flat
 // discoveryURL or as target. Setting neither leaves the provider naming no
-// server; setting both is ambiguous. packdb refuses to start on either,
+// server; setting both is ambiguous. The engine refuses to start on either,
 // taking every engine down with it. The CRD's CEL rule catches this too —
 // this exists so the rejection carries the reason rather than the rule.
 //
-// exchange is deliberately unconstrained here: packdb accepts it alongside
+// exchange is deliberately unconstrained here: the engine accepts it alongside
 // either spelling, resolving the trusted issuer as exchange-else-target.
 func validateProviderServers(p *OIDCProviderSpec, base *field.Path) field.ErrorList {
 	switch {
@@ -580,16 +578,15 @@ func validateProviderServers(p *OIDCProviderSpec, base *field.Path) field.ErrorL
 	return nil
 }
 
-// parsePackdbDuration parses a duration string using the grammar packdb's
+// parseEngineDuration parses a duration string using the grammar the engine's
 // config loader accepts for every instance.auth duration field (TokenExpiry,
 // MaxTokenAge, ClockSkewTolerance, CacheTTL, RefreshInterval): Go's
 // time.ParseDuration grammar plus a "d" (days) unit that Go's standard library
-// does not support. packdb's parser
-// (src/Common/Configuration/Unit/Duration.cpp) is a multi-component tokenizer,
+// does not support. The engine's parser is a multi-component tokenizer,
 // so "d" may appear on its own ("1d"), combined with the standard units in any
-// order ("1d12h", "12h1d"), and with a fractional value ("1.5d") — packdb
+// order ("1d12h", "12h1d"), and with a fractional value ("1.5d") — the engine
 // accepts all of these. A value that fails to parse here is guaranteed to fail
-// packdb's own config load the same way, crashing every engine at startup;
+// the engine's own config load the same way, crashing every engine at startup;
 // this validates it at admission time instead.
 //
 // Standard (no-"d") strings take time.ParseDuration's exact integer parse
@@ -601,13 +598,13 @@ func isDurationNumByte(b byte) bool {
 	return (b >= '0' && b <= '9') || b == '.'
 }
 
-func parsePackdbDuration(s string) (time.Duration, error) {
+func parseEngineDuration(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
-	// packdb grammar: an optional leading sign, then one or more
+	// engine grammar: an optional leading sign, then one or more
 	// <number><unit> components. A bare number with no unit is rejected, as
-	// packdb rejects it for these (non-legacy) config fields.
+	// the engine rejects it for these (non-legacy) config fields.
 	body := s
 	neg := false
 	switch {
@@ -674,14 +671,14 @@ func parsePackdbDuration(s string) (time.Duration, error) {
 	return total, nil
 }
 
-// validateDurationField rejects a non-empty value that parsePackdbDuration
+// validateDurationField rejects a non-empty value that parseEngineDuration
 // cannot parse. Empty is always valid — every one of these CRD fields is
-// optional, and packdb applies its own built-in default when absent.
+// optional, and the engine applies its own built-in default when absent.
 func validateDurationField(path *field.Path, value string) *field.Error {
 	if value == "" {
 		return nil
 	}
-	if _, err := parsePackdbDuration(value); err != nil {
+	if _, err := parseEngineDuration(value); err != nil {
 		return field.Invalid(path, value, `must be a valid duration string (e.g. "30s", "1h", "1d")`)
 	}
 	return nil
@@ -690,16 +687,16 @@ func validateDurationField(path *field.Path, value string) *field.Error {
 // validatePositiveDurationField is validateDurationField plus a positivity
 // check (the value must parse AND be > 0). Used for the duration fields where
 // a zero/negative value is either meaningless or unsafe:
-// oidc.providers[].discovery.refreshInterval (packdb itself rejects it
+// oidc.providers[].discovery.refreshInterval (the engine itself rejects it
 // non-positive — the discovery-refresh task would never run), and the
 // token-lifetime fields tokenExpiry / maxTokenAge (a non-positive value is
-// nonsensical to packdb and, for maxTokenAge, would corrupt
+// nonsensical to the engine and, for maxTokenAge, would corrupt
 // validateSigningKeyRotation's retain-duration floor).
 func validatePositiveDurationField(path *field.Path, value string) *field.Error {
 	if value == "" {
 		return nil
 	}
-	d, err := parsePackdbDuration(value)
+	d, err := parseEngineDuration(value)
 	if err != nil {
 		return field.Invalid(path, value, `must be a valid duration string (e.g. "30s", "1h", "1d")`)
 	}
@@ -717,17 +714,17 @@ const issuerClaim = "iss"
 // issuerClaimRef matches a template reference to the issuer claim, not the bare
 // letters. A substring test reads "{{ swiss_id }}" and "dismissal@corp" as
 // issuer-qualified and admits exactly the non-unique mapping the check exists to
-// reject. Whitespace inside the braces is optional because packdb's template
+// reject. Whitespace inside the braces is optional because the engine's template
 // parser tolerates it and the operator's own example writes "{{ iss }}".
 var issuerClaimRef = regexp.MustCompile(`\{\{\s*` + issuerClaim + `\s*\}\}`)
 
-// defaultAdminName mirrors the AdminSpec.Name CRD default (packdb's own default
+// defaultAdminName mirrors the AdminSpec.Name CRD default (the engine's own default
 // admin username).
 const defaultAdminName = "firebolt"
 
 // authAdminName is the admin username an OIDC mapping must not resolve onto,
 // resolved the way the engine will see it: the explicit value when set,
-// otherwise the CRD default that packdb also defaults to.
+// otherwise the CRD default that the engine also defaults to.
 func authAdminName(auth *AuthSpec) string {
 	if auth.Local != nil && auth.Local.Admin.Name != "" {
 		return auth.Local.Admin.Name
@@ -744,10 +741,10 @@ func authAdminName(auth *AuthSpec) string {
 //     an identity from either provider onto the SAME Firebolt user, so a subject in
 //     the weaker IdP inherits whatever the stronger IdP's user was granted. With
 //     jitProvisioning enabled the collision is created automatically on first login.
-//     packdb validates each provider in isolation and cannot see this.
+//     The engine validates each provider in isolation and cannot see this.
 //
 //  2. A mapping that is a bare literal equal to the admin username resolves an
-//     external identity onto the Instance admin account, which packdb re-provisions
+//     external identity onto the Instance admin account, which the engine re-provisions
 //     from config on every engine start. Only a literal is detectable at admission
 //     (a template's output depends on claims the operator never sees), so this
 //     catches the unambiguous case and leaves the templated one to documentation.
@@ -769,7 +766,7 @@ func validateUsernameMapping(mapping string, path *field.Path, providerCount int
 
 // validateSigningAlgorithmCompatibility rejects a JWT signing algorithm
 // that doesn't match the cert-manager key algorithm used to provision the
-// signing keypair — packdb would otherwise fail to load an RSA-family
+// signing keypair — the engine would otherwise fail to load an RSA-family
 // signing_algorithm against an ECDSA private key (or vice versa) at
 // engine startup, which is a much later and harder-to-diagnose failure
 // than an admission rejection.
@@ -794,7 +791,7 @@ func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Pat
 	}
 
 	// For ECDSA (ES*) the JWT algorithm pins the exact curve: JOSE requires
-	// ES256↔P-256, ES384↔P-384, ES512↔P-521. packdb derives the JWK curve and
+	// ES256↔P-256, ES384↔P-384, ES512↔P-521. The engine derives the JWK curve and
 	// coordinate size from the JWT algorithm rather than from the actual key,
 	// so a mismatched curve (e.g. ES256 with the default P-384 key) produces an
 	// invalid JWKS or an engine startup failure. RSA (RS*) imposes no such
@@ -856,20 +853,20 @@ func validateCertManagerKey(cm *CertManagerSpec, base *field.Path) *field.Error 
 	return nil
 }
 
-// packdbDefaultMaxTokenAge is packdb's own built-in default for
+// engineDefaultMaxTokenAge is the engine's own built-in default for
 // instance.auth.local.max_token_age (LocalAuthSpec.MaxTokenAge's doc
 // comment), used by validateSigningKeyRotation as the floor for
 // RetainDuration when MaxTokenAge is left unset.
-const packdbDefaultMaxTokenAge = 24 * time.Hour
+const engineDefaultMaxTokenAge = 24 * time.Hour
 
-// packdbDefaultClockSkew is packdb's own built-in default for
-// instance.auth.local.clock_skew_tolerance (30s; src/PackDB/Auth/
-// JwtValidationConfig.h). validateSigningKeyRotation adds it to the
-// RetainDuration floor: packdb rejects a token only once
+// engineDefaultClockSkew is the engine's own built-in default for
+// instance.auth.local.clock_skew_tolerance (30s).
+// validateSigningKeyRotation adds it to the
+// RetainDuration floor: the engine rejects a token only once
 // current_time - iat > max_token_age + clock_skew_tolerance, so a token stays
 // valid until iat + maxTokenAge + clockSkewTolerance and the key must be
 // retained for that whole window, not just maxTokenAge.
-const packdbDefaultClockSkew = 30 * time.Second
+const engineDefaultClockSkew = 30 * time.Second
 
 // validateSigningKeyRotation enforces that SigningKeyPolicy's
 // RotationInterval and RetainDuration are always set together (base is
@@ -903,26 +900,26 @@ func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.Er
 			"must be positive")}
 	}
 
-	maxTokenAge := packdbDefaultMaxTokenAge
+	maxTokenAge := engineDefaultMaxTokenAge
 	if local.MaxTokenAge != "" {
 		// A MaxTokenAge that is unparseable OR non-positive is already
 		// reported separately by validatePositiveDurationField; ignore it
-		// here (falling back to the packdb default floor) rather than let a
+		// here (falling back to the engine default floor) rather than let a
 		// bad value — most dangerously a negative duration — lower the
 		// retain-duration floor below a real token's lifetime.
-		if d, err := parsePackdbDuration(local.MaxTokenAge); err == nil && d > 0 {
+		if d, err := parseEngineDuration(local.MaxTokenAge); err == nil && d > 0 {
 			maxTokenAge = d
 		}
 	}
-	// packdb accepts a token until iat + maxTokenAge + clockSkewTolerance, so
+	// The engine accepts a token until iat + maxTokenAge + clockSkewTolerance, so
 	// the retained key must outlive that whole window. Resolve the local
 	// clock-skew tolerance the same defensively-flooring way as maxTokenAge
-	// above: a missing, unparseable, or negative value falls back to packdb's
+	// above: a missing, unparseable, or negative value falls back to the engine's
 	// 30s default rather than lowering the floor. An explicit "0s" (no
 	// tolerance) is honored and leaves the floor at exactly maxTokenAge.
-	clockSkew := packdbDefaultClockSkew
+	clockSkew := engineDefaultClockSkew
 	if local.ClockSkewTolerance != "" {
-		if d, err := parsePackdbDuration(local.ClockSkewTolerance); err == nil && d >= 0 {
+		if d, err := parseEngineDuration(local.ClockSkewTolerance); err == nil && d >= 0 {
 			clockSkew = d
 		}
 	}
@@ -937,7 +934,7 @@ func validateSigningKeyRotation(local *LocalAuthSpec, base *field.Path) field.Er
 	return nil
 }
 
-// validatePreferredAuthorizationServer mirrors packdb's rule that a set
+// validatePreferredAuthorizationServer mirrors the engine's rule that a set
 // preferred_authorization_server must name a configured authorization
 // server: either the embedded "_local" server or one of the configured
 // OIDC providers.

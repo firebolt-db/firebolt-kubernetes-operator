@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Navigation path-depth checker (synced from packdb/docs/scripts/check_group_structure.py)."""
+"""Check navigation path depth for the published documentation."""
 
 import json
 import pathlib

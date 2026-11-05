@@ -404,7 +404,7 @@ func TestEnsureEngineTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 // supported (the operator must issue per-generation certs whose SANs cover the
 // engine pod hostnames), so ensureEngineTLS's ValidateTLS re-run rejects it
 // even on a CR that reached the cluster with a bypassed webhook — rather than
-// silently consuming a user Secret that can't satisfy packdb's verification.
+// silently consuming a user Secret that can't satisfy the engine's verification.
 func TestEnsureEngineTLS_SecretRefRejected(t *testing.T) {
 	sch := authTestScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(sch).Build()

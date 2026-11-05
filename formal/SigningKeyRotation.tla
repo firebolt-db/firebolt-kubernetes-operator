@@ -231,7 +231,7 @@ TypeOK ==
           /\ observed[e].active \in Kids
           /\ observed[e].keys \subseteq Kids
 
-\* Exactly one key signs at a time. packdb renders one signing_algorithm and
+\* Exactly one key signs at a time. The engine renders one signing_algorithm and
 \* signs with signing_keys[0], so two Active keys are not representable.
 AtMostOneActive == Cardinality({k \in Kids : keyPhase[k] = "active"}) = 1
 

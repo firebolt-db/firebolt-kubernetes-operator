@@ -51,7 +51,7 @@ spec:
 
   # Auth is Instance-wide: every engine in this Instance renders the same
   # instance.auth.* config and shares the same JWT signing key, because
-  # packdb's embedded authorization server on each engine both issues and
+  # the engine's embedded authorization server on each engine both issues and
   # validates tokens.
   auth:
     enabled: true
@@ -77,7 +77,7 @@ spec:
         # single, permanent, non-rotating key (the default). When set,
         # the operator mints a new key every rotationInterval and rolls
         # it out via a two-phase promotion that never opens a validation
-        # gap; retainDuration must be at least maxTokenAge (packdb
+        # gap; retainDuration must be at least maxTokenAge (engine
         # default: 1d) so a token signed the instant a key is demoted has
         # fully expired before that key is removed.
         rotationInterval: 720h # 30 days
