@@ -28,6 +28,27 @@ make formal-check
 
 The target checks all five specifications.
 
+### Archived tools
+
+TLC uses a fixed, validated JAR stored on this repository's `tool-artifacts`
+branch. The URL in [`scripts/ci/pinned-tools.tsv`](../../scripts/ci/pinned-tools.tsv)
+selects a full Git commit, and the download helper verifies its SHA-256. Moving
+upstream release assets and expiring Actions artifacts are not download sources.
+There is no automatic upgrade schedule.
+
+The archive includes the unmodified JAR, its license, and a README recording
+its upstream revision and build details. Keep the archive branch and its history:
+append commits for upgrades, and never delete or force-push the branch. Repository
+rules prevent deletion and force pushes to `tool-artifacts`.
+
+If an upgrade is needed, verify the candidate's upstream provenance and digest,
+then run `make formal-check formal-check-counterexample formal-verify` with
+`TLA2TOOLS` pointing at that verified local JAR. Append the validated JAR, license,
+and provenance to the archive branch. Open a normal PR updating the manifest's
+full-commit URL and checksum; verify a fresh download through
+`scripts/ci/fetch-verified.sh tla2tools <destination>` and rerun the formal checks
+against that download. Changes to the manifest or download tooling run TLC in CI.
+
 ### Pinned model counterexamples
 
 Naive configurations deliberately remove one safety guard. [`formal/counterexamples.tsv`](../../formal/counterexamples.tsv) records the violation each configuration must continue to produce.
