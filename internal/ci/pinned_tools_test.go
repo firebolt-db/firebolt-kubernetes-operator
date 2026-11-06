@@ -130,6 +130,19 @@ func TestPinnedToolsManifestIsWellFormed(t *testing.T) {
 	}
 }
 
+func TestTLAArtifactUsesArchivedCommit(t *testing.T) {
+	commitURL := regexp.MustCompile(`^https://raw\.githubusercontent\.com/firebolt-db/firebolt-kubernetes-operator/[0-9a-f]{40}/tla2tools/tla2tools\.jar$`)
+	for _, tool := range readManifest(t) {
+		if tool.name == "tla2tools" {
+			if !commitURL.MatchString(tool.url) {
+				t.Fatalf("TLA tools must use a full-commit archive URL, got %q", tool.url)
+			}
+			return
+		}
+	}
+	t.Fatal("TLA tools pin is missing")
+}
+
 func TestFetchVerifiedHelperIsExecutable(t *testing.T) {
 	path := filepath.Join(repoRoot(t), helperRel)
 	info, err := os.Stat(path)

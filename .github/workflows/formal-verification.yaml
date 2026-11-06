@@ -32,10 +32,10 @@ jobs:
         run: |
           # On non-pull_request events (push to main) always run.
           # On a PR, TLC's result depends only on the TLA+ specs, the
-          # fixture generator, and the generated fixture — not docs and
+          # fixture generator, generated fixtures, and tool inputs — not docs and
           # not most Go changes. Fail-safe: any uncertainty -> true.
           #
-          # The mutant check has a WIDER scope than TLC: it asserts the
+          # The mutant check also covers controller code: it asserts the
           # state-cover suite still catches a broken reconciler, so it depends
           # on the reconciler itself, not only on the model.
           if [ "${EVENT_NAME}" != "pull_request" ]; then
@@ -66,7 +66,7 @@ jobs:
             exit 0
           fi
           if printf '%s\n' "${files}" \
-            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/check-counterexamples\.sh$'; then
+            | grep -qE '^formal/|^scripts/gen-tla-state-tests\.py$|_tla_states_data_test\.go$|^scripts/ci/(check-counterexamples\.sh|pinned-tools\.tsv|fetch-verified\.sh)$|^Makefile$|^\.github/workflows/formal-verification\.yaml$'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -105,11 +105,8 @@ jobs:
           path: tla2tools.jar
           key: tla2tools-${{ hashFiles('scripts/ci/pinned-tools.tsv') }}
 
-      # Version and SHA-256 live in scripts/ci/pinned-tools.tsv. tlaplus
-      # publishes no checksum file, so the pin is what makes a re-cut release
-      # tag visible instead of silently executed under `java -cp`. Run
-      # unconditionally: a restored cache entry is re-verified against the pin
-      # and replaced if it does not match, so cache contents are not trusted.
+      # The manifest pins our archived JAR by Git commit and SHA-256.
+      # Run unconditionally so restored cache entries are also verified.
       - name: Download TLA+ tools
         run: scripts/ci/fetch-verified.sh tla2tools tla2tools.jar
 
