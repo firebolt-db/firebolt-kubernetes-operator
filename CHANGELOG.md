@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.10](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.9...firebolt-operator-v0.17.10) (2026-11-06)
+
+
+### Dependencies
+
+* **deps:** bump github.com/cert-manager/cert-manager ([9ecefa7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9ecefa7e947d154ad8679fd31142c3c5dd3f0ab2))
+
 ## [0.17.9](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.8...firebolt-operator-v0.17.9) (2026-11-05)
 
 
