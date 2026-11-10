@@ -64,6 +64,8 @@ The rule sets distinguish:
 - reserved labels, annotations, volumes, mounts, and container names;
 - security-sensitive pod fields that are rejected rather than silently ignored.
 
+The Secret guards (reserved Secret-backed mounts, Secret volume aliases, and Secret env references) limit which containers operator key material lands in. The template author's own access is by design: an Engine template author chooses the image of the `engine` container that holds the admin password and signing keys, and an Instance author controls `spec.auth`. The published [security model](../../docs/security.mdx) describes that trust model.
+
 Controller validation must run before a builder consumes the template. This is especially important for container environment variables because Kubernetes uses the last duplicate name, allowing an appended user value to replace an operator value if validation is skipped.
 
 ## Error-surfacing policy
