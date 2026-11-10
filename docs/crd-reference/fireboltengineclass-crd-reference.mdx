@@ -93,9 +93,11 @@ the kubelet does not apply `fsGroup` to.
 
 The Secret-backed volumes are **rejected** on any container other than the
 Firebolt Operator-rendered `engine` container: `auth-admin`, `tls-engine`, and every
-`auth-signing-<key-id>` volume. Those carry the instance admin password, the
-engine's TLS private key, and the JWT signing keys, so mounting them would hand
-a template author credentials they cannot otherwise read.
+`auth-signing-<key-id>` volume. Those carry the Instance admin password, the
+Engine's TLS private key, and the JWT signing keys, which only the `engine`
+container needs. The rejection keeps that material out of additional
+containers. For who is trusted with it, see the
+[security model](../security#an-instance-and-its-engines-are-one-trust-domain).
 
 ## Status properties
 

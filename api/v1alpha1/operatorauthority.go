@@ -775,10 +775,9 @@ func validateInitContainersAgainstRules(initContainers []corev1.Container, base 
 // sidecar or init container that names an operator-rendered volume whose
 // content comes from a Secret (auth-admin / auth-signing-<kid> / tls-engine
 // on the engine; the TLS material and the wake-agent token on the gateway;
-// postgres-creds on the metadata pod). Mounting one by name would grant
-// access the pod-template model never does — reading the admin credentials
-// or JWT signing keys straight off disk, a privilege-escalation path for a
-// template author who cannot otherwise read those Secrets.
+// postgres-creds on the metadata pod). Mounting one by name would put the
+// admin credentials or JWT signing keys in a container the operator did not
+// hand them to. See the scope note on ValidateNoSecretAliasVolumes.
 //
 // The scope is deliberately narrower than ReservedPrimaryVolumeMountNames:
 // the remaining operator-rendered volumes (config, data, runtime, tmp) hold
@@ -863,9 +862,16 @@ func VolumeSecretRefs(v *corev1.Volume) []string {
 //
 // The reserved-volume-name guard cannot see this. The volume name is arbitrary,
 // only the source gives it away, and every component ruleset permits sidecars
-// and init containers whose image and command the author controls — so mounting
-// such an alias reads the Instance admin password or a JWT signing private key
-// off disk without any Secret-read RBAC.
+// and init containers — so mounting such an alias puts the Instance admin
+// password or a JWT signing private key in a container the operator did not
+// hand it to.
+//
+// Scope: this guard, like the reserved-mount and env-ref guards beside it,
+// limits which containers operator key material lands in (a third-party sidecar
+// image, an init container). The template author's own access is by design: an
+// engine template author chooses the image of the engine container, which holds
+// the admin password and the signing keys, and an Instance author controls
+// spec.auth. docs/security.mdx describes that trust model.
 //
 // isProtected decides which Secret names are off limits, so each caller supplies
 // exactly what it knows: the controller knows the names it resolved and mounted
@@ -911,11 +917,10 @@ func ContainerSecretRefs(c *corev1.Container) []string {
 }
 
 // ValidateNoSecretRefEnv rejects a container that pulls a protected Secret into
-// its environment. This is the same escalation as a volume alias by a different
+// its environment. This is the same exposure as a volume alias by a different
 // route: the reserved-volume-name rules screen mounts, and the alias rules screen
-// volume sources, but neither sees env. A permitted sidecar whose image and
-// command the author controls can simply read the value out of its own
-// environment.
+// volume sources, but neither sees env. A permitted sidecar can simply read the
+// value out of its own environment.
 //
 // Unlike a volume, an env reference is resolved once when the pod starts and is
 // never re-synced, so refusing to render is a complete remedy — there is no
@@ -954,10 +959,10 @@ func ValidateNoSecretRefEnv(
 // three disjoint per-component lists, which meant each pod template was screened
 // only against the Secrets ITS OWN pod mounts — so a gateway or metadata template
 // could alias the admin password or a JWT signing key, and one engine's template
-// could alias another engine's serving key. All of those are the same escalation
-// the guard exists to stop: a template author who cannot read Secrets mounts one
-// into a sidecar whose image and command they control. Screening every template
-// against the union closes the cross-component routes.
+// could alias another engine's serving key. All of those are the same exposure
+// the guard exists to stop: operator key material landing in a container the
+// operator did not mount it into. Screening every template against the union
+// closes the cross-component routes.
 //
 // Two names cannot be derived here because they are formed from suffixes private
 // to the controller package: the engine CA bundle, and the operator-generated
@@ -1087,7 +1092,7 @@ const (
 // is any-engine: protection is a property of the Secret, not of which resource is
 // under review. Scoping the match to the Instance being validated let a template on
 // one Instance mount a SIBLING Instance's signing key out of the same namespace and
-// mint tokens the sibling's engines honor — the cross-component escalation this
+// mint tokens the sibling's engines honor — the cross-component exposure this
 // guard exists to stop, one level up.
 //
 // Reserving the shape also claims names the operator does not use, such as
