@@ -2,6 +2,22 @@
 
 appVersion: v0.1.1
 
+## [0.14.5](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.4...firebolt-operator-chart-0.14.5) (2026-11-11)
+
+
+### Bug Fixes
+
+* **api:** reject malformed instance ULIDs ([cfc27b5](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cfc27b559f34b057d510e1999db49cde84100e61))
+* **controller:** enforce minimum poll, drain-check, and certificate renewal intervals (FB-5025) ([ad767c6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ad767c6fc76149feb18545c7e8c957b50cc10f34))
+
+
+### Dependencies
+
+* **deps:** set chart appVersion to v0.17.10 ([4dc9167](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/4dc91676ac72b387ce942d745b7546a3cb193a6e))
+* **deps:** set chart appVersion to v0.17.11 ([491e5f8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/491e5f87b98e4b28ea65e35ed783dc4c4dbbf89f))
+* **deps:** set chart appVersion to v0.17.8 ([1d92aec](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/1d92aec53aedde30bc993a644a8db27e0a882ebb))
+* **deps:** set chart appVersion to v0.17.9 ([544f606](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/544f606bc6b67ef9012018524a02731bc7cd63e1))
+
 ## [0.14.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-chart-0.14.3...firebolt-operator-chart-0.14.4) (2026-10-26)
 
 
