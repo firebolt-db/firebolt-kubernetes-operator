@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.11](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.10...firebolt-operator-v0.17.11) (2026-11-11)
+
+
+### Bug Fixes
+
+* **controller:** enforce minimum poll, drain-check, and certificate renewal intervals (FB-5025) ([ad767c6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ad767c6fc76149feb18545c7e8c957b50cc10f34))
+
 ## [0.17.10](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.9...firebolt-operator-v0.17.10) (2026-11-10)
 
 
