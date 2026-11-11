@@ -6,7 +6,7 @@
 ### Dependencies
 
 * **deps:** bump github.com/cert-manager/cert-manager ([9ecefa7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/9ecefa7e947d154ad8679fd31142c3c5dd3f0ab2))
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20261108141408.b3ab186ea45b ([97640c8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/97640c88157a91ee0c624e1d903b9dadad3f5410))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20261108141408.b3ab186ea45b ([97640c8](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/97640c88157a91ee0c624e1d903b9dadad3f5410))
 * **deps:** bump the go group with 4 updates ([f600fe3](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/f600fe32ae9dfd031bb405a8084467faf68b0d40))
 
 ## [0.17.9](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.8...firebolt-operator-v0.17.9) (2026-11-05)
@@ -14,7 +14,7 @@
 
 ### Dependencies
 
-* **deps:** bump packdb engine/metadata to 5.0.0-pre.0.20261104152650.81283bfcbc6c ([e8e2f88](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e8e2f883413338ab4cf8e5b7097433a0f6f66a4e))
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20261104152650.81283bfcbc6c ([e8e2f88](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/e8e2f883413338ab4cf8e5b7097433a0f6f66a4e))
 
 ## [0.17.8](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.7...firebolt-operator-v0.17.8) (2026-11-05)
 
