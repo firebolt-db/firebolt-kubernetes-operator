@@ -44,8 +44,14 @@
             },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute.",
-              "type": "string"
+              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute. Must be at\nleast 1 second; the operator treats a shorter stored value as 1 second.",
+              "type": "string",
+              "x-kubernetes-validations": [
+                {
+                  "message": "pollInterval must be at least 1s",
+                  "rule": "duration(self) >= duration('1s')"
+                }
+              ]
             },
             "schedule": {
               "description": "Schedule is an optional list of UTC time windows during which the engine\nis held at ActiveReplicas regardless of observed activity. Useful for\n\"always-on during business hours\" policies.",
@@ -113,8 +119,14 @@
           "type": "boolean"
         },
         "drainCheckInterval": {
-          "description": "DrainCheckInterval controls how often to check if old pods have finished serving queries.\nOnly used when drainCheckEnabled is true.",
-          "type": "string"
+          "description": "DrainCheckInterval controls how often to check if old pods have finished serving queries.\nOnly used when drainCheckEnabled is true. Must be at least 1 second; the\noperator treats a shorter stored value as 1 second.",
+          "type": "string",
+          "x-kubernetes-validations": [
+            {
+              "message": "drainCheckInterval must be at least 1s",
+              "rule": "duration(self) >= duration('1s')"
+            }
+          ]
         },
         "engineClassRef": {
           "description": "EngineClassRef is the name of a class whose pod template is merged\nunderneath this engine's pod template when the StatefulSet is built.\nThe operator resolves the name namespaced-first: FireboltEngineClass\nin this engine's namespace if present, otherwise\nClusterFireboltEngineClass of the same name. Engine spec fields\ntake precedence over class fields; operator defaults sit beneath\nboth. A namespaced object of the same name is an explicit override\nof the cluster SKU.\n\nMutable: changing the reference (or editing the resolved class's\nspec) triggers a new blue-green generation, just like any other\npod-template-affecting spec change. The change participates in\nstsMatchesSpec via an annotation hash so drift is detected\ndeterministically.\n\nThe validating webhook rejects Create and Update when neither the\nnamespaced nor the cluster object exists, so users see the typo\nimmediately instead of via engine status. Apply ordering matters:\nGitOps tooling must apply the class before any engine that\nreferences it (Argo sync-waves / Flux dependsOn).",

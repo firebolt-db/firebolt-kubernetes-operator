@@ -330,6 +330,7 @@ func validateTLSListener(listener *TLSListenerSpec, base *field.Path, isProtecte
 		if err := validateCertManagerKey(listener.CertManager, base.Child("certManager")); err != nil {
 			errs = append(errs, err)
 		}
+		errs = append(errs, validateTLSCertLifetime(listener.CertManager, base.Child("certManager"))...)
 	}
 
 	// Mutual TLS: the client-CA Secret needs a name (its ca.crt presence is
@@ -809,6 +810,47 @@ func validateSigningAlgorithmCompatibility(local *LocalAuthSpec, base *field.Pat
 		}
 	}
 	return nil
+}
+
+// validateTLSCertLifetime bounds how often a TLS listener certificate can be
+// reissued. A TLS listener certificate uses rotationPolicy Always, so every
+// renewal mints a new key: an engine generation rolls when its serving
+// certificate changes, and the gateway rolls when its mounted Secret does. A
+// renewal that follows issuance within seconds therefore rolls those pods for
+// as long as the Instance exists.
+//
+// Two bounds, both on values the user set (unset fields take the operator
+// defaults, which satisfy them):
+//
+//   - duration is at least MinCertDuration. cert-manager refuses anything
+//     shorter, so rejecting it here reports an invalid spec instead of a
+//     Certificate that never becomes Ready.
+//   - renewBefore leaves at least MinCertRenewalInterval between issuance and
+//     renewal. Only a renewBefore shorter than the effective duration is
+//     checked: a longer one is not sent to cert-manager, which then applies its
+//     own default lead time.
+func validateTLSCertLifetime(cm *CertManagerSpec, base *field.Path) field.ErrorList {
+	if cm == nil {
+		return nil
+	}
+	var errs field.ErrorList
+	duration := DefaultTLSCertDuration
+	if cm.Duration != nil && cm.Duration.Duration > 0 {
+		duration = cm.Duration.Duration
+		if duration < MinCertDuration {
+			errs = append(errs, field.Invalid(base.Child("duration"), cm.Duration.Duration.String(),
+				fmt.Sprintf("must be at least %s, the shortest lifetime cert-manager issues", MinCertDuration)))
+		}
+	}
+	if cm.RenewBefore != nil && cm.RenewBefore.Duration > 0 {
+		renewBefore := cm.RenewBefore.Duration
+		if renewBefore < duration && duration-renewBefore < MinCertRenewalInterval {
+			errs = append(errs, field.Invalid(base.Child("renewBefore"), renewBefore.String(),
+				fmt.Sprintf("must leave at least %s between issuance and renewal: duration %s minus renewBefore %s is %s",
+					MinCertRenewalInterval, duration, renewBefore, duration-renewBefore)))
+		}
+	}
+	return errs
 }
 
 // validateCertManagerKey rejects an algorithm/size combination cert-manager

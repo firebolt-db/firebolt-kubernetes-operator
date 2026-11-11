@@ -146,8 +146,12 @@ spec:
                     description: |-
                       PollInterval is the maximum interval between activity-metric scrapes. The
                       operator schedules an additional check near the idle deadline when it is
-                      sooner, with a one-second minimum delay. Defaults to 1 minute.
+                      sooner, with a one-second minimum delay. Defaults to 1 minute. Must be at
+                      least 1 second; the operator treats a shorter stored value as 1 second.
                     type: string
+                    x-kubernetes-validations:
+                    - message: pollInterval must be at least 1s
+                      rule: duration(self) >= duration('1s')
                   schedule:
                     description: |-
                       Schedule is an optional list of UTC time windows during which the engine
@@ -224,8 +228,12 @@ spec:
                   DrainCheckInterval is the default drain-poll interval for referencing
                   engines that leave spec.drainCheckInterval unset. The operator default
                   applies when neither side sets it; nil here means the class does not
-                  override.
+                  override. Must be at least 1 second; the operator treats a shorter
+                  stored value as 1 second.
                 type: string
+                x-kubernetes-validations:
+                - message: drainCheckInterval must be at least 1s
+                  rule: duration(self) >= duration('1s')
               rollout:
                 description: |-
                   Rollout is the default rollout strategy for referencing engines that

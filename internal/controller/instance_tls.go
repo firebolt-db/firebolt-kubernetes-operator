@@ -67,7 +67,7 @@ import (
 // lifetime is both safe and the correct posture. 90 days also keeps the operator
 // inside the issuance limits real CAs enforce — many reject a multi-decade
 // duration outright, which silently capped the old value anyway.
-const DefaultCertDurationTLS = 90 * 24 * time.Hour
+const DefaultCertDurationTLS = computev1alpha1.DefaultTLSCertDuration
 
 // DefaultCertRenewBeforeTLS starts renewal a third of the way into the lifetime,
 // leaving 30 days of headroom for the rollout a reissue triggers — far more than
@@ -95,7 +95,8 @@ var tlsCertRotationPolicy = certmanagerv1.RotationPolicyAlways
 // returned as cert-manager wants them, and renewBefore is only returned when it is
 // strictly shorter than duration — cert-manager rejects the Certificate otherwise,
 // and silently dropping an inconsistent pair is worse than letting cert-manager
-// apply its own default lead time.
+// apply its own default lead time. A renewBefore that would renew sooner than
+// MinCertRenewalInterval after issuance is reduced to leave that interval.
 func resolveCertDuration(
 	cm computev1alpha1.CertManagerSpec, defDuration, defRenewBefore time.Duration,
 ) (issued, renewLead *metav1.Duration) {
@@ -109,6 +110,17 @@ func resolveCertDuration(
 	}
 	if renewBefore >= duration {
 		return &metav1.Duration{Duration: duration}, nil
+	}
+	// ValidateTLS rejects a renewBefore that leaves less than
+	// MinCertRenewalInterval between issuance and renewal. The same bound is
+	// applied here because the per-generation engine certificates are built
+	// from the Instance's provisioned policy, not from a freshly validated
+	// spec.
+	if duration-renewBefore < computev1alpha1.MinCertRenewalInterval {
+		if duration <= computev1alpha1.MinCertRenewalInterval {
+			return &metav1.Duration{Duration: duration}, nil
+		}
+		renewBefore = duration - computev1alpha1.MinCertRenewalInterval
 	}
 	return &metav1.Duration{Duration: duration}, &metav1.Duration{Duration: renewBefore}
 }

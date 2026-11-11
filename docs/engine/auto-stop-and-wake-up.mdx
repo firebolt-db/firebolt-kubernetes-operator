@@ -37,7 +37,7 @@ spec:
 | `activeReplicas` | Required when enabled | Replica count while active or scheduled. |
 | `idleReplicas` | `0` | Replica count after the idle timeout. Zero fully stops compute. |
 | `idleTimeout` | `30m` | Quiet period before scale-down. |
-| `pollInterval` | `1m` | Maximum interval between activity-metrics checks. The Firebolt Operator checks activity again when either `pollInterval` elapses or the remaining idle timeout expires, whichever happens sooner. |
+| `pollInterval` | `1m` | Maximum interval between activity-metrics checks. The Firebolt Operator checks activity again when either `pollInterval` elapses or the remaining idle timeout expires, whichever happens sooner. Minimum `1s`. |
 | `schedule` | Empty | UTC windows that keep the Engine at `activeReplicas`. An end time before the start time crosses midnight. |
 
 You can place the policy on an EngineClass. If an Engine sets `spec.autoStop`, the entire Engine policy replaces the class policy. Individual auto-stop fields are not merged.

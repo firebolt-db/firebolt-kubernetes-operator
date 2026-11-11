@@ -116,8 +116,12 @@ spec:
                     description: |-
                       PollInterval is the maximum interval between activity-metric scrapes. The
                       operator schedules an additional check near the idle deadline when it is
-                      sooner, with a one-second minimum delay. Defaults to 1 minute.
+                      sooner, with a one-second minimum delay. Defaults to 1 minute. Must be at
+                      least 1 second; the operator treats a shorter stored value as 1 second.
                     type: string
+                    x-kubernetes-validations:
+                    - message: pollInterval must be at least 1s
+                      rule: duration(self) >= duration('1s')
                   schedule:
                     description: |-
                       Schedule is an optional list of UTC time windows during which the engine
@@ -213,8 +217,12 @@ spec:
               drainCheckInterval:
                 description: |-
                   DrainCheckInterval controls how often to check if old pods have finished serving queries.
-                  Only used when drainCheckEnabled is true.
+                  Only used when drainCheckEnabled is true. Must be at least 1 second; the
+                  operator treats a shorter stored value as 1 second.
                 type: string
+                x-kubernetes-validations:
+                - message: drainCheckInterval must be at least 1s
+                  rule: duration(self) >= duration('1s')
               engineClassRef:
                 description: |-
                   EngineClassRef is the name of a class whose pod template is merged
