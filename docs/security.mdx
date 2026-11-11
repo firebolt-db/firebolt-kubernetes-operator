@@ -235,6 +235,14 @@ Do not create your own Secrets under these names. A reference to one is treated 
 
 Secrets you name yourself are the exception, because the Firebolt Operator cannot recognize them by shape. The admin password Secret is screened by name against the Instance being validated, so a template on one Instance can still reference a **sibling** Instance's admin password Secret if the two use different names for it. Treat template edit rights as read access to every Secret in the namespace, as above, and put unrelated Instances in separate namespaces when that matters.
 
+### Instances and Engines in one namespace are not isolated from each other
+
+The Firebolt Operator treats a namespace as one administrative unit. Every object it manages for the Instances and Engines in a namespace lives in that namespace, under a name derived from the Instance or Engine name. The Firebolt Operator does not arbitrate between them: someone who can create or edit a `FireboltInstance`, `FireboltEngine`, `FireboltEngineClass`, or `FireboltEnginePreset` in a namespace can affect the availability of every Instance and Engine in it.
+
+**Treat write access to Firebolt resources in a namespace as administrator access to everything the Firebolt Operator runs there.** Give each team or environment that must not affect another its own namespace.
+
+Derived names can overlap. An Instance named `<engine>-g<generation>` shares its Engine TLS certificate name with that generation of the Engine, so choose Instance and Engine names that do not extend one another.
+
 ### Pod-template authors can request privileged pods
 
 The Firebolt Operator renders `hostPath` volumes, privileged containers, and root `securityContext` values from a template as written, the same way a Deployment would (see [Engine](#engine)). Which pod fields a namespace admits is your cluster's admission policy, not the Firebolt Operator's.
