@@ -178,6 +178,8 @@ Both are opt-in and Instance-wide. Neither is configured per Engine: every Engin
 
 **The Firebolt Operator never generates the admin password.** Supply it through a Secret referenced by `spec.auth.local.admin.password`. If the Secret or key is missing, the Instance reports `AuthReady=False/AdminSecretMissing`. The password is mounted into each Engine as a file and referenced by path, so no plaintext credential appears in a rendered config.
 
+Engines validate credentials. The Gateway forwards requests without checking them, so a request that reaches the Gateway for a stopped Engine starts that Engine before anything authenticates it. See [Auto-stop and wake-up](./engine/auto-stop-and-wake-up#wake-a-stopped-engine-with-the-gateway).
+
 The shared JWT signing keypair is provisioned through cert-manager against an `Issuer` or `ClusterIssuer` you supply. Signing keys are cert-manager-only — unlike TLS, there is no bring-your-own `secretRef` path — and the private key is mounted by path, never inlined.
 
 ### Engine and Gateway TLS
@@ -195,6 +197,8 @@ The Firebolt Operator cannot enforce these mutual TLS deployment choices:
 
 - **Verification is CA-scoped, not identity-scoped.** Any certificate the configured CA signed is accepted. Point `clientCASecretRef` at a CA dedicated to this purpose, not at a broad organizational CA that already signs certificates for unrelated workloads.
 - **Prefer a separate issuer per purpose.** The signing keypair, the Engine listener, the Gateway listener, and the client CA should not all chain to one issuer. The Gateway verifies Engines against the Engine issuer's CA, so anything else able to obtain a certificate from that same issuer for a matching name is, to the Gateway, indistinguishable from an Engine.
+
+**The Firebolt Operator requests the certificates an Instance asks for.** `issuerRef` and `spec.tls.gateway.dnsNames` go to cert-manager as written, so someone who can edit a `FireboltInstance` can request a certificate for any name from any issuer that namespace can use, without `create certificates` permission. Which names an issuer signs is the issuer's policy. Constrain a `ClusterIssuer` with name constraints or an approval policy, or use a namespaced `Issuer`.
 
 `crlSecretRef` on either listener supplies a revocation list the Gateway checks alongside the trust anchor, so a compromised certificate can be rejected before it expires. Certificate lifetimes are bounded by default, which limits how long a leaked key stays usable but does not end it — a CRL is the only way to cut it short. On the Gateway listener, a client CRL is only meaningful with `clientCASecretRef` (mutual TLS); without a client CA the Firebolt Operator rejects the combination at admission, and with webhooks off it reports `GatewayTLSReady=False` with reason `TLSSpecInvalid` so revocation is not silently assumed. When you update a CRL Secret, the Gateway pods roll within about a minute so Envoy reloads the list at startup. Envoy does not hot-reload a `filename`-referenced CRL from the mounted volume alone. The Secret must carry a non-empty `crl.pem` key: if the key is missing, the Firebolt Operator leaves the running Gateway pods alone (so they keep the last loaded CRL), does not start a roll onto an unmountable volume, and reports `GatewayReady=False` with reason `CRLSecretPreflightFailed` until you fix the Secret.
 
@@ -393,6 +397,10 @@ upper bounds in admission (see below) but does not emit a
 ResourceQuota. The per-namespace budget is a deployment-target
 decision (test cluster vs. multi-tenant production).
 
+### Firebolt Operator capacity is shared across namespaces
+
+One Firebolt Operator reconciles every namespace it watches. Namespaces separate credentials and data, not the Firebolt Operator's capacity: a namespace with many or frequently changing Firebolt resources delays reconciliation for the others. Grant write access to Firebolt resources to principals you trust with that, and cap how many a namespace can create with `ResourceQuota` object counts, such as `count/fireboltengines.compute.firebolt.io`.
+
 ### Image provenance and supply-chain attestation
 
 The Firebolt Operator pulls whatever image the user supplies via
@@ -472,13 +480,15 @@ rather than cert-manager's `cert-manager.io/certificate-name` annotation, becaus
 the annotation is ordinary metadata that whoever creates the Secret can set to any
 value, while the API server assigns `creationTimestamp` itself.
 
-This stops a principal who can create Secrets. It does not stop one who can also
-create `Certificate` objects: that principal creates the Certificate first and
-plants the Secret after it, so the ordering holds honestly. **Grant
-`create certificates` in a namespace running Firebolt Instances only to principals
-you would trust with the JWT signing key.** Closing that case requires
-cert-manager to stop reusing pre-existing private keys, which conflicts with
-operator-coordinated key rotation.
+This stops a principal who can only create Secrets. It does not stop one who can
+also delete them: a signing Secret deleted and recreated after its Certificate
+passes the ordering check. It does not stop one who can create `Certificate`
+objects either: that principal creates the Certificate first and plants the Secret
+after it, so the ordering holds honestly. **Grant `create certificates`, or
+`delete` together with `create` on Secrets, in a namespace running Firebolt
+Instances only to principals you would trust with the JWT signing key.** Closing
+those cases requires cert-manager to stop reusing pre-existing private keys, which
+conflicts with operator-coordinated key rotation.
 
 You can hit this legitimately by deleting a signing Certificate and letting the
 Firebolt Operator recreate it, such as during a GitOps prune. The surviving Secret
