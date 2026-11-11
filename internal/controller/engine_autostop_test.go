@@ -443,6 +443,42 @@ func TestComputeAutoStopDecision_PollIntervalDefault(t *testing.T) {
 	}
 }
 
+// A stored poll interval below the minimum must not become the requeue delay:
+// the engine controller is shared by every watched namespace, and a
+// nanosecond requeue would occupy it with one engine.
+func TestComputeAutoStopDecision_PollIntervalBelowMinimumIsRaised(t *testing.T) {
+	t.Parallel()
+
+	for _, stored := range []time.Duration{time.Nanosecond, 999 * time.Millisecond} {
+		spec := &computev1alpha1.FireboltEngineSpec{
+			Replicas: 3,
+			AutoStop: &computev1alpha1.AutoStopSpec{
+				Enabled:        true,
+				ActiveReplicas: 3,
+				PollInterval:   &metav1.Duration{Duration: stored},
+			},
+		}
+		d := computeAutoStopDecision(spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{}, AutoStopObservation{ActiveQueries: 1}, fixedNow())
+		if d.RequeueAfter != computev1alpha1.MinAutoStopPollInterval {
+			t.Errorf("pollInterval %v: requeue want %v got %v", stored, computev1alpha1.MinAutoStopPollInterval, d.RequeueAfter)
+		}
+	}
+
+	// A value at or above the minimum is used as written.
+	spec := &computev1alpha1.FireboltEngineSpec{
+		Replicas: 3,
+		AutoStop: &computev1alpha1.AutoStopSpec{
+			Enabled:        true,
+			ActiveReplicas: 3,
+			PollInterval:   &metav1.Duration{Duration: 2 * time.Second},
+		},
+	}
+	d := computeAutoStopDecision(spec, spec.AutoStop, &computev1alpha1.FireboltEngineStatus{}, AutoStopObservation{ActiveQueries: 1}, fixedNow())
+	if d.RequeueAfter != 2*time.Second {
+		t.Errorf("requeue want 2s got %v", d.RequeueAfter)
+	}
+}
+
 func TestDecideAutoStopWithEngineIdle_RecordsShortQueryActivity(t *testing.T) {
 	t.Parallel()
 
@@ -502,7 +538,7 @@ func TestDecideAutoStopWithEngineIdle_ClampsDeadlineRequeue(t *testing.T) {
 		want         time.Duration
 	}{
 		{name: "default poll", want: MinimumAutoStopDeadlineRequeue},
-		{name: "shorter configured poll", pollInterval: 250 * time.Millisecond, want: 250 * time.Millisecond},
+		{name: "configured poll below the minimum", pollInterval: 250 * time.Millisecond, want: computev1alpha1.MinAutoStopPollInterval},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

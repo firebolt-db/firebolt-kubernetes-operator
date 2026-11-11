@@ -124,7 +124,9 @@ type FireboltEngineClassSpec struct {
 	// DrainCheckInterval is the default drain-poll interval for referencing
 	// engines that leave spec.drainCheckInterval unset. The operator default
 	// applies when neither side sets it; nil here means the class does not
-	// override.
+	// override. Must be at least 1 second; the operator treats a shorter
+	// stored value as 1 second.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1s')",message="drainCheckInterval must be at least 1s"
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
 

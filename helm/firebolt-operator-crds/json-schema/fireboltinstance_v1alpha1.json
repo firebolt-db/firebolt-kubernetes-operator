@@ -117,7 +117,7 @@
                           "type": "string"
                         },
                         "duration": {
-                          "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.",
+                          "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.\n\nOn the TLS listeners it must be at least 1 hour, the shortest lifetime\ncert-manager issues.",
                           "type": "string"
                         },
                         "issuerRef": {
@@ -145,7 +145,7 @@
                           "additionalProperties": false
                         },
                         "renewBefore": {
-                          "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.",
+                          "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.\n\nIt must also leave at least 30 minutes between issuance and renewal.\nThe TLS listeners reject a value that does not, and the operator\nrequests a renewal no sooner than that from cert-manager.",
                           "type": "string"
                         },
                         "size": {
@@ -15449,7 +15449,7 @@
                       "type": "string"
                     },
                     "duration": {
-                      "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.",
+                      "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.\n\nOn the TLS listeners it must be at least 1 hour, the shortest lifetime\ncert-manager issues.",
                       "type": "string"
                     },
                     "issuerRef": {
@@ -15477,7 +15477,7 @@
                       "additionalProperties": false
                     },
                     "renewBefore": {
-                      "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.",
+                      "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.\n\nIt must also leave at least 30 minutes between issuance and renewal.\nThe TLS listeners reject a value that does not, and the operator\nrequests a renewal no sooner than that from cert-manager.",
                       "type": "string"
                     },
                     "size": {
@@ -15570,7 +15570,7 @@
                       "type": "string"
                     },
                     "duration": {
-                      "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.",
+                      "description": "Duration is how long an issued certificate is valid for. Defaults per\nlistener (see the DefaultCertDuration* constants in the controller\npackage): bounded lifetimes on the TLS listeners so a compromised\nserving key is not valid indefinitely, and a longer \u2014 but still\nbounded \u2014 lifetime on the JWT signing keypair, whose certificate is\nnever presented in a handshake and whose rotation is coordinated by\nthe operator instead (see SigningKeyPolicy.RotationInterval).\n\nRenewal is safe on every listener because a reissue is already\nobserved and rolled out: the gateway folds each mounted TLS Secret's\nresourceVersion into its config hash, and an engine generation rolls\nwhen its serving certificate's fingerprint changes. Shortening this\ndoes not require any new coordination.\n\nOn the TLS listeners it must be at least 1 hour, the shortest lifetime\ncert-manager issues.",
                       "type": "string"
                     },
                     "issuerRef": {
@@ -15598,7 +15598,7 @@
                       "additionalProperties": false
                     },
                     "renewBefore": {
-                      "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.",
+                      "description": "RenewBefore is how long before expiry cert-manager starts renewing.\nDefaults to a third of Duration when unset (cert-manager's own\ndefault), which leaves ample headroom for the rollout a renewal\ntriggers. Must be shorter than Duration.\n\nIt must also leave at least 30 minutes between issuance and renewal.\nThe TLS listeners reject a value that does not, and the operator\nrequests a renewal no sooner than that from cert-manager.",
                       "type": "string"
                     },
                     "size": {

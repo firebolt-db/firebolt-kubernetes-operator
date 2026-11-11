@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -367,6 +369,9 @@ type CertManagerSpec struct {
 	// resourceVersion into its config hash, and an engine generation rolls
 	// when its serving certificate's fingerprint changes. Shortening this
 	// does not require any new coordination.
+	//
+	// On the TLS listeners it must be at least 1 hour, the shortest lifetime
+	// cert-manager issues.
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty"`
 
@@ -374,9 +379,30 @@ type CertManagerSpec struct {
 	// Defaults to a third of Duration when unset (cert-manager's own
 	// default), which leaves ample headroom for the rollout a renewal
 	// triggers. Must be shorter than Duration.
+	//
+	// It must also leave at least 30 minutes between issuance and renewal.
+	// The TLS listeners reject a value that does not, and the operator
+	// requests a renewal no sooner than that from cert-manager.
 	// +optional
 	RenewBefore *metav1.Duration `json:"renewBefore,omitempty"`
 }
+
+const (
+	// DefaultTLSCertDuration is the lifetime of an operator-provisioned TLS
+	// certificate when certManager.duration is unset.
+	DefaultTLSCertDuration = 90 * 24 * time.Hour
+
+	// MinCertDuration is the shortest certificate lifetime cert-manager
+	// issues. A shorter value is rejected here so it surfaces as an invalid
+	// spec instead of a Certificate cert-manager refuses.
+	MinCertDuration = time.Hour
+
+	// MinCertRenewalInterval is the shortest time between a certificate's
+	// issuance and its renewal. Each renewal of a TLS listener certificate
+	// mints a new key and rolls the pods that serve it, so a renewal that
+	// follows issuance too closely rolls them continuously.
+	MinCertRenewalInterval = 30 * time.Minute
+)
 
 // PasswordLoginPolicy controls whether password-based login is available
 // to any authenticated user or only to the admin account. Mirrors

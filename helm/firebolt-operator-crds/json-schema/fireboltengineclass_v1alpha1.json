@@ -44,8 +44,14 @@
             },
             "pollInterval": {
               "default": "1m",
-              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute.",
-              "type": "string"
+              "description": "PollInterval is the maximum interval between activity-metric scrapes. The\noperator schedules an additional check near the idle deadline when it is\nsooner, with a one-second minimum delay. Defaults to 1 minute. Must be at\nleast 1 second; the operator treats a shorter stored value as 1 second.",
+              "type": "string",
+              "x-kubernetes-validations": [
+                {
+                  "message": "pollInterval must be at least 1s",
+                  "rule": "duration(self) >= duration('1s')"
+                }
+              ]
             },
             "schedule": {
               "description": "Schedule is an optional list of UTC time windows during which the engine\nis held at ActiveReplicas regardless of observed activity. Useful for\n\"always-on during business hours\" policies.",
@@ -113,8 +119,14 @@
           "type": "boolean"
         },
         "drainCheckInterval": {
-          "description": "DrainCheckInterval is the default drain-poll interval for referencing\nengines that leave spec.drainCheckInterval unset. The operator default\napplies when neither side sets it; nil here means the class does not\noverride.",
-          "type": "string"
+          "description": "DrainCheckInterval is the default drain-poll interval for referencing\nengines that leave spec.drainCheckInterval unset. The operator default\napplies when neither side sets it; nil here means the class does not\noverride. Must be at least 1 second; the operator treats a shorter\nstored value as 1 second.",
+          "type": "string",
+          "x-kubernetes-validations": [
+            {
+              "message": "drainCheckInterval must be at least 1s",
+              "rule": "duration(self) >= duration('1s')"
+            }
+          ]
         },
         "rollout": {
           "description": "Rollout is the default rollout strategy for referencing engines that\nleave spec.rollout unset. The operator default (graceful) applies when\nneither the engine nor the class sets it; an empty value here means\nthe class does not override. The graceful/recreate enum is inherited\nfrom RolloutStrategy.",

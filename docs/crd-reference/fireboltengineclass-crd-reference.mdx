@@ -16,7 +16,7 @@ Every field except `spec.template` is an optional default that a referencing Eng
 | `spec.customEngineConfig` | No | – | Free-form `config.yaml` fragment deep-merged beneath each Engine's `spec.customEngineConfig`. The merge order is the Firebolt Operator base, then the class, then the Engine, so an Engine key wins over the same key on the class. The Firebolt Operator strips its owned paths (`schema_version`, `instance.*`, `engine.id`, `engine.nodes`, and `engine.termination_grace_period`) from the class layer too, so the class cannot override identity, routing, or topology. |
 | `spec.rollout` | No | `graceful` | Default rollout strategy, `graceful` or `recreate`. The engine `spec.rollout` wins when set. |
 | `spec.drainCheckEnabled` | No | `true` | Default drain-check toggle. The engine `spec.drainCheckEnabled` wins when set. |
-| `spec.drainCheckInterval` | No | – | Default drain-poll interval. The engine `spec.drainCheckInterval` wins when set. |
+| `spec.drainCheckInterval` | No | – | Default drain-poll interval. The engine `spec.drainCheckInterval` wins when set. Minimum `1s`. |
 | `spec.autoStop` | No | – | Default auto-stop policy. This is whole-struct. An engine that sets `spec.autoStop` owns the entire policy with no field-merge, and the class policy applies only when the engine omits it. See the [FireboltEngine CRD reference](./engine-crd-reference). |
 
 A class-level change to `spec.uiSidecar`, `spec.storage`, or `spec.customEngineConfig` reshapes the rendered engine pod, so it rolls a new blue-green generation on every bound engine. Changes to `spec.rollout`, `spec.drainCheckEnabled`, `spec.drainCheckInterval`, and `spec.autoStop` are read live and do not by themselves trigger a rollout.

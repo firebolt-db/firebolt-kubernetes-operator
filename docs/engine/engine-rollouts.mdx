@@ -46,7 +46,7 @@ A pod is drained when their sum is zero.
 | Field | Default | Description |
 |---|---|---|
 | `spec.drainCheckEnabled` | `true` | Set to `false` to skip the Firebolt Operator drain gate. |
-| `spec.drainCheckInterval` | `5s` | Interval between drain checks. |
+| `spec.drainCheckInterval` | `5s` | Interval between drain checks. Minimum `1s`. |
 | `spec.rollout` | `graceful` | Set to `recreate` to skip the drain phase. |
 
 The Engine process still waits for unfinished queries during Kubernetes termination when the Firebolt Operator drain gate is disabled. The Engine pod termination grace period is fixed at 60 seconds, and the Engine reserves the final 5 seconds for shutdown.

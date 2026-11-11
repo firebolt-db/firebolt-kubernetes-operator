@@ -76,6 +76,8 @@ and [Customize component pods](../instance/overview#customize-component-pods).
 | `spec.tls.*.certManager.issuerRef.kind` | No | `ClusterIssuer` | `Issuer` or `ClusterIssuer`. |
 | `spec.tls.*.certManager.algorithm` | No | `ECDSA` | `ECDSA` or `RSA`. |
 | `spec.tls.*.certManager.size` | No | `384` | Key size. |
+| `spec.tls.*.certManager.duration` | No | `2160h` | Certificate lifetime. Minimum `1h`, the shortest lifetime cert-manager issues. |
+| `spec.tls.*.certManager.renewBefore` | No | (a third of the lifetime) | How long before expiry cert-manager renews the certificate. Must be shorter than `duration` and leave at least `30m` between issuance and renewal, because every renewal rolls the pods that serve the certificate. |
 | `spec.tls.gateway.secretRef.name` | Yes* | - | Bring-your-own Gateway certificate: a Secret carrying `tls.crt` and `tls.key`. Mutually exclusive with `certManager`. Engine TLS does not support `secretRef`. |
 | `spec.tls.gateway.clientCASecretRef.name` | No | - | Client CA to verify client certificates against, upgrading the Gateway listener to mutual TLS. Replacing it is a tightening transition and is staged fail-closed. Engine listeners do not support client-certificate verification. |
 | `spec.tls.gateway.dnsNames` | No | (in-cluster Service names) | Extra Gateway certificate SANs the Firebolt Operator cannot derive itself, such as an externally-visible hostname. Engine certificate names are derived automatically. |

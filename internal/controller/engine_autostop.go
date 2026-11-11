@@ -155,7 +155,7 @@ func computeAutoStopDecision(
 	as := autoStop
 	pollInterval := DefaultAutoStopPollInterval
 	if as.PollInterval != nil && as.PollInterval.Duration > 0 {
-		pollInterval = as.PollInterval.Duration
+		pollInterval = max(as.PollInterval.Duration, computev1alpha1.MinAutoStopPollInterval)
 	}
 	idleReplicas := DefaultAutoStopIdleReplicas
 	if as.IdleReplicas != nil {

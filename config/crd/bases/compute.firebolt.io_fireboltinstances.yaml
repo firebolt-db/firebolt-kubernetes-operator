@@ -219,6 +219,9 @@ spec:
                                   resourceVersion into its config hash, and an engine generation rolls
                                   when its serving certificate's fingerprint changes. Shortening this
                                   does not require any new coordination.
+
+                                  On the TLS listeners it must be at least 1 hour, the shortest lifetime
+                                  cert-manager issues.
                                 type: string
                               issuerRef:
                                 description: |-
@@ -249,6 +252,10 @@ spec:
                                   Defaults to a third of Duration when unset (cert-manager's own
                                   default), which leaves ample headroom for the rollout a renewal
                                   triggers. Must be shorter than Duration.
+
+                                  It must also leave at least 30 minutes between issuance and renewal.
+                                  The TLS listeners reject a value that does not, and the operator
+                                  requests a renewal no sooner than that from cert-manager.
                                 type: string
                               size:
                                 default: 384
@@ -18568,6 +18575,9 @@ spec:
                               resourceVersion into its config hash, and an engine generation rolls
                               when its serving certificate's fingerprint changes. Shortening this
                               does not require any new coordination.
+
+                              On the TLS listeners it must be at least 1 hour, the shortest lifetime
+                              cert-manager issues.
                             type: string
                           issuerRef:
                             description: |-
@@ -18597,6 +18607,10 @@ spec:
                               Defaults to a third of Duration when unset (cert-manager's own
                               default), which leaves ample headroom for the rollout a renewal
                               triggers. Must be shorter than Duration.
+
+                              It must also leave at least 30 minutes between issuance and renewal.
+                              The TLS listeners reject a value that does not, and the operator
+                              requests a renewal no sooner than that from cert-manager.
                             type: string
                           size:
                             default: 384
@@ -18783,6 +18797,9 @@ spec:
                               resourceVersion into its config hash, and an engine generation rolls
                               when its serving certificate's fingerprint changes. Shortening this
                               does not require any new coordination.
+
+                              On the TLS listeners it must be at least 1 hour, the shortest lifetime
+                              cert-manager issues.
                             type: string
                           issuerRef:
                             description: |-
@@ -18812,6 +18829,10 @@ spec:
                               Defaults to a third of Duration when unset (cert-manager's own
                               default), which leaves ample headroom for the rollout a renewal
                               triggers. Must be shorter than Duration.
+
+                              It must also leave at least 30 minutes between issuance and renewal.
+                              The TLS listeners reject a value that does not, and the operator
+                              requests a renewal no sooner than that from cert-manager.
                             type: string
                           size:
                             default: 384

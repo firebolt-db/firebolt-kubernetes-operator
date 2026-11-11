@@ -167,6 +167,12 @@ func TestGetDrainCheckIntervalWithClass(t *testing.T) {
 		DrainCheckInterval: &metav1.Duration{Duration: 7 * time.Second},
 	}
 	bare := &computev1alpha1.FireboltEngineSpec{}
+	engineTooShort := &computev1alpha1.FireboltEngineSpec{
+		DrainCheckInterval: &metav1.Duration{Duration: time.Nanosecond},
+	}
+	classTooShort := classInfoWith(func(s *computev1alpha1.FireboltEngineClassSpec) {
+		s.DrainCheckInterval = &metav1.Duration{Duration: 0}
+	})
 
 	tests := []struct {
 		name      string
@@ -177,6 +183,8 @@ func TestGetDrainCheckIntervalWithClass(t *testing.T) {
 		{"engine wins over class", engineInterval, classInterval, 7 * time.Second},
 		{"class fills in when engine nil", bare, classInterval, 11 * time.Second},
 		{"operator default when neither set", bare, nil, DefaultDrainCheckInterval},
+		{"engine below minimum is raised", engineTooShort, classInterval, computev1alpha1.MinDrainCheckInterval},
+		{"class below minimum is raised", bare, classTooShort, computev1alpha1.MinDrainCheckInterval},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

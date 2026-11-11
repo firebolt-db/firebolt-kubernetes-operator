@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -124,6 +126,16 @@ type EngineHostPathSpec struct {
 // before the CRD bound existed (FB-4770).
 const MaxEngineReplicas = 256
 
+// MinAutoStopPollInterval and MinDrainCheckInterval are the shortest intervals
+// at which the operator re-checks one engine. The CRD rejects shorter values
+// and the controller raises a stored one to the minimum, so a single engine
+// cannot requeue itself in a tight loop on a controller that every watched
+// namespace shares.
+const (
+	MinAutoStopPollInterval = time.Second
+	MinDrainCheckInterval   = time.Second
+)
+
 // AutoStopSpec configures automatic stop and wake-up for a FireboltEngine.
 //
 // When Enabled is true the operator owns spec.replicas and drives it between
@@ -170,8 +182,10 @@ type AutoStopSpec struct {
 
 	// PollInterval is the maximum interval between activity-metric scrapes. The
 	// operator schedules an additional check near the idle deadline when it is
-	// sooner, with a one-second minimum delay. Defaults to 1 minute.
+	// sooner, with a one-second minimum delay. Defaults to 1 minute. Must be at
+	// least 1 second; the operator treats a shorter stored value as 1 second.
 	// +kubebuilder:default="1m"
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1s')",message="pollInterval must be at least 1s"
 	// +optional
 	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
 
@@ -401,7 +415,9 @@ type FireboltEngineSpec struct {
 	DrainCheckEnabled *bool `json:"drainCheckEnabled,omitempty"`
 
 	// DrainCheckInterval controls how often to check if old pods have finished serving queries.
-	// Only used when drainCheckEnabled is true.
+	// Only used when drainCheckEnabled is true. Must be at least 1 second; the
+	// operator treats a shorter stored value as 1 second.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1s')",message="drainCheckInterval must be at least 1s"
 	// +optional
 	DrainCheckInterval *metav1.Duration `json:"drainCheckInterval,omitempty"`
 

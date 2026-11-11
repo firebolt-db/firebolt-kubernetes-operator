@@ -1484,13 +1484,17 @@ func buildClusterService(engineName, namespace string, gen int) *corev1.Service 
 // getDrainCheckInterval resolves the drain-poll interval: engine-if-set →
 // FireboltEngineClass-if-set → operator default (DefaultDrainCheckInterval).
 func getDrainCheckInterval(spec *computev1alpha1.FireboltEngineSpec, classInfo *FireboltEngineClassInfo) time.Duration {
-	if spec.DrainCheckInterval != nil {
-		return spec.DrainCheckInterval.Duration
+	interval := DefaultDrainCheckInterval
+	switch {
+	case spec.DrainCheckInterval != nil:
+		interval = spec.DrainCheckInterval.Duration
+	case classInfo != nil && classInfo.DrainCheckInterval != nil:
+		interval = classInfo.DrainCheckInterval.Duration
 	}
-	if classInfo != nil && classInfo.DrainCheckInterval != nil {
-		return classInfo.DrainCheckInterval.Duration
-	}
-	return DefaultDrainCheckInterval
+	// The CRD rejects an interval below the minimum. A stored value that is
+	// below it anyway is raised to the minimum, so one draining engine cannot
+	// requeue in a tight loop.
+	return max(interval, computev1alpha1.MinDrainCheckInterval)
 }
 
 // getTerminationGracePeriod returns the TGPS value to stamp on the

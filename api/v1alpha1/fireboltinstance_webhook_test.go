@@ -2014,6 +2014,86 @@ func TestValidateSigningKeyRotation_NonPositiveMaxTokenAgeUsesDefaultFloor(t *te
 	}
 }
 
+// A TLS listener certificate is reissued with a new key on every renewal, and
+// each reissue rolls the pods that serve it. ValidateTLS therefore bounds how
+// soon after issuance a renewal can be requested, on both listeners.
+func TestValidateTLS_CertLifetime(t *testing.T) {
+	d := func(v time.Duration) *metav1.Duration { return &metav1.Duration{Duration: v} }
+
+	tests := []struct {
+		name          string
+		duration      *metav1.Duration
+		renewBefore   *metav1.Duration
+		wantErrSubstr string // "" => valid
+	}{
+		{name: "defaults are valid"},
+		{name: "duration at the minimum is valid", duration: d(MinCertDuration)},
+		{name: "duration below the minimum is rejected", duration: d(MinCertDuration - time.Second), wantErrSubstr: "certManager.duration"},
+		{name: "one-nanosecond duration is rejected", duration: d(time.Nanosecond), wantErrSubstr: "certManager.duration"},
+		{
+			name:        "renewBefore leaving exactly the minimum interval is valid",
+			duration:    d(time.Hour),
+			renewBefore: d(time.Hour - MinCertRenewalInterval),
+		},
+		{
+			name:          "renewBefore one second short of duration is rejected",
+			duration:      d(time.Hour),
+			renewBefore:   d(time.Hour - time.Second),
+			wantErrSubstr: "certManager.renewBefore",
+		},
+		{
+			name:          "renewBefore is measured against the default duration when duration is unset",
+			renewBefore:   d(DefaultTLSCertDuration - time.Minute),
+			wantErrSubstr: "certManager.renewBefore",
+		},
+		{
+			// Not sent to cert-manager at all: the controller drops a
+			// renewBefore that is not shorter than the duration, and
+			// cert-manager applies its own default lead time.
+			name:        "renewBefore not shorter than duration is left to cert-manager's default",
+			duration:    d(2 * time.Hour),
+			renewBefore: d(3 * time.Hour),
+		},
+	}
+
+	listeners := map[string]func(*CertManagerSpec) *TLSSpec{
+		"engine": func(cm *CertManagerSpec) *TLSSpec {
+			return &TLSSpec{Engine: &TLSListenerSpec{Enabled: true, CertManager: cm}}
+		},
+		"gateway": func(cm *CertManagerSpec) *TLSSpec {
+			return &TLSSpec{Gateway: &TLSListenerSpec{Enabled: true, CertManager: cm}}
+		},
+	}
+
+	for listener, mkTLS := range listeners {
+		for _, tc := range tests {
+			t.Run(listener+"/"+tc.name, func(t *testing.T) {
+				inst := &FireboltInstance{
+					ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+					Spec: FireboltInstanceSpec{TLS: mkTLS(&CertManagerSpec{
+						IssuerRef:   CertManagerIssuerRef{Name: "internal-ca"},
+						Duration:    tc.duration,
+						RenewBefore: tc.renewBefore,
+					})},
+				}
+				err := ValidateTLS(inst).ToAggregate()
+				if tc.wantErrSubstr == "" {
+					if err != nil {
+						t.Fatalf("ValidateTLS: unexpected error: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatalf("ValidateTLS: expected error containing %q, got nil", tc.wantErrSubstr)
+				}
+				if !strings.Contains(err.Error(), "spec.tls."+listener+"."+tc.wantErrSubstr) {
+					t.Errorf("ValidateTLS: error %q does not name spec.tls.%s.%s", err, listener, tc.wantErrSubstr)
+				}
+			})
+		}
+	}
+}
+
 // TestValidateTLS_ForbidsOperatorManagedSecretRefs pins the spec-level twin of the
 // pod-template Secret guard: a secretRef is another route to the operator's own
 // key material, and pointing the gateway listener at the JWT signing Secret would

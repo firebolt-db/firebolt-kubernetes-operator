@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
@@ -396,6 +397,119 @@ func TestEnsureEngineTLS_BypassedWebhookDoesNotPanic(t *testing.T) {
 	}
 	if cond.Status != metav1.ConditionFalse || cond.Reason != "TLSSpecInvalid" {
 		t.Errorf("EngineTLSReady = %s/%s, want False/TLSSpecInvalid", cond.Status, cond.Reason)
+	}
+}
+
+// A renewBefore that would have cert-manager renew a TLS certificate moments
+// after issuing it is rejected by ValidateTLS. With webhooks off the
+// controller re-runs the same check and must not provision the listener.
+func TestEnsureEngineTLS_ShortRenewalIntervalSurfacesTLSSpecInvalid(t *testing.T) {
+	sch := authTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(sch).Build()
+	r := &FireboltInstanceReconciler{Client: cli, Scheme: sch}
+
+	instance := &computev1alpha1.FireboltInstance{
+		ObjectMeta: metav1.ObjectMeta{Name: "inst", Namespace: "ns-1"},
+		Spec: computev1alpha1.FireboltInstanceSpec{
+			TLS: &computev1alpha1.TLSSpec{
+				Engine: &computev1alpha1.TLSListenerSpec{
+					Enabled: true,
+					CertManager: &computev1alpha1.CertManagerSpec{
+						IssuerRef:   computev1alpha1.CertManagerIssuerRef{Name: "internal-ca"},
+						Duration:    &metav1.Duration{Duration: time.Hour},
+						RenewBefore: &metav1.Duration{Duration: time.Hour - time.Second},
+					},
+				},
+			},
+		},
+	}
+
+	if err := r.ensureEngineTLS(context.Background(), instance); err == nil {
+		t.Fatal("expected error for a renewal interval below the minimum, got nil")
+	}
+	cond := apimeta.FindStatusCondition(instance.Status.Conditions, computev1alpha1.InstanceConditionEngineTLSReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "TLSSpecInvalid" {
+		t.Fatalf("EngineTLSReady = %+v, want False/TLSSpecInvalid", cond)
+	}
+	if !strings.Contains(cond.Message, "renewBefore") {
+		t.Errorf("condition message %q does not name renewBefore", cond.Message)
+	}
+
+	var certs certmanagerv1.CertificateList
+	if err := cli.List(context.Background(), &certs); err != nil {
+		t.Fatalf("listing certificates: %v", err)
+	}
+	if len(certs.Items) != 0 {
+		t.Errorf("expected no Certificate to be applied for an invalid spec, got %d", len(certs.Items))
+	}
+}
+
+// resolveCertDuration is the last step before a Certificate is built, and the
+// per-generation engine certificates are built from the Instance's stored
+// policy without re-validating it. It therefore applies the renewal-interval
+// minimum itself.
+func TestResolveCertDuration(t *testing.T) {
+	d := func(v time.Duration) *metav1.Duration { return &metav1.Duration{Duration: v} }
+	minInterval := computev1alpha1.MinCertRenewalInterval
+
+	tests := []struct {
+		name            string
+		cm              computev1alpha1.CertManagerSpec
+		wantDuration    time.Duration
+		wantRenewBefore *time.Duration // nil => left to cert-manager's default
+	}{
+		{
+			name:            "defaults",
+			wantDuration:    DefaultCertDurationTLS,
+			wantRenewBefore: new(DefaultCertRenewBeforeTLS),
+		},
+		{
+			name:            "pair that leaves more than the minimum interval is used as written",
+			cm:              computev1alpha1.CertManagerSpec{Duration: d(4 * time.Hour), RenewBefore: d(time.Hour)},
+			wantDuration:    4 * time.Hour,
+			wantRenewBefore: new(time.Hour),
+		},
+		{
+			name:            "renewBefore one second short of duration is reduced to leave the minimum interval",
+			cm:              computev1alpha1.CertManagerSpec{Duration: d(time.Hour), RenewBefore: d(time.Hour - time.Second)},
+			wantDuration:    time.Hour,
+			wantRenewBefore: new(time.Hour - minInterval),
+		},
+		{
+			name:            "renewBefore close to the default duration is reduced the same way",
+			cm:              computev1alpha1.CertManagerSpec{RenewBefore: d(DefaultCertDurationTLS - time.Minute)},
+			wantDuration:    DefaultCertDurationTLS,
+			wantRenewBefore: new(DefaultCertDurationTLS - minInterval),
+		},
+		{
+			name:         "renewBefore not shorter than duration is dropped",
+			cm:           computev1alpha1.CertManagerSpec{Duration: d(2 * time.Hour), RenewBefore: d(3 * time.Hour)},
+			wantDuration: 2 * time.Hour,
+		},
+		{
+			name:         "default renewBefore longer than a short duration is dropped",
+			cm:           computev1alpha1.CertManagerSpec{Duration: d(time.Hour)},
+			wantDuration: time.Hour,
+		},
+		{
+			name:         "duration no longer than the minimum interval leaves renewal to cert-manager",
+			cm:           computev1alpha1.CertManagerSpec{Duration: d(minInterval), RenewBefore: d(time.Minute)},
+			wantDuration: minInterval,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDuration, gotRenewBefore := resolveCertDuration(tc.cm, DefaultCertDurationTLS, DefaultCertRenewBeforeTLS)
+			if gotDuration == nil || gotDuration.Duration != tc.wantDuration {
+				t.Errorf("duration = %v, want %v", gotDuration, tc.wantDuration)
+			}
+			switch {
+			case tc.wantRenewBefore == nil && gotRenewBefore != nil:
+				t.Errorf("renewBefore = %v, want unset", gotRenewBefore.Duration)
+			case tc.wantRenewBefore != nil && (gotRenewBefore == nil || gotRenewBefore.Duration != *tc.wantRenewBefore):
+				t.Errorf("renewBefore = %v, want %v", gotRenewBefore, *tc.wantRenewBefore)
+			}
+		})
 	}
 }
 
