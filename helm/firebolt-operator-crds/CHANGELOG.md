@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.4...firebolt-operator-crds-chart-0.9.5) (2026-11-12)
+
+
+### Bug Fixes
+
+* **controller:** enforce minimum poll, drain-check, and certificate renewal intervals (FB-5025) ([ad767c6](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/ad767c6fc76149feb18545c7e8c957b50cc10f34))
+
 ## [0.9.4](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-crds-chart-0.9.3...firebolt-operator-crds-chart-0.9.4) (2026-11-05)
 
 
