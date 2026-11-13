@@ -81,11 +81,6 @@
       "component": "firebolt-operator-chart",
       "include-v-in-tag": false,
       "changelog-path": "CHANGELOG.md"
-    },
-    "helm/firebolt-operator-crds": {
-      "release-type": "helm",
-      "component": "firebolt-operator-crds-chart",
-      "include-v-in-tag": false
     }
   }
 }

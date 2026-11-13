@@ -48,6 +48,9 @@ jobs:
       - name: Lint Helm chart
         run: make helm-lint
 
+      - name: Test CRD release selection
+        run: python3 scripts/ci/crd-release-needed_test.py
+
       - name: Validate Helm templates
         run: make helm-template > /dev/null
 

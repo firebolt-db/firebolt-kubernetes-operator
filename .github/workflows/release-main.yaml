@@ -52,12 +52,12 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
+      releases_created: ${{ steps.release.outputs.releases_created == 'true' || steps.crds-release.outputs.releases_created == 'true' }}
       app_release_created: ${{ steps.release.outputs.release_created }}
       app_tag_name: ${{ steps.release.outputs.tag_name }}
       app_version: ${{ steps.release.outputs.version }}
       helm_operator_release_created: ${{ steps.release.outputs['helm/firebolt-operator--release_created'] }}
-      helm_crds_release_created: ${{ steps.release.outputs['helm/firebolt-operator-crds--release_created'] }}
+      helm_crds_release_created: ${{ steps.crds-release.outputs['helm/firebolt-operator-crds--release_created'] }}
       next_app_version: ${{ steps.versions.outputs.next_app_version }}
       next_helm_operator_version: ${{ steps.versions.outputs.next_helm_operator_version }}
       next_helm_crds_version: ${{ steps.versions.outputs.next_helm_crds_version }}
@@ -67,6 +67,16 @@ jobs:
           show-progress: "false"
           fetch-depth: 0
           persist-credentials: false
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: "latest"
+
+      - name: Compare CRD chart with its last release
+        id: crds
+        run: |
+          python3 -m pip install --user pyyaml
+          python3 scripts/ci/crd-release-needed.py
 
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
@@ -84,16 +94,27 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      - name: Release Please (CRDs)
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: crds-release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-crds-config.json
+          manifest-file: .release-please-manifest.json
+          # Merged releases must still be tagged and published.
+          skip-github-pull-request: ${{ steps.crds.outputs.needed != 'true' }}
+
       - name: Resolve next versions for pre-releases
         id: versions
         env:
           PRS_JSON: ${{ steps.release.outputs.prs || '[]' }}
+          CRDS_PRS_JSON: ${{ steps.crds-release.outputs.prs || '[]' }}
         run: |
           chmod +x scripts/ci/resolve-next-release-version.sh
           {
             echo "next_app_version=$(scripts/ci/resolve-next-release-version.sh . "$PRS_JSON")"
             echo "next_helm_operator_version=$(scripts/ci/resolve-next-release-version.sh helm/firebolt-operator "$PRS_JSON")"
-            echo "next_helm_crds_version=$(scripts/ci/resolve-next-release-version.sh helm/firebolt-operator-crds "$PRS_JSON")"
+            echo "next_helm_crds_version=$(scripts/ci/resolve-next-release-version.sh helm/firebolt-operator-crds "$CRDS_PRS_JSON")"
           } >> "$GITHUB_OUTPUT"
 
   pre-release-app:
