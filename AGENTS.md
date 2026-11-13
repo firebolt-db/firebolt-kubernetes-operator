@@ -146,9 +146,9 @@ manager role. Namespace-scoped installs still need read-only cluster-class acces
 
 Read the release guide before changing release automation. Preserve independent
 component versions, operator-only `appVersion` synchronization, and publication
-based on component release outputs. Keep shared policy aligned across release
-configs. Keep non-shipping paths excluded from the root application component,
-`always-update` enabled, and `chore(deps)` visible in release notes.
+based on component release outputs. Keep non-shipping paths excluded from the
+root application component, `always-update` enabled, and `chore(deps)` visible in
+release notes.
 
 - Use `scripts/ci/fetch-verified.sh <name> <dest>` for downloaded third-party binary
   artifacts; pin their URL and SHA-256 in `scripts/ci/pinned-tools.tsv`. Update
