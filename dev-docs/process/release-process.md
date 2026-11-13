@@ -31,6 +31,31 @@ The authoritative configuration is
 Conventional commit subjects determine release eligibility and version impact;
 follow the repository commit rules in [`AGENTS.md`](../../AGENTS.md).
 
+## CRD release validation
+
+Release Please opens and updates all component release PRs through the normal
+workflow. The required `Lint` check validates any PR that changes the CRD chart
+version, using the checked-out merge candidate and the last CRD release tag
+reachable from the PR base. Ordinary PRs that leave that version unchanged skip
+this comparison.
+
+The check packages both revisions with Helm and compares their contents using
+Kubernetes YAML decoding. Schema descriptions, YAML formatting, chart
+version/description, README, and changelog do not count as substantive changes.
+Helm applies each revision's `.helmignore`. Schema defaults, validation rules,
+resource versions, installation settings, and other packaged changes do count.
+
+An unchanged candidate fails `Lint` and cannot merge through the normal required
+checks. Leave that release PR open: Release Please updates it when further changes
+land, and a substantive change makes it eligible. Deferred descriptions ship with
+that release, so `kubectl explain` may lag documentation-only corrections.
+Missing release history or packaging/parsing errors also fail the check.
+
+The check reads fixed Git revisions; it does not create PRs, tag releases, or
+publish charts. Publication after a release PR merges is unchanged. As with other
+PR checks, its result applies to the tested candidate; it is not a guarantee about
+subsequent edits or an administrative bypass of required checks.
+
 ## Development image variants
 
 [`config/images/defaults.latest.env`](../../config/images/defaults.latest.env)

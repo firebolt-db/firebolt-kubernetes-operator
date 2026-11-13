@@ -1,350 +1,181 @@
 # AGENTS.md
 
-## What this project does
-
-Firebolt Operator manages five CRDs -- **FireboltInstance** (shared infrastructure per namespace: PostgreSQL, metadata service, Envoy gateway), **FireboltEngine** (stateful compute nodes with zero-downtime blue-green deployments), **FireboltEngineClass** (optional namespaced fragment of shared engine settings -- a pod template plus storage, engine-config, rollout/autoStop, and optional Engine Web UI sidecar defaults -- referenced by multiple engines in the same namespace), **ClusterFireboltEngineClass** (optional cluster-scoped SKU catalog -- instance type, resources, affinity/tolerations, init containers, optional engine image; no SA / Secret / IAM / storage / rollout / autoStop), and **FireboltEnginePreset** (optional namespaced ambient overlay -- service account, storage, credential env, customEngineConfig -- merged under every engine in the namespace; the object must be named `firebolt` (a CRD CEL rule pins the name), so a namespace holds at most one). `spec.engineClassRef` resolves namespaced-first: FireboltEngineClass in the engine namespace if present, otherwise ClusterFireboltEngineClass of the same name. Built with Go and controller-runtime.
-
-Engines require a ready instance. See [docs/architecture.mdx](docs/architecture.mdx) for the full design.
-
-## Repo structure
-
-```
-api/v1alpha1/          # CRD type definitions and webhooks
-cmd/main.go            # operator entry point
-cmd/kubectl-firebolt/  # kubectl-firebolt plugin entry point
-config/
-  crd/bases/           # generated CRD manifests
-  images/              # embedded default image tags (dev / latest variants)
-  rbac/                # generated RBAC manifests (kubebuilder output)
-  manager/             # manager deployment manifest
-  samples/             # example CRs
-docs/                  # published Mintlify docs (MDX + docs.json)
-dev-docs/              # contributor documentation (Markdown; not published by Mintlify)
-examples/              # user-facing example manifests
-formal/                # TLA+ specifications and model-checker configs
-helm/
-  firebolt-operator/   # operator Helm chart
-  firebolt-operator-crds/ # CRD-only Helm chart
-internal/
-  ci/                  # test-only: repo-level CI invariants (pinned tool digests)
-  controller/          # reconcilers, state machines, gateway, drain logic
-  infra/               # kubectl-firebolt plugin library (typed CRs + kubectl)
-  metrics/             # Prometheus metric recorders
-scripts/               # CI helpers, Kind setup, image loading, code generation
-  ci/                  # workflow helpers + pinned third-party binary digests
-test/
-  e2e/                 # Ginkgo E2E tests (build tag: e2e)
-  testhelpers/         # shared test utilities
-```
-
-Unit tests live alongside their source files in `internal/controller/` and `internal/metrics/`. E2E tests are isolated under `test/e2e/`.
-
-## Build, test, and lint
-
-- `make` / `make help` -- print the Firebolt logo and the lifecycle-grouped target list (this is the default goal; bare `make` does **not** build)
-- `make build` (or `make all`) -- compile to `bin/manager`
-- `make manifests` -- regenerate CRDs from type markers
-- `make generate` -- regenerate DeepCopy methods
-- `make test` -- unit tests (uses envtest; no cluster required)
-- `make test-e2e` -- E2E tests on a Kind cluster (build tag `e2e`; operator runs in-process)
-- `make test-property` -- rapid property-based harness for the outer reconcile loop
-- `make formal-check` -- run TLC model checker on all TLA+ specs
-- `make formal-verify` -- regenerate TLA+ state-cover fixtures and fail if stale
-- `make formal-check-mutants` -- apply each pinned mutant and require the test its manifest row names (state-cover or rapid property harness) to fail (refuses to run on a dirty tree)
-- `make lint` -- golangci-lint (must pass before PR)
-- `make lint-fix` -- auto-fix lint issues
-- `make helm-lint` -- lint both Helm charts
-- `make helm-template` -- render Helm templates locally
-- `make helm-docs` -- regenerate Helm chart READMEs from `values.yaml` comments
-- `make setup-local-registry` -- start the local Docker registry that kind nodes mirror through (idempotent)
-- `make flush-local-registry` -- drop and recreate the local registry (clears cached images)
-- `make prepare-test-e2e` -- full e2e setup: regenerate manifests/DeepCopy, create or reuse the Kind cluster, and publish test images to the local registry (runs `manifests generate setup-kind load-test-images`)
-- `make local-deploy` -- build operator, load into Kind, deploy via Helm
-- `make local-undeploy` -- remove the operator Helm release
-- `make cleanup-test-e2e` -- delete the Kind cluster (local registry is left running)
-
-After every code change: `make build && make lint`. Use `make lint-fix` to auto-fix where possible.
-
-### Running a single test
-
-```bash
-go test ./internal/controller/... -run "TestControllerSuite/SomeSpec"
-GINKGO_FOCUS="your test description" make test-e2e
-```
-
-### Build tags
-
-| Tag | Effect |
-|-----|--------|
-| *(none)* | Unit tests only. Crash points compile as no-ops. Embeds `defaults.dev.env`. |
-| `e2e` | Enables E2E test files. Activates real crash-point injection. |
-| `e2e,heavy` | Same as `e2e` but uses the heavy query configuration. |
-| `wakehandofftest` | CI-only wake-agent handoff barrier for the Helm wake regression. Never enable for release images. |
-| `latest` | Swaps embedded defaults to `defaults.latest.env`. Combine with `e2e` for the latest-variant E2E run. |
-
-The rows above describe the raw Go build tags. The build tooling defaults the variant to **latest**: `IMAGE_VARIANT` defaults to `latest` in the `Makefile`, `Dockerfile.ci`, `scripts/load-e2e-images.sh`, and `scripts/ci/verify-quickstart-full.sh`, so `make build` / `make docker-build` / `make test-e2e` (and the released operator image and Helm chart) embed `defaults.latest.env` by default and add the `latest` tag. Set `IMAGE_VARIANT=dev` to build the `dev` variant. A bare `go build` / `go test` with no tag still embeds `defaults.dev.env`.
-
-### Release workflow (main)
-
-[`/.github/workflows/release-main.yaml`](.github/workflows/release-main.yaml) runs on every push to `main`:
-
-- **release-please** maintains separate release PRs for the app (`version.txt`) and each Helm chart, accumulating conventional commits until merge.
-- **Pre-1.0 version bumping** — top-level `bump-minor-pre-major: true` applies to all three components: while a component is below `1.0.0`, a breaking change (`feat!:` / `BREAKING CHANGE:`) bumps the **minor**, not the major, so a `0.x` major bump is only ever deliberate. `feat:` still bumps minor and `fix:` still bumps patch (`bump-patch-for-minor-pre-major` is deliberately left off so `feat:` stays minor rather than collapsing to patch).
-- **Pre-releases** — every app and/or Helm change on `main` builds artifacts tagged `{next-version}-pre.0.{utc-datetime}.{short-sha}` (for example `0.2.0-pre.0.20260613004124.a71720862062`). The next version comes from the open release-please PR when one exists, otherwise from [`.release-please-manifest.json`](.release-please-manifest.json). Pre-release images and charts are build/package validation only — they are not pushed to GHCR.
-- **Official releases** — merging a release-please PR creates the GitHub release/tag. release-please is the single authority over every component's version (`version.txt` and each chart's `version`/manifest entry); the workflow never bumps a chart `version` out of band. An app release builds and pushes the operator image to GHCR (tag `vX.Y.Z` + `:latest`, cosign-signed); a chart release packages and pushes the OCI charts to GHCR.
-- **App → chart appVersion coupling** — an **app** release additionally runs `sync-chart-appversion`, which rewrites **only the `firebolt-operator` chart's** `appVersion` to the new operator image tag (`vX.Y.Z`) and commits it as `chore(deps): set chart appVersion to vX.Y.Z`. release-please cannot reference another component's version itself ([googleapis/release-please#2655](https://github.com/googleapis/release-please/issues/2655)), so this minimal glue exists — but it touches `appVersion` only, never chart `version` or the manifest. The `deps` scope is deliberate: the `chore`+`deps` entry in `release-please-config.json` `changelog-sections` is unhidden, so the commit renders under a "Dependencies" section **and** counts as a releasable change for the `firebolt-operator` chart component (release-please's `helm` release-type gates a release purely on a non-empty rendered changelog, with no commit-type allowlist). That `chore(deps)` commit flows back through release-please as an ordinary `firebolt-operator` chart release PR; **merging it bumps the chart `version` and publishes the chart.** So an app release publishes the operator chart in a follow-up step, not atomically. The `firebolt-operator-crds` chart is deliberately **not** synced: it ships only CRD manifests, references no operator image, and carries no `appVersion`, so a Go-only app release no longer triggers a spurious CRDs chart release — the CRDs chart releases only when its own content under `helm/firebolt-operator-crds/` changes (e.g. `make manifests` regenerating the CRDs).
-- **Single chart publisher** — `release-helm-standalone` publishes charts whenever release-please cuts a chart release (a chart release PR merged), whatever opened that PR (a plain `helm/**` change or the app-driven `chore(deps)` commit). It is gated purely on the chart `release_created` outputs: if a chart release was cut, its GitHub release/tag exists and the matching OCI chart must be pushed. This holds even when an app release is cut in the **same** run (two release PRs merged in one push, or `workflow_dispatch`) — the app jobs run in parallel and never publish charts, so there is no double-publish. An app-only run leaves both chart `release_created` outputs false, so the job correctly stands down then.
-
-The operator image tag is `vX.Y.Z` (matching the `firebolt-operator` chart's `appVersion`), distinct from the component-scoped git release tags release-please creates (`firebolt-operator-v<v>`, `firebolt-operator-chart-<v>`, `firebolt-operator-crds-chart-<v>`).
-
-## Proactive Collaboration
-
-You are expected to operate as a strategic collaborator, not a code generator.
-
-- **Verify; never assume.** Do not assume how something works -- confirm it against the source of truth (the code first, documentation second) before acting or advising. State the fact you relied on (file, line, target, or doc) when it matters. An unverified claim is a bug waiting to happen.
-- **Challenge weak assumptions.** If a request contradicts the existing structure, conventions, or sound engineering practice, propose a better path before implementing. Surface the trade-off explicitly.
-- **Surface viability concerns early.** Before writing code, sanity-check that the requested approach fits the stack, the data model, and any cross-component constraints. If something will not work, say so.
-- **Think end-to-end.** A change is not done when the code compiles. It is done when the surrounding integration works: callers updated, configuration wired, downstream consumers verified.
-- **Security and correctness by default.** Prefer least-privilege, encrypted, validated, and observable defaults. Flag insecure or fragile patterns even when they were not part of the request.
-
-You MUST follow these collaboration rules on every task.
-
-## Keep documentation up to date
-
-You MUST keep documentation in sync with code. When making changes:
-
-- **README.md** -- update if your change affects what a human reader needs to know to understand the project: setup, headline architecture, or what the project is for. Keep the README an overview; push detail into AGENTS.md.
-- **docs/architecture.mdx** -- architectural changes (state-machine phases, reconciler control flow, gateway/data-plane contracts, drain/shutdown handling, RBAC surface) MUST include a matching update in the same commit. This is the canonical record of *why* the system is shaped the way it is.
-- **docs/** -- keep the published docs (`docs/`) up to date as code changes.
-- **dev-docs/** -- keep contributor-facing design, testing, release, and workflow documentation in sync with the implementation. This tree is Markdown-only and is not published by Mintlify.
-
-A pull request that changes structure or interfaces without a documentation update is incomplete.
-
-## Proactive harness
-
-Code is not done until it is covered by tests where tests are reasonable.
-
-- You MUST add or update tests for behavior you introduce, change, or fix. Use the project's existing test runners: `make test` for unit tests (envtest), `make test-e2e` for E2E tests (Kind + Ginkgo).
-- If a change is genuinely untestable in the current harness (e.g., cloud-only infrastructure, external service integration), you MUST say so explicitly in your response and explain why.
-- Prefer fast, deterministic tests at the lowest reasonable level (unit > integration > end-to-end).
-- A change that ships without tests, and without an explicit reason for not having them, is incomplete.
-
-## How we work (agentic workflow)
-
-Every change is tracked and lands through a branch and a pull request -- no exceptions.
-
-- **A documented issue comes first.** Every implementation task MUST have a corresponding issue before any work starts -- a Linear ticket or a GitHub issue. If none exists, create one. No issue, no work.
-- **Never touch `main` directly.** You MUST NEVER work in, commit to, or push to `main`. All work happens on a feature branch and merges via a reviewed PR. `main` is only ever advanced by merging a PR or by the release automation (release-please merging a release PR, and the `sync-chart-appversion` job's `chore(deps)` appVersion commit).
-- **Branch names tie the branch to its issue**, so work is traceable. Prefix the branch with the tracker identifier:
-  - Linear: `FB-<number>-<short-kebab-description>` (e.g. `FB-<number>-pods-not-ready-message`).
-  - GitHub issue: `<issue-number>-<short-kebab-description>`.
-  - Branch off the latest `main`, not off another in-flight feature branch unless instructed.
-- **PRs follow the template.** Pull requests MUST follow [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md): fill in **Background** (replace the whole `<ISSUE-REF>` placeholder with the actual reference — a Linear ticket like `FB-123` or a GitHub issue like `#123` — followed by `:` and the one-sentence why, e.g. `FB-123: switch to blue-green cutover because rolling restarts dropped queries`; do NOT keep the literal `<ISSUE-REF>` token), **Summary** (what changes and what it means going forward), and **Test Plan**. Re-check the template before opening a PR in case it has changed.
-- **Conventional-commit subjects drive releases.** [release-please](release-please-config.json) opens release PRs on `main` that accumulate conventional commits for the app (`version.txt`) and each Helm chart (`helm/firebolt-operator`, `helm/firebolt-operator-crds`). Merging a release PR creates the GitHub release and tag. Every commit subject MUST follow the format in "Commit conventions" (under Project-specific rules below).
-
-Linear specifics:
-
-- **Team:** `Firebolt` (key `FB`). All issue identifiers use the `FB-` prefix.
-- **Project:** `Firebolt Operator`.
-- Any new Linear issue created in connection with this repo MUST be filed under team `Firebolt` AND project `Firebolt Operator`. Filing it in the team without the project leaves it unscoped.
-
-## Known issues
-
-Ongoing limitations, framework footguns, and environment traps that still affect day-to-day work and need a **workaround** until the root cause is fixed.
-
-- Do **not** add entries for bugs you fix in the current PR. The code change and PR description are the record.
-- When you are instructed to add content to AGENTS.md, put it in the most-relevant `AGENTS.md` (root or scoped). State the symptom, cause, and workaround in two or three sentences.
-- When you review known issues, remove the entry when the underlying issue is fixed — do not leave solved history behind.
-
-- **GitHub Actions `pull_request.paths` filters also suppress `closed` events.** If a workflow creates external state on `opened` or `synchronize` and must clean it up on `closed`, do not rely on trigger-level `paths` filters. Put path relevance checks inside the job instead, and let `closed` events reach the workflow so cleanup can run even when the final PR diff no longer includes the original files.
-- **release-please root component (`.`) greedily owns sub-package commits.** A release-please component whose path is `.` is treated as a meta-package that owns **every** file in the repo, including files under nested component paths (matching is `file.indexOf("<path>/") === 0`, and `.` matches everything). Two consequences: (1) a commit touching only `helm/**` is attributed to the chart components **and** the root app component, opening a spurious app release PR — and because an app release commits a `chore(deps)` appVersion change, that creates a release cycle (app release → `chore(deps)` → new app PR); (2) a commit touching any **non-shipping** path (`docs/**`, `examples/**`, `formal/**`) with a **releasable** type (`fix:`, `feat:`) cuts a real operator release for a change that never touched the operator binary. Fix for both: list every non-operator directory in the `.` package's `"exclude-paths"` (`["helm", "docs", "examples", "formal"]`) so the root component only releases on genuine operator-shipping changes (`api/`, `cmd/`, `config/`, `internal/`). Caveats: (a) `exclude-paths` only filters by directory prefix; it cannot exclude individual root-level files ([googleapis/release-please#2266](https://github.com/googleapis/release-please/issues/2266)), so keep the `chore(deps)` appVersion commit scoped to files under `helm/` only (never a root file like `.release-please-manifest.json`); (b) release-please does **not** auto-close a release PR that is no longer warranted, so after excluding a path that already produced a spurious PR, close that PR by hand — once the path is excluded it will not be recreated.
-- **release-please can't set a Helm `appVersion` from another component's version.** release-please's `helm` release-type updates only the chart `version` (and CHANGELOG), never `appVersion`. There is no native way to make a chart's `appVersion` track *another* component's version while keeping independent chart versions: `linked-versions` forces one shared version line, and cross-component references in `extra-files` are an open, unimplemented request ([googleapis/release-please#2655](https://github.com/googleapis/release-please/issues/2655)). The `sync-chart-appversion` job bridges this by committing a narrow `chore(deps): set chart appVersion to vX.Y.Z` on every app release, which then flows back through release-please as a `firebolt-operator` chart release PR. Keep that glue limited to `appVersion` only — if it ever writes chart `version` or `.release-please-manifest.json`, it competes with release-please's version ownership and produces conflicting chart versions / manifest churn. It is also deliberately scoped to the `firebolt-operator` chart only: the `firebolt-operator-crds` chart references no operator image and carries no `appVersion`, so syncing it would cut a CRDs chart release on every Go-only app release for a chart whose content never changed.
-- **A `chore` commit can be releasable — it depends on `changelog-sections`, not a fixed type allowlist.** It is a common misconception that release-please only releases on `feat`/`fix`/`perf`/`revert`. That allowlist (`src/util/filter-commits.ts`) is only wired into the `node`/`python`/`java` strategies. The `helm` and `simple` release-types (what this repo uses) gate a release **solely** on `changelogEmpty()` — whether the rendered release notes are more than one line. So any commit whose type/scope maps to an **unhidden** `changelog-sections` entry is releasable. This repo's config has `{ "type": "chore", "scope": "deps", "section": "Dependencies" }` with no `hidden: true`, and the bundled `conventional-changelog-conventionalcommits` honors `scope`, so `chore(deps): …` releases (and renders under "Dependencies") while a plain `chore:` or other-scoped `chore(...)` renders nothing and does not. Footgun: adding `"hidden": true` to that entry (or dropping the `deps`-scoped entry) silently stops the `sync-chart-appversion` commit from ever cutting a chart release — the appVersion bump would land on `main` but no chart release PR would open.
-- **Separate release PRs conflict in `.release-please-manifest.json` and don't self-heal by default.** With `separate-pull-requests: true`, every component's release PR edits the **same** `.release-please-manifest.json`, and the per-component entries sit on **adjacent lines**. Merging one component's PR changes a line next to another open PR's line, so git's 3-way merge flags the still-open PR as conflicting even though the edits are logically independent ([googleapis/release-please#1870](https://github.com/googleapis/release-please/issues/1870)). It does **not** auto-resolve under the default config because `maybeUpdateExistingPullRequest` skips pushing an update when the PR body is unchanged — and a sibling component's release notes don't change just because another component released, so release-please never rebases the stale branch. Fix: set `"always-update": true` (top level of `release-please-config.json`), which forces a rebuild of each open release branch off the current `main` tip every run. The related failure mode — merging two release PRs at the exact same instant → duplicate-tag errors — is handled separately by the workflow's `concurrency` group serializing runs on `main`.
-- **release-please `prs` output has no `path`/`version`.** The `prs` output of `release-please-action` is an array of PullRequest objects exposing `headBranchName`, `title`, `body`, etc. — but **no** per-package `path` or `version`. A resolver that does `select(.path == $path) | .version` silently matches nothing and falls back to the committed manifest, so pre-release tags get the *current* version instead of the *next* one. Resolve the next version from each component's PR `headBranchName` (`…--components--<component>`) or `title` (`chore(release): <component> <version>`) instead — see [`scripts/ci/resolve-next-release-version.sh`](scripts/ci/resolve-next-release-version.sh). Match the component exactly to avoid the `firebolt-operator` vs `firebolt-operator-chart` prefix collision.
-- **`sync-chart-appversion` can lose a race with concurrent pushes to `main`.** Symptom: the job commits the chart `appVersion` update and then fails with `! [rejected] HEAD -> main (fetch first)` if another commit lands after checkout. Cause: a single push attempt from a stale base, plus unauthenticated fetches when checkout credentials are disabled. Resolution: use a retry loop that pushes up to three times, fetching and rebasing onto authenticated latest `main` between attempts (`fetch-depth: 0` for a stable merge base), and fail explicitly only if convergence still fails.
-
-## Project-specific rules
-
-### Engine reconciler and blue-green state machine
-
-Before touching the engine reconciler -- especially `engine_reconcile.go`, `engine_state.go`, or `instance_gateway.go` -- read the relevant section of [docs/architecture.mdx](docs/architecture.mdx) first.
-
-- The blue-green state machine (`creating -> switching -> draining -> cleaning`) is formalised in [formal/FireboltEngine.tla](formal/FireboltEngine.tla). A change in one belongs in both, and `make formal-verify` is the CI guard.
-- The JWT signing-key rotation state machine (`mint -> promote -> retain -> remove`, each irreversible step gated on fleet convergence) is formalised in [formal/SigningKeyRotation.tla](formal/SigningKeyRotation.tla), with the same pairing rule and CI guard. Its `AnchorAtDemotion` constant additionally pins a counterexample: `make formal-check-counterexample` requires that anchoring the retain window at demotion instead of at confirmed post-promotion convergence still violates `NoValidationGap`. If you weaken a convergence gate, that target fails — which is the point, so fix the gate rather than the target.
-- The wake-on-zero / auto-stop protocol is formalised in **two** specs, split because no property spans them: [formal/EngineWake.tla](formal/EngineWake.tla) is the demand path (the agent's stamp, the operator's cached copy of it, and `computeAutoStopDecision` reading that copy, with time as a bounded tick counter) and [formal/WakeAgentHold.tla](formal/WakeAgentHold.tla) is the agent's readiness waiter (pure ordering, no clock). Merging them multiplies two independent state spaces for nothing. Four counterexample configs, one per hazard: the wake check below the stopped early return (`WakeIsNotLost` fails — an auto-stopped engine IS an engine at zero replicas, so that ordering makes wake impossible), acting on a stamp the agent still retains but the operator should not honour (`ScaleUpOnlyOnFreshDemand`), caching demand for a running engine (`Inv_DemandOnlyForStoppedEngines` — the agent stamps for any engine with no ready endpoints, including one mid node-drain), and releasing a readiness waiter by engine name instead of channel identity (`Inv_NoStrandedWaiter`). Only `EngineWake` is bound to Go; the agent half's reason for not being is a row in `formal/model-scope.tsv`.
-- The same "prove it can fail" discipline applies to the **Go** side of both machines: [formal/mutants/](formal/mutants/) holds patches that deliberately break a reconciler guard, and `make formal-check-mutants` requires each one to make the Go test its manifest row names fail with a specific named message -- most rows name the state-cover suite; the autostop row names the rapid property harness (a non-zero `go test` exit is not enough — a rotted patch would exit non-zero too). Adding a mutant is a patch plus a row in `formal/mutants/manifest.tsv`. If a patch stops applying after a refactor, re-point it at the current code; deleting it removes a guard nobody is checking any more.
-- **The spec is the source for both the invariants and the actions the Go harnesses check.** The generator parses `Safety ==` into `tlaRequiredInvariants` and `Next ==` into `tlaEngineSpecActions`, and two tests fail when the Go side falls behind: `TestEngineInvariantsMatchSpec` requires every Safety conjunct to have an entry in the shared invariant registry, and `TestEngineActionsMatchSpec` requires every `Next` disjunct to be either mapped to a rapid action of `engineSim` by an explicit declaration or listed as spec-only **with a reason** — and the same in reverse, so a new harness action must map back to the spec or be declared harness-only. The mapping is declared, never inferred from names: the vocabularies differ on purpose (`EnvPodsReady` vs `PodsBecomesReady`) and every `Reconcile*` disjunct maps to the one whole-pass `Reconcile`. Which specs have their action set checked at all is recorded in `tlaActionCoverageLedger` (`internal/controller/engine_actions_test.go`); a `.tla` under `formal/` that is missing from it fails `TestTLAActionCoverageIsDeclared`, so an uncovered machine is a written decision rather than a silence. Only FireboltEngine is covered today — `FireboltInstance`, `SigningKeyRotation`, `EngineWake` and `WakeAgentHold` are listed with their reasons. The generator emits the Safety-conjunct list under a per-model identifier (`tlaRequiredInvariants` for engine, `tlaWakeRequiredInvariants` for wake), since two models emitting one name into the same package would not compile.
-- **One generator produces every state-cover fixture: [scripts/gen-tla-state-tests.py](scripts/gen-tla-state-tests.py).** It takes `--model {engine,instance,rotation,wake}` and reads that machine's entry from its `MODELS` registry — which TLA+ variables the projection keeps, how to decode them, which action labels are environment rather than reconciler, whether one Go call may realize several consecutive model actions (`transitive_closure`: true for a whole reconcile pass, false for `wake`, whose entry point is one pure decision and so must equal the model's ONE-STEP successor), and the emitted Go type/variable names. Everything else (DOT parsing, the reconciler closure, content-stable output ordering, pool dedupe) is shared. Adding a modelled machine is a `MODELS` entry plus a `formal-gen` line in the `Makefile`; changing a projection is a change to one config, not to a copy of the pipeline.
-- **Which code is bound to a model is written down: [formal/model-scope.tsv](formal/model-scope.tsv).** The state-cover suite only proves the reconciler agrees with the model *inside the state space the model represents*; a change that adds a phase, a gate or a transition the spec never had passes every formal target while the model quietly stops describing what ships. The `Model scope` CI check (`scripts/ci/check-model-scope.sh`) asks that a change touching a listed function also moves its `.tla` and its fixture. It is a review prompt, not a proof: a change that genuinely does not affect the model passes by saying so with a `Model-scope-ok: <reason>` line in a commit message or the PR body. Machines with **no** Go binding (the wake agent's hold path — modelled by `WakeAgentHold.tla`, but its state is unexported in-memory bookkeeping in a package that must not import controller-runtime — the class merge layer, and drain timeouts) are `UNMODELLED` rows in the same file, each with a required reason, and the script enforces completeness mechanically: every `compute*` / `step*` / `set*Rollup` function under `internal/` must be bound to a spec or listed as `UNMODELLED` — so a new state machine cannot ship as a silent gap, and "the TLA+ suite passes" is never the same claim as "this change is verified".
-- Zero-downtime during pod termination is enforced by a layered data-plane contract (headless DNS, Envoy active health check, engine `/health/ready=503` on SIGTERM, engine pre-work shutdown fence, gateway retry on `X-Firebolt-Drained`). The "Graceful pod shutdown" and "Why no EndpointSlice gate" subsections of `docs/architecture.mdx` document the chain and call out a previously-removed design that should not be reintroduced. If you find yourself adding an EndpointSlice watch / RBAC / state field to fix a 5xx during cutover, check whether one of the existing layers is broken before adding a sixth.
-
-- Engine retirement and query safety — the retry conditions, the drain sequence, and the accepted limits — is a recorded contract: [dev-docs/architecture/engine-retirement-and-query-safety.md](dev-docs/architecture/engine-retirement-and-query-safety.md). A change to the gateway `retry_on` set, drained-response handling, engine readiness on SIGTERM, or the engine health-check cadence must keep that page true, and update it in the same PR.
-
-### FireboltEngineClass merge layer
-
-FireboltEngineClass holds a reusable pod-template fragment plus defaults for a subset of non-template engine settings (`uiSidecar`, `storage`, `customEngineConfig`, `rollout`, `drainCheckEnabled`, `drainCheckInterval`, `autoStop`) that engines in the same namespace reference via `spec.engineClassRef`. `ClusterFireboltEngineClass` is the cluster-scoped SKU catalog of the same name: only `spec.template` (instance type, resources, affinity/tolerations, init containers, optional engine image). Namespace-resolved identifiers (serviceAccountName, Secret refs, IAM annotations) and non-template settings stay off the cluster object. The resolver is namespaced-first: `Get` FireboltEngineClass in the engine namespace, else `Get` ClusterFireboltEngineClass of the same name. Same name in both scopes is allowed and is how override works — the namespaced object wins wholesale; cluster SKU fields do not leak through. A catalog edit rides the same template-hash / blue-green path as a namespaced class edit. The operator does not reconcile the catalog object: engines consume it read-only (`get/list/watch`). Deleting a catalog SKU does not tear down running pods; engines that still name it emit a Warning `EngineClassNotFound` Event and keep the last applied StatefulSet. `uiSidecar: true` makes `buildStatefulSet` inject a built-in UI sidecar (the operator-owned `engine-web` nginx container, via `effectiveSidecarsWithUI`); the `engine-web` container name is reserved in `FireboltEngineClassPodTemplateRules` (like `engine`), so a user container/init container with that name is rejected and injection needs no collision guard. Like `storage` it reshapes the pod, so `stsMatchesSpec` detects a toggle through the sidecar comparator and rolls a new generation. FireboltEngineClass is namespaced — the namespaced resolver path, the FireboltEngine admission check, the controller watch, and the namespaced deletion-blocking webhook all key by `{Namespace, Name}`. Every inherited field resolves **engine-if-set → Preset-if-set → resolved-class-if-set → operator default**. `overlayPresetOnClass` folds the namespace `FireboltEnginePreset` object into `classInfo` first so the `effective*` helpers keep the shape `(spec, classInfo)`. The pod-template / storage merge runs inside `buildStatefulSet` and the config merge inside `buildConfigMap`, with the resolved class template hash stamped on the StatefulSet as `firebolt.io/engine-class-hash` and the Preset spec hash as `firebolt.io/engine-preset-hash` so `stsMatchesSpec` detects template drift (an in-place class or Preset spec edit, or a flip to a different class).
-
-- Centralised in the `effective*` helpers (`engine_reconcile.go`): template fields (`effectiveServiceAccountName`, `effectiveAutomountServiceAccountToken`, `effectiveNodeSelector`, `effectiveTolerations`, `effectiveAffinity`, `effectivePodLabels`, `effectivePodAnnotations`, `effectiveEngineImage`, `effectiveEngineWebPullPolicy`, `engineClassSidecars`, `engineClassInitContainers`) and non-template fields (`effectiveStorage`, `effectiveCustomEngineConfig`, `effectiveRollout`, `effectiveDrainCheckEnabled`, `effectiveAutoStop`, and the class-aware `getDrainCheckInterval`). Every helper has the same shape: takes `(spec, classInfo)` and returns the merged value. `buildStatefulSet` and `stsMatchesSpec` MUST consume the same helper for any given field — divergence produces phantom drift (rebuilds-without-changes, infinite rollouts). The Preset overlay (`overlayPresetPodSpec` / `overlayPresetEngineContainer` in `engine_preset_overlay.go`) rebuilds the merged template field-by-field from those same helpers, so a new `effective*` helper needs a matching overlay line — without it the class value of that field silently disappears in every namespace that carries a Preset object; `TestOverlayPresetOnClass_EmptyPresetIsRenderInert` pins the lockstep. `FireboltEnginePreset` carries only `template`, `storage`, and `customEngineConfig`; `rollout` / `drainCheckEnabled` / `drainCheckInterval` / `autoStop` / `uiSidecar` stay on the class.
-- Class drift for the two pod-affecting non-template fields is detected by their own effective-aware comparators, NOT the class hash: `storageMatchesSpec(sts, spec, classInfo)` and `customEngineConfigHash(spec, classInfo)` both resolve through the effective helper, so a class storage/config edit rolls a new generation. `rollout` / `drainCheckEnabled` / `drainCheckInterval` / `autoStop` do not reshape the pod and are read live, so they are intentionally absent from both the hash and `stsMatchesSpec`. The `firebolt.io/engine-class-hash` annotation covers only `spec.template`.
-- `rollout` and `drainCheckEnabled` carry NO `+kubebuilder:default` on `FireboltEngineSpec`: the default (graceful / true) is applied last in the `effective*` resolver, not by the apiserver, so an unset engine value stays empty and can fall through to the class. Re-adding a CRD default to either field would silently disable class inheritance for it.
-- The operator-owned set on `FireboltEngineClass.spec.template` lives in `api/v1alpha1/operatorauthority.go` (`ValidateOperatorOwnedPodTemplate`). The validating webhook returns those `field.Forbidden` errors verbatim; the FireboltEngineClass status controller re-runs the same check as a defense-in-depth `Ready=False/OperatorOwnedFieldSet` signal. Adding a new operator-owned field belongs in `ValidateOperatorOwnedPodTemplate` and propagates everywhere automatically. `ClusterFireboltEngineClass` runs the same owned-path check plus `ValidateClusterEngineClassSKUOnly` at admission and again on the live spec in the engine resolver (`clusterClassLiveSpecErrors`); there is no catalog controller and no Ready stamp.
-- **Operator-rendered volumes are declared in two tiers per component.** `operatorOwned<Component>VolumeNames` (wired to `ReservedPrimaryVolumeMountNames`) is every volume the operator renders; the primary container may not name any of them. `operatorOwned<Component>SecretVolumeNames` (wired to `SecretBackedVolumeMountNames`) is the subset sourced from a Secret; only those are refused to user-supplied sidecars and init containers, because the remaining volumes (`config`, `data`, `runtime`, `tmp`) hold no credential material and mounting them is a supported pattern — a `hostPath`-backed `data` volume gets no `fsGroup` treatment from the kubelet, so an init container has to chown it before the non-root engine starts. Adding a Secret-backed volume means adding it to **both** lists; adding a plain one means the first list only.
-
-### kubectl-firebolt plugin
-
-`internal/infra/` + `cmd/kubectl-firebolt/` implement the `kubectl-firebolt` plugin — a command-line client that creates and inspects FireboltEngine / FireboltInstance / FireboltEngineClass / ClusterFireboltEngineClass resources. It builds those CRs from the typed `api/v1alpha1` structs and applies them with `kubectl`, so it is a first-class consumer of the CRD surface that compiles against the same types. `--type` / `EngineClassProvidesStorage` resolve namespaced-first, matching the operator.
-
-- **Any large functional change to the operator MUST be verified to stay in line with the plugin.** This covers CRD field shapes, the engine-create contract (`engineClassRef`, the per-engine `spec.template` overrides, storage, `customEngineConfig`), resource kinds/group, and readiness conditions. Update `internal/infra/` in the same change and confirm `go build ./...`, `go test ./internal/infra/...`, and `make kubectl-firebolt` still pass.
-- Because the plugin compiles against the CRD types, a field rename surfaces as a build error in `internal/infra/`. Fix it by realigning the plugin — do **not** loosen it to hide the change. See [internal/infra/AGENTS.md](internal/infra/AGENTS.md) for the plugin's own invariants.
-- The engine container image and pull-policy resolve through `effectiveEngineImage` (`internal/controller/engine_reconcile.go`): engine `spec.template` engine container if set → FireboltEngineClass template engine container → operator default. `FireboltEngineSpec` has no dedicated scalar image field, but a per-engine override via `spec.template.spec.containers[name=="engine"].image` is honored and wins over the class. Default pull policies for operator-rendered containers follow the Kubernetes tag rule (`resolveContainerImagePullPolicy`: `:latest`/untagged → `Always`, else `IfNotPresent`); the engine and metadata containers resolve through `resolveWorkloadImagePullPolicy`, which additionally treats the mutable `dev` tag like `:latest` (→ `Always`) so dev-branch builds are never pinned to a node's first cached pull. metadata-ng (`spec.metadataNG: true`) further defaults the metadata container to `Always` regardless of tag, because that mode is typically paired with a floating tag such as `pd-dev` that the tag rule would otherwise cache. An explicitly-set pull policy always wins. The injected `engine-web` UI sidecar resolves through `effectiveEngineWebPullPolicy`: an explicitly-set engine-container pull policy (engine → class) applies to the sidecar too, with the plain tag rule on `DefaultEngineWebImage` as fallback (`Always` while the UI image is tracked at `:latest`). Mutating the referenced class is the canonical pattern for rolling one image across many engines at once; the e2e Image Switching test in `test/e2e/e2e_test.go` exercises that class-mutation path.
-
-### RBAC changes
-
-`config/rbac/role.yaml` is the canonical RBAC manifest, regenerated from `// +kubebuilder:rbac:` markers via `make manifests` (controller-gen step). The Helm chart template [`helm/firebolt-operator/templates/manager-rbac.yaml`](helm/firebolt-operator/templates/manager-rbac.yaml) is GENERATED from that canonical file by [`scripts/sync-helm-rbac.py`](scripts/sync-helm-rbac.py), which `make manifests` runs immediately after controller-gen. So a `// +kubebuilder:rbac:` marker edit + `make manifests` updates both files in lockstep. Do not hand-edit the chart template — the next `make manifests` run will overwrite the edit. Historical drift between the two files used to require a hand-merge step (`pods/proxy` missing after b284983, `endpointslices` dead since e538444); the sync script removes that drift entirely.
-
-The chart picks the RBAC envelope at install time from `.Values.watchNamespaces`:
-- Empty list (default) → one `ClusterRole` + one `ClusterRoleBinding` (cluster-wide install).
-- Non-empty list → a `Role` + `RoleBinding` pair in each listed namespace for namespaced resources, plus a `ClusterRole` (`…-cluster-resources`) with `get/list/watch` on `clusterfireboltengineclasses` so engines can resolve the shared SKU catalog. The catalog is read-only in this mode; the operator never writes it. The operator's `cache.Options.DefaultNamespaces` is still scoped to the listed namespaces via `--namespaces=<comma-list>`.
-
-[`internal/controller/rbac_chart_toggle_test.go`](internal/controller/rbac_chart_toggle_test.go) pins the four-cell `watchNamespaces × rbac.apiserverProxyGrant` matrix against `helm template`. If a chart edit silently drops the per-NS branch or renders both envelopes at once, that test fails.
-
-`pods/proxy: get` is intentionally NOT in the canonical RBAC because the default `FireboltInstance.spec.metricScrapeMode=PodIP` doesn't use it. The chart template [`helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml`](helm/firebolt-operator/templates/apiserver-proxy-rbac.yaml) renders the grant on the opt-in `rbac.apiserverProxyGrant=true` value and mirrors the same `watchNamespaces` shape. If you add a `// +kubebuilder:rbac:groups="",resources=pods/proxy,verbs=get` marker back, the verb leaks into the always-on manager RBAC — keep it out of the canonical source.
-
-### Admission webhooks and controller-side fallbacks
-
-`FireboltInstance.spec.metadataNG` is experimental and defaults to false. It selects the rendered metadata config and built-in UID/GID but MUST NOT infer from or rewrite the metadata image; selecting a compatible image remains the user's responsibility.
-
-The operator supports two admission postures and every invariant has to behave the same in both. The operator CLI flag `--enable-webhooks` defaults to `true`, but the Helm chart sets `webhook.enabled: false` by default (cert bootstrap is the caller's responsibility), so the realistic shipped state is **webhooks off**. `make test`, `make test-e2e`, and `make helm-test` all run with webhooks off too — the in-process operators and envtest setup do not register the webhook server.
-
-Every webhook-enforced invariant has a controller-side counterpart so the same CR write produces the same outcome regardless of admission. When touching any of these, change both sides together and add envtest coverage for the controller branch:
-
-- **`FireboltInstance.spec.id` defaulting.** Mutating defaulter mints a Crockford ULID at admission (`MintInstanceID`). Controller fallback mints the same encoding and `Update`s on the first reconcile when the field is empty. The minted encoding is lowercase, matching what engine and metadata images at `CanonicalInstanceIDImageFloor` consume as the account ID; on a build whose floor is empty it is uppercase, which is what images below the floor consume. The floor tracks the `ENGINE_TAG` / `METADATA_TAG` pins in `config/images/defaults.latest.env` and moves with them (`TestDefaultImagesMeetCanonicalFloor` fails if a bump leaves one behind). The CRD's CEL rule allows the empty-to-value write and a case-only rewrite (`oldSelf == '' || self == oldSelf || self.lowerAscii() == oldSelf.lowerAscii()`). The controller lowercases an existing uppercase Crockford ULID only when resolved metadata and every bound engine image meet `CanonicalInstanceIDImageFloor`; otherwise it leaves the field and rendered config unchanged and stamps `InstanceIDCanonical=False/ImageBelowFloor`, `ImageResolveFailed`, or `UpdateRejected`. That condition is not rolled up into `Ready`, and is removed entirely while the floor is empty. Neither a resolve error nor an admission rejection of the case-only `Update` aborts the rest of Reconcile — returning either would stall metadata and gateway on an otherwise healthy instance. Deletion is handled before the id work: `reconcileDelete` sweeps by the `LabelInstance` label, never by `spec.id`, so a terminating instance skips minting and canonicalizing outright. The uppercase check uses `ulid.ParseStrict` — `ulid.Parse` accepts any 26-character string, and `spec.id` has no CRD pattern, so a same-length user-supplied id would otherwise be lowercased. Image comparison is over the project tag format (`release|debug-MAJOR.MINOR.PATCH[-pre.N.TIMESTAMP.sha]`), not semver; `dev` clears the floor, `latest` and digest pins do not. The gate re-runs on a bound engine's spec change **and** on `FireboltEngineClass` / `FireboltEnginePreset` events, because a bound engine's resolved image is as often the class's or the Preset's as its own and neither bump touches an engine generation. The engine and class watches are generation-filtered (their image pins live in spec); the Preset watch deliberately is not, since `resolveFireboltEnginePresetInfo` is fail-closed on the Preset's `Ready` condition.
-- **`FireboltInstance.spec.metadata.{postgres,replicas}`.** The webhook rejects an empty PostgreSQL credentials Secret reference and invalid external PostgreSQL TLS settings. The CRD restricts TLS mode to `verify-full`, requires the same-namespace CA Secret name and key, and enforces `replicas == 1`. The controller re-runs PostgreSQL validation and preflights the referenced credential Secret plus the selected CA key, surfacing failures as `MetadataReady=False/PostgresSecretPreflightFailed`.
-- **`FireboltInstance.spec.{gateway,metadata}.template` operator-owned paths.** Webhook walks both templates with `GatewayPodTemplateRules` / `MetadataPodTemplateRules`. Controller's `validateInstanceTemplates` re-runs the same rules every reconcile and surfaces `{Gateway,Metadata}Ready=False/TemplateRejected` with the field path; the offending component is not rendered.
-- **`FireboltInstance.spec.tls` (`ValidateTLS`).** Webhook rejects invalid TLS blocks (including `spec.tls.gateway.crlSecretRef` without `clientCASecretRef`, and CRL/client-CA on a disabled listener). Controller's `ensureEngineTLS` / `ensureGatewayTLS` re-run `ValidateTLS` whenever the matching listener block exists — including `Enabled=false` — and surface `{Engine,Gateway}TLSReady=False/TLSSpecInvalid`; the secure listener is not provisioned until the spec is admissible. `ValidateTLS` also bounds the certificate lifetime on both listeners: `certManager.duration` is at least `MinCertDuration` and `renewBefore` leaves at least `MinCertRenewalInterval` between issuance and renewal, because every TLS renewal mints a new key and rolls the pods that serve it. `resolveCertDuration` applies the same renewal minimum to every Certificate it builds, which covers the per-generation engine certificates built from an Instance's already-provisioned policy.
-- **`autoStop.pollInterval` and `drainCheckInterval` minimums (Engine and EngineClass).** A CRD CEL rule rejects a value below `MinAutoStopPollInterval` / `MinDrainCheckInterval`, so the rejection holds with webhooks off and needs no webhook counterpart. `computeAutoStopDecision` and `getDrainCheckInterval` raise a stored shorter value to the minimum, which covers objects written before the rule and API servers that ratchet an unchanged invalid field. Both intervals become a requeue delay on the engine controller that every watched namespace shares, so the minimum is what keeps one engine from requeueing in a tight loop.
-- **`FireboltEngineClass.spec.template` operator-owned paths.** Webhook walks `FireboltEngineClassPodTemplateRules`. `FireboltEngineClassReconciler.classReadiness` stamps `Ready=False/OperatorOwnedFieldSet` as defense-in-depth, AND `FireboltEngineReconciler.resolveFireboltEngineClassInfo` reads that condition: when set, it returns `errFireboltEngineClassUnready` (with the class info still populated so a drain can read inherited drain settings) and Reconcile surfaces `engine.ConditionReady=False/FireboltEngineClassUnready` in `stable` / `stopped` / `creating` — the engine StatefulSet is NOT rendered until the class becomes admissible. `switching` / `draining` / `cleaning` skip that fail-closed check.
-- **`ClusterFireboltEngineClass.spec.template` SKU-only + operator-owned paths.** Webhook walks `ValidateOperatorOwnedPodTemplate` and `ValidateClusterEngineClassSKUOnly`. The engine resolver re-runs both on the live catalog spec (`clusterClassLiveSpecErrors`) and fail-closes with `errFireboltEngineClassUnready` / `FireboltEngineClassUnready`. There is no catalog reconciler and no Ready condition on the cluster object.
-- **`FireboltEngineClass` deletion while bound.** Webhook refuses DELETE. `FireboltEngineClassReconciler` carries the finalizer `compute.firebolt.io/fireboltengineclass-deletion-guard`; while a `deletionTimestamp` is set and a bound engine exists, the reconciler holds the finalizer and stamps `Ready=False/DeletionBlocked` with the count. Force-removing the finalizer (`kubectl patch metadata.finalizers`) is the legitimate escape hatch.
-- **`ClusterFireboltEngineClass` deletion.** Delete is allowed. Engines that still resolve to the name emit a Warning `EngineClassNotFound` Event, keep the last applied StatefulSet, and retry with backoff. A namespaced `FireboltEngineClass` of the same name continues to satisfy those engines.
-- **`FireboltEngine.spec.engineClassRef`.** Webhook and controller resolve namespaced-first (FireboltEngineClass in the engine namespace, else ClusterFireboltEngineClass of the same name). Both reject / back off when neither object exists. Controller emits a Warning `EngineClassNotFound` Event naming both lookups and bubbles `errFireboltEngineClassNotFound` for backoff (no dedicated Ready condition — class state is binary).
-- **`FireboltEnginePreset` one-per-namespace.** Enforced by a CRD CEL rule pinning `metadata.name` to `firebolt` (`FireboltEnginePresetDefaultName`): apiserver name uniqueness then makes a second object per namespace impossible in every admission posture, so there is no webhook or controller counterpart to keep in sync. The resolver (`resolveFireboltEnginePresetInfo`) and the engine webhook's bounds tier both `Get` by that fixed name.
-- **`FireboltEnginePreset.spec.template` operator-owned paths.** Webhook walks the template with `FireboltEngineClassPodTemplateRules`. `FireboltEnginePresetReconciler.presetReadiness` stamps `Ready=False/OperatorOwnedFieldSet` as defense in depth.
-- **`FireboltEnginePreset` deletion while engines exist.** Webhook refuses DELETE while any `FireboltEngine` exists in the namespace. The reconciler carries the finalizer `compute.firebolt.io/fireboltenginepresets-deletion-guard` and stamps `Ready=False/DeletionBlocked` with the count. Force-removing the finalizer is the escape hatch.
-- **`FireboltEnginePreset` ambient overlay.** The engine webhook's resource-bounds gate resolves the Preset tier (see the bounds entry below); the overlay's remaining invariants are reconcile-only. `resolveFireboltEnginePresetInfo` `Get`s the object by its CEL-enforced fixed name and fails closed when `spec.requirePreset` is true and no object exists, when the object is `Ready=False/OperatorOwnedFieldSet`, or when the live `spec.template` still carries operator-owned paths (covers the webhook-off window before the Preset controller stamps Ready, and a spec patch while `DeletionBlocked`). That fail-closed check is a render gate: Reconcile surfaces `ConditionReady=False` with `FireboltEnginePresetRequired` / `FireboltEnginePresetUnready` in `stable` / `stopped` / `creating` and does not render a StatefulSet. `switching` / `draining` / `cleaning` skip the Preset resolver. Missing Preset with `requirePreset` unset is a no-op so existing engines keep working. Resource-bound and secret-env diagnostics name `FireboltEnginePreset` when that object supplied the value; they must not attribute an overlaid Preset field to `spec.engineClassRef`.
-- **`FireboltEngine.spec.template` operator-owned paths.** Webhook walks the engine's own template with `FireboltEngineClassPodTemplateRules` (engine and class templates merge into one pod, so they share the contract). Controller's `validateEngineTemplate` re-runs the same rules in `stable` / `stopped` / `creating` and surfaces `engine.ConditionReady=False/TemplateRejected` with the field path; the engine StatefulSet is not rendered. `switching` / `draining` / `cleaning` skip this check. Closes the webhook-off gap where a reserved engine env key (`POD_INDEX`, `FB_AWS_EC2_METADATA_CLIENT_ENABLED`) set on `spec.template` would otherwise be appended after the operator-injected vars in `buildEngineContainerEnv` and win under the kubelet's last-wins env semantics. Reuses the FireboltInstance controller's `TemplateRejected` reason.
-- **`FireboltEngine.spec.resources` bounds (`--engine-max-*`).** Webhook rejects, resolving the effective engine-container resources in render order — engine template, else the namespace `FireboltEnginePreset`, else the class — so a masked source cannot cause a false rejection and an honoured one cannot escape. Controller's `r.ResourceBounds.Validate` runs in `stable` / `stopped` / `creating` over the same three-tier resolution (`validateMergedEngineResources`) and surfaces `engine.ConditionReady=False/ResourceBoundsExceeded` with the field path and the configured maximum. `switching` / `draining` / `cleaning` skip this check. Plumb the bounds from `cmd/main.go` into both the webhook and the reconciler so they cannot diverge. The webhook resolves the Preset tier by the fixed name `firebolt`, exactly like the reconciler; when no such object exists the tier falls through to the class.
-
-CRD CEL rules (the third enforcement layer) are independent of webhook state — they are baked into the CRD and run inside the apiserver. Use them for invariants where webhook + controller cannot together close a race: the `spec.id` empty-to-ULID and case-only transitions, and the `FireboltEnginePreset` fixed-name rule (webhook-off creates would otherwise admit a second object per namespace).
-
-### Local image-loading mechanism
-
-E2E and helm-test workflows publish workload images (engine, metadata, postgres, envoy, curl) to a **local Docker registry container** rather than copying each image into every kind node's containerd snapshotter via `kind load docker-image`. The legacy `kind load` flow duplicates the multi-GB engine image per node and overflows Docker Desktop's default ~64 GB VM disk on multi-node clusters.
-
-Layout:
-
-- Container: `kind-registry` (image `registry:2`), exposed on `127.0.0.1:5001`, attached to the `kind` Docker network so kind nodes resolve it as `kind-registry:5000`.
-- Each kind node has `containerdConfigPatches` pointing at `/etc/containerd/certs.d`, plus per-host `hosts.toml` files written by `scripts/setup-kind-cluster.sh` that alias `ghcr.io` and `docker.io` to `http://kind-registry:5000`. Containerd hot-reloads `certs.d`, no daemon restart.
-- `scripts/load-e2e-images.sh` does `docker pull -> docker tag -> docker push -> docker rmi` per image so Docker's local content store stays empty after publishing.
-- The image-switch E2E specs need a synthetic `<tag>-uptest` reference; the load script publishes the same engine / metadata content under both `${TAG}` and `${TAG}-uptest`. OCI registries dedupe by digest, so the second tag is just a manifest write. Keep `upgradeTagSuffix` in `test/e2e/e2e_suite_test.go` in sync with `UPGRADE_TAG_SUFFIX` in the load script.
-
-Operations:
-
-- Start / repair: `make setup-local-registry` (idempotent; called transitively by `make setup-kind`).
-- Flush stale cache: `make flush-local-registry` (`docker rm -f kind-registry` + recreate). Use after a kind upgrade changes the network, or when a malformed push is masking a real bump.
-- Verify: `curl http://localhost:5001/v2/_catalog`.
-
-The registry persists across `make cleanup-test-e2e` (which only deletes the kind cluster) so the next `make prepare-test-e2e` reuses cached layers. `kind-load-operator` (used by `make local-deploy`) still uses `kind load docker-image` because the operator binary image is small and built locally — not worth registry-ifying.
-
-### Testing rules
-
-**Unit tests** (`internal/controller/*_test.go`): use envtest (embedded K8s API server). Run with `make test`.
-
-**E2E tests** (`test/e2e/`): require a Kind cluster with images published to the local registry (see "Local image-loading mechanism"). Build tag `e2e`; heavy stress tests use tag `e2e,heavy`. The operator runs **in-process** during E2E -- it is not deployed into the cluster.
-
-E2E rules:
-
-- Zero-downtime tests must not have transient failures -- if they flake, fix the test or the controller.
-- Maximum wait for any condition: **15 seconds**. Never `sleep` longer than 15 seconds.
-- Prefer a short polling loop that exits as soon as the condition is met over a long fixed sleep.
-- Run focused tests via `make test-e2e GINKGO_FOCUS=...`; do not invoke `ginkgo` directly.
-- When a test fails because pods never become ready, check engine container logs.
-- The engine operator runs with the orphaned-generation GC **disabled by default** (`StartOperator` / `SetupTestInstance`), so happy-path specs assert the primary reconcile path never orphans a generation. A spec that drives **mid-flight spec changes** — rapid replica edits that abandon a half-built blue-green generation — MUST start its operator with `WithGC()`: the primary path deliberately leaves abandoned generations for the GC to reap, so without GC their `*-g<N>` StatefulSets linger. Symptom of getting this wrong: a spec times out in `WaitForEngineReady` waiting for *N* ready pods while extra `*-g<N>` pods from a superseded generation stay Running (it counts ready pods across all generations by the engine label).
-
-Do not delete Docker images or kind clusters; assume the kind cluster is already set up.
-
-### Pinned third-party CI binaries
-
-Every third-party binary that CI or the Makefile downloads (`kind`, `yq`, `helm-docs`, `tla2tools.jar`) is pinned by content in [`scripts/ci/pinned-tools.tsv`](scripts/ci/pinned-tools.tsv) and fetched through [`scripts/ci/fetch-verified.sh`](scripts/ci/fetch-verified.sh), which writes the destination only after the SHA-256 matches. A pinned *version* is not integrity protection on its own: an upstream release tag can be deleted and re-cut with different bytes, and these runners hold a `GITHUB_TOKEN` while executing PR code.
-
-- Call sites pass a **name**, never a URL: `scripts/ci/fetch-verified.sh <name> <dest>`. The manifest owns version, URL and digest, so a bump is one edit shared by every workflow and by `make formal-check`.
-- Fetch to a file, then unpack or install. Never pipe a download into `tar`/`sh` — that executes bytes before they are checked.
-- Bumping a version means replacing the URL **and** the digest together. Take the digest from the project's own published checksum file (`<url>.sha256sum` for kind, `checksums` for yq, `checksums.txt` for helm-docs). For `tla2tools.jar`, use the validated archive on `tool-artifacts`, pinned by full Git commit SHA and checksum; see [the formal verification guide](dev-docs/testing/formal-verification.md). Do not restore a rolling upstream URL or automatically refresh this tool.
-- The helper verifies an existing destination instead of trusting it, so it is safe to run over a restored `actions/cache` entry; on a digest hit it also `touch`es the destination so Make rules that depend on the manifest do not rebuild forever. The `formal-verification.yaml` TLA+ cache is keyed on `hashFiles('scripts/ci/pinned-tools.tsv')` and its download step runs unconditionally for that reason.
-- The Makefile `$(TLA2TOOLS)` rule depends on `scripts/ci/pinned-tools.tsv` (real prerequisite) and `| $(LOCALBIN)` (order-only), so a pin bump re-runs the helper while other writes into `bin/` do not.
-- [`internal/ci/pinned_tools_test.go`](internal/ci/pinned_tools_test.go) (a test-only package, run by `make test`) keeps the manifest well-formed and fails any `curl`/`wget` of an `https://` URL in a workflow, the `Makefile`, or `scripts/**` that bypasses the helper — including backslash-continued lines where the URL is on the next physical line. A line that fetches something other than an executable artifact can opt out with a `# fetch-verified-exempt: <reason>` comment.
-
-### Required checks / rollup gates
-
-GitHub branch protection requires checks by **job `name`** (not workflow name). A check counts as passing when it is `success`, `skipped`, or `neutral` — but **where** the skip happens matters: a workflow skipped by an `on:` filter stays *Pending* (blocks the PR), whereas a job skipped by a job-level `if:` reports *Success*. Matrix-leg names are also not reliably emitted when the leg is skipped. To keep path/branch-conditional workflows compatible with required checks (docs-only and trusted release-please PRs must not block forever, but real failures must still fail closed), each conditional or matrix workflow exposes **one stable required-check name backed by a rollup gate job**.
-
-Gate convention: the gate job runs `if: always()`, `needs` the `detect` job plus the heavy/worker job, has `permissions: {}`, uses inline `run:` only (no new pinned action — keeps the action-lint/zizmor surface unchanged), and passes only when `detect` succeeded **and** the gated job is `success` or (intentionally) `skipped` with the matching skip output set. A failed `detect` fails the gate closed (a skipped heavy job would otherwise count as a false success). `needs.<job>.result` collapses all matrix legs into one result.
-
-**Trusted release-please shortcut.** Release-please PRs only rewrite release metadata (`version.txt`, `CHANGELOG.md`, `.release-please-manifest.json`, chart `version` / `appVersion`). Their code was already gated on the feature PRs that landed on `main`, so the expensive workers skip on those PRs while the rollup gates stay green:
-
-- Predicate (must match all three): `github.head_ref` starts with `release-please--`, head repo is this repository (not a fork), and `github.event.pull_request.user.login` is `fireboltdb-ci-writer[bot]`.
-- Applied in `test-e2e.yaml`, `test-helm.yaml`, `test.yaml`, and `formal-verification.yaml` (sets `relevant`/`mutants` false so TLC and Mutants skip). Do **not** skip via workflow-level `on:` / branch filters — that leaves required checks Pending.
-- Forks or hand-rolled branches named like `release-please--*` still run the full suites (fail closed). `formal-verification.yaml` push-to-`main` is unchanged and still always runs TLC/mutants.
-
-Canonical required-check names (each is a gate job except Lint / PR Title):
-
-| Required check | Workflow | Gate job | Worker job |
-|----------------|----------|----------|------------|
-| `E2E Tests` | `test-e2e.yaml` | `e2e-required` | `test-e2e` (matrix dev/latest) |
-| `Helm Tests` | `test-helm.yaml` | `helm-required` | `test-helm` |
-| `Unit Tests` | `test.yaml` | `unit-tests` | `test` (matrix dev/latest) |
-| `TLC model checker` | `formal-verification.yaml` | `tlc-required` | `tlc` + `mutants` (both path-scoped via `detect`) |
-| `Actions Lint & Scan` | `lint-and-scan-actions.yaml` | `actions-lint-required` | `actionlint` + `zizmor` (path-scoped via `detect`) |
-| `Lint` | `lint.yaml` | — (always runs) | `lint` |
-| `PR Title` | `pr-title.yaml` | — (always runs; skip reports success) | `validate` |
-
-`Model scope` (`formal-verification.yaml`, job `model-scope`) is deliberately **not** in the list above and not wired into `tlc-required`: it is a review prompt with an escape hatch rather than a proof, so it reports on every PR without blocking merges. Adding it to the ruleset later is a one-click change — the name is already reported on PR runs.
-
-The `formal-verification.yaml` `detect` job is **path-scoped**, with two outputs because its two workers have different dependencies: `relevant` (drives `tlc`) is `true` only when changed files match `^formal/`, `^scripts/gen-tla-state-tests.py$`, `_tla_states_data_test.go$`, or formal tooling inputs (the pin manifest, verified downloader, Makefile, counterexample runner, and workflow), while `mutants` has a **separate** scope (`^formal/`, `^internal/controller/`, `^Makefile$`, the workflow itself) because the mutant check asserts the state-cover suite still catches a broken *reconciler*, so it depends on the reconciler and not only on the model. Both are fail-safe (any uncertainty → `true`); on push to `main` both are always `true`. `lint-and-scan-actions.yaml` follows the same shape (`detect` scoped to `^\.github/`); its `pull_request` trigger drops the `paths` filter so the gate reports on every PR while `actionlint`/`zizmor` run only when workflow/action files changed (the `push` trigger keeps its `paths` filter since pushes do not gate merges). The required name `TLC model checker` lives on the gate so the worker job could be renamed to `TLC` with no branch-protection change. When adding a new conditional/matrix workflow that should gate merges, add a gate following this shape rather than requiring matrix-leg or worker names directly. A gate name appears in the branch-protection / ruleset picker once it has been reported as a completed check on **any ref** — a single PR-branch CI run is enough, so the new required names can be pre-selected from an open PR before the workflow change merges to `main` (no merge-to-`main`-first step required).
+## Project and sources of truth
+
+Firebolt Operator is a Go/controller-runtime operator for FireboltInstance,
+FireboltEngine, FireboltEngineClass, ClusterFireboltEngineClass, and
+FireboltEnginePreset. Engines require a ready Instance.
+
+Read the relevant guide before changing its implementation:
+
+| Area | Guide |
+| --- | --- |
+| Reconcilers, rollout phases, gateway, and RBAC | [Architecture](docs/architecture.mdx) |
+| Retirement, retries, and query safety | [Retirement contract](dev-docs/architecture/engine-retirement-and-query-safety.md) |
+| Class and Preset precedence | [Configuration inheritance](docs/engineclass/configuration-inheritance.mdx) |
+| Admission and controller validation | [Validation guide](dev-docs/architecture/admission-and-controller-validation.md) |
+| State machines and model coverage | [Formal verification](dev-docs/testing/formal-verification.md) |
+| E2E setup and diagnostics | [E2E testing](dev-docs/testing/e2e-testing.md), [local registry](dev-docs/testing/local-image-registry.md) |
+| Component versions and publication | [Release process](dev-docs/process/release-process.md) |
+| CLI consumer of the CRDs | [Plugin rules](internal/infra/AGENTS.md) |
+
+Source layout: `api/v1alpha1/` holds CRD types and webhooks;
+`internal/controller/` holds reconcilers; `internal/infra/` backs
+`cmd/kubectl-firebolt/`; `cmd/` builds the operator. Generated manifests live in
+`config/` and `helm/`. Tests live beside Go code and under `test/e2e/`;
+models live under `formal/`; automation lives under `scripts/` and `.github/`.
+Published documentation is in `docs/`; contributor guides are in `dev-docs/`.
+
+## Working rules
+
+- Verify behavior against code before advising or editing. Identify the source
+  when it matters; explain uncertainties and challenge approaches that do not fit.
+- Check callers, configuration, generated output, documentation, and downstream
+  consumers as part of a change. Preserve least privilege and explicit validation.
+- Track implementation work in an issue before starting. Use the Firebolt team
+  and Firebolt Operator project for Linear work.
+- Work on an issue-prefixed branch from latest `main`, unless instructed otherwise.
+  Never implement or commit directly on `main`; changes land through reviewed PRs.
+- Keep commits self-contained. Separate refactors from behavior changes; introduce
+  types and CRD changes before the controller logic that consumes them.
+- Preserve unrelated changes. Stage explicit paths or hunks; never use
+  `git add .`, `git add -A`, or `git add --all`.
+- Follow [the PR template](.github/PULL_REQUEST_TEMPLATE.md): actual issue reference
+  and reason in Background, resulting behavior in Summary, coverage in Test Plan.
+- Do not ignore errors without a documented rationale. State what was tested and
+  what was not verified; explain any behavior that the current harness cannot test.
 
 ### Commit conventions
 
-```
-<type>(<scope>): <description> (<issue-ref>)
-```
+Use `<type>(<scope>): <description> (<issue-ref>)`. Scope is optional; common
+scopes are `api`, `controller`, `helm`, and `e2e`. Types are `build`, `chore`,
+`ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, and `test`.
+Use an imperative, lowercase subject under 100 characters, without a final period.
+Take the issue reference from the tracked work. Keep tracker references out of
+source comments, identifiers, strings, and documentation prose.
 
-Types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`.
+CI-only changes use `ci:`, never `fix(ci):`; release-please uses the commit type
+for release eligibility. Explain the reason for non-obvious changes in the body.
 
-Scope is optional but encouraged. Common scopes: `api`, `controller`, `helm`, `e2e`.
+## Validation
 
-Rules:
+Bare `make` prints help. After every code change, run `make build && make lint`.
+Use `make lint-fix` where appropriate. Add or update tests for changed behavior,
+preferably fast deterministic tests at the lowest useful level.
 
-- Subject: imperative mood, lowercase, no trailing period; keep it under 100 characters.
-- Body: explain what changed and *why*.
-- An issue reference is required: either a GitHub issue (`#123`) or a Linear ticket (`FB-<ticket>`); take it from the branch name or last commit.
-- CI-only changes MUST use `ci:` with an optional scope (for example, `ci(test): ...`), never `fix(ci):`. A `fix:` conventional commit always triggers a patch release, which is not required for CI changes.
+| Change | Relevant targets |
+| --- | --- |
+| CRD markers, RBAC, or API types | `make manifests generate` |
+| Controller behavior | `make test`; focused E2E where integration matters |
+| Admission registration/defaulting | `make test-webhook-integration` |
+| Reconcile invariants | `make test-property` and applicable formal targets |
+| Helm templates or values | `make helm-lint helm-template helm-docs` |
+| Documentation | `make docs-check` |
+| Plugin contract | `go build ./...`, `go test ./internal/infra/...`, `make kubectl-firebolt` |
 
-Example: `fix(controller): report ready-vs-total pods in PodsNotReady message (#123)`
+Make targets default to `IMAGE_VARIANT=latest`; set `IMAGE_VARIANT=dev` for the
+other image set. Raw Go commands without tags embed the dev defaults. `e2e`
+enables E2E tests and crash injection; `heavy` adds heavy query configurations;
+`latest` selects release-oriented defaults. Never enable the test-only
+`wakehandofftest` tag in release images.
 
-**Staging**: always add files by explicit path (`git add file1 file2`). Never use `git add -A`, `git add .`, or `git add --all` -- untracked files that are not meant to be versioned will be committed.
+Run focused E2E specs through `make test-e2e GINKGO_FOCUS='...'`, not Ginkgo
+directly. The operator runs in process; workload pods run in Kind. Reuse the
+existing cluster and local image registry; do not delete Docker images or Kind
+clusters as a debugging shortcut. Follow the E2E guide for preparation and waits.
 
-### Planning work
+- Do not accept transient query failures in zero-downtime assertions.
+- Poll for conditions instead of long fixed sleeps; focused transitions should
+  converge within 15 seconds. Use existing readiness budgets for provisioning.
+- Inspect engine container logs when pods fail to become ready.
+- Use `WithGC()` for specs that abandon a generation through mid-flight edits;
+  happy-path specs keep abandoned-generation GC disabled.
 
-When breaking work into a plan, divide it into self-contained commits. Each commit is a single logical change -- do not mix refactors with new features. Order:
+## Implementation safeguards
 
-1. Refactors and type extractions first (non-functional changes).
-2. New types and CRDs.
-3. Modifications to existing types.
-4. Controller/reconciler logic last.
+### Reconcilers and formal models
 
-### Code quality
+- Keep protocol and state-transition changes aligned with their TLA+ specs,
+  generated fixtures, and Go tests. Consult [model scope](formal/model-scope.tsv)
+  before claiming formal coverage; a passing model does not prove unmodeled code.
+- Use [the shared generator](scripts/gen-tla-state-tests.py) for fixtures. Maintain
+  invariant/action mappings and declare unmodeled functions with a reason.
+- Run `make formal-check formal-check-counterexample formal-verify` as applicable.
+  Run `make formal-check-mutants` from a clean tree when changing its covered
+  reconciler or harness. Repair stale mutants; do not delete negative controls or
+  weaken guards to make checks pass.
+- If a touched function does not change its model, explain the abstraction boundary
+  with `Model-scope-ok: <reason>` in the commit or PR.
+- Preserve the documented shutdown and retry contract. Investigate its existing
+  layers before adding EndpointSlice watches, permissions, or cutover gates.
 
-- Ignoring errors is forbidden except with a documented rationale in a comment.
-- No issue references (`FB-<ticket>`, `FIR-<ticket>`, any tracker ID, or a GitHub issue number like `#123`) in code or docs: not in comments, identifiers, strings, or doc prose. They go in the commit message only (see Commit conventions).
-- Comments and docs state how the code behaves now, not what just changed. Do not narrate edits ("previously", "changed to", "fixed the bug where", "new:").
+### Templates, inheritance, and admission
+
+- Builders and drift detection must use the same `effective*` helpers. Keep Preset
+  overlays aligned when adding inherited fields; retain empty-Preset equivalence.
+- Preserve namespaced-first class resolution and Engine → Preset → class → default
+  precedence for fields those objects support. Keep cluster classes SKU-only.
+- Do not add CRD defaults to inherited `rollout` or `drainCheckEnabled` fields;
+  apply defaults last in the resolver so omission still permits inheritance.
+- Keep pod-affecting comparisons separate from policies read live. Reuse the shared
+  image and pull-policy resolvers; explicit overrides take precedence.
+- Maintain shared admission and controller validation, including identical runtime
+  bounds. Add controller/envtest coverage with webhooks disabled; use CRD/CEL
+  validation for invariants that must hold on every API-server write.
+- Preserve render-validation gates without interrupting an ongoing switch, drain,
+  or cleanup. Follow the validation guide for each object's enforcement layer.
+- Put operator-owned path rules in `api/v1alpha1/operatorauthority.go`. Add a
+  Secret-backed volume to both the reserved-volume and Secret-volume sets; add a
+  non-Secret volume only to the reserved set.
+- Do not infer or rewrite metadata images from `spec.metadataNG`; compatible image
+  selection belongs to the user.
+- Keep the typed `kubectl-firebolt` client aligned with API and readiness changes.
+  Fix consumer build errors rather than weakening its types.
+
+### RBAC and generated output
+
+Edit kubebuilder RBAC markers and run `make manifests`. The canonical
+`config/rbac/role.yaml` feeds `scripts/sync-helm-rbac.py`; never hand-edit generated
+`helm/firebolt-operator/templates/manager-rbac.yaml`.
+
+Preserve both cluster-wide and namespace-scoped chart envelopes and their tests.
+Keep `pods/proxy` access behind `rbac.apiserverProxyGrant`, outside the canonical
+manager role. Namespace-scoped installs still need read-only cluster-class access.
+
+## CI and releases
+
+Read the release guide before changing release automation. Preserve independent
+component versions, operator-only `appVersion` synchronization, and publication
+based on component release outputs. Keep non-shipping paths excluded from the
+root application component, `always-update` enabled, and `chore(deps)` visible in
+release notes.
+
+- Use `scripts/ci/fetch-verified.sh <name> <dest>` for downloaded third-party binary
+  artifacts; pin their URL and SHA-256 in `scripts/ci/pinned-tools.tsv`. Update
+  both together. Download and verify before unpacking; never pipe downloads into
+  `tar` or `sh`. Follow the formal guide for the archived model-checker tool.
+- Revalidate cached artifacts. Keep manifest dependencies and cache keys aligned
+  with pin changes; retain the checks in `internal/ci/pinned_tools_test.go`.
+- Required checks must report on every PR. For conditional or matrix workers,
+  preserve stable rollup job names with `if: always()`, no permissions, and explicit
+  failure on detection errors or unexpected skips. Do not hide required checks
+  behind workflow-level path filters.
+- Release-PR test shortcuts must verify the branch prefix, same-repository origin,
+  and expected bot author. Forks and lookalike branches run the full suites.
+- Workflows that create external state must receive `closed` events for cleanup.
+  Put relevance checks inside the job rather than trigger-level path filters.
+
+## Documentation and instruction maintenance
+
+- Keep README an overview. Put implementation explanations and operational
+  procedures in the relevant `docs/` or `dev-docs/` guide.
+- Update `docs/architecture.mdx` in the same commit as changes to state machines,
+  reconciler flow, data-plane contracts, or RBAC. Keep other affected guides and
+  published references in sync with code.
+- Keep AGENTS.md focused on actionable rules and links to authoritative guides.
+  Put directory-specific rules in the nearest scoped AGENTS.md. Do not duplicate
+  implementation walkthroughs, incident narratives, or lists of completed fixes.
+- Record only unresolved issues that need a current workaround, briefly stating
+  symptom, cause, and workaround. Remove them when resolved.
+- Describe current behavior in comments and docs. Avoid edit narratives,
+  historical commit IDs, and tracker references.
