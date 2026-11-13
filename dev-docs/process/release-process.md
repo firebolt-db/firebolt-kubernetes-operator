@@ -10,6 +10,7 @@ Release Please manages three independently versioned components from `main`:
 
 The authoritative configuration is
 [`release-please-config.json`](../../release-please-config.json),
+[`release-please-crds-config.json`](../../release-please-crds-config.json),
 [`.release-please-manifest.json`](../../.release-please-manifest.json), and
 [`.github/workflows/release-main.yaml`](../../.github/workflows/release-main.yaml).
 
@@ -30,6 +31,20 @@ The authoritative configuration is
 
 Conventional commit subjects determine release eligibility and version impact;
 follow the repository commit rules in [`AGENTS.md`](../../AGENTS.md).
+
+## CRD release selection
+
+The CRD component uses a separate Release Please invocation. Before creating
+its release PR, CI compares the packaged chart with the last CRD release tag.
+Schema descriptions, YAML formatting, chart version/description, README, and
+changelog changes do not trigger a release. Helm excludes files according to
+each revision's `.helmignore`. All other packaged changes remain eligible.
+
+Deferred descriptions ship with the next substantive release, so `kubectl
+explain` may lag documentation-only corrections. Release tagging and chart
+publication always run for merged release PRs. Missing history, packaging
+errors, and invalid YAML fail the check. A pending release PR whose substantive
+changes were reverted must be closed before merging it.
 
 ## Development image variants
 
