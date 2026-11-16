@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.12](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.11...firebolt-operator-v0.17.12) (2026-11-16)
+
+
+### Dependencies
+
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20261114125429.c7292e78e3ad ([c0b074f](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/c0b074fac002ab51731cb8e77657ac255ca65c31))
+
 ## [0.17.11](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.10...firebolt-operator-v0.17.11) (2026-11-11)
 
 
