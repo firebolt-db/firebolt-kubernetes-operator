@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.13](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.12...firebolt-operator-v0.17.13) (2026-11-17)
+
+
+### Dependencies
+
+* **deps:** bump github.com/onsi/ginkgo/v2 ([64ca11c](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/64ca11ccf3f2f7373bc268383fec3669dbe3847e))
+* **deps:** bump go.opentelemetry.io/otel/trace from 1.45.0 to 1.47.0 ([00be4c7](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/00be4c75cc5e08ce883ced00208d0a38fa7086c4))
+
 ## [0.17.12](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.11...firebolt-operator-v0.17.12) (2026-11-16)
 
 
