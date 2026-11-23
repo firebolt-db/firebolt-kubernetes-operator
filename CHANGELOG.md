@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.14](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.13...firebolt-operator-v0.17.14) (2026-11-23)
+
+
+### Dependencies
+
+* **deps:** bump engine/metadata to 5.0.0-pre.0.20261120174054.3c6146c2c04d ([cec5d13](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/cec5d1393d46440800e5e61697f20cc6aaa2b772))
+* **deps:** bump go.opentelemetry.io/otel/sdk from 1.45.0 to 1.47.0 ([0444dbf](https://github.com/firebolt-db/firebolt-kubernetes-operator/commit/0444dbf574be476f0536c0e1aa07178a907b9765))
+
 ## [0.17.13](https://github.com/firebolt-db/firebolt-kubernetes-operator/compare/firebolt-operator-v0.17.12...firebolt-operator-v0.17.13) (2026-11-17)
 
 
